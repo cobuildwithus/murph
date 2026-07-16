@@ -240,7 +240,7 @@ describe("hosted ops growth metrics", () => {
   it("keeps exact trial maturity boundary rows immature", () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const rows = buildTrialCohortRows({
-      rowCount: 2,
+      rowCount: 3,
       trialStartRows: [
         {
           currentBillingPhase: "paid",
@@ -248,7 +248,7 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: null,
           },
           paidViaFamily: false,
-          pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
+          pulseTrialRedeemedAt: new Date("2026-06-21T12:00:00.000Z"),
         },
         {
           currentBillingPhase: null,
@@ -256,7 +256,7 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: null,
           },
           paidViaFamily: false,
-          pulseTrialRedeemedAt: new Date("2026-06-26T12:00:00.000Z"),
+          pulseTrialRedeemedAt: new Date("2026-06-22T12:00:00.000Z"),
         },
         {
           currentBillingPhase: null,
@@ -264,13 +264,13 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: null,
           },
           paidViaFamily: false,
-          pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
+          pulseTrialRedeemedAt: new Date("2026-06-20T12:00:00.000Z"),
         },
       ],
       windowEnd: now,
     });
 
-    expect(rows[1]).toMatchObject({
+    expect(rows[2]).toMatchObject({
       converted: 1,
       conversionPercent: 50,
       started: 3,
@@ -281,7 +281,7 @@ describe("hosted ops growth metrics", () => {
   it("keeps suspended paid mature trial rows in the cohort denominator without counting them converted", () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const rows = buildTrialCohortRows({
-      rowCount: 2,
+      rowCount: 3,
       trialStartRows: [
         {
           currentBillingPhase: "paid",
@@ -289,7 +289,7 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: null,
           },
           paidViaFamily: false,
-          pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
+          pulseTrialRedeemedAt: new Date("2026-06-21T12:00:00.000Z"),
         },
         {
           currentBillingPhase: "paid",
@@ -297,13 +297,13 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: new Date("2026-07-01T00:00:00.000Z"),
           },
           paidViaFamily: false,
-          pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
+          pulseTrialRedeemedAt: new Date("2026-06-20T12:00:00.000Z"),
         },
       ],
       windowEnd: now,
     });
 
-    expect(rows[1]).toMatchObject({
+    expect(rows[2]).toMatchObject({
       converted: 1,
       conversionPercent: 50,
       started: 2,

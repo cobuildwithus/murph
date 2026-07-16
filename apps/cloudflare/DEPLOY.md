@@ -587,7 +587,32 @@ group automation, and confirm there are no new
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 
-The first shared preference-causal-sequence release uses a web-first hard cut. Vercel predeploy adds the nullable `causal_seq` state and nullable keyed assistant-input lookup projection, then deploys the web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. New conversation rows store a server-keyed lookup of their existing deterministic assistant input id, never the raw id, without changing the mailbox wire, `sourceRef`, or event id. The web callback accepts no numeric sequence fallback: inside the mutation transaction it derives every configured lookup-key candidate from the callback id, resolves the callback member plus one matching key to one live conversation-lane `conversation.message` row, and derives that row's canonical sequence. This web build is the rollback floor. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle next with `container_rollout=immediate` and prove fleet convergence; for an update, it forwards only the terminal input id from a locally revalidated bounded exact-successor provider batch. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. Legacy or mixed-version runtimes continue ordinary replies while incompatible preference writes fail closed. Deploy web and Cloudflare/runtime in tandem to minimize that temporary unavailable-write window.
+The first shared preference-causal-sequence release uses a Web-first hard cut.
+Vercel predeploy adds nullable `causal_seq` state, the nullable keyed
+assistant-input lookup projection, and nullable Humor, Push, and Detail
+projection watermarks, then deploys Web with
+`MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. New conversation rows
+store a server-keyed lookup of their existing deterministic assistant input id,
+never the raw id, without changing the mailbox wire, `sourceRef`, or event id.
+The Web callback accepts no numeric sequence fallback: inside the mutation
+transaction it derives every configured lookup-key candidate from the callback
+id, resolves the callback member plus one matching key to one live
+conversation-lane `conversation.message` row, and derives that row's canonical
+sequence. The hard-cut route also rejects the retired direct-vault
+causal-sequence action after old Vercel functions drain. This Web build is the
+rollback floor. The post-deploy contract lane checks legacy work against the
+system-lane `consumed_seq`, adds the new-write constraint `NOT VALID`, and seeds
+all three personality watermarks to each member's current causal barrier,
+including null projection values because historical Web values may differ from
+canonical vault values and cannot be backfilled safely. Deploy this Cloudflare
+worker and runner bundle next with `container_rollout=immediate` and prove fleet
+convergence; for an update, it forwards only the terminal input id from a
+locally revalidated bounded exact-successor provider batch. Then set the Vercel
+gate to `1` and redeploy Web to switch Settings to sparse deltas and expose
+personality controls plus hosted conversation convergence. Legacy runtimes
+continue ordinary replies while style writes fail closed. Deploy Web and
+Cloudflare/runtime in tandem to minimize that temporary unavailable-write
+window, and keep Web at the hard-cut floor during any runner rollback.
 
 The first production release that writes `murph.inbox-capture.v2` records or
 `parser-result` assistant-input evidence must use

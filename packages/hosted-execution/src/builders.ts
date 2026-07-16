@@ -37,12 +37,14 @@ import type {
   HostedRuntimeTimerTriggerKind,
 } from "./contracts.ts";
 import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
 } from "./contracts.ts";
+import {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+  parseHostedExecutionAssistantAskTimestamp,
+} from "./assistant-ask-payload.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
@@ -457,178 +459,14 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
   };
 }
 
-const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
-const HOSTED_EXECUTION_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
-
-function normalizeHostedExecutionAssistantAskText(input: {
-  label: string;
-  maxCodePoints: number;
-  value: string;
-}): string {
-  if (typeof input.value !== "string") {
-    throw new TypeError(`${input.label} must be a string.`);
-  }
-  const normalized = input.value.trim();
-  const codePoints = [...normalized].length;
-  if (codePoints === 0 || codePoints > input.maxCodePoints) {
-    throw new TypeError(
-      `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
-    );
-  }
-  return normalized;
-}
-
-function normalizeHostedExecutionAssistantAskOpaqueId(
-  value: string,
-  label: string,
-): string {
-  return normalizeHostedExecutionAssistantAskText({
-    label,
-    maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-    value,
-  });
-}
-
-function requireHostedExecutionAssistantAskTimestamp(
-  value: string,
-  label: string,
-): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
-  }
-  const timestampMs = Date.parse(value);
-  if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== value) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
-  }
-  return value;
-}
-
-function cloneAssistantAskRequestedPayload(
-  value: HostedExecutionAssistantAskRequestedPayload,
-): HostedExecutionAssistantAskRequestedPayload {
-  const originAssistantInputId = normalizeHostedExecutionAssistantAskOpaqueId(
-    value.originAssistantInputId,
-    "Hosted execution assistant ask originAssistantInputId",
-  );
-  if (!HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN.test(originAssistantInputId)) {
-    throw new TypeError(
-      "Hosted execution assistant ask originAssistantInputId is invalid.",
-    );
-  }
-  const originSessionId = normalizeHostedExecutionAssistantAskOpaqueId(
-    value.originSessionId,
-    "Hosted execution assistant ask originSessionId",
-  );
-  if (value.target.kind !== "joined_group") {
-    throw new TypeError("Hosted execution assistant ask target kind is invalid.");
-  }
-
-  return {
-    expiresAt: requireHostedExecutionAssistantAskTimestamp(
-      value.expiresAt,
-      "Hosted execution assistant ask expiresAt",
-    ),
-    originAssistantInputId,
-    originSessionId,
-    question: normalizeHostedExecutionAssistantAskText({
-      label: "Hosted execution assistant ask question",
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: value.question,
-    }),
-    target: {
-      kind: "joined_group",
-      membershipId: normalizeHostedExecutionAssistantAskOpaqueId(
-        value.target.membershipId,
-        "Hosted execution assistant ask membershipId",
-      ),
-      requestedLabel: value.target.requestedLabel === null
-        ? null
-        : normalizeHostedExecutionAssistantAskText({
-            label: "Hosted execution assistant ask requestedLabel",
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-            value: value.target.requestedLabel,
-          }),
-    },
-  };
-}
-
-function cloneAssistantAskCompletedPayload(
-  value: HostedExecutionAssistantAskCompletedPayload,
-): HostedExecutionAssistantAskCompletedPayload {
-  const originAssistantInputId = normalizeHostedExecutionAssistantAskOpaqueId(
-    value.originAssistantInputId,
-    "Hosted execution assistant ask originAssistantInputId",
-  );
-  if (!HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN.test(originAssistantInputId)) {
-    throw new TypeError(
-      "Hosted execution assistant ask originAssistantInputId is invalid.",
-    );
-  }
-  const originSessionId = normalizeHostedExecutionAssistantAskOpaqueId(
-    value.originSessionId,
-    "Hosted execution assistant ask originSessionId",
-  );
-
-  const result = value.result.outcome === "answered"
-    ? {
-        answer: normalizeHostedExecutionAssistantAskText({
-          label: "Hosted execution assistant ask answer",
-          maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-          value: value.result.answer,
-        }),
-        outcome: "answered" as const,
-      }
-    : value.result.outcome === "cannot_answer"
-      ? {
-          answer: value.result.answer === null
-            ? null
-            : normalizeHostedExecutionAssistantAskText({
-                label: "Hosted execution assistant ask answer",
-                maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-                value: value.result.answer,
-              }),
-          outcome: "cannot_answer" as const,
-        }
-      : null;
-  if (result === null) {
-    throw new TypeError("Hosted execution assistant ask outcome is invalid.");
-  }
-
-  return {
-    expiresAt: requireHostedExecutionAssistantAskTimestamp(
-      value.expiresAt,
-      "Hosted execution assistant ask expiresAt",
-    ),
-    originAssistantInputId,
-    originSessionId,
-    question: normalizeHostedExecutionAssistantAskText({
-      label: "Hosted execution assistant ask question",
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: value.question,
-    }),
-    requestId: normalizeHostedExecutionAssistantAskOpaqueId(
-      value.requestId,
-      "Hosted execution assistant ask requestId",
-    ),
-    result,
-    targetLabel: value.targetLabel === null
-      ? null
-      : normalizeHostedExecutionAssistantAskText({
-          label: "Hosted execution assistant ask targetLabel",
-          maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-          value: value.targetLabel,
-        }),
-  };
-}
-
 export function buildHostedExecutionAssistantAskRequestedWake(input: {
   ask: HostedExecutionAssistantAskRequestedPayload;
   eventId: string;
   memberId: string;
   occurredAt: string;
 }): HostedExecutionAssistantAskRequestedWake {
-  const ask = cloneAssistantAskRequestedPayload(input.ask);
-  const occurredAt = requireHostedExecutionAssistantAskTimestamp(
+  const ask = parseHostedExecutionAssistantAskRequestedPayload(input.ask);
+  const occurredAt = parseHostedExecutionAssistantAskTimestamp(
     input.occurredAt,
     "Hosted execution assistant ask requested occurredAt",
   );
@@ -658,8 +496,8 @@ export function buildHostedExecutionAssistantAskCompletedWake(input: {
   memberId: string;
   occurredAt: string;
 }): HostedExecutionAssistantAskCompletedWake {
-  const ask = cloneAssistantAskCompletedPayload(input.ask);
-  const occurredAt = requireHostedExecutionAssistantAskTimestamp(
+  const ask = parseHostedExecutionAssistantAskCompletedPayload(input.ask);
+  const occurredAt = parseHostedExecutionAssistantAskTimestamp(
     input.occurredAt,
     "Hosted execution assistant ask completed occurredAt",
   );

@@ -420,9 +420,6 @@ export interface HostedRuntimePlanUsageToolPort {
 }
 
 export interface HostedRuntimeAssistantPersonalizationToolPort {
-  resolvePreferenceCausalSeq(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>;
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,

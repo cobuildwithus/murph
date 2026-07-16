@@ -157,11 +157,14 @@ The hosted Prisma schema keeps ownership sharp and nested:
   authenticated Settings display/write projection; canonical assistant
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
-  canonical snapshot. The mailbox owner assigns one immutable causal sequence
-  across conversation and system lanes, and the canonical companion
+  canonical snapshot. Hosted conversation set/reset uses the signed,
+  input-bound Web transaction to update requested personality columns and
+  their nullable projection watermarks atomically with a sparse origin-turn
+  mailbox event when at least one requested dial applies. The mailbox owner assigns one immutable causal
+  sequence across conversation and system lanes, and the canonical companion
   `bank/assistant-preference-mutations.json` retains only per-setting applied
-  watermarks, so retries never use this projection or timestamps as conflict
-  authority.
+  watermarks. For Humor, Push, and Detail, both owners apply the same
+  equality-aware field-local order; timestamps are never conflict authority.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references
@@ -852,23 +855,26 @@ use the neutral confirmation. The
 removes both only after the consumer-capable production deployment is live and
 the guarded prior-function drain and alias proof have completed.
 The first assistant-personality causal rollout adds nullable causal-sequence
-state and a nullable `assistant_input_lookup_key` projection on conversation
-mailbox rows. Deploy the web build with personality writes gated off. It writes
-a server-keyed blind lookup derived from the existing deterministic input id
-for new conversation messages, never the raw id, and hard-rejects callbacks
-that cannot resolve the callback member plus a derived candidate key to one
-live conversation-lane `conversation.message` row; there is no numeric sequence
-fallback and no mailbox wire, `sourceRef`, or event-id change. The automatic
-post-deploy contract lane waits for old functions and applies the
-causal-sequence constraint only when no unconsumed sequence-less preference row
-remains; otherwise it fails closed for a later retry. After the same drain, it
-advances each populated tone/voice projection watermark to the member's current
-causal counter so a delayed pre-cutover turn cannot overwrite a newer Settings
-projection. This web hard cut is the rollback floor. Deploy the Cloudflare
-worker/runtime next with an immediate rollout, then enable the web personality
-gate after fleet convergence. Legacy or mixed-version runtimes continue
-ordinary replies while incompatible preference writes fail closed. Deploy the
-two planes in tandem to minimize that temporary unavailable-write window.
+state, a nullable `assistant_input_lookup_key` projection on conversation
+mailbox rows, and nullable Humor, Push, and Detail projection watermarks. Deploy
+the Web build with personality writes gated off. It writes a server-keyed blind
+lookup derived from the existing deterministic input id for new conversation
+messages, never the raw id, and hard-rejects callbacks that cannot resolve the
+callback member plus a derived candidate key to one live conversation-lane
+`conversation.message` row. There is no numeric sequence fallback and no
+mailbox wire, `sourceRef`, or event-id change. The automatic post-deploy
+contract lane waits for old functions, applies the causal-sequence constraint
+only when no unconsumed sequence-less preference row remains, and then seeds
+all three personality watermarks to the member's current causal barrier. The
+seed intentionally includes null projection values because pre-fix Web values
+may differ from canonical vault values and cannot be backfilled safely. This
+Web hard cut is the rollback floor. Deploy Cloudflare/runtime next with an
+immediate rollout and prove fleet convergence, then enable the Web personality
+gate. The hard-cut build rejects the retired direct-vault causal-sequence
+action after old Vercel functions drain. Legacy runtimes continue ordinary
+replies while style writes fail closed; deploy the two planes in tandem to
+minimize that temporary unavailable-write window. Keep Web at this hard-cut
+floor during any runner rollback.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

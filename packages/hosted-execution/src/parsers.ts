@@ -16,9 +16,6 @@ import {
 } from "@murphai/contracts";
 
 import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -31,10 +28,7 @@ import {
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
-  HostedExecutionAssistantAskCompletedPayload,
   HostedExecutionAssistantAskRequestedEvent,
-  HostedExecutionAssistantAskRequestedPayload,
-  HostedExecutionAssistantAskResult,
   HostedExecutionAssistantNotificationDelivery,
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
@@ -64,6 +58,10 @@ import type {
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedCodexAuthAction,
 } from "./contracts.ts";
+import {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+} from "./assistant-ask-payload.ts";
 import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
@@ -121,6 +119,10 @@ import {
 } from "./parsers/device-sync.ts";
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
+export {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+} from "./assistant-ask-payload.ts";
 export {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
@@ -1287,196 +1289,6 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
   };
-}
-
-const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
-const HOSTED_EXECUTION_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
-
-export function parseHostedExecutionAssistantAskRequestedPayload(
-  value: unknown,
-  label = "Hosted execution assistant.ask.requested payload",
-): HostedExecutionAssistantAskRequestedPayload {
-  const record = requireObject(value, label);
-  assertExactHostedExecutionKeys(record, [
-    "expiresAt",
-    "originAssistantInputId",
-    "originSessionId",
-    "question",
-    "target",
-  ], label);
-  const targetLabel = `${label}.target`;
-  const target = requireObject(record.target, targetLabel);
-  assertExactHostedExecutionKeys(
-    target,
-    ["kind", "membershipId", "requestedLabel"],
-    targetLabel,
-  );
-  if (target.kind !== "joined_group") {
-    throw new TypeError(`${targetLabel}.kind is invalid.`);
-  }
-
-  return {
-    expiresAt: parseHostedExecutionAssistantAskTimestamp(
-      record.expiresAt,
-      `${label}.expiresAt`,
-    ),
-    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-      record.originAssistantInputId,
-      `${label}.originAssistantInputId`,
-    ),
-    originSessionId: parseHostedExecutionAssistantAskOpaqueId(
-      record.originSessionId,
-      `${label}.originSessionId`,
-    ),
-    question: parseHostedExecutionAssistantAskBoundedText({
-      label: `${label}.question`,
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: record.question,
-    }),
-    target: {
-      kind: "joined_group",
-      membershipId: parseHostedExecutionAssistantAskOpaqueId(
-        target.membershipId,
-        `${targetLabel}.membershipId`,
-      ),
-      requestedLabel: target.requestedLabel === null
-        ? null
-        : parseHostedExecutionAssistantAskBoundedText({
-            label: `${targetLabel}.requestedLabel`,
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-            value: target.requestedLabel,
-          }),
-    },
-  };
-}
-
-export function parseHostedExecutionAssistantAskCompletedPayload(
-  value: unknown,
-  label = "Hosted execution assistant.ask.completed payload",
-): HostedExecutionAssistantAskCompletedPayload {
-  const record = requireObject(value, label);
-  assertExactHostedExecutionKeys(record, [
-    "expiresAt",
-    "originAssistantInputId",
-    "originSessionId",
-    "question",
-    "requestId",
-    "result",
-    "targetLabel",
-  ], label);
-
-  return {
-    expiresAt: parseHostedExecutionAssistantAskTimestamp(
-      record.expiresAt,
-      `${label}.expiresAt`,
-    ),
-    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-      record.originAssistantInputId,
-      `${label}.originAssistantInputId`,
-    ),
-    originSessionId: parseHostedExecutionAssistantAskOpaqueId(
-      record.originSessionId,
-      `${label}.originSessionId`,
-    ),
-    question: parseHostedExecutionAssistantAskBoundedText({
-      label: `${label}.question`,
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: record.question,
-    }),
-    requestId: parseHostedExecutionAssistantAskOpaqueId(
-      record.requestId,
-      `${label}.requestId`,
-    ),
-    result: parseHostedExecutionAssistantAskResult(record.result, `${label}.result`),
-    targetLabel: record.targetLabel === null
-      ? null
-      : parseHostedExecutionAssistantAskBoundedText({
-          label: `${label}.targetLabel`,
-          maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-          value: record.targetLabel,
-        }),
-  };
-}
-
-function parseHostedExecutionAssistantAskResult(
-  value: unknown,
-  label: string,
-): HostedExecutionAssistantAskResult {
-  const record = requireObject(value, label);
-  assertExactHostedExecutionKeys(record, ["answer", "outcome"], label);
-  const outcome = requireString(record.outcome, `${label}.outcome`);
-  if (outcome === "answered") {
-    return {
-      answer: parseHostedExecutionAssistantAskBoundedText({
-        label: `${label}.answer`,
-        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-        value: record.answer,
-      }),
-      outcome,
-    };
-  }
-  if (outcome === "cannot_answer") {
-    return {
-      answer: record.answer === null
-        ? null
-        : parseHostedExecutionAssistantAskBoundedText({
-            label: `${label}.answer`,
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-            value: record.answer,
-          }),
-      outcome,
-    };
-  }
-  throw new TypeError(`${label}.outcome is invalid.`);
-}
-
-function parseHostedExecutionAssistantAskOriginInputId(
-  value: unknown,
-  label: string,
-): string {
-  const originAssistantInputId = requireString(value, label);
-  if (!HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN.test(originAssistantInputId)) {
-    throw new TypeError(`${label} is invalid.`);
-  }
-  return originAssistantInputId;
-}
-
-function parseHostedExecutionAssistantAskOpaqueId(
-  value: unknown,
-  label: string,
-): string {
-  return parseHostedExecutionAssistantAskBoundedText({
-    label,
-    maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-    value,
-  });
-}
-
-function parseHostedExecutionAssistantAskBoundedText(input: {
-  label: string;
-  maxCodePoints: number;
-  value: unknown;
-}): string {
-  const normalized = requireString(input.value, input.label).trim();
-  const codePoints = [...normalized].length;
-  if (codePoints === 0 || codePoints > input.maxCodePoints) {
-    throw new TypeError(
-      `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
-    );
-  }
-  return normalized;
-}
-
-function parseHostedExecutionAssistantAskTimestamp(
-  value: unknown,
-  label: string,
-): string {
-  const timestamp = requireString(value, label);
-  const timestampMs = Date.parse(timestamp);
-  if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== timestamp) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
-  }
-  return timestamp;
 }
 
 function parseHostedExecutionMemberActivationSignupWelcome(

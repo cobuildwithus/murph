@@ -93,9 +93,6 @@ export interface AssistantHostedPlanUsageTool {
 }
 
 export interface AssistantHostedPersonalizationTool {
-  resolvePreferenceCausalSeq?(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -416,12 +413,6 @@ function normalizeAssistantPersonalizationTool(
   }
 
   return {
-    ...(typeof input.resolvePreferenceCausalSeq === 'function'
-      ? {
-          resolvePreferenceCausalSeq:
-            input.resolvePreferenceCausalSeq.bind(input),
-        }
-      : {}),
     request: input.request.bind(input),
   }
 }

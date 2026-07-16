@@ -9,6 +9,7 @@ import {
   isAssistantPersonalityScore,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  type AssistantPreferenceFieldId,
   type AssistantPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -23,7 +24,7 @@ export interface HostedMailboxAppendDispatch {
 }
 
 export type HostedMemberAssistantPersonalityUpdate = Partial<
-  Record<AssistantPersonalitySettingId, number>
+  Record<AssistantPersonalitySettingId, number | null>
 >;
 
 export type HostedMemberAssistantPersonalitySnapshot = Record<
@@ -42,6 +43,7 @@ export type HostedMemberAssistantPreferencesMailboxPayloadMode =
   | "sparse_delta";
 
 export interface HostedMemberAssistantPreferencesResult {
+  appliedFields: AssistantPreferenceFieldId[];
   assistantPersonality: HostedMemberAssistantPersonalitySnapshot;
   assistantTone: AssistantTonePreference | null;
   assistantVoice: AssistantVoiceOptionId | null;
@@ -76,8 +78,11 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     },
     select: {
       assistantDetail: true,
+      assistantDetailCausalSeq: true,
       assistantHumor: true,
+      assistantHumorCausalSeq: true,
       assistantPush: true,
+      assistantPushCausalSeq: true,
       assistantTone: true,
       assistantToneCausalSeq: true,
       assistantVoice: true,
@@ -109,6 +114,11 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       : {
           causalSeq: requestedCausalSeq,
           currentCausalSeq: {
+            personality: {
+              detail: member.assistantDetailCausalSeq,
+              humor: member.assistantHumorCausalSeq,
+              push: member.assistantPushCausalSeq,
+            },
             tone: member.assistantToneCausalSeq,
             voice: member.assistantVoiceCausalSeq,
           },
@@ -117,6 +127,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
 
   if (!applicablePreferences) {
     return {
+      appliedFields: [],
       assistantPersonality: normalizeStoredAssistantPersonality(member),
       assistantTone: normalizeStoredAssistantTone(member.assistantTone),
       assistantVoice: normalizeStoredAssistantVoice(member.assistantVoice),
@@ -125,9 +136,11 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     };
   }
 
+  const preferences = applicablePreferences.preferences;
+
   if (
     input.mailboxPayloadMode === "legacy_snapshot"
-    && applicablePreferences.personality !== undefined
+    && preferences.personality !== undefined
   ) {
     throw new TypeError(
       "Assistant personality updates require the sparse mailbox payload rollout.",
@@ -146,14 +159,14 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       ? { preferenceCausalSeq: input.preferenceCausalSeq }
       : {}),
     preferences: input.mailboxPayloadMode === "sparse_delta"
-      ? applicablePreferences
+      ? preferences
       : buildHostedMemberAssistantPreferencesSnapshot({
-          tone: applicablePreferences.tone ?? member.assistantTone,
-          voice: applicablePreferences.voice ?? member.assistantVoice,
+          tone: preferences.tone ?? member.assistantTone,
+          voice: preferences.voice ?? member.assistantVoice,
         }),
     requestedFields: [
-      ...(applicablePreferences.tone === undefined ? [] : ["tone" as const]),
-      ...(applicablePreferences.voice === undefined ? [] : ["voice" as const]),
+      ...(preferences.tone === undefined ? [] : ["tone" as const]),
+      ...(preferences.voice === undefined ? [] : ["voice" as const]),
     ],
   });
   const append = await appendHostedMailboxEnvelopeTx({
@@ -171,14 +184,25 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
   const projectedTone = wake.preferences.tone;
   const projectedVoice = wake.preferences.voice;
-  const visibleValueChanged = applicablePreferences.personality !== undefined
+  const visibleValueChanged = (
+    preferences.personality?.humor !== undefined
+    && preferences.personality.humor !== member.assistantHumor
+  )
     || (
-      applicablePreferences.tone !== undefined
-      && applicablePreferences.tone !== member.assistantTone
+      preferences.personality?.push !== undefined
+      && preferences.personality.push !== member.assistantPush
     )
     || (
-      applicablePreferences.voice !== undefined
-      && applicablePreferences.voice !== member.assistantVoice
+      preferences.personality?.detail !== undefined
+      && preferences.personality.detail !== member.assistantDetail
+    )
+    || (
+      preferences.tone !== undefined
+      && preferences.tone !== member.assistantTone
+    )
+    || (
+      preferences.voice !== undefined
+      && preferences.voice !== member.assistantVoice
     );
   const updatedMember = await input.prisma.hostedMember.update({
     where: {
@@ -203,15 +227,33 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
               effectiveCausalSeq,
             ),
           }),
-      ...(applicablePreferences.personality?.humor === undefined
+      ...(preferences.personality?.humor === undefined
         ? {}
-        : { assistantHumor: applicablePreferences.personality.humor }),
-      ...(applicablePreferences.personality?.push === undefined
+        : {
+            assistantHumor: preferences.personality.humor,
+            assistantHumorCausalSeq: maxCausalSeq(
+              member.assistantHumorCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
+      ...(preferences.personality?.push === undefined
         ? {}
-        : { assistantPush: applicablePreferences.personality.push }),
-      ...(applicablePreferences.personality?.detail === undefined
+        : {
+            assistantPush: preferences.personality.push,
+            assistantPushCausalSeq: maxCausalSeq(
+              member.assistantPushCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
+      ...(preferences.personality?.detail === undefined
         ? {}
-        : { assistantDetail: applicablePreferences.personality.detail }),
+        : {
+            assistantDetail: preferences.personality.detail,
+            assistantDetailCausalSeq: maxCausalSeq(
+              member.assistantDetailCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
     },
     select: {
       assistantDetail: true,
@@ -223,6 +265,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   });
 
   return {
+    appliedFields: applicablePreferences.appliedFields,
     assistantPersonality: normalizeStoredAssistantPersonality(updatedMember),
     assistantTone: normalizeStoredAssistantTone(updatedMember.assistantTone),
     assistantVoice: normalizeStoredAssistantVoice(updatedMember.assistantVoice),
@@ -280,11 +323,15 @@ function resolveApplicableAssistantPreferences(input: {
     voice: string | null;
   };
   currentCausalSeq?: {
+    personality: Record<AssistantPersonalitySettingId, bigint | null>;
     tone: bigint | null;
     voice: bigint | null;
   };
   preferences: HostedMemberAssistantPreferencesUpdate;
-}): HostedExecutionMemberPreferences | null {
+}): {
+  appliedFields: AssistantPreferenceFieldId[];
+  preferences: HostedExecutionMemberPreferences;
+} | null {
   const toneApplicable = input.causalSeq === undefined
     || input.currentCausalSeq?.tone === null
     || input.currentCausalSeq?.tone === undefined
@@ -300,16 +347,30 @@ function resolveApplicableAssistantPreferences(input: {
     ? input.preferences.voice
     : undefined;
   const personality: HostedMemberAssistantPersonalityUpdate = {};
+  const appliedFields: AssistantPreferenceFieldId[] = [
+    ...(tone === undefined ? [] : ["tone" as const]),
+    ...(voice === undefined ? [] : ["voice" as const]),
+  ];
   for (const settingId of assistantPersonalitySettingIds) {
     const requestedScore = input.preferences.personality?.[settingId];
     if (requestedScore === undefined) {
       continue;
     }
 
-    // Postgres is only a display/write projection. An explicit sparse
-    // personality request must reach the canonical owner even when its value
-    // equals the potentially stale projection column.
+    if (!isAssistantPreferenceFieldApplicable({
+      causalSeq: input.causalSeq,
+      currentCausalSeq: input.currentCausalSeq?.personality[settingId],
+      currentValue: readStoredAssistantPersonalityScore(
+        input.current.personality,
+        settingId,
+      ),
+      requestedValue: requestedScore,
+    })) {
+      continue;
+    }
+
     personality[settingId] = requestedScore;
+    appliedFields.push(settingId);
   }
   const personalityChanged = Object.keys(personality).length > 0;
 
@@ -318,10 +379,45 @@ function resolveApplicableAssistantPreferences(input: {
   }
 
   return {
-    ...(personalityChanged ? { personality } : {}),
-    ...(tone === undefined ? {} : { tone }),
-    ...(voice === undefined ? {} : { voice }),
+    appliedFields,
+    preferences: {
+      ...(personalityChanged ? { personality } : {}),
+      ...(tone === undefined ? {} : { tone }),
+      ...(voice === undefined ? {} : { voice }),
+    },
   };
+}
+
+function isAssistantPreferenceFieldApplicable(input: {
+  causalSeq: bigint | undefined;
+  currentCausalSeq: bigint | null | undefined;
+  currentValue: number | null;
+  requestedValue: number | null;
+}): boolean {
+  if (input.causalSeq === undefined || input.currentCausalSeq == null) {
+    return true;
+  }
+  if (input.causalSeq > input.currentCausalSeq) {
+    return true;
+  }
+  if (input.causalSeq < input.currentCausalSeq) {
+    return false;
+  }
+  return input.requestedValue !== input.currentValue;
+}
+
+function readStoredAssistantPersonalityScore(
+  value: HostedMemberPersonalityColumns,
+  settingId: AssistantPersonalitySettingId,
+): number | null {
+  switch (settingId) {
+    case "detail":
+      return value.assistantDetail;
+    case "humor":
+      return value.assistantHumor;
+    case "push":
+      return value.assistantPush;
+  }
 }
 
 function buildHostedMemberAssistantPreferencesSnapshot(input: {

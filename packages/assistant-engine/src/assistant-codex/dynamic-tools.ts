@@ -6,8 +6,8 @@ import {
   MURPH_PRODUCT_ORIGIN,
 } from '@murphai/contracts'
 import {
-  hostedRuntimeAssistantPersonalizationToolRequestSchema,
-  type HostedRuntimeAssistantPersonalizationToolRequest,
+  hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
+  type HostedRuntimeAssistantPersonalizationModelToolRequest,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -123,8 +123,12 @@ import {
   MURPH_ASSISTANT_STYLE_TOOL,
   readAssistantStyleDynamicToolRequest,
   type AssistantStyleDynamicToolRequest,
+  type AssistantStyleTurnSettingsOverlay,
 } from './dynamic-tools/assistant-style.js'
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
+export type {
+  AssistantStyleTurnSettingsOverlay,
+} from './dynamic-tools/assistant-style.js'
 import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
@@ -1700,7 +1704,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'personalization'
-      request: HostedRuntimeAssistantPersonalizationToolRequest
+      request: HostedRuntimeAssistantPersonalizationModelToolRequest
     }
   | {
       kind: 'plan-usage'
@@ -2127,6 +2131,7 @@ function readGeneratedImageToolCallId(
 }
 
 export async function executeMurphDynamicToolRequest(input: {
+  assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   assistantStyleSettingsAvailable?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -2224,12 +2229,14 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
+        assistantInputId:
+          hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null,
         available: input.assistantStyleSettingsAvailable === true,
-        causalSeqRequired: hostedToolContext != null,
+        hosted: hostedToolContext != null,
+        hostedPersonalizationTool:
+          hostedToolContext?.personalizationTool ?? null,
+        hostedSettingsOverlay: input.assistantStyleSettingsOverlay ?? null,
         request: input.request,
-        resolveCausalSeq: hostedToolContext
-          ? () => resolveHostedAssistantStyleCausalSeq(hostedToolContext)
-          : null,
         vaultRoot: input.vaultRoot ?? null,
       })
     }
@@ -2612,7 +2619,7 @@ async function executePlanUsageTool(input: {
 
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeAssistantPersonalizationToolRequest
+  request: HostedRuntimeAssistantPersonalizationModelToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
@@ -2634,28 +2641,6 @@ async function executePersonalizationTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'personalization request failed')
-  }
-}
-
-async function resolveHostedAssistantStyleCausalSeq(
-  hostedToolContext: AssistantHostedToolContext | null,
-): Promise<string | null> {
-  if (!hostedToolContext) {
-    return null
-  }
-  const assistantInputId =
-    hostedToolContext.currentAssistantPreferenceInputId?.() ?? null
-  const personalizationTool = hostedToolContext.personalizationTool ?? null
-  if (!assistantInputId || !personalizationTool?.resolvePreferenceCausalSeq) {
-    return null
-  }
-
-  try {
-    return await personalizationTool.resolvePreferenceCausalSeq({
-      assistantInputId,
-    })
-  } catch {
-    return null
   }
 }
 
@@ -4017,11 +4002,12 @@ function parsePersonalizationArguments(
   value: unknown,
 ):
   | {
-      request: HostedRuntimeAssistantPersonalizationToolRequest
+      request: HostedRuntimeAssistantPersonalizationModelToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = hostedRuntimeAssistantPersonalizationToolRequestSchema.safeParse(value)
+  const parsed = hostedRuntimeAssistantPersonalizationModelToolRequestSchema
+    .safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,

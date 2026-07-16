@@ -9,7 +9,7 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
@@ -4029,10 +4029,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
         const body = await request.clone().json() as { action?: unknown };
-        if (body.action === HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION) {
+        if (body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
           return new Response(JSON.stringify({
-            action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-            result: { causalSeq: "42" },
+            action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+            result: {
+              outcomes: {
+                detail: "unchanged",
+                humor: "saved",
+              },
+              settings: {
+                detail: { source: "default", value: 5 },
+                humor: { source: "custom", value: 8 },
+                push: { source: "default", value: 3 },
+              },
+            },
           }), {
             headers: { "content-type": "application/json; charset=utf-8" },
             status: 200,
@@ -4167,11 +4177,29 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       { action: "read" },
       { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
     )).resolves.toMatchObject({ action: "read" });
-    await expect(
-      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
-        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
-      }),
-    ).resolves.toBe("42");
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        personality: {
+          detail: null,
+          humor: 8,
+        },
+      },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).resolves.toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: {
+          detail: "unchanged",
+          humor: "saved",
+        },
+        settings: {
+          detail: { source: "default", value: 5 },
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
+    });
     await expect(platform.groupToolPort!.request({ action: "read_current" }))
       .resolves.toEqual({
         action: "read_current",
@@ -4210,12 +4238,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+    await expect(requests[10]?.clone().json()).resolves.toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: {
+        detail: null,
+        humor: 8,
+      },
+    });
   });
 
-  it("rejects malformed preference causal-sequence responses", async () => {
+  it("rejects malformed personality update responses", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-      result: { causalSeq: "not-a-sequence" },
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: { humor: "saved" },
+        settings: {
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
     }), {
       headers: { "content-type": "application/json; charset=utf-8" },
       status: 200,
@@ -4233,13 +4274,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    await expect(
-      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
-        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
-      }),
-    ).rejects.toThrow(
-      "Hosted assistant preference causal sequence returned invalid JSON.",
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        personality: { humor: 8 },
+      },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).rejects.toThrow(
+      "Hosted assistant personalization tool returned invalid JSON.",
     );
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "personality update callback request",
+    );
+    expect(request.url).toBe(
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
   });
 
   it("attaches active lease headers to direct signed web-control callbacks", async () => {

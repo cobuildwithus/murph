@@ -47,7 +47,6 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   handleHostedRuntimeAssistantPersonalizationTool,
-  resolveHostedRuntimeAssistantPreferenceCausalSeq,
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
 
 describe("hosted assistant personalization tool owner adapter", () => {
@@ -63,6 +62,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
     mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
+      personality: {
+        detail: null,
+        humor: null,
+        push: null,
+      },
       tone: "formal",
       voice: "warm",
     });
@@ -72,6 +76,12 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx.mockResolvedValue("42");
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["voice"],
+      assistantPersonality: {
+        detail: null,
+        humor: null,
+        push: null,
+      },
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: { mailboxItemId: "mailbox_preferences_1" },
@@ -145,61 +155,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
 
-  it("resolves a member-bound causal sequence under the canonical access locks", async () => {
-    await expect(resolveHostedRuntimeAssistantPreferenceCausalSeq({
-      authority: { assistantInputId: "ain_66666666666666666666666666666666" },
-      memberId: "member_personalization_1",
-    })).resolves.toEqual({
-      action: "resolve_preference_causal_seq",
-      result: { causalSeq: "42" },
-    });
-
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!,
-    );
-    expect(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0]!,
-    );
-    expect(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.assertHostedMemberAssistantPersonalizationEligible
-        .mock.invocationCallOrder[0]!,
-    );
-    expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
-    ).toHaveBeenCalledWith({
-      assistantInputId: "ain_66666666666666666666666666666666",
-      memberId: "member_personalization_1",
-      prisma: { tx: true },
-    });
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
-  });
-
-  it("rejects causal-sequence resolution without canonical mailbox authority", async () => {
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
-      .mockResolvedValue(null);
-
-    await expect(resolveHostedRuntimeAssistantPreferenceCausalSeq({
-      authority: { assistantInputId: "ain_77777777777777777777777777777777" },
-      memberId: "member_personalization_1",
-    })).rejects.toThrow("input authority is invalid");
-
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
-  });
-
   it("rejects updates inside the transaction when canonical hosted access is inactive", async () => {
     const accessError = hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
@@ -266,6 +221,171 @@ describe("hosted assistant personalization tool owner adapter", () => {
       mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects personality updates behind the rollout gate before opening a transaction", async () => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_88888888888888888888888888888888" },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
+    });
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects personality updates without assistant input authority", async () => {
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { push: null },
+      },
+    })).rejects.toThrow("requires assistant input authority");
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("causally projects sparse personality values and reports exact field outcomes", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["humor"],
+      assistantPersonality: {
+        detail: 3,
+        humor: 8,
+        push: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_personality_1" },
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_99999999999999999999999999999999" },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: {
+          detail: 9,
+          humor: 8,
+          push: null,
+        },
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "update_personality",
+      result: {
+        outcomes: {
+          detail: "superseded",
+          humor: "saved",
+          push: "unchanged",
+        },
+        settings: {
+          detail: { source: "custom", value: 3 },
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
+    });
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
+      { tx: true },
+      "member_personalization_1",
+    );
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      { tx: true },
+      "member_personalization_1",
+    );
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.assertHostedMemberAssistantPersonalizationEligible
+        .mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).toHaveBeenCalledWith({
+      assistantInputId: "ain_99999999999999999999999999999999",
+      memberId: "member_personalization_1",
+      prisma: { tx: true },
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_personalization_1",
+      occurredAt: expect.any(String),
+      preferenceCausalSeq: "42",
+      preferences: {
+        personality: {
+          detail: 9,
+          humor: 8,
+          push: null,
+        },
+      },
+      prisma: { tx: true },
+    });
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_personalization_1",
+      mailboxItemId: "mailbox_personality_1",
+    });
+  });
+
+  it("does not schedule a wake when a personality update has no dispatch", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: [],
+      assistantPersonality: {
+        detail: null,
+        humor: 8,
+        push: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: null,
+      updated: false,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "update_personality",
+      result: {
+        outcomes: { humor: "unchanged" },
+        settings: {
+          detail: { source: "default", value: 5 },
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
+    });
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 
   it("saves a style-only update while reading the effective model from its canonical owner", async () => {
