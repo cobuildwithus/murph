@@ -1059,10 +1059,10 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       JUNCTION_SUMMARY_BACKFILL_DAYS: "7",
       JUNCTION_SUMMARY_RESOURCES: "sleep,profile",
       JUNCTION_TIMESERIES_BACKFILL_DAYS: "3",
-      JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
       JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "300000",
     });
     expect(runtime.platformEnv).not.toHaveProperty("JUNCTION_WEBHOOK_SECRET");
+    expect(runtime.platformEnv).not.toHaveProperty("JUNCTION_TIMESERIES_RESOURCES");
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).toMatchObject({
       environment: "sandbox",
       region: "us",
@@ -1070,6 +1070,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty("apiKey");
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty(
       "clientUserIdSecret",
+    );
+    expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty(
+      "timeseriesResources",
     );
   });
 });
@@ -1238,6 +1241,9 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("GARMIN_API_BASE_URL");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("JUNCTION_RESOURCE_OVERRIDES");
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+      "JUNCTION_TIMESERIES_RESOURCES",
+    );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toContain(
       "LINQ_ATTACHMENT_CDN_BASE_URL",
     );

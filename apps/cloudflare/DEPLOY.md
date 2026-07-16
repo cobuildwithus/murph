@@ -311,7 +311,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; the target production slug for this rollout is `gpt-5.6-terra`, with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -319,19 +319,6 @@ Hosted assistant config:
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
-For the GPT-5.6 rollout, first merge and deploy the web allowance logic plus
-Worker/runner catalog patch while production remains on
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`. Use `container_rollout=immediate`, leave the
-default live-model smoke enabled, and require that preparatory deploy to report
-`gpt-5.6-terra` and `OK`; this proves the production OpenAI project and deployed
-runner before user turns move. Then set
-`HOSTED_ASSISTANT_MODEL=gpt-5.6-terra` and redeploy Cloudflare with
-`container_rollout=immediate` and the live-model smoke still enabled. Immediate
-rollout is required because a gradual rollout can leave warm old-bundle
-containers without the GPT-5.6 catalog. The rollback floor is
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`; when Terra itself is the reason for rollback,
-set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
-does not block restoring the floor.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner
@@ -355,7 +342,6 @@ Opt-in runtime integrations:
 - `JUNCTION_REGION`
 - `JUNCTION_PROVIDER_FILTER`
 - `JUNCTION_SUMMARY_RESOURCES`
-- `JUNCTION_TIMESERIES_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
 - `JUNCTION_RECONCILE_DAYS`

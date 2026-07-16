@@ -227,6 +227,37 @@ function createEffect(
   });
 }
 
+function createReplyBubbleEffects(input: {
+  baseKey: string;
+  channel: "linq" | "telegram";
+  count: number;
+  deliveryPhase?: "background_retry" | "foreground_current_turn";
+  transportIdempotent?: boolean;
+  turnId: string;
+}) {
+  const target = input.channel === "linq" ? "linq_chat_123" : "chat_123";
+  return Array.from({ length: input.count }, (_, index) => {
+    const isFinal = index === input.count - 1;
+    return buildHostedAssistantDeliveryEffect({
+      dedupeKey: `dedupe_${input.turnId}_${index}`,
+      deliveryPhase: input.deliveryPhase ?? "foreground_current_turn",
+      effectId: `intent_${input.turnId}_${index}`,
+      payload: createPayload({
+        bindingDeliveryKind: input.channel === "linq" ? "thread" : "participant",
+        bindingDeliveryTarget: target,
+        channel: input.channel,
+        explicitTarget: input.channel === "linq" ? target : null,
+        idempotencyKey: isFinal
+          ? input.baseKey
+          : `${input.baseKey}:bubble:${index}`,
+        message: isFinal ? "Final bubble" : `Bubble ${index + 1}`,
+        transportIdempotent: input.transportIdempotent ?? false,
+        turnId: input.turnId,
+      }),
+    });
+  });
+}
+
 function createHostedVoiceMemoMedia(
   overrides: Partial<HostedVoiceMemoDeliveryMedia> = {},
 ): HostedVoiceMemoDeliveryMedia {
@@ -2054,6 +2085,9 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      status: "abandoned",
+    });
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
         actorId: null,
@@ -2117,9 +2151,283 @@ describe("hosted runtime callbacks", () => {
         code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
       }),
       intentId: "intent_signup_welcome",
+      onlyCurrentStatuses: ["pending", "retryable"],
       status: "abandoned",
       vault: "/tmp/vault",
     });
+  });
+
+  it.each([true, false])(
+    "abandons a retryable signup welcome from durable later auto-reply evidence (background=%s)",
+    async (includeBackgroundDueIntents) => {
+      const welcome = createPendingHostedDeliveryIntent({
+        actorId: "actor_member",
+        bindingDelivery: { kind: "participant", target: "participant_member" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+        explicitTarget: null,
+        identityId: "identity_member",
+        intentId: "intent_signup_welcome_retry",
+        lastError: {
+          code: "LINQ_API_REQUEST_FAILED",
+          message: "Chat not found",
+        },
+        media: [],
+        nextAttemptAt: "2026-04-08T00:30:00.000Z",
+        replyToMessageId: null,
+        status: "retryable",
+        threadId: null,
+        threadIsDirect: true,
+        turnId: "turn_signup_welcome_retry",
+      });
+      const laterAutoReply = createPendingHostedDeliveryIntent({
+        actorId: "actor_member",
+        bindingDelivery: { kind: "thread", target: "thread_materialized" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:10:00.000Z",
+        deliveryIdempotencyKey: "reply_delivery_key",
+        explicitTarget: "chat_materialized",
+        identityId: "identity_member",
+        intentId: "intent_later_auto_reply",
+        media: [],
+        nextAttemptAt: null,
+        replyToMessageId: "message_inbound",
+        status: "sent",
+        threadId: "thread_materialized",
+        threadIsDirect: true,
+        turnId: "turn_later_auto_reply",
+      });
+      mocks.listAssistantOutboxIntents.mockResolvedValue([
+        welcome,
+        laterAutoReply,
+      ]);
+      mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+        new Set(["intent_later_auto_reply"]),
+      );
+      mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+        (intent) => intent.status !== "sent",
+      );
+      mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+        ...welcome,
+        lastError: {
+          code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+          message: "Stale signup welcome suppressed.",
+        },
+        status: "abandoned",
+      });
+
+      await expect(collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      })).resolves.toEqual([]);
+
+      expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+        error: expect.objectContaining({
+          code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+        }),
+        intentId: "intent_signup_welcome_retry",
+        onlyCurrentStatuses: ["pending", "retryable"],
+        status: "abandoned",
+        vault: "/tmp/vault",
+      });
+    },
+  );
+
+  it("keeps a signup welcome when its supersession claim loses to dispatch", async () => {
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: "actor_member",
+      bindingDelivery: { kind: "participant", target: "participant_member" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      explicitTarget: null,
+      intentId: "intent_signup_welcome_claim_race",
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+    });
+    const historicalReply = createPendingHostedDeliveryIntent({
+      actorId: "actor_member",
+      bindingDelivery: { kind: "thread", target: "thread_materialized" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      explicitTarget: "chat_materialized",
+      intentId: "intent_auto_reply_claim_race",
+      media: [],
+      status: "sent",
+      threadId: "thread_materialized",
+      threadIsDirect: true,
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      welcome,
+      historicalReply,
+    ]);
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set(["intent_auto_reply_claim_race"]),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      ...welcome,
+      lastAttemptAt: "2026-04-08T00:10:01.000Z",
+      status: "sending",
+    });
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_signup_welcome_claim_race",
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      autoReply: true,
+      label: "an older reply",
+      replyOverrides: {
+        createdAt: "2026-04-07T23:59:00.000Z",
+      },
+    },
+    {
+      autoReply: true,
+      label: "a different direct recipient",
+      replyOverrides: {
+        actorId: "actor_other",
+        bindingDelivery: { kind: "thread", target: "thread_other" },
+        identityId: "identity_other",
+        threadId: "thread_other",
+      },
+    },
+    {
+      autoReply: true,
+      label: "a group reply from the same actor",
+      replyOverrides: {
+        bindingDelivery: { kind: "thread", target: "thread_group" },
+        explicitTarget: "chat_group",
+        threadId: "thread_group",
+        threadIsDirect: false,
+      },
+    },
+    {
+      autoReply: false,
+      label: "a non-auto-reply delivery",
+      replyOverrides: {},
+    },
+  ])("keeps a signup welcome when durable history contains $label", async ({
+    autoReply,
+    replyOverrides,
+  }) => {
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: "actor_member",
+      bindingDelivery: { kind: "participant", target: "participant_member" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      explicitTarget: null,
+      intentId: "intent_signup_welcome_kept",
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+    });
+    const historicalReply = createPendingHostedDeliveryIntent({
+      actorId: "actor_member",
+      bindingDelivery: { kind: "thread", target: "thread_materialized" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      deliveryIdempotencyKey: "reply_delivery_key",
+      explicitTarget: "chat_materialized",
+      intentId: "intent_historical_reply",
+      media: [],
+      nextAttemptAt: null,
+      replyToMessageId: "message_inbound",
+      status: "sent",
+      threadId: "thread_materialized",
+      threadIsDirect: true,
+      ...replyOverrides,
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      welcome,
+      historicalReply,
+    ]);
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      autoReply ? new Set(["intent_historical_reply"]) : new Set(),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_signup_welcome_kept",
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+  });
+
+  it("does not eagerly abandon a sending signup welcome", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        actorId: "actor_member",
+        bindingDelivery: { kind: "participant", target: "participant_member" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+        explicitTarget: null,
+        intentId: "intent_signup_welcome_sending",
+        lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        media: [],
+        status: "sending",
+        threadId: null,
+        threadIsDirect: true,
+      }),
+      createPendingHostedDeliveryIntent({
+        actorId: "actor_member",
+        bindingDelivery: { kind: "thread", target: "thread_materialized" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:10:00.000Z",
+        explicitTarget: null,
+        intentId: "intent_auto_reply_after_sending",
+        media: [],
+        status: "sent",
+        threadId: "thread_materialized",
+        threadIsDirect: true,
+      }),
+    ]);
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set(["intent_auto_reply_after_sending"]),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_signup_welcome_sending",
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
   });
 
   it("prefers fresh pending deliveries over stale retryable deliveries at the hosted effect cap", async () => {
@@ -4312,6 +4620,338 @@ describe("hosted runtime callbacks", () => {
     ]);
     await flushHostedRuntimeCallbackTestMicrotasks();
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("pauses 1.5 seconds between confirmed Linq reply bubbles", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const effects = createReplyBubbleEffects({
+        baseKey: "delivery_bubbles",
+        channel: "linq",
+        count: 3,
+        turnId: "turn_bubbles",
+      });
+      const effectById = new Map(effects.map((effect) => [effect.effectId, effect]));
+      const dispatchedAt: number[] = [];
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+        async ({ intentId }) => createMirrorState({
+          delivery: null,
+          intentId,
+          lastError: null,
+          status: "pending",
+        }),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) => {
+        const effect = effectById.get(intentId);
+        assert(effect);
+        dispatchedAt.push(Date.now());
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey: effect.payload.idempotencyKey,
+            providerThreadId: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          intentId,
+          status: "sent",
+        });
+      });
+
+      const drain = drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: effects,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await expect(drain).resolves.toHaveLength(3);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(3);
+      expect(dispatchedAt).toEqual([
+        Date.parse("2026-04-08T00:00:00.000Z"),
+        Date.parse("2026-04-08T00:00:01.500Z"),
+        Date.parse("2026-04-08T00:00:03.000Z"),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      channel: "telegram" as const,
+      deliveryPhase: "foreground_current_turn" as const,
+      label: "Telegram reply bubbles",
+    },
+    {
+      channel: "linq" as const,
+      deliveryPhase: "background_retry" as const,
+      label: "background Linq retries",
+    },
+  ])("does not pace $label", async ({ channel, deliveryPhase }) => {
+    vi.useFakeTimers();
+    try {
+      const effects = createReplyBubbleEffects({
+        baseKey: "unpaced_bubbles",
+        channel,
+        count: 2,
+        deliveryPhase,
+        turnId: `turn_unpaced_${channel}_${deliveryPhase}`,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+        async ({ intentId }) => createMirrorState({
+          delivery: null,
+          intentId,
+          lastError: null,
+          status: "pending",
+        }),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) =>
+        createDispatchResult({
+          delivery: createDelivery({ idempotencyKey: `assistant-outbox:${intentId}` }),
+          intentId,
+          status: "sent",
+        }));
+
+      const drain = drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: effects,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(drain).resolves.toHaveLength(2);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      firstIdempotencyKey: "assistant-outbox:intent_reply",
+      firstMessage: "Reply before reaction",
+      firstReplyToMessageId: "linq_message_123",
+      label: "a Linq reply followed by a reaction",
+      secondIdempotencyKey: "assistant-outbox:intent_reaction",
+      secondMessage: "",
+      secondReplyToMessageId: "linq_message_123",
+    },
+    {
+      firstIdempotencyKey: "unrelated_first",
+      firstMessage: "First unrelated message",
+      firstReplyToMessageId: null,
+      label: "unrelated Linq effects",
+      secondIdempotencyKey: "unrelated_second",
+      secondMessage: "Second unrelated message",
+      secondReplyToMessageId: null,
+    },
+  ])("does not pace $label", async ({
+    firstIdempotencyKey,
+    firstMessage,
+    firstReplyToMessageId,
+    secondIdempotencyKey,
+    secondMessage,
+    secondReplyToMessageId,
+  }) => {
+    vi.useFakeTimers();
+    try {
+      const turnId = "turn_unpaced_adjacent_effects";
+      const effects = [
+        {
+          idempotencyKey: firstIdempotencyKey,
+          message: firstMessage,
+          replyToMessageId: firstReplyToMessageId,
+        },
+        {
+          idempotencyKey: secondIdempotencyKey,
+          message: secondMessage,
+          replyToMessageId: secondReplyToMessageId,
+        },
+      ].map((payload, index) => buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe_unpaced_adjacent_${index}`,
+        deliveryPhase: "foreground_current_turn",
+        effectId: `intent_unpaced_adjacent_${index}`,
+        payload: createPayload({
+          bindingDeliveryKind: "thread",
+          bindingDeliveryTarget: "linq_chat_123",
+          channel: "linq",
+          explicitTarget: "linq_chat_123",
+          turnId,
+          ...payload,
+        }),
+      }));
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+        async ({ intentId }) => createMirrorState({
+          delivery: null,
+          intentId,
+          lastError: null,
+          status: "pending",
+        }),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) =>
+        createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerThreadId: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          intentId,
+          status: "sent",
+        }));
+
+      const drain = drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: effects,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(drain).resolves.toHaveLength(2);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not pause after a failed Linq reply bubble", async () => {
+    vi.useFakeTimers();
+    try {
+      const effects = createReplyBubbleEffects({
+        baseKey: "failed_bubbles",
+        channel: "linq",
+        count: 2,
+        turnId: "turn_failed_bubble",
+      });
+      const failedEffectId = effects[0]?.effectId;
+      assert(failedEffectId);
+      mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+        async ({ intentId }) => createMirrorState({
+          delivery: null,
+          intentId,
+          lastError: null,
+          status: "pending",
+        }),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) => {
+        if (intentId === failedEffectId) {
+          const deliveryError = {
+            code: "ASSISTANT_DELIVERY_FAILED",
+            message: "terminal bubble failure",
+          };
+          return createDispatchResult(
+            { intentId, lastError: deliveryError, status: "failed" },
+            deliveryError,
+          );
+        }
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey: "failed_bubbles",
+            providerThreadId: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          intentId,
+          status: "sent",
+        });
+      });
+
+      const drain = drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: effects,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(drain).resolves.toHaveLength(2);
+      expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets remaining prepared bubbles when the pacing pause is aborted", async () => {
+    const abortController = new AbortController();
+    const abortReason = new Error("lease expired during reply bubble pause");
+    const effects = createReplyBubbleEffects({
+      baseKey: "aborted_bubbles",
+      channel: "linq",
+      count: 2,
+      transportIdempotent: true,
+      turnId: "turn_aborted_bubbles",
+    });
+    const firstEffect = effects[0];
+    const finalEffect = effects[1];
+    assert(firstEffect);
+    assert(finalEffect);
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(
+      async ({ intentId }) => createMirrorState({
+        delivery: null,
+        intentId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ intentId }) =>
+      createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "aborted_bubbles:bubble:0",
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        intentId,
+        status: "sent",
+      }));
+
+    const drain = drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [firstEffect, finalEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      preparedDispatches: [{
+        intentId: finalEffect.effectId,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: finalEffect.payload.idempotencyKey,
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      signal: abortController.signal,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await flushHostedRuntimeCallbackTestMicrotasks();
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledOnce();
+
+    abortController.abort(abortReason);
+
+    await expect(drain).rejects.toBe(abortReason);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledOnce();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryIdempotencyKey: "aborted_bubbles",
+        intentId: finalEffect.effectId,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        vault: HOSTED_WAKE.vaultRoot,
+      }),
+    );
   });
 
   it("does not stop Linq typing for missing-result when a later same-target delivery sends in the same drain", async () => {
@@ -10762,7 +11402,7 @@ describe("hosted runtime callbacks", () => {
     )).toEqual(["member_one", "member_two"]);
   });
 
-  it("does not recreate sent or ambiguous newsletter recipient children from the same parent attempt", async () => {
+  it("does not recreate sent, ambiguous, or exhausted newsletter recipients from the same parent attempt", async () => {
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
@@ -10780,7 +11420,7 @@ describe("hosted runtime callbacks", () => {
     });
     const existingRecipient = (
       memberId: string,
-      status: "abandoned" | "sent",
+      status: "abandoned" | "failed" | "sent",
       errorCode: string | null,
     ) => ({
       deliveryIdempotencyKey,
@@ -10801,6 +11441,11 @@ describe("hosted runtime callbacks", () => {
         "abandoned",
         "ASSISTANT_DELIVERY_AMBIGUOUS",
       ),
+      existingRecipient(
+        "member_three",
+        "failed",
+        "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+      ),
     ]);
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
@@ -10820,7 +11465,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
         sendEmail: vi.fn(async () => ({
-          fanoutRecipientMemberIds: ["member_one", "member_two"],
+          fanoutRecipientMemberIds: ["member_one", "member_two", "member_three"],
           target: fanoutTarget,
         })),
       }),
@@ -10836,6 +11481,11 @@ describe("hosted runtime callbacks", () => {
         "abandoned",
         "ASSISTANT_DELIVERY_AMBIGUOUS",
       ),
+      existingRecipient(
+        "member_three",
+        "failed",
+        "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+      ),
     ].map((intent) => ({ ...intent, turnId: "turn_previous" })));
 
     await drainHostedPreparedAssistantDeliveries({
@@ -10843,7 +11493,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
         sendEmail: vi.fn(async () => ({
-          fanoutRecipientMemberIds: ["member_one", "member_two"],
+          fanoutRecipientMemberIds: ["member_one", "member_two", "member_three"],
           target: fanoutTarget,
         })),
       }),
@@ -10851,6 +11501,9 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    expect(mocks.createAssistantOutboxIntent.mock.calls.map((call) =>
+      parseHostedEmailThreadTarget(call[0].explicitTarget)?.recipientMemberId
+    )).toEqual(["member_one", "member_two"]);
   });
 
   it("keeps partial group fanout intent persistence replayable", async () => {
