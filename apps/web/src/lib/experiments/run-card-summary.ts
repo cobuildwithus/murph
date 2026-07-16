@@ -36,24 +36,16 @@ export function buildExperimentRunCardSummary(
     metric: primarySignal || primaryTrend
       ? buildMetric(primarySignal, primaryTrend)
       : undefined,
-    metrics: buildMetrics(run.signals, run.trends),
+    metrics: buildMetrics(run.signals),
   };
 }
 
 function buildMetrics(
   signals: ExperimentRunProjection["signals"],
-  trends: ExperimentRunProjection["trends"],
 ): ExperimentRunCardMetric[] {
-  const usableTrends = trends.filter(hasTrendPoints);
-  const trendsByLabel = new Map(usableTrends.map((trend) => [trend.label, trend]));
-  const signalLabels = new Set(signals.map((signal) => signal.label));
-
-  return [
-    ...signals.map((signal) => buildMetric(signal, trendsByLabel.get(signal.label))),
-    ...usableTrends
-      .filter((trend) => !signalLabels.has(trend.label))
-      .map((trend) => buildMetric(undefined, trend)),
-  ];
+  return signals
+    .filter((signal) => signal.delta.trim().length > 0)
+    .map((signal) => buildMetric(signal, undefined));
 }
 
 function buildMetric(

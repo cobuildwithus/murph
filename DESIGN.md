@@ -200,12 +200,13 @@ and mobile-landscape widths, and one where the open desktop sidebar constrains
 the content column.
 Inside each card, keep the category and title, then show every comparable result
 as a small primary-first grid of mono labels and Fraunces deltas. Positive
-evidence may use sage; unfavorable and neutral movement stays slate because a
-mixed result is not a warning state. Keep the date, but omit the redundant
-Completed badge, circled privacy lock, Baseline-to-Latest block, and visible
-View arrow. The entire card remains the link to the detailed result. Active and
-paused cards keep the larger progress-first treatment. Keep privacy legible with
-a small unbordered lock beside the date rather than a separate header control.
+evidence uses sage, unfavorable movement retains amber, and neutral movement
+stays slate so mixed results remain distinguishable. Keep the date, but omit the
+redundant Completed badge, circled privacy lock, Baseline-to-Latest block, and
+visible View arrow. The entire card remains the link to the detailed result.
+Active and paused cards keep the larger progress-first treatment, and stopped
+runs keep the standard history-card treatment. Keep privacy legible with a small
+unbordered lock beside the date rather than a separate header control.
 
 ### Library List Pattern (Hero / Standard / Table)
 For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker, recipes, protocols), break the rhythm into three tiers instead of an identical-card grid:

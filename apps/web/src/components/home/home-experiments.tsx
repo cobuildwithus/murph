@@ -37,7 +37,7 @@ export function HomeExperiments({ inProgress, history }: HomeExperimentsProps) {
           label="In progress"
           cards={inProgress}
           action={browseAction}
-          variant="progress"
+          variant="default"
         />
       ) : null}
       {history.length > 0 ? (
@@ -61,8 +61,10 @@ function HomeExperimentsSection({
   label: string;
   cards: ExperimentLibraryCard[];
   action?: React.ReactNode;
-  variant: "history" | "progress";
+  variant: "default" | "history";
 }) {
+  const historyLayout = variant === "history";
+
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -72,14 +74,40 @@ function HomeExperimentsSection({
         {action ?? null}
       </div>
       <div className={cn(
-        "grid sm:grid-cols-2",
-        variant === "history"
-          ? "gap-3 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3"
-          : "gap-5",
+        "grid",
+        historyLayout
+          ? "grid-cols-6 items-start gap-5"
+          : "gap-5 sm:grid-cols-2",
       )}>
-        {cards.map((card) => (
-          <HomeExperimentCard key={card.id} card={card} variant={variant} />
-        ))}
+        {cards.map((card) => {
+          const cardVariant = historyLayout && card.runStatus === "finished"
+            ? "history"
+            : "default";
+
+          if (!historyLayout) {
+            return (
+              <HomeExperimentCard
+                key={card.id}
+                card={card}
+                variant={cardVariant}
+              />
+            );
+          }
+
+          return (
+            <div
+              key={card.id}
+              className={cn(
+                "col-span-6",
+                cardVariant === "history"
+                  ? "h-fit sm:col-span-3 md:col-span-6 lg:col-span-3 xl:col-span-2"
+                  : "self-stretch sm:col-span-3",
+              )}
+            >
+              <HomeExperimentCard card={card} variant={cardVariant} />
+            </div>
+          );
+        })}
       </div>
     </section>
   );

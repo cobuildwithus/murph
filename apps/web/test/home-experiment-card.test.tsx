@@ -50,7 +50,7 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
   );
   assert.match(
     markup,
-    /Sleep efficiency<\/p><p class="[^"]*text-foreground[^"]*">-0\.7 percent<\/p>/,
+    /Sleep efficiency<\/p><p class="[^"]*text-amber-600[^"]*">-0\.7 percent<\/p>/,
   );
   assert.match(
     markup,
@@ -71,6 +71,7 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
   assert.doesNotMatch(markup, /inline-flex size-7/);
   assert.doesNotMatch(markup, />Completed</);
   assert.doesNotMatch(markup, />View</);
+  assert.doesNotMatch(markup, /h-full/);
   assert.doesNotMatch(markup, /min-h-\[240px\]/);
   assert.doesNotMatch(markup, /<img/);
   assert.doesNotMatch(markup, /Protocol preview copy that should stay hidden/);
@@ -127,10 +128,11 @@ test("HomeExperimentCard keeps low-confidence completed runs concise", async () 
     completionPercent: 100,
     dateRange: "May 1 to May 14",
     day: 14,
-    metrics: [{
+    metric: {
       current: "18 min",
       label: "Sleep latency",
-    }],
+    },
+    metrics: [],
   };
   const markup = renderToStaticMarkup(createElement(HomeExperimentCard, {
     card,
@@ -150,7 +152,7 @@ test("HomeExperimentCard combines current data with progress for an active run",
   );
   const markup = renderToStaticMarkup(createElement(HomeExperimentCard, {
     card: progressCard(),
-    variant: "progress",
+    variant: "default",
   }));
 
   assert.match(markup, /Resting heart rate/);
@@ -159,7 +161,7 @@ test("HomeExperimentCard combines current data with progress for an active run",
   assert.match(markup, /Day 6/);
   assert.match(markup, /role="progressbar"/);
   assert.match(markup, /aria-valuenow="43"/);
-  assert.match(markup, /data-home-experiment-card-variant="progress"/);
+  assert.match(markup, /data-home-experiment-card-variant="default"/);
   assert.match(markup, /min-h-\[240px\] p-5/);
   assert.match(markup, /inline-flex size-7/);
   assert.match(markup, />Active</);
@@ -177,13 +179,86 @@ test("HomeExperiments gives history a denser three-column layout", async () => {
     inProgress: [progressCard()],
   }));
 
-  assert.match(markup, /data-home-experiment-card-variant="progress"/);
+  assert.match(markup, /data-home-experiment-card-variant="default"/);
   assert.match(markup, /data-home-experiment-card-variant="history"/);
+  assert.match(markup, /grid grid-cols-6 items-start gap-5/);
   assert.match(
     markup,
-    /gap-3 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3/,
+    /col-span-6 h-fit sm:col-span-3 md:col-span-6 lg:col-span-3 xl:col-span-2/,
   );
-  assert.match(markup, /grid sm:grid-cols-2 gap-5/);
+  assert.match(markup, /grid gap-5 sm:grid-cols-2/);
+});
+
+test("HomeExperiments preserves the standard card treatment for stopped runs", async () => {
+  const { HomeExperiments } = await import(
+    "@/src/components/home/home-experiments"
+  );
+  const markup = renderToStaticMarkup(createElement(HomeExperiments, {
+    history: [stoppedCard()],
+    inProgress: [],
+  }));
+
+  assert.match(markup, /data-home-experiment-card-variant="default"/);
+  assert.doesNotMatch(markup, /data-home-experiment-card-variant="history"/);
+  assert.match(markup, /grid grid-cols-6 items-start gap-5/);
+  assert.match(markup, /col-span-6 self-stretch sm:col-span-3/);
+  assert.doesNotMatch(markup, /xl:col-span-2/);
+  assert.match(markup, /<a class="block [^"]* h-full" href=/);
+  assert.match(markup, /h-full min-h-\[240px\] p-5/);
+  assert.match(markup, />Stopped</);
+  assert.match(markup, /Deep sleep/);
+  assert.match(markup, /Baseline/);
+  assert.match(markup, /Latest/);
+  assert.doesNotMatch(markup, /Sleep latency/);
+  assert.match(markup, /Private data/);
+  assert.match(markup, /inline-flex size-7/);
+  assert.match(markup, />View</);
+  assert.match(
+    markup,
+    /<a[^>]*href="\/experiments\/red-light-glasses"[^>]*><article/,
+  );
+});
+
+test("HomeExperiments keeps mixed history cards on lifecycle-specific grid spans", async () => {
+  const { HomeExperiments } = await import(
+    "@/src/components/home/home-experiments"
+  );
+  const stopped = stoppedCard();
+  stopped.id = "red-light-glasses-stopped";
+  const markup = renderToStaticMarkup(createElement(HomeExperiments, {
+    history: [resultCard(), stopped],
+    inProgress: [],
+  }));
+
+  assert.match(markup, /grid grid-cols-6 items-start gap-5/);
+  assert.match(
+    markup,
+    /class="col-span-6 h-fit sm:col-span-3 md:col-span-6 lg:col-span-3 xl:col-span-2"/,
+  );
+  assert.equal(
+    markup.match(/class="col-span-6 self-stretch sm:col-span-3"/g)?.length,
+    1,
+  );
+  assert.match(
+    markup,
+    /class="col-span-6 h-fit sm:col-span-3 md:col-span-6 lg:col-span-3 xl:col-span-2"[\s\S]*class="col-span-6 self-stretch sm:col-span-3"/,
+  );
+  assert.equal(
+    markup.match(/data-home-experiment-card-variant="history"/g)?.length,
+    1,
+  );
+  assert.equal(
+    markup.match(/data-home-experiment-card-variant="default"/g)?.length,
+    1,
+  );
+  assert.match(
+    markup,
+    /data-home-experiment-card-variant="history"[\s\S]*data-home-experiment-card-variant="default"/,
+  );
+  assert.match(
+    markup,
+    /data-home-experiment-card-variant="history"[\s\S]*h-full min-h-\[240px\][\s\S]*data-home-experiment-card-variant="default"/,
+  );
 });
 
 function resultCard(): ExperimentLibraryCard {
@@ -201,10 +276,6 @@ function resultCard(): ExperimentLibraryCard {
       dateRange: "May 1 to May 14",
       day: 14,
       metrics: [
-        {
-          current: "18 min",
-          label: "Sleep latency",
-        },
         {
           baseline: "94.8 percent",
           current: "94.1 percent",
@@ -241,6 +312,30 @@ function resultCard(): ExperimentLibraryCard {
     statusVariant: "outline",
     title: "Red Light Glasses Before Bed",
   };
+}
+
+function stoppedCard(): ExperimentLibraryCard {
+  const card = resultCard();
+  card.runStatus = "stopped";
+  card.statusLabel = "Stopped";
+  card.statusVariant = "destructive";
+  card.runSummary = {
+    completionPercent: 43,
+    dateRange: "May 1 to May 7",
+    day: 7,
+    metric: {
+      baseline: "96.4 min",
+      current: "116.8 min",
+      delta: "+20.4 min",
+      label: "Deep sleep",
+      sentiment: "positive",
+    },
+    metrics: [{
+      current: "18 min",
+      label: "Sleep latency",
+    }],
+  };
+  return card;
 }
 
 function progressCard(): ExperimentLibraryCard {

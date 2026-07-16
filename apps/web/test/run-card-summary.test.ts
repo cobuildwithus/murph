@@ -33,6 +33,15 @@ test("buildExperimentRunCardSummary preserves every comparable metric in run ord
   const summary = buildExperimentRunCardSummary(createRun({
     signals: [
       {
+        baseline: "20 min",
+        delta: "",
+        direction: "neutral",
+        expected: "",
+        label: "Sleep latency",
+        unit: "min",
+        value: "18",
+      },
+      {
         baseline: "94.8 percent",
         delta: "-0.7 percent",
         direction: "down",
@@ -51,6 +60,16 @@ test("buildExperimentRunCardSummary preserves every comparable metric in run ord
         sentiment: "positive",
         unit: "min",
         value: "116.8",
+      },
+      {
+        baseline: "60.6 ms",
+        delta: "+0.6 ms",
+        direction: "up",
+        expected: "",
+        label: "HRV RMSSD",
+        sentiment: "neutral",
+        unit: "ms",
+        value: "61.2",
       },
       {
         baseline: "50.4 bpm",
@@ -96,8 +115,8 @@ test("buildExperimentRunCardSummary preserves every comparable metric in run ord
   })), [
     { delta: "-0.7 percent", label: "Sleep efficiency", sentiment: "negative" },
     { delta: "+20.4 min", label: "Deep sleep", sentiment: "positive" },
+    { delta: "+0.6 ms", label: "HRV RMSSD", sentiment: "neutral" },
     { delta: "-3.3 bpm", label: "Resting heart rate", sentiment: "positive" },
-    { delta: "+0.6 ms", label: "HRV RMSSD", sentiment: undefined },
   ]);
   assert.equal(summary.metric?.label, "Deep sleep");
 });
@@ -114,7 +133,7 @@ test("buildExperimentRunCardSummary falls back to trend values", () => {
     label: "Deep sleep",
     sentiment: undefined,
   });
-  assert.deepEqual(summary.metrics, [summary.metric]);
+  assert.deepEqual(summary.metrics, []);
 });
 
 test("buildExperimentRunCardSummary stays honest when no comparable metric exists", () => {

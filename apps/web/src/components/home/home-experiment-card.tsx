@@ -12,7 +12,7 @@ import { cn } from "@/src/lib/utils";
 
 interface HomeExperimentCardProps {
   card: ExperimentLibraryCard;
-  variant: "history" | "progress";
+  variant: "default" | "history";
 }
 
 export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
@@ -20,8 +20,8 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
   const content = (
     <article
       className={cn(
-        "group flex h-full flex-col rounded-xl border border-border/70 bg-card/70 transition-colors",
-        variant === "history" ? "p-4" : "min-h-[240px] p-5",
+        "group flex flex-col rounded-xl border border-border/70 bg-card/70 transition-colors",
+        variant === "history" ? "h-fit p-4" : "h-full min-h-[240px] p-5",
         card.href ? "hover:border-primary/35 hover:bg-card" : "",
       )}
       data-home-experiment-card
@@ -40,7 +40,7 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
           </h3>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {variant === "progress" && card.privateBadgeLabel ? (
+          {variant === "default" && card.privateBadgeLabel ? (
             <span
               className="inline-flex size-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground"
               title={card.privateBadgeLabel}
@@ -50,7 +50,7 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
             </span>
           ) : null}
           {card.statusLabel && (
-            variant === "progress" || !isRedundantHistoryStatus(card.statusLabel)
+            variant === "default" || !isRedundantHistoryStatus(card.statusLabel)
           ) ? (
             <Badge variant={card.statusVariant ?? "outline"} className="font-normal">
               {card.statusLabel}
@@ -79,7 +79,7 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
           ) : null}
           {dateLabel ?? "Stored in your private vault"}
         </span>
-        {variant === "progress" && card.href ? (
+        {variant === "default" && card.href ? (
           <span className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground/70 transition-colors group-hover:text-foreground">
             View
             <ArrowRight
@@ -99,7 +99,10 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
   return (
     <Link
       href={card.href}
-      className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className={cn(
+        "block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        variant === "default" ? "h-full" : "",
+      )}
     >
       {content}
     </Link>
@@ -108,10 +111,10 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
 
 function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
   const summary = card.runSummary;
-  const primaryMetric = summary?.metric;
-  const comparableMetrics = summary?.metrics.filter((metric) => metric.delta?.trim()) ?? [];
+  const inProgress = card.runStatus === "active" || card.runStatus === "paused";
+  const comparableMetrics = summary?.metrics ?? [];
 
-  if (variant === "progress" && typeof summary?.completionPercent === "number") {
+  if (inProgress && typeof summary?.completionPercent === "number") {
     return <ExperimentProgress summary={summary} />;
   }
 
@@ -119,11 +122,11 @@ function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
     return <ExperimentResults metrics={comparableMetrics} />;
   }
 
-  if (variant === "progress" && primaryMetric) {
-    return <ExperimentResult metric={primaryMetric} />;
+  if (variant === "default" && summary?.metric) {
+    return <ExperimentResult metric={summary.metric} />;
   }
 
-  const fallback = variant === "progress"
+  const fallback = inProgress
     ? "Collecting data"
     : summary
       ? "No clear signal"
@@ -255,6 +258,7 @@ function resolveDateLabel(card: ExperimentLibraryCard): string | null {
 
 function resolveMetricTone(metric: ExperimentRunCardMetric): string {
   if (metric.sentiment === "positive") return "text-primary";
+  if (metric.sentiment === "negative") return "text-amber-600";
   return "text-foreground";
 }
 
