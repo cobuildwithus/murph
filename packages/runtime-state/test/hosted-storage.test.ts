@@ -94,6 +94,24 @@ test("hosted storage payloads round-trip with aad and keyring lookup", async () 
   assert.deepEqual(decrypted, plaintext);
 });
 
+test("hosted cipher key IDs accept portable grammar boundaries", async () => {
+  for (const keyId of [
+    "a",
+    "A0._:-z",
+    "k".repeat(256),
+  ]) {
+    const envelope = await encryptHostedStoragePayload({
+      key: ROOT_KEY,
+      keyId,
+      plaintext: new TextEncoder().encode("payload"),
+      scope: "artifact",
+    });
+
+    assert.equal(envelope.keyId, keyId);
+    assert.equal(parseHostedCipherEnvelope(envelope).keyId, keyId);
+  }
+});
+
 test("hosted meal photos use a dedicated storage scope", async () => {
   const plaintext = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
   const aad = buildHostedStorageAad({
@@ -173,6 +191,37 @@ test("hosted storage parsing and decryption fail closed on invalid envelopes", a
         scope: "root-key-recipient",
       }),
     /Hosted cipher envelope\.scope must be a supported hosted storage scope\./u,
+  );
+  for (const [keyId, message] of [
+    [" ", /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+    [" key-v1", /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+    ["key-v1 ", /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+    ["k".repeat(257), /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+    ["udrk:runtime:\0bad", /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+    ["udrk:runtime:résumé", /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u],
+  ] as const) {
+    assert.throws(
+      () =>
+        parseHostedCipherEnvelope({
+          algorithm: "AES-GCM",
+          ciphertext: "abc",
+          iv: "def",
+          keyId,
+          schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
+          scope: "artifact",
+        }),
+      message,
+    );
+  }
+  await expect(
+    encryptHostedStoragePayload({
+      key: ROOT_KEY,
+      keyId: "udrk:runtime:\0bad",
+      plaintext: new TextEncoder().encode("payload"),
+      scope: "artifact",
+    }),
+  ).rejects.toThrow(
+    /Hosted cipher envelope\.keyId must be a 1-256 character portable identifier\./u,
   );
   const aad = buildHostedStorageAad({ scope: "bundle" });
   const envelope = await encryptHostedStoragePayload({

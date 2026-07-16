@@ -17,6 +17,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   decryptHostedWebNullableString,
+  decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import {
@@ -82,6 +83,14 @@ const hostedMemberEmailAuthorizationLookupSelect =
     },
   });
 
+const hostedMemberVerifiedEmailSelect =
+  Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
+    memberId: true,
+    verifiedEmailAddressEncrypted: true,
+    verifiedEmailLookupKey: true,
+    verifiedEmailVerifiedAt: true,
+  });
+
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
@@ -118,6 +127,16 @@ export interface HostedMemberEmailAuthorizationLookup {
   core: HostedMemberCoreState;
   emailAuthorization: HostedMemberEmailAuthorizationState;
   matchedBy: "verifiedEmail";
+}
+
+export interface HostedMemberEmailSnapshot {
+  core: HostedMemberCoreState;
+  emailAuthorization: HostedMemberEmailAuthorizationState | null;
+}
+
+export interface HostedMemberVerifiedEmailSnapshot {
+  memberId: string;
+  verifiedEmail: HostedMemberVerifiedEmailFact | null;
 }
 
 export interface HostedMemberEmailAuthorizationWriteInput {
@@ -207,6 +226,83 @@ export async function readHostedMemberCoreState(input: {
       id: input.memberId,
     },
     select: hostedMemberCoreStateSelect,
+  });
+}
+
+export async function readHostedMemberEmailSnapshots(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberEmailSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const records = await input.prisma.hostedMember.findMany({
+    where: {
+      id: {
+        in: [...input.memberIds],
+      },
+    },
+    select: {
+      ...hostedMemberCoreStateSelect,
+      emailAuthorization: {
+        select: hostedMemberEmailAuthorizationStateSelect,
+      },
+    },
+  });
+
+  return Promise.all(records.map(async (record) => ({
+    core: projectHostedMemberCoreState(record),
+    emailAuthorization: record.emailAuthorization
+      ? await projectHostedMemberEmailAuthorizationState(
+          record.emailAuthorization,
+          input.prisma,
+        )
+      : null,
+  })));
+}
+
+export async function readHostedMemberVerifiedEmailSnapshots(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberVerifiedEmailSnapshot[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
+    where: {
+      memberId: {
+        in: memberIds,
+      },
+    },
+    select: hostedMemberVerifiedEmailSelect,
+  });
+
+  const addresses = await decryptHostedWebNullableStrings({
+    field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+    prisma: input.prisma,
+    values: records.map((record) => ({
+      memberId: record.memberId,
+      value: record.verifiedEmailAddressEncrypted,
+    })),
+  });
+  return records.map((record, index) => {
+    const address = addresses[index] ?? null;
+    return {
+      memberId: record.memberId,
+      verifiedEmail:
+        address
+        && record.verifiedEmailLookupKey
+        && record.verifiedEmailVerifiedAt
+          ? {
+              address,
+              lookupKey: record.verifiedEmailLookupKey,
+              verifiedAt: record.verifiedEmailVerifiedAt,
+            }
+          : null,
+    };
   });
 }
 

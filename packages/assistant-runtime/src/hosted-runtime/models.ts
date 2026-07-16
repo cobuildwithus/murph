@@ -175,6 +175,7 @@ export interface HostedConversationWakeMetrics {
 }
 
 export type HostedMailboxLane =
+  | "assistant-ask-completion"
   | "assistant-notification"
   | "conversation-message"
   | "clinical-records"
@@ -202,6 +203,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;
   assistantAutomationSelectedInputIds?: string[] | null;
+  assistantAutomationSelectedInputWakeAt?: string | null;
   assistantAutomationTerminalLinqCleanup?: readonly string[] | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;

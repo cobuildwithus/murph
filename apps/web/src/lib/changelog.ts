@@ -63,6 +63,164 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-15",
+    publishedOn: "2026-07-15",
+    title: "A lighter way to say yes",
+    summary:
+      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. New Pulse Trials now run for two weeks, and billing questions lead straight to the account controls that own the change.",
+    items: [
+      {
+        id: "affirmative-reactions-as-replies",
+        kind: "feature",
+        priority: 5,
+        title: "A like can answer Murph",
+        summary:
+          "Like Murph's own iMessage when a simple yes is enough and the reaction now enters the conversation as your reply, in both private and group chats.",
+        details:
+          "The reaction must point to an exact message Murph sent in the same conversation. Unmatched reactions stay silent instead of guessing what you meant.",
+        relevanceTags: ["assistant", "imessage", "reactions"],
+        sourcePullRequests: [655, 664],
+      },
+      {
+        id: "reaction-first-group-permissions",
+        kind: "feature",
+        priority: 5,
+        title: "Add group permissions with a like",
+        summary:
+          "When an existing group needs more shared data, Murph can post the exact request in the chat. Like that message to add only the permissions shown, or open the linked page to customize them.",
+        details:
+          "Murph now defaults to this in-chat consent flow when existing members approve additional permissions.",
+        relevanceTags: ["groups", "permissions", "reactions"],
+        sourcePullRequests: [661],
+      },
+      {
+        id: "exercise-library-250-more-visual-guides",
+        kind: "feature",
+        priority: 4,
+        title: "250 more exercises have visual guides",
+        summary:
+          "Another 250 strength movements, mobility drills, and stretches now include illustrated step-by-step carousels instead of text alone.",
+        details:
+          "The catalog now has visual guides for 1,655 of 1,748 movements. Each new carousel was checked at full resolution for anatomy, movement order, equipment, and left-right accuracy before it was published.",
+        relevanceTags: ["exercise", "images", "accessibility"],
+        sourcePullRequests: [],
+        tryIt: {
+          label: "Ask for an exercise guide",
+          prompt: "Show me the steps for a mobility drill with clear visuals.",
+        },
+      },
+      {
+        id: "fresh-messages-stay-foreground",
+        kind: "improvement",
+        priority: 5,
+        title: "Fresh messages stay ahead of background work",
+        summary:
+          "A new text now gets Murph's attention before workspace cleanup, recovery, or checkpoint work. When a conversation is already active, the new message can steer the reply without waiting for background housekeeping to finish.",
+        relevanceTags: ["assistant", "messaging", "reliability"],
+        sourcePullRequests: [635, 636, 641, 643, 653, 656],
+      },
+      {
+        id: "pulse-trial-two-weeks",
+        kind: "feature",
+        priority: 4,
+        title: "Pulse Trial now runs for two weeks",
+        summary:
+          "Every new Pulse Trial now lasts 14 days instead of 10. Trials already created keep the policy and end date they started with.",
+        relevanceTags: ["pulse", "billing", "trial"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "billing-settings-handoff",
+        kind: "improvement",
+        priority: 3,
+        title: "Billing questions lead to the right controls",
+        summary:
+          "Ask about your plan, subscription, or Family billing and Murph can read your current plan summary, then send you to the Subscription section in Settings for any account change.",
+        details:
+          "The chat handoff never claims a billing change happened. Settings remains the place that owns checkout, subscription, and Family account controls.",
+        relevanceTags: ["billing", "settings", "assistant"],
+        sourcePullRequests: [667],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "Open subscription settings",
+        },
+      },
+    ],
+  },
+  {
+    id: "2026-07-14",
+    publishedOn: "2026-07-14",
+    title: "Your plan, groups, and next appointment",
+    summary:
+      "See monthly plan use as a percentage, ask personal Murph which groups you belong to, and start appointment requests with a complete brief. Apple Health setup can now begin in chat, with a clear handoff to the iPhone companion.",
+    items: [
+      {
+        id: "plan-usage-percentage",
+        kind: "feature",
+        priority: 5,
+        title: "See how much of your monthly plan you have used",
+        summary:
+          "Settings, chat, and usage notices now describe your monthly allowance with the same percentage, so you can understand where you stand without decoding internal cost figures.",
+        details:
+          "When there is enough history, Murph can also give a bounded forecast and the next available plan action without treating the estimate as a cutoff.",
+        relevanceTags: ["billing", "plans", "usage"],
+        sourcePullRequests: [570, 607, 621],
+        tryIt: {
+          label: "Check plan usage",
+          prompt: "How much of my plan have I used this month?",
+        },
+      },
+      {
+        id: "personal-group-awareness",
+        kind: "feature",
+        priority: 5,
+        title: "Ask Murph which groups you belong to",
+        summary:
+          "Your private Murph can now list your groups, your role in each one, what the group has requested, and what you currently share. When an authorized link is available, it also shows where to review those permissions.",
+        details:
+          "The answer stays scoped to your own memberships and permissions. It does not expose another member's identity or sharing choices.",
+        relevanceTags: ["groups", "assistant", "permissions"],
+        sourcePullRequests: [542, 620, 634],
+        tryIt: {
+          label: "Review your groups",
+          prompt: "Which Murph groups am I in, and what am I sharing with each one?",
+        },
+      },
+      {
+        id: "appointment-scheduling-brief",
+        kind: "feature",
+        priority: 4,
+        title: "Appointment requests start with a complete brief",
+        summary:
+          "Ask Murph to book, move, cancel, or join a waitlist and it now checks the context you already shared, then asks only for the missing details needed to carry out the request.",
+        details:
+          "Once the brief is complete, Murph can use the available phone, browser, or connected-app path. One-off appointment details stay with the task unless you explicitly ask to save a reusable preference.",
+        relevanceTags: ["appointments", "assistant", "automation"],
+        sourcePullRequests: [646],
+        tryIt: {
+          label: "Plan an appointment",
+          prompt: "Help me schedule my next dentist appointment.",
+        },
+      },
+      {
+        id: "apple-health-chat-handoff",
+        kind: "feature",
+        priority: 4,
+        title: "Apple Health setup can start in chat",
+        summary:
+          "Ask Murph to connect Apple Health and it now explains the handoff, then sends the official iPhone companion link where sign-in and Health permissions belong.",
+        details:
+          "If you use WHOOP, Murph also gives the documented Apple Health forwarding steps before sharing the companion link. It does not invent a WHOOP deep link.",
+        relevanceTags: ["apple-health", "wearables", "onboarding"],
+        sourcePullRequests: [],
+        tryIt: {
+          label: "Connect Apple Health",
+          prompt: "Help me connect Apple Health to Murph.",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-07-13",
     publishedOn: "2026-07-13",
     title: "More control, less waiting",

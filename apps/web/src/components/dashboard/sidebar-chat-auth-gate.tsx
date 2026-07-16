@@ -48,7 +48,7 @@ export function SidebarChatWithMurphAuthGate() {
               Log in or sign up
             </DialogTitle>
             <DialogDescription>
-              Whatever comes up with your health, you don’t have to figure it out alone.
+              Murph helps you build healthier habits that fit your life.
             </DialogDescription>
           </DialogHeader>
           {authDialogOpen ? (

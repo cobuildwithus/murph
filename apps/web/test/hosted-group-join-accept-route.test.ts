@@ -99,6 +99,7 @@ beforeEach(async () => {
 test("signals destination cleanup wakes after a group permission revoke without exposing mailbox ids", async () => {
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
+      expectedMembershipId: "membership_existing",
       selectedVaultShareProjectionKinds: [],
     }),
     headers: {
@@ -123,6 +124,7 @@ test("signals destination cleanup wakes after a group permission revoke without 
   });
   expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledWith({
     confirmationPublicBaseUrl: "https://murph.example",
+    expectedMembershipId: "membership_existing",
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
@@ -153,6 +155,7 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
   });
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
+      expectedMembershipId: null,
       selectedVaultShareProjectionKinds: [],
     }),
     headers: {
@@ -211,7 +214,10 @@ test("best-effort signals combined confirmation and cleanup wakes without exposi
     new Error("runtime unavailable"),
   );
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
-    body: JSON.stringify({ selectedVaultShareProjectionKinds: [] }),
+    body: JSON.stringify({
+      expectedMembershipId: null,
+      selectedVaultShareProjectionKinds: [],
+    }),
     headers: {
       "content-type": "application/json",
       origin: "https://join.example.test",
@@ -259,7 +265,10 @@ test("bounds a stalled maintenance wake after confirmation recovery", async () =
     });
     mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
     const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
-      body: JSON.stringify({ selectedVaultShareProjectionKinds: [] }),
+      body: JSON.stringify({
+        expectedMembershipId: null,
+        selectedVaultShareProjectionKinds: [],
+      }),
       headers: {
         "content-type": "application/json",
         origin: "https://join.example.test",
@@ -294,6 +303,7 @@ test("enqueues a private missing-email nudge after accepting an email-sharing gr
   });
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
+      expectedMembershipId: null,
       selectedVaultShareProjectionKinds: ["group-email.v0"],
     }),
     headers: {
@@ -319,6 +329,7 @@ test("enqueues a private missing-email nudge after accepting an email-sharing gr
 test("accepts the full closed set of selectable vault-share permissions", async () => {
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
+      expectedMembershipId: null,
       selectedVaultShareProjectionScopes: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     }),
     headers: {
@@ -335,6 +346,7 @@ test("accepts the full closed set of selectable vault-share permissions", async 
   expect(response.status).toBe(200);
   expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledWith({
     confirmationPublicBaseUrl: "https://murph.example",
+    expectedMembershipId: null,
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
@@ -342,3 +354,52 @@ test("accepts the full closed set of selectable vault-share permissions", async 
     tx: { tx: true },
   });
 });
+
+test("rejects an unversioned join-page save before opening a transaction", async () => {
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({ selectedVaultShareProjectionKinds: [] }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_GROUP_MEMBERSHIP_CHANGED" },
+  });
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.acceptHostedGroupJoinCodeTx).not.toHaveBeenCalled();
+});
+
+test.each(["", "   ", 42, false])(
+  "rejects malformed expected membership id %j",
+  async (expectedMembershipId) => {
+    const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+      body: JSON.stringify({
+        expectedMembershipId,
+        selectedVaultShareProjectionKinds: [],
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await route.POST(request, {
+      params: Promise.resolve({ joinCode: "JOIN123" }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_GROUP_MEMBERSHIP_ID_INVALID" },
+    });
+    expect(mocks.acceptHostedGroupJoinCodeTx).not.toHaveBeenCalled();
+  },
+);

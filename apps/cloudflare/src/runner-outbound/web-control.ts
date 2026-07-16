@@ -15,15 +15,8 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
-  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
-  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
-  HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_GROUP_TOOL_PATH,
-  HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
-  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -122,18 +115,6 @@ export async function handleRunnerWebControlRequest(input: {
     return notFound();
   }
 
-  const isActionApprovalRequest =
-    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH
-    && input.request.method === "POST";
-  const isActionApprovalRead =
-    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH
-    && input.request.method === "POST";
-  const isActionApprovalConsume =
-    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH
-    && input.request.method === "POST";
-  const isAssistantConfigurationToolRequest =
-    input.url.pathname === HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH
-    && input.request.method === "POST";
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
   const isBrowserVaultReplicaPublishRequest =
@@ -142,83 +123,31 @@ export async function handleRunnerWebControlRequest(input: {
   const isDeviceSyncRuntimeSnapshotRequest =
     input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     && input.request.method === "POST";
-  const isRuntimeLatencyTraceRequest =
-    input.url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
-    && input.request.method === "POST";
-  const isLinqEgressEngagementRequest = policy.operation === "linq_egress_engagement"
-    && input.request.method === "POST";
-  const isLinqDeliveryOutcomeRequest = policy.operation === "linq_delivery_outcome"
-    && input.request.method === "POST";
-  const isVaultShareDeliverRequest =
-    input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
-    && input.request.method === "POST";
-  const isGroupToolRequest =
-    input.url.pathname === HOSTED_RUNTIME_GROUP_TOOL_PATH
-    && input.request.method === "POST";
-  const isNewsletterToolRequest = policy.operation === "newsletter_tool"
-    && input.request.method === "POST";
-  const isPlanUsageToolRequest = policy.operation === "plan_usage_tool"
-    && input.request.method === "POST";
-  const isComputerUseRequest = policy.operation === "computer_use"
-    && input.request.method === "POST";
-  const isConnectedAppsRequest = policy.operation === "connected_apps"
-    && input.request.method === "POST";
   const isClinicalRecordsRequest = (
     policy.operation === "clinical_records_fetch_page"
     || policy.operation === "clinical_records_read_run"
     || policy.operation === "clinical_records_record_outcome"
   ) && input.request.method === "POST";
-  const isCodexAuthUpdateRequest = policy.operation === "codex_auth_update"
-    && input.request.method === "POST";
-  const isPhoneCallStartRequest = policy.operation === "phone_call_start"
-    && input.request.method === "POST";
-  const isAssistantPersonalizationToolRequest =
-    policy.operation === "assistant_personalization_tool"
-    && input.request.method === "POST";
-  let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
-    null;
-  if (
-    isActionApprovalRequest
-    || isActionApprovalRead
-    || isActionApprovalConsume
-    || isAssistantConfigurationToolRequest
-    || isCheckpointRequest
-    || isBrowserVaultReplicaPublishRequest
-    || isDeviceSyncRuntimeSnapshotRequest
-    || isRuntimeLatencyTraceRequest
-    || isLinqDeliveryOutcomeRequest
-    || isLinqEgressEngagementRequest
-    || isVaultShareDeliverRequest
-    || isGroupToolRequest
-    || isNewsletterToolRequest
-    || isPlanUsageToolRequest
-    || isComputerUseRequest
-    || isConnectedAppsRequest
-    || isClinicalRecordsRequest
-    || isCodexAuthUpdateRequest
-    || isPhoneCallStartRequest
-    || isAssistantPersonalizationToolRequest
-  ) {
-    try {
-      writeAuthority = await (
-        isBrowserVaultReplicaPublishRequest
-          ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
-            env: input.env,
-            request: input.request,
-            userId: input.userId,
-          })
-          : requireRunnerRuntimeWriteFenceWrite({
-            env: input.env,
-            request: input.request,
-            userId: input.userId,
-          })
-      );
-    } catch (error) {
-      if (error instanceof RunnerRuntimeWriteFenceError) {
-        return unauthorized();
-      }
-      throw error;
+  let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  try {
+    writeAuthority = await (
+      isBrowserVaultReplicaPublishRequest
+        ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
+          env: input.env,
+          request: input.request,
+          userId: input.userId,
+        })
+        : requireRunnerRuntimeWriteFenceWrite({
+          env: input.env,
+          request: input.request,
+          userId: input.userId,
+        })
+    );
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return unauthorized();
     }
+    throw error;
   }
 
   let body: string | undefined;
@@ -229,8 +158,7 @@ export async function handleRunnerWebControlRequest(input: {
     body = augmentHostedRunnerWebControlBody({
       body,
       env: input.env,
-      includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest
-        && writeAuthority !== null,
+      includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest,
       path: input.url.pathname,
       userId: input.userId,
     });
@@ -244,8 +172,7 @@ export async function handleRunnerWebControlRequest(input: {
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
   if (
-    writeAuthority
-    && checkpointRequest
+    checkpointRequest
     && (
       writeAuthority.attemptId !== checkpointRequest.attemptId
       || writeAuthority.generation !== checkpointRequest.leaseGeneration
@@ -284,12 +211,10 @@ export async function handleRunnerWebControlRequest(input: {
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
-    headers: writeAuthority
-      ? createRunnerRuntimeWriteFenceForwardHeaders(
-        writeAuthority,
-        checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
-      )
-      : undefined,
+    headers: createRunnerRuntimeWriteFenceForwardHeaders(
+      writeAuthority,
+      checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
+    ),
     timeoutMs: input.environment.webControlTimeoutMs,
   });
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
@@ -312,9 +237,6 @@ export async function handleRunnerWebControlRequest(input: {
     phase: "wake.running",
   });
   if (checkpointRequest && response.ok) {
-    if (!writeAuthority) {
-      return unauthorized();
-    }
     try {
       parseHostedWorkspaceCheckpointResponse(await response.clone().json());
     } catch {

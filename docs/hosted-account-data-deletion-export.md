@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-10
+Last verified: 2026-07-15
 
 ## Purpose
 
@@ -24,7 +24,7 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
 6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
 8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
-9. Provider revocation runs before local database deletion while local token references are still readable.
+9. Provider revocation and Retell call-object deletion run before local database deletion while local retry identifiers and token references are still readable. Retell cleanup fails closed on ambiguous provider or local-write outcomes.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
@@ -58,15 +58,16 @@ The Settings vault export does not include:
 
 1. Load the hosted member, decrypted Stripe/Privy vendor account references, and device connection identities.
 2. Suspend the hosted member for account deletion, then best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted` before provider revocation, billing cancellation, or local row deletion starts.
-3. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
-4. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
-5. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
-6. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
-7. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
-8. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
-9. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
-10. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
-11. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
+3. Process one bounded Retell cleanup batch containing every durable provider call id, including terminal calls. Active calls are stopped before their provider objects are deleted. A confirmed deletion or confirmed absence clears the local provider id; any ambiguous provider or local-write failure retains the row and id for retry and aborts account deletion. Unbound active reservations are reconciled by their Murph call metadata, and the final Prisma transaction rechecks that no provider id or active reservation remains.
+4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
+5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
+6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
+7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
+8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
+9. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
+10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
+11. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
+12. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
 
 ## Store coverage
 
@@ -87,7 +88,7 @@ The Settings vault export does not include:
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
 | `prisma.hosted_workspace` | Live delete | Metadata/counts | Deletes workspace checkpoint refs, browser vault replica refs, wake state, and redacted status. |
-| `prisma.hosted_phone_call` | Live delete | Metadata/counts | Deletes phone-call rows and encrypted private briefs/results explicitly. Export reports counts only and omits private content and ciphertext. |
+| `prisma.hosted_phone_call` | Provider delete, then live delete | Metadata/counts | Stops active Retell calls and deletes every known Retell provider object before clearing the local provider id and deleting phone-call rows plus encrypted private briefs/results. The row and provider id remain retry ownership on ambiguous cleanup. Export reports counts only and omits private content and ciphertext. |
 | `prisma.hosted_runtime_log` | Live delete | Documented only | Deletes member-scoped runtime logs and redacted runtime JSON. Export omits runtime log rows and counts. |
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |
@@ -95,6 +96,7 @@ The Settings vault export does not include:
 | `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
 | `prisma.hosted_product_feedback` | Live delete | Confirmed data export | Deletes assistant-captured product feedback rows. Confirmed export includes safe kind/summary metadata and optional published changelog item ids while omitting internal feedback ids. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
+| `prisma.hosted_linq_invite_delivery` | Live delete | Metadata/counts | Deletes signup-link delivery records whose delivery identity contains the member id; unrelated operational delivery records remain under their normal retention policy. Historical orphan cleanup is finalized after production promotion and the prior-function drain. |
 | `prisma.hosted_invite` | Live delete | Metadata/counts | Deletes invite codes and channel metadata owned by the member. |
 | `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
 | `prisma.hosted_consent_grant` | Live delete | Confirmed data export | Deletes member-scoped consent grant state. Confirmed export includes grant scope/source/status and document metadata. |
@@ -154,6 +156,8 @@ Deletion cannot guarantee immediate erasure in systems Murph does not control. T
 
 Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the customer and Privy user are deleted best-effort afterward. Stripe retains records it is legally required to keep (for example invoices) under its own documented processes after the customer object is deleted.
 
+Retell call objects are actively deleted before the local wipe. The local phone-call row remains available for retry until Retell confirms deletion or confirms that the object is already absent; account deletion does not report success while a Retell provider id remains.
+
 ## Tests
 
 `apps/web/test/hosted-account-data-service.test.ts` covers:
@@ -166,5 +170,6 @@ Stripe and Privy vendor accounts are actively deleted by the deletion workflow i
 - Temporal workflow termination ordering before deletion, after Prisma commit, and after Cloudflare cleanup, plus hosted reconciliation-facts blocking for deleted, inactive, or unconfigured users.
 - vendor account deletion: Stripe subscription cancel before the local wipe (and abort on failure), Stripe customer and Privy user deletion after it, already-canceled/missing-record skips, not-configured skips, and best-effort failure reporting.
 - Family account cleanup: owned Family subscriptions cancel fail-closed, Family memberships/invites/billing refs are deleted with account rows, and Family Stripe customer references are deduped with direct billing customer cleanup.
+- Retell cleanup: terminal and active provider objects are deleted, active calls stop first, confirmed absence is retry-safe, ambiguous failures retain local provider ids, bounded extra batches require retry, and the final transaction rejects any remaining provider id or active reservation.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.

@@ -6,14 +6,6 @@ import type {
   HostedRuntimeAssistantConfigurationToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
-import {
-  serializeHostedActionApprovalRequest,
-} from "@murphai/hosted-execution/action-approval";
-
-import { consumeHostedActionApproval } from "../action-approvals";
-import {
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantConfigurationTx,
 } from "../hosted-onboarding/assistant-model-preference";
@@ -24,6 +16,9 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
+import {
+  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+} from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 
 export async function handleHostedRuntimeAssistantConfigurationTool(input: {
@@ -43,34 +38,20 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
     };
   }
   const updateRequest = input.request;
-  const expectedApprovalRequest = buildHostedAssistantConfigurationApprovalRequest({
-    changes: updateRequest,
-    returnContactKind: updateRequest.approval.request.returnContactKind,
-    target: updateRequest.target,
-  });
-  if (
-    serializeHostedActionApprovalRequest(expectedApprovalRequest) !==
-    serializeHostedActionApprovalRequest(updateRequest.approval.request)
-  ) {
-    throw hostedOnboardingError({
-      code: "ACTION_APPROVAL_UNAVAILABLE",
-      httpStatus: 403,
-      message: "Secure approval is unavailable for this change.",
-    });
-  }
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
-      const approval = await consumeHostedActionApproval({
-        memberId: input.memberId,
-        prisma: tx,
-        request: updateRequest.approval,
-      });
-      if (approval.status !== "approved") {
+      const causalSeq =
+        await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+          assistantInputId: updateRequest.assistantInputId,
+          memberId: input.memberId,
+          prisma: tx,
+        });
+      if (causalSeq === null) {
         throw hostedOnboardingError({
-          code: "ACTION_APPROVAL_UNAVAILABLE",
+          code: "ASSISTANT_CONFIGURATION_INPUT_AUTHORITY_INVALID",
           httpStatus: 403,
-          message: "Secure approval is unavailable for this change.",
+          message: "Assistant configuration is unavailable for this turn.",
         });
       }
       const updatedConfiguration = await updateHostedMemberAssistantConfigurationTx({
@@ -83,17 +64,6 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
           ? {}
           : { reasoningEffort: updateRequest.reasoningEffort }),
       });
-      if (
-        updatedConfiguration.model !== updateRequest.target.model ||
-        updatedConfiguration.reasoningEffort !==
-          updateRequest.target.reasoningEffort
-      ) {
-        throw hostedOnboardingError({
-          code: "ACTION_APPROVAL_UNAVAILABLE",
-          httpStatus: 403,
-          message: "Secure approval is unavailable for this change.",
-        });
-      }
       return updatedConfiguration;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 

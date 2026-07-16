@@ -8,11 +8,6 @@ import {
   HOSTED_ASSISTANT_TERRA_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
-
-import {
   executeMurphDynamicToolRequest,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   readMurphDynamicToolRequest,
@@ -87,7 +82,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it("requires accepted user input before starting an update approval", async () => {
+  it("requires accepted user input before updating configuration", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -102,13 +97,11 @@ describe("assistant configuration tool", () => {
     const assistantConfigurationTool = {
       request: vi.fn(),
     };
-    const actionApprovalPort = { request: vi.fn() };
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        actionApprovalPort,
         assistantConfigurationTool,
         currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
         currentReasoningEffort: "low",
@@ -120,10 +113,9 @@ describe("assistant configuration tool", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(assistantConfigurationTool.request).not.toHaveBeenCalled();
-    expect(actionApprovalPort.request).not.toHaveBeenCalled();
   });
 
-  it("returns a pending exact-target approval without changing the saved target", async () => {
+  it("saves an explicit model and reasoning change directly for the next turn", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -152,65 +144,176 @@ describe("assistant configuration tool", () => {
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       reasoningEffort: "low",
     });
+    const updatedSaved = {
+      ...createSavedConfiguration({
+        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        reasoningEffort: "medium",
+      }),
+      appliesAt: "next_turn" as const,
+      requiredPlan: null,
+      status: "updated" as const,
+    };
     const assistantConfigurationTool = {
-      request: vi.fn(async () => ({
-        action: "read" as const,
-        result: savedForNextTurn,
-      })),
-    };
-    const approval = {
-      approvalId: `haa_${"a".repeat(32)}`,
-      approvalUrl: "https://murph.test/approve/pending",
-      expiresAt: "2026-07-10T18:00:00.000Z",
-      status: "pending" as const,
-    };
-    const actionApprovalPort = {
-      request: vi.fn(async () => approval),
+      request: vi.fn()
+        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
+        .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
     };
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        actionApprovalPort,
         assistantConfigurationTool,
         currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
         currentReasoningEffort: "low",
-        userActionApproved: true,
+        assistantInputId: `ain_${"a".repeat(32)}`,
       }),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
       request,
     });
 
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "medium",
-      },
-      returnContactKind: "text",
-      target: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "medium",
-      },
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
+      action: "read",
     });
-    expect(actionApprovalPort.request).toHaveBeenCalledWith(approvalRequest);
-    expect(assistantConfigurationTool.request).toHaveBeenCalledTimes(1);
-    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({ action: "read" });
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+      action: "update",
+      assistantInputId: `ain_${"a".repeat(32)}`,
+      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      reasoningEffort: "medium",
+    });
     expect(readToolPayload(result)).toEqual({
-      approval,
       currentTurn: {
         model: HOSTED_ASSISTANT_TERRA_MODEL,
         reasoningEffort: "low",
       },
-      requestedForNextTurn: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "medium",
-      },
-      savedForNextTurn,
+      savedForNextTurn: updatedSaved,
     });
   });
 
-  it("consumes an approved exact target while preserving the requested field mask", async () => {
+  it("confirms an unchanged target through the input-bound update", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "update",
+          reasoningEffort: "low",
+        },
+        namespace: "murph",
+        tool: "assistant_configuration",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an assistant configuration dynamic tool request.");
+    }
+    const savedForNextTurn = createSavedConfiguration({
+      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      reasoningEffort: "low",
+    });
+    const unchangedSaved = {
+      ...savedForNextTurn,
+      appliesAt: "next_turn" as const,
+      requiredPlan: null,
+      status: "unchanged" as const,
+    };
+    const assistantConfigurationTool = {
+      request: vi.fn()
+        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
+        .mockResolvedValueOnce({ action: "update", result: unchangedSaved }),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        assistantConfigurationTool,
+        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentReasoningEffort: "low",
+        assistantInputId: `ain_${"d".repeat(32)}`,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
+      action: "read",
+    });
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+      action: "update",
+      assistantInputId: `ain_${"d".repeat(32)}`,
+      reasoningEffort: "low",
+    });
+    expect(readToolPayload(result)).toEqual({
+      currentTurn: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      },
+      savedForNextTurn: unchangedSaved,
+    });
+  });
+
+  it("returns the Edge upgrade requirement without sending a direct mutation", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "update",
+          model: HOSTED_ASSISTANT_SOL_MODEL,
+        },
+        namespace: "murph",
+        tool: "assistant_configuration",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an assistant configuration dynamic tool request.");
+    }
+    const savedForNextTurn = {
+      ...createSavedConfiguration({
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      }),
+      solAvailable: false,
+    };
+    const assistantConfigurationTool = {
+      request: vi.fn(async () => ({
+        action: "read" as const,
+        result: savedForNextTurn,
+      })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        assistantConfigurationTool,
+        currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
+        currentReasoningEffort: "low",
+        assistantInputId: `ain_${"e".repeat(32)}`,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
+    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
+      action: "read",
+    });
+    expect(readToolPayload(result)).toEqual({
+      currentTurn: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "low",
+      },
+      savedForNextTurn: {
+        ...savedForNextTurn,
+        appliesAt: "next_turn",
+        requiredPlan: "edge",
+        status: "upgrade_required",
+      },
+    });
+  });
+
+  it("preserves the requested field mask", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -243,53 +346,27 @@ describe("assistant configuration tool", () => {
         .mockResolvedValueOnce({ action: "read", result: currentSaved })
         .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
     };
-    const actionApprovalPort = {
-      request: vi.fn(async () => ({
-        approvalGeneration: "b".repeat(64),
-        approvalId: `haa_${"a".repeat(32)}`,
-        status: "approved" as const,
-      })),
-    };
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        actionApprovalPort,
         assistantConfigurationTool,
         currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
         currentReasoningEffort: "high",
-        userActionApproved: true,
+        assistantInputId: `ain_${"b".repeat(32)}`,
       }),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
       request,
     });
 
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: { reasoningEffort: "medium" },
-      returnContactKind: "text",
-      target: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "medium",
-      },
-    });
     expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
       action: "read",
     });
     expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
       action: "update",
-      approval: {
-        approvalGeneration: "b".repeat(64),
-        consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-          approvalRequest,
-        ),
-        request: approvalRequest,
-      },
+      assistantInputId: `ain_${"b".repeat(32)}`,
       reasoningEffort: "medium",
-      target: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "medium",
-      },
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
@@ -335,23 +412,14 @@ describe("assistant configuration tool", () => {
         .mockResolvedValueOnce({ action: "read", result: currentSaved })
         .mockResolvedValueOnce({ action: "update", result: updatedSaved }),
     };
-    const actionApprovalPort = {
-      request: vi.fn(async () => ({
-        approvalGeneration: "b".repeat(64),
-        approvalId: `haa_${"a".repeat(32)}`,
-        status: "approved" as const,
-      })),
-    };
-
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        actionApprovalPort,
         assistantConfigurationTool,
         currentModel: HOSTED_ASSISTANT_TERRA_MODEL,
         currentReasoningEffort: "low",
-        userActionApproved: true,
+        assistantInputId: `ain_${"c".repeat(32)}`,
       }),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
@@ -359,14 +427,10 @@ describe("assistant configuration tool", () => {
     });
 
     expect(result.rpcResult).toMatchObject({ success: true });
-    expect(actionApprovalPort.request).toHaveBeenCalledOnce();
     expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, expect.objectContaining({
       action: "update",
+      assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
-      target: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        reasoningEffort: "low",
-      },
     }));
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
@@ -418,23 +482,18 @@ function createSavedConfiguration(input: {
 }
 
 function createHostedToolContext(input: {
-  actionApprovalPort?: NonNullable<AssistantHostedToolContext["actionApprovalPort"]>;
+  assistantInputId?: string | null;
   assistantConfigurationTool: NonNullable<
     AssistantHostedToolContext["assistantConfigurationTool"]
   >;
   currentModel: string;
   currentReasoningEffort: string;
-  userActionApproved?: boolean;
 }): AssistantHostedToolContext {
   return {
-    actionApprovalPort: input.actionApprovalPort ?? null,
+    actionApprovalPort: null,
     assistantConfigurationTool: input.assistantConfigurationTool,
     computerToolsAvailable: false,
-    currentAssistantConfigurationApprovalScope: () => (
-      input.userActionApproved === true
-        ? { returnContactKind: "text" }
-        : null
-    ),
+    currentAssistantPreferenceInputId: () => input.assistantInputId ?? null,
     currentAssistantTarget: () => ({
       model: input.currentModel,
       reasoningEffort: input.currentReasoningEffort,

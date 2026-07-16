@@ -7,6 +7,11 @@ import type {
   HostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonalitySettingId,
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
+} from "@murphai/contracts";
+import type {
   AssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node";
 import type {
@@ -14,19 +19,13 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedActionApprovalConsumeRequest,
-} from "./action-approval.ts";
-import type {
-  HostedAssistantConfigurationApprovalChanges,
-  HostedAssistantConfigurationApprovalTarget,
-} from "./assistant-configuration-approval.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -55,6 +54,8 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
+  "assistant.ask.requested",
+  "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -846,9 +847,45 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS = 200;
+
+export type HostedRuntimeAssistantAskControlRequest =
+  | {
+      action: "prepare";
+      requestId: string;
+    }
+  | {
+      action: "complete";
+      requestId: string;
+      result: HostedExecutionAssistantAskResult;
+    };
+
+export type HostedRuntimeAssistantAskTerminalReason =
+  | "expired"
+  | "unavailable";
+
+export type HostedRuntimeAssistantAskControlResponse =
+  | {
+      action: "prepare";
+      question: string;
+      status: "ready";
+      targetLabel: string | null;
+    }
+  | {
+      action: "prepare" | "complete";
+      status: "terminal";
+      terminalReason: HostedRuntimeAssistantAskTerminalReason;
+    }
+  | {
+      action: "complete";
+      status: "completed" | "already_completed";
+    };
+
 export type HostedRuntimeGroupToolAction =
+  | "ask"
   | "read_current"
   | "list_memberships"
+  | "leave_membership"
   | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
@@ -856,7 +893,9 @@ export type HostedRuntimeGroupToolAction =
   | "read_chat_participants"
   | "set_chat_avatar"
   | "share_contact_card"
-  | "revoke_own_email_share";
+  | "revoke_own_email_share"
+  | "read_own_assistant_style"
+  | "update_own_assistant_style";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -899,6 +938,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
+  membershipId: string;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -946,9 +986,32 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
-export interface HostedRuntimeGroupToolSelfOptOutContext {
+export interface HostedRuntimeGroupToolCurrentSenderContext {
+  /** Injected from the accepted Linq inbound; the model cannot select it. */
   senderHandle: string;
   source: "email" | "linq";
+}
+
+export type HostedRuntimeGroupToolSelfOptOutContext =
+  HostedRuntimeGroupToolCurrentSenderContext;
+
+export type HostedRuntimeGroupOwnAssistantPersonalityUpdate = Partial<
+  Record<AssistantPersonalitySettingId, number | null>
+>;
+
+export interface HostedRuntimeGroupOwnAssistantStyleUpdate {
+  personality?: HostedRuntimeGroupOwnAssistantPersonalityUpdate;
+  tone?: AssistantTonePreference;
+  voice?: AssistantVoiceOptionId;
+}
+
+export interface HostedRuntimeGroupOwnAssistantStyleSnapshot {
+  personality: Record<
+    AssistantPersonalitySettingId,
+    { source: "custom" | "default"; value: number }
+  >;
+  tone: AssistantTonePreference;
+  voice: AssistantVoiceOptionId;
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
@@ -959,8 +1022,16 @@ export interface HostedRuntimeGroupChatParticipant {
 }
 
 export type HostedRuntimeGroupToolRequest =
+  | {
+      action: "ask";
+      groupLabel?: string | null;
+      originAssistantInputId: string;
+      originSessionId: string;
+      question: string;
+    }
   | { action: "read_current" }
   | { action: "list_memberships" }
+  | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
@@ -986,9 +1057,28 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "revoke_own_email_share";
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    }
+  | {
+      action: "read_own_assistant_style";
+      currentSender?: HostedRuntimeGroupToolCurrentSenderContext | null;
+    }
+  | {
+      action: "update_own_assistant_style";
+      currentSender?: HostedRuntimeGroupToolCurrentSenderContext | null;
+      style: HostedRuntimeGroupOwnAssistantStyleUpdate;
     };
 
+export type HostedRuntimeGroupAskResult =
+  | { status: "accepted"; targetLabel: string | null }
+  | { groupLabels: string[]; status: "clarification_required" }
+  | { status: "no_groups" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
+  | {
+      action: "ask";
+      result: HostedRuntimeGroupAskResult;
+    }
   | {
       action: "read_current";
       result:
@@ -1009,6 +1099,14 @@ export type HostedRuntimeGroupToolResponse =
             unavailableReason: string;
             memberships: null;
           };
+    }
+  | {
+      action: "leave_membership";
+      result:
+        | { status: "left" }
+        | { status: "already_left" }
+        | { status: "owner_cannot_leave" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "create_join_link";
@@ -1060,12 +1158,24 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "revoked"; revokedCount: number }
         | { status: "already_removed"; revokedCount: 0 }
         | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "read_own_assistant_style";
+      result:
+        | { status: "ok"; style: HostedRuntimeGroupOwnAssistantStyleSnapshot }
+        | { status: "unavailable"; unavailableReason: string; style: null };
+    }
+  | {
+      action: "update_own_assistant_style";
+      result:
+        | {
+            status: "saved" | "unchanged";
+            style: HostedRuntimeGroupOwnAssistantStyleSnapshot;
+          }
+        | { status: "unavailable"; unavailableReason: string; style: null };
     };
 
-export type HostedRuntimeNewsletterToolAction =
-  | "prepare"
-  | "read_stats"
-  | "send";
+export type HostedRuntimeNewsletterToolAction = "prepare" | "send";
 
 export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
@@ -1112,17 +1222,12 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 export interface HostedRuntimeNewsletterToolPrepareRequest {
   action: "prepare";
   groupId: string;
-  /** Required for successful preparation; older runners fail closed when they omit it. */
-  includeAuthorizationSnapshot?: true;
-  /** Required for successful preparation; keeps the proof private from model-facing output. */
-  includeAuthorizationProof?: true;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }
 
 export type HostedRuntimeNewsletterToolRequest =
   | HostedRuntimeNewsletterToolPrepareRequest
-  | { action: "read_stats"; groupId: string }
   | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
 
 export type HostedRuntimeNewsletterToolResponse =
@@ -1140,13 +1245,6 @@ export type HostedRuntimeNewsletterToolResponse =
             status: "unavailable";
             unavailableReason: string;
           };
-    }
-  | {
-      action: "read_stats";
-      result: {
-        status: "unavailable";
-        unavailableReason: string;
-      };
     }
   | {
       action: "send";
@@ -1299,7 +1397,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
     }
   | ({
       action: "update";
-    } & HostedAssistantConfigurationApprovalChanges);
+    } & HostedRuntimeAssistantConfigurationChanges);
+
+export type HostedRuntimeAssistantConfigurationChanges =
+  | {
+      model: HostedAssistantProductModel;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      reasoningEffort: HostedAssistantReasoningEffort;
+    };
 
 export type HostedRuntimeAssistantConfigurationControlRequest =
   | {
@@ -1307,9 +1415,8 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
     }
   | ({
       action: "update";
-      approval: HostedActionApprovalConsumeRequest;
-      target: HostedAssistantConfigurationApprovalTarget;
-    } & HostedAssistantConfigurationApprovalChanges);
+      assistantInputId: string;
+    } & HostedRuntimeAssistantConfigurationChanges);
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];

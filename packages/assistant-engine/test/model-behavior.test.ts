@@ -86,7 +86,7 @@ describe('assistant execution prompt contract', () => {
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
-    expect(prompt).toContain('It does not mean inventing extra health interventions')
+    expect(prompt).not.toContain('extra nudges')
     expect(
       buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
     ).toContain('Prefer direct tool use over telling the user')
@@ -184,7 +184,10 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
-      'Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail.',
+      'Defaults: Humor 3—at most one earned situational beat when playful; no canned bits or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Calm, observant, direct, plainspoken.',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
       'Be a peer, not an authority',
@@ -202,12 +205,51 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences for this private conversation:',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Humor 9/10: use prominent, bold, dry humor',
+      'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'absurd but unmistakably nonliteral escalation',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Make the contrast large enough to read as a joke',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Humor is permission, not a quota',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'if no specific beat sharpens the point or rewards shared context, omit it at any score',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'In factual answers, use at most one beat',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Never explain a joke or repeat the same punchline; avoid stock personification, canned meme templates, and forced analogies',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'When health stakes or emotional reception are unclear, stay literal',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Target Murph or the situation, never the user, their identity, body, symptoms, condition, competence, or effort',
     )
     expect(layers.threadContextPrompt).not.toContain('Push 3/10')
     expect(layers.threadContextPrompt).not.toContain('Detail 5/10')
     expect(layers.threadContextPrompt).toContain(
-      "the user's explicit current-turn instruction always win",
+      'Apply these dials within the saved tone and current channel style',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "Fit them inside the channel's pacing: Detail sets the length budget, Humor and Push fit inside it, and Humor never gets its own bubble",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'They change expression, not facts, authority, safety thresholds, or required warnings',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'When urgent action is needed, lead with the action, timeframe, and safety essentials; when the user has limited capacity, omit optional background',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "Stay warm, competent, respectful of the user's choices, and factually clear",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "the user's explicit current-turn instructions take precedence",
     )
     expect(layers.stableRouteCapabilityPrompt).not.toContain('Humor 9/10')
     expect(layers.dynamicTurnContextPrompt).not.toContain('Humor 9/10')
@@ -215,14 +257,14 @@ describe('assistant execution prompt contract', () => {
 
   it('maps exact personality scores into the reviewed behavior bands', () => {
     const humorCases = [
-      [0, 'use no intentional jokes'],
-      [1, 'use occasional light, dry humor'],
-      [3, 'use occasional light, dry humor'],
-      [4, 'use regular wit when it helps'],
-      [6, 'use regular wit when it helps'],
-      [7, 'use prominent, bold, dry humor'],
-      [9, 'use prominent, bold, dry humor'],
-      [10, 'use maximum safe comedic ambition'],
+      [0, 'use no jokes, puns, teasing'],
+      [1, 'use occasional, subtle situational wit'],
+      [3, 'use occasional, subtle situational wit'],
+      [4, 'when a strong opportunity arises'],
+      [6, 'when a strong opportunity arises'],
+      [7, 'take a bold, situation-specific swing'],
+      [9, 'take a bold, situation-specific swing'],
+      [10, 'take the largest safe creative swing'],
     ] as const
     for (const [score, expected] of humorCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -235,14 +277,14 @@ describe('assistant execution prompt contract', () => {
     }
 
     const pushCases = [
-      [0, 'use no motivational pressure'],
-      [1, 'use supportive teammate energy'],
-      [3, 'use supportive teammate energy'],
-      [4, 'use focused high-school-coach energy'],
-      [6, 'use focused high-school-coach energy'],
-      [7, 'use strict college-coach energy'],
-      [9, 'use strict college-coach energy'],
-      [10, 'use terse, theatrical drill-sergeant energy'],
+      [0, 'reflect, inform, and offer choices'],
+      [1, 'encourage gently'],
+      [3, 'encourage gently'],
+      [4, 'be direct and action-oriented'],
+      [6, 'be direct and action-oriented'],
+      [7, 'use firm accountability'],
+      [9, 'use firm accountability'],
+      [10, 'use maximum directness and brevity'],
     ] as const
     for (const [score, expected] of pushCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -255,14 +297,14 @@ describe('assistant execution prompt contract', () => {
     }
 
     const detailCases = [
-      [0, 'give the shortest complete answer'],
-      [1, 'stay concise and include only the essential reason'],
-      [3, 'stay concise and include only the essential reason'],
-      [4, 'give a balanced explanation'],
-      [6, 'give a balanced explanation'],
-      [7, 'cover relevant context, tradeoffs, uncertainty'],
-      [9, 'cover relevant context, tradeoffs, uncertainty'],
-      [10, 'be comprehensive when warranted'],
+      [0, 'lead with the shortest complete answer'],
+      [1, 'lead with the bottom line'],
+      [3, 'lead with the bottom line'],
+      [4, 'give answer-first balanced detail'],
+      [6, 'give answer-first balanced detail'],
+      [7, 'give a thorough, answer-first response'],
+      [9, 'give a thorough, answer-first response'],
+      [10, 'give the most complete decision-relevant answer'],
     ] as const
     for (const [score, expected] of detailCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -273,6 +315,35 @@ describe('assistant execution prompt contract', () => {
       expect(prompt).toContain(`Detail ${score}/10`)
       expect(prompt).toContain(expected)
     }
+
+    const maximumPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantPersonality: {
+          detail: 10,
+          humor: 10,
+          push: 10,
+        },
+      }),
+    )
+    expect(maximumPrompt).toContain(
+      'In factual answers, use at most one beat',
+    )
+    expect(maximumPrompt).toContain('one bold deadpan beat, ridiculous escalation')
+    expect(maximumPrompt).toContain(
+      'never motive or character; ask for a commitment, revision, or decline, then respect the answer',
+    )
+    expect(maximumPrompt).toContain(
+      'Push changes delivery, not authority',
+    )
+    expect(maximumPrompt).toContain(
+      'Never pressure a reply, signup, sharing, spending, consent, health compliance, authorization, or irreversible action',
+    )
+    expect(maximumPrompt).toContain(
+      'Start with the conclusion and, when relevant, the immediate action',
+    )
+    expect(maximumPrompt).toContain(
+      'Do not imply completeness, enumerate remote possibilities, or add background that would not change understanding or action',
+    )
   })
 
   it('keeps conversation-first personalization guidance and private dial controls in the stable route prompt', () => {
@@ -307,34 +378,37 @@ describe('assistant execution prompt contract', () => {
       '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'returned `settings` governs',
+      'trust `settings`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'state exact score/source',
+      'State score/source',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'false `updated` = already requested',
+      '`superseded` newer intent won',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`updated` means effective change',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never echo superseded',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Error/no `settings`: unconfirmed',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never changed/unchanged',
+      'Show states values, not cause',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'One `show` may state values, not cause',
+      'Saved Humor change only: >0, at most one earned joke',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'one fresh safe joke only for Humor >0',
+      'none otherwise',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'none for 0/query/Push/Detail',
+      'Explicit ongoing requests only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Persist only explicit ongoing setting requests',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'no shame, threats, coercion, false urgency',
+      'never shame, coerce, invent urgency',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'self-harm',
@@ -376,7 +450,7 @@ describe('assistant execution prompt contract', () => {
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'exact-target approval result is authoritative',
+      'explicit user-requested model or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',
@@ -408,19 +482,20 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
+  it('keeps pending vault approval capabilities outside model context and approved sends free of stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'send a normal text reply with the raw approval URL',
+      'explain naturally that approval is required',
     )
     expect(prompt).toContain(
       'The file is not attached yet.',
     )
     expect(prompt).toContain(
-      'Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.',
+      'The runtime appends the exact approval link outside model context',
     )
+    expect(prompt).toContain('do not invent, request, or print an approval URL')
     expect(prompt).toContain(
       'When `murph.send_vault_file` returns `status: "approved"`',
     )
@@ -491,7 +566,10 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('send_progress_update')
     expect(prompt).toContain(
-      'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
+      'Native commentary is internal, not member-visible',
+    )
+    expect(prompt).toContain(
+      'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
       'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
@@ -642,7 +720,16 @@ describe('assistant execution prompt contract', () => {
       '`context.request` for secret transfer, `context.unroute()` to bypass routing, new browser contexts for policy bypass, or Node/network APIs to exfiltrate data',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_os_control` only as a fallback when `murph.computer_act` cannot operate the page surface.',
+      'If a visible control fails after a safe Playwright alternative and state check',
+    )
+    expect(prompt).toContain(
+      'use `murph.computer_os_control` at a fresh bounding box with `numClicks: 1`',
+    )
+    expect(prompt).toContain(
+      'If a prior click may have acted, `murph.computer_open` must first show no effect',
+    )
+    expect(prompt).toContain(
+      'Verify afterward; hand off on ambiguity',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
@@ -1150,7 +1237,7 @@ describe('assistant system prompt cache stability', () => {
       createCommonCodexPromptInput({ assistantCliContract: null }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(7_500)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_000)
   })
 
@@ -1401,7 +1488,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'ca8549f6f738dd10ae3278f8aaccab2f88cd99ce1faea341a880f1a2a57bf0b5',
+      '47fdddb1886c2f567d1f23ba944b3db3b1deec61f385ac7a161a5289c75ca0b7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1538,25 +1625,10 @@ Execution context:
 })
 
 describe('assistant experiment onboarding guidance', () => {
-  it('omits the preloaded protocol index and keeps task-time discovery commands', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantSupportedExperimentProtocols: [
-        {
-          category: 'Recovery',
-          routeId: 'finnish-sauna',
-          title: 'Finnish Dry Sauna',
-        },
-        {
-          category: 'Exercise',
-          routeId: 'norwegian-4x4',
-          title: 'Norwegian 4x4',
-        },
-      ],
-    }))
+  it('keeps protocol discovery task-time instead of rendering a resident index', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).not.toContain('finnish-sauna | Finnish Dry Sauna')
-    expect(prompt).not.toContain('norwegian-4x4 | Norwegian 4x4')
     expect(prompt).toContain('Health Commons route surface:')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
@@ -1612,12 +1684,25 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
-  it('preserves the PR #480 context-first recommendation contract', () => {
+  it('keeps context-first advice while expanding longitudinal discovery and proactive support', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
+    expect(prompt).toContain(
+      'You are Murph, the user\'s durable, long-term personal health assistant.',
+    )
+    expect(prompt).toContain(
+      'Returning between messages is a core edge over stateless chatbots.',
+    )
+    expect(prompt).toContain(
+      'Offer specific reminders, check-ins, monitoring, or follow-ups; once authorized, initiate them when useful.',
+    )
+    expect(prompt).toContain('Delight is care.')
+    expect(prompt).toContain(
+      'use an image, voice memo, or song only when requested or known to be preferred',
+    )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
-      'Murph\'s advantage is accumulated personal context. Do not replace that advantage with a generic tip list.',
+      'Murph\'s edge is durable context: a progressively complete picture.',
     )
 
     // Data-first grounding opens with evidence rather than generic advice.
@@ -1625,15 +1710,18 @@ describe('assistant experiment onboarding guidance', () => {
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
 
-    // Discovery stays bounded across turns: one concrete question per message.
+    // Discovery has no arbitrary question cap, but stays paced and useful.
     expect(prompt).toContain(
-      'ask the single most useful concrete, textable question.',
+      'Health problems have interacting variables the user may not mention.',
     )
     expect(prompt).toContain(
-      'Continue only as a bounded discovery loop, one question per message, until the picture supports personal advice.',
+      'then ask every needed concrete question—one at a time on texting routes, or a short related set elsewhere.',
     )
     expect(prompt).toContain(
-      'If answers get short or the user pushes back, recommend from what is known and name the uncertainty instead of continuing an intake.',
+      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise name uncertainty and help now.',
+    )
+    expect(prompt).toContain(
+      'If the user declines, wants an answer now, or has low capacity, help from what is known and name uncertainty.',
     )
 
     // Motivation is captured once, in the user's own words.
@@ -1641,15 +1729,15 @@ describe('assistant experiment onboarding guidance', () => {
       'capture the user\'s reason in their own words when it is not already clear; it shapes the plan and later support.',
     )
     expect(prompt).toContain(
-      'Do not run a motivation interview or re-ask what the user already said.',
+      'Do not run an open-ended or deep motivation interview, and do not re-ask what the user already said.',
     )
 
     // Context questions earn their place and durable discoveries remain controllable.
     expect(prompt).toContain(
-      'Ask proactive context only to improve help, unlock action, resolve safety, personalize near-term follow-up, or meet a finite skill contract.',
+      'Across useful conversations, deepen longitudinal understanding when context could improve current or future help, unlock action, resolve safety, personalize follow-through, or meet a finite skill contract.',
     )
     expect(prompt).toContain(
-      'otherwise do not build generic profiles.',
+      'do not build generic profiles or re-ask known facts.',
     )
     expect(prompt).toContain(
       'Save durable context to its owner in the same turn.',
@@ -1675,7 +1763,7 @@ describe('assistant experiment onboarding guidance', () => {
       'do not force a heavier flow.',
     )
     expect(prompt).toContain(
-      'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
+      'For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.',
     )
 
     // Quick/general/safety and low-capacity asks bypass discovery when it would delay help.
@@ -1691,6 +1779,14 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt.indexOf('Follow-through and authorization:')).toBeGreaterThan(
       prompt.indexOf('Understand before recommending:'),
     )
+
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({ conversationScope: 'group' }),
+    )
+    expect(groupPrompt).not.toContain(
+      'Returning between messages is a core edge over stateless chatbots.',
+    )
+    expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
 
   it('routes running and cardio through the compact movement overlap rules', () => {
@@ -1880,11 +1976,20 @@ describe('assistant notification decision guidance', () => {
       }),
     ).prompt
 
-    // Outcome-first framing: decide whether to send, default to silence.
+    // The automation is authorized support: send when its purpose still holds.
     expect(prompt).toContain(
-      'decide whether this reminder still earns a send',
+      'This automation is authorized support.',
     )
-    expect(prompt).toContain('Default to staying silent.')
+    expect(prompt).toContain(
+      'Prefer a timely send; skip only for a concrete current reason.',
+    )
+    expect(prompt).toContain(
+      'richer media only when the automation marks that modality welcome and privacy-safe',
+    )
+    expect(prompt).toContain(
+      'Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages.',
+    )
+    expect(prompt).not.toContain('Default to staying silent.')
 
     // Canonical task capability + ground in what the user actually did today.
     expect(prompt).toContain(
@@ -1908,7 +2013,7 @@ describe('assistant notification decision guidance', () => {
       'Skip when the run is inactive, reminders were declined or moved, the day\'s session or log is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
     )
     expect(prompt).toContain(
-      'Send only when the reminder\'s purpose still holds: the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
+      'The reminder\'s purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
     )
 
     // Good-message guidance as outcome, not an enumerated per-type list.
@@ -1990,7 +2095,19 @@ describe('assistant Murph onboarding guidance', () => {
       'before advancing, declining, or completing onboarding',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+    )
+    expect(prompt).toContain(
+      'During discovery, a stated health goal is context, not an action request.',
+    )
+    expect(prompt).toContain(
+      'Do not diagnose, recommend, prescribe, build a plan, or enter a domain workflow solely because the user answered what they want from their health.',
+    )
+    expect(prompt).toContain(
+      'Unless an explicit immediate request or safety need requires problem-solving first, reflect, save, and park the thread before solving it.',
+    )
+    expect(prompt).toContain(
+      'The user may always pause, defer, skip a checkpoint, or decline further setup; honor that without pressure.',
     )
     expect(prompt).toContain(
       'Do not reproduce or substitute a second onboarding flow from this overlay.',
@@ -2002,7 +2119,7 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question in a reply and follow the skill\'s stand-alone-reply rules.',
+      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
@@ -2011,6 +2128,8 @@ describe('assistant Murph onboarding guidance', () => {
       'vault-cli assistant onboarding resume-context --format json',
     )
     expect(prompt).not.toContain('all six foundation checkpoints')
+    expect(prompt).not.toContain('first-value proof')
+    expect(prompt).not.toContain('support-loop setup')
     expect(prompt).not.toContain('offer to continue now or another day')
     expect(prompt).not.toContain(
       'including a resolved first experiment setup',
@@ -2042,7 +2161,7 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
-  it('keeps personal settings and authorization surfaces out of group prompts', () => {
+  it('allows only server-bound current-sender style settings in group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
         'vault-cli device connect <provider> --format json',
@@ -2086,6 +2205,11 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
+    expect(prompt).toContain('`read_own_assistant_style` and `update_own_assistant_style`')
+    expect(prompt).toContain("only the current sender's private tone, voice, Humor, Push, and Detail")
+    expect(prompt).toContain('never supply, infer, or ask for a member id or handle')
+    expect(prompt).toContain('not this shared room')
+    expect(prompt).toContain('do not fall back to a settings URL from the group')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -2109,6 +2233,14 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')
     expect(prompt).toContain('action="start_checkout"')
+    expect(prompt).toContain('For new or converting Family access')
+    expect(prompt).toContain('return its checkout link plainly')
+    expect(prompt).toContain(
+      'Never use it for active-plan tier/capacity, member-removal, or invite-cancellation changes',
+    )
+    expect(prompt).toContain(
+      "route those through `murph.plan_usage`'s private management handoff",
+    )
     expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
     expect(prompt).toContain('User-provided content and vault writes:')
@@ -2132,18 +2264,24 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).not.toContain('existing automation in this bound runtime vault')
+    expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')
     expect(prompt).not.toContain('Scheduled automation commands are available for this group room')
   })
 
-  it('keeps hosted direct automation writes in the current conversation', () => {
+  it('keeps hosted route writes current while permitting vault-owned record mutations', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',
       hostedRuntime: true,
     }))
 
-    expect(prompt).toContain('Hosted chat automation writes are current-conversation-only')
-    expect(prompt).toContain('omit route flags so the trusted route is inherited')
+    expect(prompt).toContain('existing automation in this bound runtime vault')
+    expect(prompt).toContain('`vault-cli automation edit` for non-route changes')
+    expect(prompt).toContain('`vault-cli automation set-status`')
+    expect(prompt).toContain('stored route remains unchanged')
+    expect(prompt).toContain('bind to the trusted current conversation')
+    expect(prompt).toContain('do not target another route')
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 

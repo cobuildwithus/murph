@@ -17,11 +17,15 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
   decryptHostedWebNullableString,
+  decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../src/lib/hosted-web/encryption";
+import { readHostedMemberPhoneNumberSnapshots } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
+import { readHostedMemberVerifiedEmailSnapshots } from "../src/lib/hosted-onboarding/hosted-member-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 import type {
   GcpKmsAsymmetricSignInput,
+  GcpKmsDecryptInput,
   GcpKmsEncryptInput,
   HostedGcpKmsClient,
 } from "../src/lib/hosted-crypto/gcp-kms";
@@ -313,13 +317,203 @@ test("hosted web private-field encryption uses already-provisioned control roots
   assert.equal(encryptCalls.length, 1);
   assert.equal(signCalls.length, 1);
 
+  const openedPlaintexts = captureDecodedPlaintexts();
   await expect(decryptHostedWebNullableString({
     field: "hosted-member-identity.phone-number",
     memberId: "member-test-transaction",
     prisma: tx.prisma,
     value: ciphertext,
   })).resolves.toBe("redacted-phone-token");
+  expect(openedPlaintexts).toHaveLength(1);
+  expect(new Uint8Array(openedPlaintexts[0]!).every((byte) => byte === 0)).toBe(true);
   assert.equal(tx.persistedEnvelopes.length, 1);
+});
+
+test("member email and phone batches use one envelope query with bounded KMS unwraps", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from({ length: 6 }, (_, index) => `member-batch-${index + 1}`);
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const emailFindMany = vi.fn().mockResolvedValue(records.emailRecords);
+  const identityFindMany = vi.fn().mockResolvedValue(records.identityRecords);
+  const prisma = Object.assign(tx.prisma, {
+    hostedMemberEmailAuthorization: { findMany: emailFindMany },
+    hostedMemberIdentity: { findMany: identityFindMany },
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+
+  const openedPlaintexts = captureDecodedPlaintexts();
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedMemberVerifiedEmailSnapshots({
+    memberIds: [...memberIds, memberIds[0]!],
+    prisma,
+  })).resolves.toEqual(memberIds.map((memberId, index) => ({
+    memberId,
+    verifiedEmail: {
+      address: `member-${index + 1}@example.test`,
+      lookupKey: `email-lookup-${index + 1}`,
+      verifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+    },
+  })));
+  expect(emailFindMany).toHaveBeenCalledTimes(1);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(memberIds.length);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts).toHaveLength(memberIds.length);
+  expect(openedPlaintexts.every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+
+  envelopeFindMany.mockClear();
+  openedPlaintexts.length = 0;
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedMemberPhoneNumberSnapshots({
+    memberIds: [...memberIds, memberIds[0]!],
+    prisma,
+  })).resolves.toEqual(memberIds.map((memberId, index) => ({
+    memberId,
+    phoneNumber: `+12125550${String(index + 1).padStart(3, "0")}`,
+  })));
+  expect(identityFindMany).toHaveBeenCalledTimes(1);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(memberIds.length);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts).toHaveLength(memberIds.length);
+  expect(openedPlaintexts.every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+});
+
+test("batch private-field decrypt deduplicates roots and fails closed on missing envelopes", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = ["member-batch-present", "member-batch-missing"];
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const first = records.identityRecords[0]!;
+  const second = records.identityRecords[1]!;
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(decryptHostedWebNullableStrings({
+    field: "hosted-member-identity.phone-number",
+    prisma,
+    values: [
+      { memberId: first.memberId, value: first.phoneNumberEncrypted },
+      { memberId: first.memberId, value: first.phoneNumberEncrypted },
+    ],
+  })).resolves.toEqual(["+12125550001", "+12125550001"]);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(envelopeFindMany.mock.calls[0]?.[0]?.where?.OR).toHaveLength(1);
+  expect(decryptMetrics.calls).toHaveLength(1);
+
+  envelopeFindMany.mockImplementationOnce(async () =>
+    buildBatchEnvelopeRows(tx).filter((row) => row.userId !== second.memberId)
+  );
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(decryptHostedWebNullableStrings({
+    field: "hosted-member-identity.phone-number",
+    prisma,
+    values: records.identityRecords.map((record) => ({
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+  })).rejects.toThrow(/domain root envelope is not available/u);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  const [firstEnvelope, secondEnvelope] = tx.persistedEnvelopes;
+  assert.ok(firstEnvelope);
+  assert.ok(secondEnvelope);
+  envelopeFindMany.mockImplementationOnce(async () =>
+    buildBatchEnvelopeRows(tx).map((row) =>
+      row.userId === second.memberId
+        ? { ...row, signedEnvelopeJson: firstEnvelope }
+        : row
+    )
+  );
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(decryptHostedWebNullableStrings({
+    field: "hosted-member-identity.phone-number",
+    prisma,
+    values: records.identityRecords.map((record) => ({
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+  })).rejects.toThrow(/row does not match requested user\/domain/u);
+  expect(decryptMetrics.calls).toHaveLength(0);
+});
+
+test("batch private-field decrypt zeroizes successful roots when a bounded KMS chunk fails", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from({ length: 5 }, (_, index) => `member-batch-failure-${index + 1}`);
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, {
+    failAtCall: 2,
+    yieldBeforeReturn: true,
+  });
+  await expect(decryptHostedWebNullableStrings({
+    field: "hosted-member-identity.phone-number",
+    prisma,
+    values: records.identityRecords.map((record) => ({
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+  })).rejects.toThrow("Test KMS decrypt failure.");
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(4);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts).toHaveLength(3);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+});
+
+test("batch private-field decrypt zeroizes invalid KMS plaintext and stops before the next chunk", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from({ length: 5 }, (_, index) =>
+    `member-batch-invalid-root-${index + 1}`
+  );
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, {
+    invalidPlaintextAtCall: 2,
+    yieldBeforeReturn: true,
+  });
+  await expect(decryptHostedWebNullableStrings({
+    field: "hosted-member-identity.phone-number",
+    prisma,
+    values: records.identityRecords.map((record) => ({
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+  })).rejects.toThrow(/decrypt returned invalid root length/u);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(4);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts).toHaveLength(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
 });
 
 test("domain root unwraps are memoized inside the scoped cache and wiped at scope end", async () => {
@@ -561,6 +755,7 @@ test("hosted Privy member creation provisions the control root before private id
 async function createHostedWebCryptoTransactionFixture(
   createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
 ): Promise<{
+  decryptMetrics: LocalKmsDecryptMetrics;
   encryptCalls: GcpKmsEncryptInput[];
   signCalls: GcpKmsAsymmetricSignInput[];
   tx: HostedCryptoTestTransaction;
@@ -568,9 +763,11 @@ async function createHostedWebCryptoTransactionFixture(
   setHostedSecureBoxStringTestCodecForTests(null);
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const decryptMetrics = createLocalKmsDecryptMetrics();
   const encryptCalls: GcpKmsEncryptInput[] = [];
   const signCalls: GcpKmsAsymmetricSignInput[] = [];
   gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
     encryptCalls,
     signCalls,
     signer: signer.privateKey,
@@ -581,10 +778,102 @@ async function createHostedWebCryptoTransactionFixture(
   });
 
   return {
+    decryptMetrics,
     encryptCalls,
     signCalls,
     tx: createTransaction(),
   };
+}
+
+async function createBatchPrivateFieldRecords(input: {
+  memberIds: readonly string[];
+  tx: HostedCryptoTestTransaction;
+}) {
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const emailRecords = [] as Array<{
+    memberId: string;
+    verifiedEmailAddressEncrypted: string | null;
+    verifiedEmailLookupKey: string;
+    verifiedEmailVerifiedAt: Date;
+  }>;
+  const identityRecords = [] as Array<{
+    memberId: string;
+    phoneNumberEncrypted: string | null;
+  }>;
+  for (const [index, memberId] of input.memberIds.entries()) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: input.tx.prisma,
+      reason: "test.batch-provision",
+      userId: memberId,
+    });
+    emailRecords.push({
+      memberId,
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId,
+        prisma: input.tx.prisma,
+        value: `member-${index + 1}@example.test`,
+      }),
+      verifiedEmailLookupKey: `email-lookup-${index + 1}`,
+      verifiedEmailVerifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+    });
+    identityRecords.push({
+      memberId,
+      phoneNumberEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-identity.phone-number",
+        memberId,
+        prisma: input.tx.prisma,
+        value: `+12125550${String(index + 1).padStart(3, "0")}`,
+      }),
+    });
+  }
+  return { emailRecords, identityRecords };
+}
+
+function createBatchEnvelopeFindMany(tx: HostedCryptoTestTransaction) {
+  return vi.fn(async (input: {
+    where?: {
+      OR?: Array<{ domain: string; rootKeyId: string; userId: string }>;
+    };
+  }) => {
+    const requestedKeys = new Set((input.where?.OR ?? []).map((reference) =>
+      `${reference.userId}|${reference.domain}|${reference.rootKeyId}`
+    ));
+    return buildBatchEnvelopeRows(tx).filter((row) =>
+      requestedKeys.has(`${row.userId}|${row.domain}|${row.rootKeyId}`)
+    );
+  });
+}
+
+function buildBatchEnvelopeRows(tx: HostedCryptoTestTransaction) {
+  return tx.persistedEnvelopes.map((envelope) => ({
+    domain: envelope.domain,
+    id: `row-${envelope.userId}-${envelope.domain}`,
+    rootKeyId: envelope.rootKeyId,
+    signedEnvelopeJson: envelope,
+    status: "active" as const,
+    updatedAt: new Date(envelope.updatedAt),
+    userId: envelope.userId,
+  }));
+}
+
+function captureDecodedPlaintexts(): Uint8Array[] {
+  const outputs: Uint8Array[] = [];
+  const decode = TextDecoder.prototype.decode;
+  vi.spyOn(TextDecoder.prototype, "decode").mockImplementation(function (
+    this: TextDecoder,
+    input,
+    options,
+  ) {
+    if (input instanceof Uint8Array) {
+      outputs.push(input);
+    }
+    return decode.call(this, input, options);
+  });
+  return outputs;
 }
 
 type HostedCryptoTestTransaction = {
@@ -689,10 +978,25 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
       const now = new Date("2026-05-02T00:00:00.000Z");
       return {
         assistantDetail: null,
+        assistantDetailCausalSeq:
+          input.data.assistantDetailCausalSeq === undefined ||
+          input.data.assistantDetailCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantDetailCausalSeq),
         assistantHumor: null,
+        assistantHumorCausalSeq:
+          input.data.assistantHumorCausalSeq === undefined ||
+          input.data.assistantHumorCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantHumorCausalSeq),
         assistantModelPreference: null,
         assistantReasoningEffortPreference: null,
         assistantPush: null,
+        assistantPushCausalSeq:
+          input.data.assistantPushCausalSeq === undefined ||
+          input.data.assistantPushCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantPushCausalSeq),
         assistantTone: null,
         assistantToneCausalSeq: null,
         assistantVoice: null,
@@ -774,6 +1078,7 @@ function capturePersistedEnvelope(
 }
 
 function createLocalKmsClient(input: {
+  decryptMetrics?: LocalKmsDecryptMetrics;
   encryptCalls: GcpKmsEncryptInput[];
   signCalls: GcpKmsAsymmetricSignInput[];
   signer: CryptoKey;
@@ -792,9 +1097,30 @@ function createLocalKmsClient(input: {
       };
     },
     async decrypt(decryptInput) {
-      return {
-        plaintext: Buffer.from(decryptInput.ciphertext, "base64"),
-      };
+      const metrics = input.decryptMetrics;
+      metrics?.calls.push(decryptInput);
+      const callNumber = metrics?.calls.length ?? 0;
+      if (metrics) {
+        metrics.activeCount += 1;
+        metrics.maxConcurrent = Math.max(metrics.maxConcurrent, metrics.activeCount);
+      }
+      try {
+        if (metrics?.yieldBeforeReturn) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        if (metrics && metrics.failAtCall === callNumber) {
+          throw new Error("Test KMS decrypt failure.");
+        }
+        const plaintext = metrics?.invalidPlaintextAtCall === callNumber
+          ? new Uint8Array(31).fill(7)
+          : Uint8Array.from(Buffer.from(decryptInput.ciphertext, "base64"));
+        metrics?.returnedPlaintexts.push(plaintext);
+        return { plaintext };
+      } finally {
+        if (metrics) {
+          metrics.activeCount -= 1;
+        }
+      }
     },
     async encrypt(encryptInput) {
       input.encryptCalls.push(encryptInput);
@@ -804,6 +1130,45 @@ function createLocalKmsClient(input: {
       };
     },
   };
+}
+
+interface LocalKmsDecryptMetrics {
+  activeCount: number;
+  calls: GcpKmsDecryptInput[];
+  failAtCall: number | null;
+  invalidPlaintextAtCall: number | null;
+  maxConcurrent: number;
+  returnedPlaintexts: Uint8Array[];
+  yieldBeforeReturn: boolean;
+}
+
+function createLocalKmsDecryptMetrics(): LocalKmsDecryptMetrics {
+  return {
+    activeCount: 0,
+    calls: [],
+    failAtCall: null,
+    invalidPlaintextAtCall: null,
+    maxConcurrent: 0,
+    returnedPlaintexts: [],
+    yieldBeforeReturn: false,
+  };
+}
+
+function resetLocalKmsDecryptMetrics(
+  metrics: LocalKmsDecryptMetrics,
+  input?: {
+    failAtCall?: number | null;
+    invalidPlaintextAtCall?: number | null;
+    yieldBeforeReturn?: boolean;
+  },
+): void {
+  metrics.activeCount = 0;
+  metrics.calls.length = 0;
+  metrics.failAtCall = input?.failAtCall ?? null;
+  metrics.invalidPlaintextAtCall = input?.invalidPlaintextAtCall ?? null;
+  metrics.maxConcurrent = 0;
+  metrics.returnedPlaintexts.length = 0;
+  metrics.yieldBeforeReturn = input?.yieldBeforeReturn ?? false;
 }
 
 function restoreHostedSecureBoxTestCodec(): void {

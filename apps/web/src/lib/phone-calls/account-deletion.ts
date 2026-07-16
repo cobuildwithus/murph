@@ -21,7 +21,7 @@ type HostedPhoneCallAccountDeletionStore = {
 export const HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE = 8;
 export const HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS = 35_000;
 
-export async function stopHostedPhoneCallsForAccountDeletion(input: {
+export async function deleteHostedPhoneCallsForAccountDeletion(input: {
   memberIds: readonly string[];
   prisma: HostedPhoneCallAccountDeletionStore;
   runtime?: RetellPhoneCallAccountDeletionRuntime;
@@ -50,15 +50,10 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
     },
     where: {
       memberId: { in: [...input.memberIds] },
+      provider: "retell",
       OR: [
+        { providerCallId: { not: null } },
         { status: { in: [...HOSTED_PHONE_CALL_ACTIVE_STATUSES] } },
-        {
-          analyzedAt: null,
-          endedAt: null,
-          provider: "retell",
-          providerCallId: { not: null },
-          status: "failed",
-        },
       ],
     },
     take: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1,
@@ -82,7 +77,7 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
     if (!providerCallId) {
       continue;
     }
-    cleanupFailure = await stopProviderCallAndPersistTerminal({
+    cleanupFailure = await deleteProviderCallAndPersistCompletion({
       call: {
         ...call,
         providerCallId,
@@ -134,7 +129,7 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
     }
 
     let boundCall: Parameters<
-      typeof stopProviderCallAndPersistTerminal
+      typeof deleteProviderCallAndPersistCompletion
     >[0]["call"] | null = null;
     try {
       const bound = await input.prisma.hostedPhoneCall.updateMany({
@@ -198,7 +193,7 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
     if (!boundCall) {
       continue;
     }
-    cleanupFailure = await stopProviderCallAndPersistTerminal({
+    cleanupFailure = await deleteProviderCallAndPersistCompletion({
       call: boundCall,
       prisma: input.prisma,
       runtime,
@@ -215,7 +210,7 @@ export async function stopHostedPhoneCallsForAccountDeletion(input: {
   }
 }
 
-async function stopProviderCallAndPersistTerminal(input: {
+async function deleteProviderCallAndPersistCompletion(input: {
   call: {
     analyzedAt: Date | null;
     endedAt: Date | null;
@@ -230,22 +225,27 @@ async function stopProviderCallAndPersistTerminal(input: {
 }): Promise<unknown | undefined> {
   try {
     input.signal.throwIfAborted();
-    await input.runtime.stopIfActive(input.call.providerCallId, {
+    await input.runtime.deleteProviderCall(input.call.providerCallId, {
       signal: input.signal,
     });
     await input.prisma.hostedPhoneCall.updateMany({
       data: {
-        endedAt: new Date(),
-        status: isHostedPhoneCallProviderCleanupPending(input.call)
-          ? "failed"
-          : "ended",
+        ...(input.call.status === "starting" || input.call.status === "calling"
+          ? {
+            endedAt: new Date(),
+            status: "ended" as const,
+          }
+          : isHostedPhoneCallProviderCleanupPending(input.call)
+            ? {
+              endedAt: new Date(),
+              status: "failed" as const,
+            }
+            : {}),
+        providerCallId: null,
       },
       where: {
         id: input.call.id,
         providerCallId: input.call.providerCallId,
-        status: {
-          in: [...HOSTED_PHONE_CALL_ACTIVE_STATUSES, "failed"],
-        },
       },
     });
     return undefined;
@@ -261,15 +261,10 @@ export async function assertHostedPhoneCallsReadyForAccountDeletionTx(input: {
   const activeCallCount = await input.prisma.hostedPhoneCall.count({
     where: {
       memberId: { in: [...input.memberIds] },
+      provider: "retell",
       OR: [
+        { providerCallId: { not: null } },
         { status: { in: [...HOSTED_PHONE_CALL_ACTIVE_STATUSES] } },
-        {
-          analyzedAt: null,
-          endedAt: null,
-          provider: "retell",
-          providerCallId: { not: null },
-          status: "failed",
-        },
       ],
     },
   });
@@ -283,7 +278,7 @@ function phoneCallCleanupError(cause?: unknown) {
     cause,
     code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
     httpStatus: 502,
-    message: "We could not safely end your active phone calls. Retry account deletion, or contact support if it keeps failing.",
+    message: "We could not safely delete your phone-call data. Retry account deletion, or contact support if it keeps failing.",
     retryable: true,
   });
 }

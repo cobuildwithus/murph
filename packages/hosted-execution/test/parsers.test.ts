@@ -132,6 +132,7 @@ describe("parseHostedExecutionEvent", () => {
           groupParticipantAdded: true,
           groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
           linqMessage: {
+            affirmativeReaction: true,
             chatId: "chat_123",
             from: "+15550001111",
             isFromMe: false,
@@ -159,6 +160,9 @@ describe("parseHostedExecutionEvent", () => {
       message: {
         groupParticipantAdded: true,
         groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
+        linqMessage: {
+          affirmativeReaction: true,
+        },
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
@@ -168,6 +172,33 @@ describe("parseHostedExecutionEvent", () => {
       },
     });
   });
+
+  it.each([false, "true", null])(
+    "rejects non-true Linq affirmative reaction markers: %j",
+    (affirmativeReaction) => {
+      expect(() => parseHostedExecutionWake({
+        eventId: "linq-affirmative-reaction-1",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          linqMessage: {
+            affirmativeReaction,
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "reaction_event_123",
+            parts: [{ type: "text", value: "Yes." }],
+            replyToMessageId: "msg_murph_123",
+            threadIsDirect: true,
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_personal_123",
+      })).toThrow(/affirmativeReaction must be true when present/u);
+    },
+  );
 
   it.each([false, "true"])(
     "rejects non-true Linq participant context: %j",
@@ -724,6 +755,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    })).toEqual({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "update_display_name",
       updateDisplayName: {
         displayName: "  Weekly   Health Crew  ",
@@ -840,6 +878,67 @@ describe("parseHostedRuntimeGroupTool", () => {
         source: "email",
       },
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_own_assistant_style",
+    })).toEqual({
+      action: "read_own_assistant_style",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+      style: {
+        personality: { detail: 8, humor: 10, push: null },
+        tone: "casual",
+        voice: "warm",
+      },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+      style: {
+        personality: { detail: 8, humor: 10, push: null },
+        tone: "casual",
+        voice: "warm",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: {},
+    })).toThrow(/must not be empty/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { personality: { humor: 11 } },
+    })).toThrow(/humor is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { personality: {} },
+    })).toThrow(/personality must not be empty/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { tone: "chatty" },
+    })).toThrow(/tone is not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { voice: "booming" },
+    })).toThrow(/voice is not supported/u);
 
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
@@ -850,6 +949,24 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "read_current",
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+      })
+    ).toThrow(/membershipId/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+        membershipId: "   ",
+      })
+    ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+        groupId: "hgrp_hijack",
+        membershipId: "hgm_self_123",
       })
     ).toThrow(/not allowed/u);
     expect(() =>
@@ -1011,6 +1128,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           kind: "friends",
           memberCount: 7,
+          membershipId: "hgm_self_123",
           permissionsUrl: "https://example.com/groups/join/abc123",
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -1055,6 +1173,40 @@ describe("parseHostedRuntimeGroupTool", () => {
         truncated: false,
       },
     })).toThrow(/not allowed/u);
+
+    const { membershipId: _omittedMembershipId, ...legacyMembership } =
+      response.result.memberships[0];
+    void _omittedMembershipId;
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembership],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/membershipId/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          membershipId: null,
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/membershipId/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          membershipId: "   ",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/membershipId must not be blank/u);
 
     const {
       requestedVaultShareProjectionScopes: _omittedRequestedScopes,
@@ -1602,6 +1754,114 @@ describe("parseHostedRuntimeGroupTool", () => {
       })
     ).toThrow(/must be 1/u);
   });
+
+  it("parses current-sender assistant-style responses", () => {
+    const style = {
+      personality: {
+        detail: { source: "default", value: 5 },
+        humor: { source: "custom", value: 10 },
+        push: { source: "default", value: 3 },
+      },
+      tone: "casual",
+      voice: "warm",
+    } as const;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_own_assistant_style",
+      result: { status: "saved", style },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      result: { status: "saved", style },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style: { ...style, tone: "chatty" } },
+    })).toThrow(/snapshot is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "ok",
+        style: {
+          ...style,
+          personality: {
+            ...style.personality,
+            humor: { source: "inherited", value: 10 },
+          },
+        },
+      },
+    })).toThrow(/humor source is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style,
+        unavailableReason: "sender_unavailable",
+      },
+    })).toThrow(/unavailable style must be null/u);
+  });
+
+  it("parses leave_membership responses without accepting extra state", () => {
+    for (const status of ["left", "already_left", "owner_cannot_leave"] as const) {
+      expect(parseHostedRuntimeGroupToolResponse({
+        action: "leave_membership",
+        result: { status },
+      })).toEqual({
+        action: "leave_membership",
+        result: { status },
+      });
+    }
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "unavailable", unavailableReason: "membership_lookup_unavailable" },
+    })).toEqual({
+      action: "leave_membership",
+      result: { status: "unavailable", unavailableReason: "membership_lookup_unavailable" },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "left", groupId: "hgrp_private" },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "unavailable" },
+    })).toThrow(/unavailableReason/u);
+  });
 });
 
 describe("parseHostedRuntimeNewsletterTool", () => {
@@ -1612,44 +1872,19 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     memberId: "member_123",
   };
 
-  it("parses current, legacy, and scheduled send requests", () => {
+  it("parses prepare and send requests", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
     })).toEqual({
       action: "prepare",
       groupId: "group_123",
-    });
-
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationProof: true,
-      includeAuthorizationSnapshot: true,
-    })).toEqual({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationProof: true,
-      includeAuthorizationSnapshot: true,
     });
     expect(() => parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
-      includeAuthorizationProof: false,
-    })).toThrow(/must be true/u);
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationSnapshot: false,
-    })).toThrow(/must be true/u);
-
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "read_stats",
-      groupId: "group_123",
-    })).toEqual({
-      action: "read_stats",
-      groupId: "group_123",
-    });
+      retiredVersionMarker: true,
+    })).toThrow(/not allowed/u);
 
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "send",
@@ -1706,6 +1941,10 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         subject: " ",
       })
     ).toThrow(/subject must not be blank/u);
+    expect(() => parseHostedRuntimeNewsletterToolRequest({
+      action: "retired_action",
+      groupId: "group_123",
+    })).toThrow(/action is not supported/u);
   });
 
   it("requires authorization snapshots in successful prepare responses", () => {
@@ -1815,36 +2054,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     })).toThrow(/participants must contain at most 100 entries/u);
   });
 
-  it("accepts only fail-closed legacy responses", () => {
-    const legacyParticipant = {
-      ...PARTICIPANT,
-      displayName: null,
-    };
+  it("rejects unsupported response actions", () => {
     expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "retired_action",
       result: {
-        groupId: "group_123",
-        missingEmailParticipants: [
-          { ...legacyParticipant, hasEmail: false },
-        ],
-        participants: [legacyParticipant],
-        status: "ok",
+        status: "unavailable",
+        unavailableReason: "unsupported_action",
       },
     })).toThrow(/not supported/u);
-
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    })).toEqual({
-      action: "read_stats",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
   });
 
   it("parses newsletter send outcomes and validates partial counts", () => {

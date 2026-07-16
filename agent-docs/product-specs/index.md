@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ Last verified: 2026-07-14
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
-| `agent-docs/product-specs/murph-onboarding.md` | Value-first onboarding for a private broad-assistant relationship, an ongoing support loop, progressive health-foundation checkpoints, optional baseline review, and finite completion. | Active |
+| `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding for a private broad-assistant relationship: brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, and finite completion. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, sensed/confirmed/assumed confidence ladder, correction semantics, and category-scoped activity evidence. | Active |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |
@@ -26,6 +26,7 @@ Last verified: 2026-07-14
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
+| `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | First-join private Murph confirmation with a sanitized group name, deterministic web or reaction copy, and first-party sharing-editor link. | Implemented |
 
 ## Rule

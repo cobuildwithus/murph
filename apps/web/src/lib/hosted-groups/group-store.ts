@@ -24,7 +24,7 @@ import {
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
 } from "../hosted-onboarding/shared";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { readHostedMemberPhoneNumberSnapshots } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -77,6 +77,7 @@ export interface HostedGroupMembershipReadSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
+  membershipId: string;
   ownerJoinCode: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -96,6 +97,8 @@ export interface HostedGroupJoinView {
   memberCount: number;
   requestedVaultShareProjections: HostedVaultShareProjectionDisplay[];
   status: "active";
+  viewerCanLeave: boolean;
+  viewerMembershipId: string | null;
   viewerMembershipStatus: string | null;
 }
 
@@ -143,6 +146,20 @@ export type HostedGroupMemberEmailShareRevocationTxResult =
       revokedCount: 0;
       vaultShareCleanupSignals: [];
     };
+
+export type HostedGroupMemberLeaveTxResult =
+  | {
+      kind: "left";
+      vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
+    }
+  | {
+      kind: "already_left" | "group_not_found" | "owner_cannot_leave";
+      vaultShareCleanupSignals: [];
+    };
+
+export type HostedGroupMemberLeaveSelector =
+  | { joinCode: string; membershipId?: never }
+  | { joinCode?: never; membershipId: string };
 
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
@@ -281,11 +298,23 @@ export async function readHostedGroupByRuntimeMemberId(input: {
   runtimeMemberId: string;
 }): Promise<HostedGroupSummary | null> {
   const prisma = input.prisma ?? getPrisma();
+  const groupId = await readHostedGroupIdByRuntimeMemberId({
+    prisma,
+    runtimeMemberId: input.runtimeMemberId,
+  });
+  return groupId ? readHostedGroupSummaryById(prisma, groupId) : null;
+}
+
+export async function readHostedGroupIdByRuntimeMemberId(input: {
+  prisma?: HostedGroupsReadClient;
+  runtimeMemberId: string;
+}): Promise<string | null> {
+  const prisma = input.prisma ?? getPrisma();
   const group = await prisma.hostedGroup.findUnique({
     where: { runtimeMemberId: input.runtimeMemberId },
     select: { id: true },
   });
-  return group ? readHostedGroupSummaryById(prisma, group.id) : null;
+  return group?.id ?? null;
 }
 
 export async function readHostedGroupMembershipsForMember(input: {
@@ -357,6 +386,7 @@ export async function readHostedGroupMembershipsForMember(input: {
         grantedVaultShareProjectionScopes,
         kind: row.group.kind,
         memberCount: row.group._count.members,
+        membershipId: row.id,
         ownerJoinCode: row.role === "owner" ? row.group.joinCode : null,
         requestedVaultShareProjectionScopes: policy.requestedVaultShareProjectionScopes,
         role: row.role,
@@ -522,6 +552,7 @@ export async function readHostedGroupJoinView(input: {
       id: true,
       joinPolicyJson: true,
       kind: true,
+      ownerMemberId: true,
       runtimeMemberId: true,
       _count: { select: { members: true } },
       members: {
@@ -558,6 +589,8 @@ export async function readHostedGroupJoinView(input: {
       policy.requestedVaultShareProjectionScopes,
     ),
     status: "active",
+    viewerCanLeave: group.members.length > 0 && group.ownerMemberId !== input.memberId,
+    viewerMembershipId: group.members[0]?.id ?? null,
     viewerMembershipStatus: group.members.length > 0 ? "active" : null,
   };
 }
@@ -568,6 +601,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   joinCode: string;
   memberId: string;
   now: Date;
+  expectedMembershipId: string | null;
   selectedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   selectedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
@@ -585,6 +619,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   return acceptHostedGroupJoinTx({
     additiveOnly: false,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
+    expectedMembershipId: input.expectedMembershipId,
     groupId: groupLookup.id,
     joinOrigin: "web",
     memberId: input.memberId,
@@ -813,6 +848,7 @@ async function revokeHostedGroupJoinOffersTx(
 async function acceptHostedGroupJoinTx(input: {
   additiveOnly: boolean;
   confirmationPublicBaseUrl: string | null;
+  expectedMembershipId?: string | null;
   groupId: string;
   joinOrigin: HostedGroupJoinConfirmationOrigin;
   memberId: string;
@@ -853,6 +889,22 @@ async function acceptHostedGroupJoinTx(input: {
   }
   assertHostedMemberNotSuspended(member);
 
+  const existingMembership = await input.tx.hostedGroupMember.findUnique({
+    where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
+    select: { id: true },
+  });
+  if (
+    input.expectedMembershipId !== undefined
+    && (existingMembership?.id ?? null) !== input.expectedMembershipId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_MEMBERSHIP_CHANGED",
+      httpStatus: 409,
+      message: "Your group membership changed. Reload this page and try again.",
+      retryable: false,
+    });
+  }
+
   const selected = normalizeHostedVaultShareProjectionScopes(
     input.selectedVaultShareProjectionScopes,
   );
@@ -889,10 +941,6 @@ async function acceptHostedGroupJoinTx(input: {
   // gate applies to every join, not only joins that select health projections.
   await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
 
-  const existingMembership = await input.tx.hostedGroupMember.findUnique({
-    where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true },
-  });
   let membershipId: string;
   let alreadyMember = false;
   if (!existingMembership) {
@@ -1049,6 +1097,84 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
     groupId: group.id,
     kind: "ok",
     revokedCount: revoked.revokedCount,
+    vaultShareCleanupSignals: revoked.cleanupSignals,
+  };
+}
+
+export async function leaveHostedGroupMemberTx(
+  input: {
+    memberId: string;
+    now: Date;
+    tx: Prisma.TransactionClient;
+  } & HostedGroupMemberLeaveSelector,
+): Promise<HostedGroupMemberLeaveTxResult> {
+  let groupLookup: { id: string } | null;
+  if (input.membershipId !== undefined) {
+    const selectedMembership = await input.tx.hostedGroupMember.findUnique({
+      where: { id: input.membershipId },
+      select: { groupId: true, memberId: true },
+    });
+    if (!selectedMembership || selectedMembership.memberId !== input.memberId) {
+      return { kind: "already_left", vaultShareCleanupSignals: [] };
+    }
+    groupLookup = { id: selectedMembership.groupId };
+  } else {
+    groupLookup = await input.tx.hostedGroup.findUnique({
+      where: { joinCode: input.joinCode },
+      select: { id: true },
+    });
+    if (!groupLookup) {
+      return { kind: "group_not_found", vaultShareCleanupSignals: [] };
+    }
+  }
+
+  await lockHostedGroupRow(input.tx, groupLookup.id);
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { id: groupLookup.id },
+    select: { id: true, ownerMemberId: true, runtimeMemberId: true },
+  });
+  if (!group) {
+    return { kind: "group_not_found", vaultShareCleanupSignals: [] };
+  }
+
+  await lockHostedMemberRow(input.tx, input.memberId);
+  if (group.ownerMemberId === input.memberId) {
+    return { kind: "owner_cannot_leave", vaultShareCleanupSignals: [] };
+  }
+
+  const membership = await input.tx.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.memberId,
+      },
+    },
+    select: { id: true },
+  });
+  // A membership id is also the replay fence for private-assistant requests.
+  // Never let a stale request remove a membership created by a later rejoin.
+  if (input.membershipId !== undefined && membership?.id !== input.membershipId) {
+    return { kind: "already_left", vaultShareCleanupSignals: [] };
+  }
+
+  const revoked = group.runtimeMemberId
+    ? await revokeHostedVaultSharesWithCleanupTx({
+        destinationMemberId: group.runtimeMemberId,
+        grantorMemberId: input.memberId,
+        now: input.now,
+        tx: input.tx,
+      })
+    : { cleanupSignals: [], revokedCount: 0 };
+
+  if (membership) {
+    await input.tx.hostedGroupMember.delete({ where: { id: membership.id } });
+  }
+  if (!membership && revoked.revokedCount === 0) {
+    return { kind: "already_left", vaultShareCleanupSignals: [] };
+  }
+
+  return {
+    kind: "left",
     vaultShareCleanupSignals: revoked.cleanupSignals,
   };
 }
@@ -1249,37 +1375,42 @@ async function readHostedGroupMemberRoster(
     return [];
   }
 
+  const memberIds = input.members.map((member) => member.memberId);
+  const [grants, phoneNumberSnapshots] = await Promise.all([
+    input.runtimeMemberId
+      ? prisma.hostedVaultShare.findMany({
+        where: {
+          destinationMemberId: input.runtimeMemberId,
+          grantorMemberId: { in: memberIds },
+          status: "granted",
+        },
+        select: {
+          grantorMemberId: true,
+          projectionKind: true,
+          projectionScopeJson: true,
+          projectionScopeKey: true,
+        },
+      })
+      : Promise.resolve([]),
+    readHostedMemberPhoneNumberSnapshots({ memberIds, prisma }),
+  ]);
   const grantsByMemberId = new Map<string, HostedVaultShareProjectionScope[]>();
-  if (input.runtimeMemberId) {
-    const grants = await prisma.hostedVaultShare.findMany({
-      where: {
-        destinationMemberId: input.runtimeMemberId,
-        grantorMemberId: { in: input.members.map((member) => member.memberId) },
-        status: "granted",
-      },
-      select: {
-        grantorMemberId: true,
-        projectionKind: true,
-        projectionScopeJson: true,
-        projectionScopeKey: true,
-      },
-    });
-    for (const grant of grants) {
-      const scope = parseHostedGroupVaultShareRowProjectionScope(grant);
-      if (!scope) {
-        continue;
-      }
-      const scopes = grantsByMemberId.get(grant.grantorMemberId) ?? [];
-      scopes.push(scope);
-      grantsByMemberId.set(grant.grantorMemberId, scopes);
+  for (const grant of grants) {
+    const scope = parseHostedGroupVaultShareRowProjectionScope(grant);
+    if (!scope) {
+      continue;
     }
+    const scopes = grantsByMemberId.get(grant.grantorMemberId) ?? [];
+    scopes.push(scope);
+    grantsByMemberId.set(grant.grantorMemberId, scopes);
   }
+  const phoneNumberByMemberId = new Map(
+    phoneNumberSnapshots.map((snapshot) =>
+      [snapshot.memberId, snapshot.phoneNumber] as const
+    ),
+  );
 
-  return await Promise.all(input.members.map(async (member) => {
-    const identity = await readHostedMemberIdentity({
-      memberId: member.memberId,
-      prisma,
-    });
+  return input.members.map((member) => {
     const grantedVaultShareProjectionScopes =
       grantsByMemberId.get(member.memberId) ?? [];
     return {
@@ -1287,11 +1418,11 @@ async function readHostedGroupMemberRoster(
         ...new Set(grantedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
       ],
       grantedVaultShareProjectionScopes,
-      handle: identity?.phoneNumber ?? null,
+      handle: phoneNumberByMemberId.get(member.memberId) ?? null,
       memberId: member.memberId,
       role: member.role,
     };
-  }));
+  });
 }
 
 async function assertHostedGroupRuntimeDestinationTx(

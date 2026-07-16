@@ -107,8 +107,6 @@ import {
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
-import { getHostedOnboardingEnvironment } from "./runtime";
-
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
@@ -132,6 +130,7 @@ type HostedLinqExistingMemberMatch =
 type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInboundDailyState>>;
 
 export async function planHostedOnboardingLinqWebhook(input: {
+  affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
   firstContactAdmitted?: boolean;
   prisma: Prisma.TransactionClient;
@@ -176,6 +175,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         })
       : { mailboxConsumedAt: null };
     return planHostedLinqExplicitThreadRouteWebhook({
+      ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
       prisma: input.prisma,
@@ -186,6 +186,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   if (isHostedLinqGroupChat(messageEvent)) {
     return planHostedLinqGroupChatWebhook({
+      ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
       prisma: input.prisma,
@@ -632,14 +633,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
       eventId: input.event.event_id,
       linqMessage: {
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
         chatId: summary.chatId,
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
-        reactionEligible: isHostedLinqMessageReactionEligible({
-          parts: messageEvent.data.message.parts,
-          service: messageEvent.data.service ?? null,
-        }),
+        reactionEligible: input.affirmativeReaction
+          ? false
+          : isHostedLinqMessageReactionEligible({
+              parts: messageEvent.data.message.parts,
+              service: messageEvent.data.service ?? null,
+            }),
         threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
@@ -1012,6 +1016,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
+  affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
@@ -1116,14 +1121,17 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         ? { groupReactionContext: context.groupReactionContext }
         : {}),
       linqMessage: {
+        ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
         chatId: summary.chatId,
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
-        reactionEligible: isHostedLinqMessageReactionEligible({
-          parts: messageEvent.data.message.parts,
-          service: messageEvent.data.service ?? null,
-        }),
+        reactionEligible: input.affirmativeReaction
+          ? false
+          : isHostedLinqMessageReactionEligible({
+              parts: messageEvent.data.message.parts,
+              service: messageEvent.data.service ?? null,
+            }),
         threadIsDirect: false,
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
@@ -1320,6 +1328,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
  * containers billed against its home member.
  */
 async function planHostedLinqGroupChatWebhook(input: {
+  affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
@@ -1446,6 +1455,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
 
   const plan = await planHostedLinqExplicitThreadRouteWebhook({
+    ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
     context: input.context,
     event: input.event,
     prisma: input.prisma,

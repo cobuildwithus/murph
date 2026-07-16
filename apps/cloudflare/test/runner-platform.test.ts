@@ -9,7 +9,7 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
@@ -32,6 +32,9 @@ import type {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
+import {
+  HostedRuntimeArtifactReadError,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
@@ -105,6 +108,8 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -766,6 +771,125 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("preserves cancellation while a direct R2 snapshot presign is pending", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-abort-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot presign");
+    let resolvePresignStarted: (() => void) | null = null;
+    const presignStarted = new Promise<void>((resolve) => {
+      resolvePresignStarted = resolve;
+    });
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot pending presign fetch");
+        resolvePresignStarted?.();
+        resolvePresignStarted = null;
+        await delayWithAbort(60_000, request.signal);
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        signal: abortController.signal,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await presignStarted;
+      abortController.abort(abortReason);
+
+      await expect(upload).rejects.toBe(abortReason);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("preserves cancellation while the direct R2 snapshot PUT is pending", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-abort-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot PUT");
+    const objectKey =
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+    const putUrl =
+      `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+    let resolvePutStarted: (() => void) | null = null;
+    const putStarted = new Promise<void>((resolve) => {
+      resolvePutStarted = resolve;
+    });
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot pending PUT fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        resolvePutStarted?.();
+        resolvePutStarted = null;
+        await delayWithAbort(60_000, request.signal);
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        signal: abortController.signal,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await putStarted;
+      abortController.abort(abortReason);
+
+      await expect(upload).rejects.toBe(abortReason);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const putRequest = requireFetchRequest(
+        fetchMock.mock.calls[1],
+        "cancelled direct R2 workspace snapshot PUT",
+      );
+      expect(putRequest.method).toBe("PUT");
+      expect(putRequest.url).toBe(putUrl);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("logs redacted direct R2 transport failure text without presigned URL material", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
@@ -895,6 +1019,38 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         recursive: true,
       });
     }
+  });
+
+  it("preserves cancellation while a workspace snapshot session start is pending", async () => {
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot session start");
+    let resolveStartRequested: (() => void) | null = null;
+    const startRequested = new Promise<void>((resolve) => {
+      resolveStartRequested = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot pending session start");
+      expect(request.url).toBe("http://workspace-snapshots.worker/workspace-snapshots/start");
+      resolveStartRequested?.();
+      resolveStartRequested = null;
+      await delayWithAbort(60_000, request.signal);
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const start = platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "6",
+      reason: "idle_shutdown",
+      signal: abortController.signal,
+    });
+    await startRequested;
+    abortController.abort(abortReason);
+
+    await expect(start).rejects.toBe(abortReason);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("reuses the snapshot session write fence when aborting after the runtime lease changes", async () => {
@@ -2274,12 +2430,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     let thrown: unknown;
     try {
-      await platform.artifactStore.get("a".repeat(64));
+      await platform.artifactStore.get("a".repeat(64), {
+        purpose: "workspace_restore",
+      });
     } catch (error) {
       thrown = error;
     }
 
-    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toBeInstanceOf(HostedRuntimeArtifactReadError);
+    expect(thrown).toMatchObject({ retryable: true });
     expect((thrown as Error).message).toBe(
       "Hosted artifact fetch request failed.",
     );
@@ -2339,6 +2498,95 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
+  it.each([
+    { retryable: false, status: 422 },
+    { retryable: true, status: 503 },
+  ])("maps artifact HTTP $status to retryable=$retryable", async ({
+    retryable,
+    status,
+  }) => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: vi.fn(async () => new Response(null, { status })) as typeof fetch,
+    });
+
+    let thrown: unknown;
+    try {
+      await platform.artifactStore.get("a".repeat(64), {
+        purpose: "workspace_restore",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(HostedRuntimeArtifactReadError);
+    expect(thrown).toMatchObject({ retryable });
+  });
+
+  it("attaches the active runtime write fence to legacy artifact reads", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.artifactStore.get("a".repeat(64), {
+      purpose: "workspace_restore",
+    })).resolves.toBeNull();
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "artifact read");
+    expect(request.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get(HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER))
+      .toBe("workspace_restore");
+    const correlationId = request.headers.get(
+      HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+    );
+    expect(correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchCorrelationId: correlationId,
+          artifactReadPurpose: "workspace_restore",
+        }),
+      }),
+    );
+  });
+
+  it("preserves cancellation while a legacy snapshot artifact fetch is pending", async () => {
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted legacy artifact fetch");
+    let resolveFetchStarted: (() => void) | null = null;
+    const fetchStarted = new Promise<void>((resolve) => {
+      resolveFetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "pending legacy snapshot artifact fetch");
+      resolveFetchStarted?.();
+      resolveFetchStarted = null;
+      await delayWithAbort(60_000, request.signal);
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const artifact = platform.artifactStore.get("a".repeat(64), {
+      purpose: "legacy_snapshot_materialization",
+      signal: abortController.signal,
+    });
+    await fetchStarted;
+    abortController.abort(abortReason);
+
+    await expect(artifact).rejects.toBe(abortReason);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("retries replay-safe artifact fetch transport failures once", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
@@ -2357,10 +2605,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    const result = await platform.artifactStore.get("b".repeat(64));
+    const result = await platform.artifactStore.get("b".repeat(64), {
+      purpose: "workspace_artifact_materialization",
+    });
 
     expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = requireFetchRequest(fetchMock.mock.calls[0], "first artifact read");
+    const secondRequest = requireFetchRequest(fetchMock.mock.calls[1], "retried artifact read");
+    expect(firstRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER))
+      .toBe("workspace_artifact_materialization");
+    expect(secondRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER))
+      .toBe(firstRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runtime.artifact-store",
@@ -2414,7 +2670,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    const result = await platform.artifactStore.get("c".repeat(64));
+    const result = await platform.artifactStore.get("c".repeat(64), {
+      purpose: "canonical_write_receipt",
+    });
 
     expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -2482,7 +2740,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.artifactStore.get("d".repeat(64)))
+      await expect(platform.artifactStore.get("d".repeat(64), {
+        purpose: "workspace_restore",
+      }))
         .rejects.toThrow(testCase.expectedMessage);
       expect(fetchMock, testCase.label).toHaveBeenCalledTimes(1);
       const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
@@ -3510,7 +3770,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
+  it("routes raw email reads through the Cloudflare internal effects port with the active runtime fence", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -3530,6 +3790,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "effects port fetch");
     expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
+    expect(request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe("attempt_1");
+    expect(request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe("9");
+    expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("4");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.method).toBe("GET");
   });
@@ -3766,10 +4029,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
         const body = await request.clone().json() as { action?: unknown };
-        if (body.action === HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION) {
+        if (body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
           return new Response(JSON.stringify({
-            action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-            result: { causalSeq: "42" },
+            action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+            result: {
+              outcomes: {
+                detail: "unchanged",
+                humor: "saved",
+              },
+              settings: {
+                detail: { source: "default", value: 5 },
+                humor: { source: "custom", value: 8 },
+                push: { source: "default", value: 3 },
+              },
+            },
           }), {
             headers: { "content-type": "application/json; charset=utf-8" },
             status: 200,
@@ -3839,6 +4112,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.assistantAskPort).toBeDefined();
     expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
     expect(platform.vaultSharePort).toBeDefined();
@@ -3903,11 +4177,29 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       { action: "read" },
       { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
     )).resolves.toMatchObject({ action: "read" });
-    await expect(
-      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
-        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
-      }),
-    ).resolves.toBe("42");
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        personality: {
+          detail: null,
+          humor: 8,
+        },
+      },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).resolves.toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: {
+          detail: "unchanged",
+          humor: "saved",
+        },
+        settings: {
+          detail: { source: "default", value: 5 },
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
+    });
     await expect(platform.groupToolPort!.request({ action: "read_current" }))
       .resolves.toEqual({
         action: "read_current",
@@ -3946,12 +4238,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+    await expect(requests[10]?.clone().json()).resolves.toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: {
+        detail: null,
+        humor: 8,
+      },
+    });
   });
 
-  it("rejects malformed preference causal-sequence responses", async () => {
+  it("rejects malformed personality update responses", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-      result: { causalSeq: "not-a-sequence" },
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: { humor: "saved" },
+        settings: {
+          humor: { source: "custom", value: 8 },
+          push: { source: "default", value: 3 },
+        },
+      },
     }), {
       headers: { "content-type": "application/json; charset=utf-8" },
       status: 200,
@@ -3969,13 +4274,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    await expect(
-      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
-        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
-      }),
-    ).rejects.toThrow(
-      "Hosted assistant preference causal sequence returned invalid JSON.",
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        personality: { humor: 8 },
+      },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).rejects.toThrow(
+      "Hosted assistant personalization tool returned invalid JSON.",
     );
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "personality update callback request",
+    );
+    expect(request.url).toBe(
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
   });
 
   it("attaches active lease headers to direct signed web-control callbacks", async () => {
@@ -4061,15 +4377,56 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("routes device reconcile through the signed web-control port", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/api/internal/device-sync/reconcile");
+      await expect(request.json()).resolves.toEqual({ connectionId: "conn_123" });
+      return new Response(JSON.stringify({
+        connectionId: "conn_123",
+        occurredAt: "2026-07-15T12:00:00.000Z",
+        status: "queued",
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.reconcileAccount!({
+      connectionId: "conn_123",
+    })).resolves.toEqual({
+      connectionId: "conn_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "device reconcile request");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {
     let responseCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
       responseCount += 1;
+      const body = await request.json() as { authorityCheckOnly?: unknown };
+      expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
       return new Response(JSON.stringify({
         ok: true,
-        providerDispatchClaimed: true,
+        ...(body.authorityCheckOnly === false
+          ? { providerDispatchClaimed: true }
+          : {}),
         threadIsDirect: responseCount === 1 ? false : "false",
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -4093,6 +4450,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
 
     await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: false,
       target: "chat_123",
       targetKind: "thread",
     })).resolves.toEqual({
@@ -4100,11 +4458,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirect: false,
     });
     await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({
-      providerDispatchClaimed: true,
-    });
+    })).resolves.toEqual({});
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {

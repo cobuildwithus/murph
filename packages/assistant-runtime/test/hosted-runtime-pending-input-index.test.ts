@@ -25,6 +25,7 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
+  inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -48,6 +49,19 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("preserves the exact abort reason before background compaction starts", async () => {
+    const vaultRoot = await createTempVault();
+    const controller = new AbortController();
+    const reason = new Error("foreground input interrupted pending compaction");
+    controller.abort(reason);
+
+    await expect(compactHostedPendingAssistantInputIds({
+      signal: controller.signal,
+      vaultRoot,
+    })).rejects.toBe(reason);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
   it("treats a missing file as an empty greenfield index", async () => {
     const vaultRoot = await createTempVault();
 
@@ -356,6 +370,14 @@ describe("hosted pending assistant input index", () => {
       .resolves.not.toContain(oldPending.inputId);
 
     await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-04-23T00:00:08.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:38.000Z");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.not.toContain(oldPending.inputId);
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-04-23T00:00:09.000Z",
       vaultRoot,
     })).resolves.toBe("2026-04-23T00:00:09.000Z");
@@ -492,6 +514,52 @@ describe("hosted pending assistant input index", () => {
     });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("keeps complete nonempty index inspection conservative before maintenance compacts it", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_terminal_inspection",
+        eventId: "evt_terminal_inspection",
+        itemId: "item_terminal_inspection",
+        laneSeq: "10",
+        messageId: "msg_terminal_inspection",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "terminal indexed input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([event.inputId]);
+    await writeTerminalEvidence({
+      evidenceId: event.inputId,
+      groupInputIds: [event.inputId],
+      vaultRoot,
+    });
+
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([event.inputId]);
+    await expect(resolveHostedPendingAssistantInputWakeAt({ vaultRoot }))
+      .resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([]);
   });
 
   it("sorts remaining pending inputs by cursor during compaction", async () => {

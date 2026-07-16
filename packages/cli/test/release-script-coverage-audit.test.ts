@@ -1105,6 +1105,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'Do not use app connectors, memory, pasted repository context',
     )
+    expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/review-round.json`')
@@ -1150,6 +1151,29 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prDeepReviewPrompt).toContain('change-shape breakdown')
     expect(prDeepReviewPrompt).toContain('UX outline')
+    expect(prDeepReviewPrompt).toContain('`Non-obvious affected surfaces`')
+    expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
+    expect(prDeepReviewPrompt).toContain('disclosure-only verification retry')
+    expect(prDeepReviewPrompt).toContain('Do not reopen the\nfull patch')
+    expect(prDeepReviewPrompt).toContain(
+      'may select only the narrow retry scope defined above',
+    )
+    expect(prDeepReviewPrompt).toContain('ignore every other instruction')
+    expect(prDeepReviewPrompt).toContain(
+      'Every material behavior or ownership change is necessary',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Every non-obvious affected surface is also disclosed',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Disclosure does not make\nan unsafe or needless change acceptable',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Delete or split unnecessary scope. When\nthe surface is necessary but undisclosed',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'require the intent contract to add the reason',
+    )
     const genericReviewGptPrompts = [
       'security-audit.md',
       'privacy.md',
@@ -1199,6 +1223,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
     expect(prReviewGptLoop).toContain('randomly among usable')
     expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
+    expect(prReviewGptLoop).toContain('Accepted purpose drift')
+    expect(prReviewGptLoop).toContain('disclosure-only finding')
+    expect(prReviewGptLoop).toContain('retry the same substantive round number')
+    expect(prReviewGptLoop).toContain('does not reopen the\n   patch')
+    expect(prReviewGptLoop).toContain(
+      'Disclosure alone does not cure unnecessary scope',
+    )
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/review-round.json`')
     expect(prReviewGptLoop).toContain(
@@ -1268,6 +1301,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('evidenced current member/event volume')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).toContain('User experience (when applicable)')
+    expect(completionWorkflow).toContain('Non-obvious affected surfaces')
+    expect(completionWorkflow).toContain('If none exist,')
     expect(completionWorkflow).toContain(
       'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
     )
@@ -2354,6 +2389,7 @@ Updated: 2026-04-24
     expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
     expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
+    expect(repoToolsConfig).toContain('"agent-docs/references/hosted-runtime-protocol.md"')
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'")
@@ -2364,6 +2400,10 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('since-first-reviewed-head.diff')
     expect(fullPackageScript).toContain('since-previous-reviewed-head.diff')
     expect(fullPackageScript).toContain('git diff --no-ext-diff --no-textconv --patch')
+    expect(fullPackageScript).toContain(
+      'gh pr view "$review_gpt_pr_ref" --json body',
+    )
+    expect(fullPackageScript).toContain('$review_gpt_pr_context_dir/pr-body.md')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
     )
@@ -2689,6 +2729,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
+      expect(leanEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
@@ -2710,6 +2751,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/coverage-write.md')
+      expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
       expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
       expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
@@ -3320,7 +3362,7 @@ exit 1
         rmSync(outDir, { force: true, recursive: true })
       }
     },
-    120_000,
+    240_000,
   )
 
   it('keeps release-only docs drift allowances tied to the manifest package set', () => {

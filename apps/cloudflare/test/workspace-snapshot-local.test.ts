@@ -399,6 +399,43 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
+  it("preserves snapshot construction cancellation and removes temporary output", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-abort-test-"));
+    const durableRoot = path.join(tempRoot, "source", "durable");
+    const outputDir = path.join(tempRoot, "scratch");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const snapshotId = "snapshot_construction_abort";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_construction_abort.snapshot.enc";
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot construction");
+
+    try {
+      const construction = createEncryptedWorkspaceSnapshotFile({
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey,
+          snapshotId,
+          userId: "member_123",
+        }),
+        archiveEntries: [],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 10))
+          .toString("base64url"),
+        maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        outputDir,
+        signal: abortController.signal,
+      });
+
+      abortController.abort(abortReason);
+
+      await expect(construction).rejects.toBe(abortReason);
+      await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
   it("restores encrypted snapshots from an encrypted byte stream", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");

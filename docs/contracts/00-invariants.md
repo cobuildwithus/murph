@@ -2,8 +2,9 @@
 
 This file contains Murph's cross-cutting engineering rules. Product behavior
 belongs in product specs. Protocol details, file paths, provider fields,
-numeric tuning, incident history, and rollout case law belong in owner docs and
-executable tests.
+tunable numeric settings, incident history, and rollout case law belong in
+owner docs and executable tests. A fixed numeric floor appears here only when
+it has been explicitly elevated to a cross-cutting invariant.
 
 ## Admission Test
 
@@ -81,11 +82,37 @@ executable tests.
 - Background work runs in finite abortable units, checks for fresh input before
   each unit, and derives continuation from durable owner state. Preemption
   defers work; it never drops it.
+- A cross-context assistant ask uses paired encrypted mailbox items as its only
+  durable work state. Trusted owners derive and revalidate the target,
+  membership generation, origin, and return route; model-supplied labels or
+  questions never confer authority or select an internal runtime id.
+- A detached assistant read may overlap foreground work only in a separate
+  one-shot process with OS-enforced read-only roots and no write, tool-network,
+  route, delivery, or recursion authority. The resident foreground assistant
+  remains the sole model-authored canonical-content writer and sender. The
+  runtime must abort, await, and prove exit of the exact owned child before
+  checkpoint release, workspace replacement, fence loss, shutdown, or
+  invocation return.
 - A foreground prerequisite is a named current fact, not a generic lane or
   backlog. Bound unavoidable pre-provider and pre-delivery collections and
   waits, but never let background, replay, maintenance, or diagnostic budgets
   cap fresh accepted input.
+- Recovery, replay, audit, checkpoint, projection, maintenance, and diagnostic
+  failures may reject unsafe mutation and surface explicit degraded state, but
+  cannot indefinitely withhold foreground reply authority from durably accepted
+  current input. Continue from the last-known-good authorized state; never
+  fabricate or force conflicting canonical state to make recovery appear clean.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
+  After the latest durably accepted conversation message, routine checkpoint
+  construction has a hard 180-second minimum quiet window. Internal assistant,
+  maintenance, retention, cleanup, projection, and scheduled wakes must not
+  shorten it. Only the exact assistant retry or follow-up wake projected
+  directly by the current foreground assistant phase may run as foreground
+  work inside that window without publishing a snapshot. Inherited, committed,
+  durability-gated, and shutdown-time wakes do not use this exception. If the
+  hot pass dirties state, the full quiet window starts again. An actual host
+  termination may use the separate last-chance durability path, but durably
+  staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox
@@ -189,6 +216,22 @@ executable tests.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
   with distinct causal anchors must not be merged into one turn.
+- When one wake exposes a bounded sequence of already-durable, replyable
+  messages that share one conversation and native reply anchor and have
+  exact-successor positive causal identifiers, process that sequence as one
+  assistant turn. An initially empty pre-provider selection may acquire that
+  whole sequence during its required refresh; selection freezes when it first
+  becomes nonempty and always before provider start. A gap, legacy or missing
+  causal identifier, changed anchor or conversation, overflow, or post-freeze
+  arrival starts a later turn; terminal evidence covers every admitted input
+  so restart repair cannot resend the reply.
+- Accepted-turn membership remains authoritative during restart recovery. If
+  terminal evidence proves only an oldest contiguous handled prefix while a
+  post-freeze successor is also pending, repair and retire exactly that prefix,
+  checkpoint at its terminal input, and leave the successor pending for a later
+  turn. Recovery never widens the historical turn or advances past an uncovered
+  obligation; ambiguous, overlapping, noncontiguous, or conflicting evidence
+  fails closed.
 - Progress never advances past accepted work without terminal or durable
   pending evidence. A checkpoint cannot make an unhandled obligation disappear.
 - Commit durable work before signaling. A wake is a droppable, replayable
@@ -202,6 +245,30 @@ executable tests.
 - Recovery candidate enumeration begins from surviving staged evidence. Clean
   terminal metadata without stage residue is not recovery work. Narrowing that
   enumeration must preserve canonical identity across physical partitions.
+
+## Database Load And Collection Fanout
+
+- A request, render, transaction, or job that consumes a collection has an
+  owner-documented upper bound on datastore round trips, decrypted fields,
+  external key or provider calls, and concurrency. Evaluate that bound at the
+  maximum admitted cardinality. A small connection pool is a capacity limit,
+  not backpressure that makes unbounded application fanout safe.
+- As output cardinality grows, use narrow set-based reads or explicitly bounded
+  pages. Read shared facts once at their owning boundary and derive downstream
+  views from that snapshot. Sibling helpers must not reread the same owner rows
+  or decrypt fields their caller does not use.
+- Fewer reads must not weaken correctness. Keep required live authority checks
+  at lifetime, target, and irreversible-effect boundaries. Remove only reads
+  proved equivalent, and reuse owner predicates and resolvers instead of
+  copying policy into feature-local code.
+- Per-item external work that cannot be batched is deduplicated and
+  concurrency-capped. Crypto owners batch envelope metadata, preserve binding
+  and authenticity checks, fail closed on missing or mismatched material, and
+  zeroize key and plaintext buffers on success and failure.
+- Hot, locked, or transactional collection paths have deterministic
+  maximum-cardinality tests for datastore call count, selected fields, external
+  call count and concurrency, ordering, and required boundary revalidation.
+  Tunable numeric caps live in the owning protocol or SLO docs and tests.
 
 ## Provider And Runtime Boundaries
 
@@ -276,9 +343,11 @@ executable tests.
 - Make hot-path size, dependency closure, call ordering, scan complexity, state
   placement, provider shape, and replay boundaries executable with
   deterministic tests when prose cannot prevent drift.
-- Numeric latency budgets, retry counts, scan limits, and output limits live in
+- Tunable latency budgets, retry counts, scan limits, and output limits live in
   owner protocol or SLO docs and tests so they can be measured and ratcheted
-  without turning this file into configuration.
+  without turning this file into configuration. Fixed numeric floors explicitly
+  elevated to baseline invariants are mirrored mechanically in owner config and
+  tests.
 - Codex test doubles sit behind the production adapter. They may fake unsafe
   external edges, credentials, time, and deliberate failures; they must not
   maintain a second Codex lifecycle, protocol, scheduler, supervisor, or retry

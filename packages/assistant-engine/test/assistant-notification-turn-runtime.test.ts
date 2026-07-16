@@ -3268,6 +3268,7 @@ test('sendAssistantNotificationLocal clears rejected resume state before surfaci
     codexRolloutRelativePath: null,
     codexThreadId: null,
     routeFingerprint: 'route-primary',
+    threadCompatibilityFingerprint: 'route-primary',
     session: providerSession,
     vault: '/vaults/notification-rejected-resume',
   })
@@ -3325,6 +3326,7 @@ test('sendAssistantNotificationLocal persists accepted resume state before surfa
       'sessions/2026/07/14/accepted-notification-thread.jsonl',
     codexThreadId: 'accepted-notification-thread',
     routeFingerprint: 'route-primary',
+    threadCompatibilityFingerprint: 'route-primary',
     session: providerSession,
     vault: '/vaults/notification-accepted-resume',
   })
@@ -3894,11 +3896,13 @@ function createProviderResult(input?: {
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',
+    responseDeliveryContextOrdinal: 0,
     responseMedia: input?.responseMedia ?? [],
     route: input?.route ?? createRoute(),
     session,
     stderr: '',
     stdout: '',
+    transcriptResponse: input?.response ?? 'provider response',
     usage:
       input?.usage === undefined
         ? defaultUsage

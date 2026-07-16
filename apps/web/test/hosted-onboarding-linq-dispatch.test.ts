@@ -8753,12 +8753,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
-    hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
-      hostedInvite.findFirst?.({
+    hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => {
+      if (input.select?.id === true && typeof input.where?.id === "string") {
+        return { id: input.where.id };
+      }
+      return hostedInvite.findFirst?.({
         select: input.select,
         where: input.where,
-      }),
-    );
+      });
+    });
   }
 
   if (hostedMember && !hostedMember.updateMany) {

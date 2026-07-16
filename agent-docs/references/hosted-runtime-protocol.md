@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-12
+Last verified: 2026-07-15
 
 ## Decision
 
@@ -37,9 +37,12 @@ The live ownership split is:
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
-  The runtime, not the host, waits for the idle window or a scheduled wake and
-  checkpoints dirty local runtime state before returning success. When
-  Cloudflare reports container activity
+  The runtime, not the host, keeps dirty state warm through the configured idle
+  floor. The exact assistant wake projected directly by the current foreground
+  assistant phase may run once before that floor without checkpointing;
+  inherited or committed wakes and durability barriers remain checkpoint-first.
+  At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
+  state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
   cleanup only. There is no pending idle-checkpoint Durable Object state, idle
   checkpoint lease, idle checkpoint alarm, or host-owned shutdown checkpoint
@@ -62,6 +65,14 @@ The live ownership split is:
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
 
+Assistant Ask reuses that same ownership split. Web resolves the target and
+return authority, then appends paired encrypted `assistant.ask.requested` and
+`assistant.ask.completed` mailbox items. The group runtime may answer one
+request in a separate read-only one-shot Codex child while its resident
+foreground assistant continues to own writes and sends. The mailbox remains the
+only durable queue and operation state; Cloudflare gains no second container,
+Durable Object state, scheduler, or workflow for this lane.
+
 The final seam is:
 
 ```text
@@ -72,8 +83,11 @@ import mailbox prefix into local runtime state and stage AssistantInputEvent row
 pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
-wait for the runtime idle window, a coalesced wake, or a projected runtime wake
-checkpoint final dirty runtime state with checkpoint reason idle_shutdown; commit
+while dirty and before the idle floor, service fresh foreground input and at
+  most one exact assistant wake projected by the current foreground phase
+  without publishing a snapshot; other wakes do not shorten the floor
+at the idle floor, or on shutdown, checkpoint final dirty runtime state with
+  checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
 if the default-mode runtime remains live, import that ahead input immediately;
   during retention-only work or shutdown, leave the durable mailbox row for
@@ -91,7 +105,8 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
-final runtime-owned idle or scheduled-wake checkpoint. Plain-text Linq plus
+runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
+Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.
 Direct email retains raw-message projection because its staged preview is
@@ -245,6 +260,20 @@ discard a valid uploaded
 snapshot or create a second metadata-only shutdown snapshot. Assistant
 admission, assistant automation, outbox intent creation, and reply delivery
 remain independent of device-sync and other maintenance completion.
+Once terminal reply delivery is durable, the foreground lane releases ownership;
+it does not wait for provider cleanup or another exact automation inventory
+scan. A conversation import that lands while foreground-owned maintenance is
+in flight aborts that work through the runner-scoped background-maintenance
+signal so the new message can enter assistant admission immediately.
+
+Foreground wake projection is read-only unless the foreground turn itself
+committed a canonical write under `bank/automations`. That write arms an
+immediate assistant maintenance wake, where exact cron reconciliation remains
+owned. Ordinary post-delivery work does not rescan exact cron status. Pending
+assistant-input probes also inspect only the existing index: a candidate in a
+complete index keeps its immediate wake, while a missing or incomplete index
+gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
+in the maintenance lane rather than extending reply ownership.
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
@@ -272,14 +301,64 @@ proof owns the container lifecycle while it delivers the identity-checked abort.
 A stale result preserves the fence and retries. An accepted or queued result, or
 an ambiguous delivery failure, recycles the old shell fail-closed before the
 container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement. A deploy-skewed request-only
-`requested` result remains non-authoritative without inactive proof and
-preserves the fence for retry.
+clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
 workspace checkpoint compare-and-swap conflicts still fail closed rather than
 publishing partial or corrupt state.
+
+### Assistant Ask Read Side Lane
+
+`murph.group(action="ask")` is admitted only from a fresh authenticated private
+input. The runtime calls `assistantAskPort.request`; the signed
+`POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
+resolves the current `HostedGroupMember` row and synthetic group runtime from
+the caller plus an optional exact visible label. Models never supply member,
+membership, runtime, mailbox, callback, session, or return-route ids. Web
+derives one stable request identity, pins the origin, destination, membership
+generation, and ten-minute expiry, appends one encrypted
+`assistant.ask.requested` item, then signals the existing group runtime. Exact
+retry reuses that item and cannot resolve a different target.
+
+The target runtime rechecks expiry, membership generation, runtime identity,
+and the active write fence before context assembly. It snapshots bounded
+committed conversation evidence in memory and seals it with the live restored
+group workspace; this is not a second durable snapshot or projection. A
+dedicated router keeps the request out of ordinary serial
+system-message execution and starts at most one `executeReadOnlyAssistantAsk`
+promise. That call launches a separate one-shot App Server process with the
+native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
+`.codex/**`, and environment-file denial, no tool network or inherited shell
+secrets, and no dynamic tools or delivery authority. Thread-start attestation
+must confirm the exact profile, roots, sealed empty working directory, empty
+instruction sources, and approval policy before model work. Further asks stay
+pending in the mailbox. The resident process remains the sole model-authored
+canonical-content writer and sender, and foreground start, steering, and
+delivery never await the child.
+
+The group runtime returns only the request id and schema-checked bounded answer
+through the signed completion control path. Web reloads the request, rechecks
+the exact membership generation, runtime fence, expiry, and original private
+route, then appends one deterministic encrypted `assistant.ask.completed` item
+to the bound private runtime. The first committed completion wins. The private
+runtime treats it as correlated untrusted data and may run one output-only
+follow-up after current route validation; it cannot recurse into Assistant Ask
+or invoke side-effecting tools.
+
+An unfinished child leaves the request pending. Before invocation return,
+checkpoint, shutdown, fence loss, or workspace replacement, the runtime
+interrupts the exact child, waits a bounded grace period, terminates only that
+proven-owned process if needed, proves exit, and only then releases the
+workspace. Child failure cannot interrupt or poison the resident App Server.
+
+The first rollout is consumer-first. Deploy the runtime and runner consumers
+with immediate container rollout, prove `murph-group-read` confinement and the
+new bundle fingerprint, deploy Web with
+`HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`, and enable exact `1` only
+after convergence. Rollback disables and redeploys the Web producer first,
+waits at least the full ten-minute request lifetime, and rolls consumers back
+only after pending request and completion items have drained or expired.
 
 ### Deploy Compatibility Rule
 
@@ -297,15 +376,23 @@ this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
 The preference sparse-delta plus cross-lane causal-sequence rollout uses the
 same compatibility rule behind one gate. Vercel predeploy first adds nullable
-`causal_seq` storage and the new web build starts producing sequences while
-personality writes remain gated off; the old Cloudflare parser ignores that
+`causal_seq` storage, the keyed assistant-input lookup, and nullable Humor,
+Push, and Detail projection watermarks. The new web build starts producing
+sequences and supports the signed input-bound personality transaction while
+personality writes remain gated off; the old Cloudflare parser ignores the
 optional field. The normal post-deploy contract lane waits for old Vercel
 functions to drain and requires sequences only when no unconsumed legacy
-preference row remains, failing closed for a later retry otherwise. Deploy the
-sequence-aware Cloudflare consumer with immediate runner rollout and its gate
-off, prove fleet convergence, then enable Cloudflare before Vercel. Once the
-gates are enabled or positive preference watermarks can exist, neither plane
-may roll back independently.
+preference row remains, failing closed for a later retry otherwise. It then
+seeds all three personality watermarks to each member's current causal barrier,
+including null projection values, because the pre-fix projection may differ
+from canonical vault state and cannot be backfilled safely. Deploy the
+sequence-aware Cloudflare consumer with immediate runner rollout, prove fleet
+convergence, then enable the Vercel gate. The hard-cut Web build rejects the
+retired direct-vault causal-sequence action after old Vercel functions drain;
+legacy runners keep ordinary replies but style writes fail closed. Web must not
+roll back below that hard-cut while personality watermarks exist. Set the gate
+to `0` and redeploy Web before a runner rollback when unavailable controls must
+be hidden.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -410,6 +497,13 @@ staging/trace-row race; it carries no message, prompt, response, reasoning, or
 provider payload. Post-generation delivery guards must never create or
 overwrite the local Codex start milestone.
 
+Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
+one UUID correlation id per logical fetch; retries retain that same id. Both
+sides log only validated purpose/correlation metadata, timing, status, and
+ordinal fields, never artifact refs or bytes. The allowed purposes distinguish
+workspace restore, canonical-write receipts, legacy snapshot materialization,
+and workspace artifact materialization.
+
 Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
@@ -496,18 +590,42 @@ user-scoped transaction lock, shared by the conversation and system lanes.
 That acceptance sequence, not lane import order or wall-clock time, orders
 Settings deltas against conversational preference commands. System pending
 items and durable conversation input records carry it to the canonical
-preference owner, which stores only a per-field applied watermark. An older or
-equal event is terminal for stale fields, while a fresh sibling still applies.
-Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
-a field whose zero-or-newer watermark is already established.
+preference owner, which stores only a per-field applied watermark. Web keeps
+matching nullable per-field projection watermarks for tone, voice, Humor, Push,
+and Detail. The four-case equality-aware rule applies at the canonical owner
+and to Web's Humor, Push, and Detail projection: a newer sequence applies even
+when the visible value is unchanged, an older sequence is a field-local stale
+no-op while a fresh sibling still applies, the same sequence and value is an
+idempotent retry, and the same sequence with a different value is a later
+command in the same accepted turn. Web tone and voice retain their existing
+watermark ordering. Tokenless v1 pending items map to sequence zero and drain;
+they cannot overwrite a field whose zero-or-newer watermark is already
+established.
 Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
-value document. The canonical selector admits at most one mailbox-backed input
-per provider turn; later inputs remain pending instead of being folded or
-steered across causal anchors. During that turn, the accepted-input boundary
-passes the exact selected sequence directly to the private hosted style
-operation. The model cannot supply the number, and the turn-local value is
-cleared at turn completion.
+value document. The canonical selector admits a bounded, cursor-ordered compound
+batch. Foreground begins with the oldest fresh input in the current wake and
+considers only later fresh siblings; background begins with the oldest replyable
+pending input. The batch continues only across the same canonical conversation,
+the same provider-native reply anchor, and exact-successor positive per-member
+causal sequences. A gap, missing or legacy sequence, boundary change, or the
+50-input bound ends the batch and leaves the remainder pending. During that
+turn, the accepted-input boundary passes the terminal provider input id to the
+private hosted style operation. The signed Web transaction binds that id to the
+member's live conversation row and derives the compound turn frontier; the
+model supplies neither the id nor a numeric sequence. Exact-successor proof
+prevents that frontier from crossing an intervening Settings row.
+
+Hosted style set/reset atomically updates the Web projection and requested
+per-dial watermarks in that transaction and, when at least one requested dial
+applies, appends a sparse
+`member.preferences.updated` event with `causalOrigin: "turn"` and the derived
+frontier as `preferenceCausalSeq`. The new mailbox row's own transport sequence
+does not become a second intent time. Runtime handling remains the only durable
+vault mutation path. Until that event is imported, the invocation keeps only
+Web's accepted effective dials as a turn-scoped overlay; `show` reads canonical
+vault state first and overlays those accepted current-turn results. The overlay
+is cleared when the invocation completes.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime
@@ -522,6 +640,14 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+When a pending vault-file action must surface an approval capability, the
+assistant runtime keeps the approval owner's URL out of model context and
+appends that exact hidden value only to the ephemeral delivery response. The
+durable assistant transcript stores the capability-free semantic response, not
+the transport-complete delivery text. A required user-visible capability also
+overrides no-reply selection before the runtime persists any no-reply
+suppression or completion marker. The model is not an authority for
+capability-token transcription or delivery decisions.
 An approved vault-file intent is also bound to its persisted provider target and
 target kind at final dispatch. Linq current-home fallback cannot substitute a
 different destination after approval; that intent fails before approval consume
@@ -809,7 +935,8 @@ background-only mailbox semantics are unchanged.
 The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
-idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
+idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
+RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
@@ -854,24 +981,52 @@ must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
-The assistant engine then admits the persisted input through live steering or
-pre-provider admission without using hosted-specific mailbox
-refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
-steered into that live provider turn. After the live provider turn ends,
-untargeted new input remains staged for a normal later assistant turn, while
-strict active-turn-targeted input fails closed instead of falling through; the
-assistant engine does not synthesize another provider request inside the same
-assistant turn.
+The assistant engine admits the frozen same-wake compound batch before provider
+start without broad hosted mailbox rediscovery. While a Codex turn is live,
+later mailbox input may still be imported and staged. Its exact staged input ID
+may join through the generic live-steering path only when the stored event is
+the next positive causal-sequence successor and preserves the conversation,
+delivery route, native reply anchor, account/audience, and group actor. A
+projection-pending input is a causal barrier until the existing
+projection-completion notification retries it; terminal projection failure is
+still replyable through the normal fallback. Duplicate staging and
+projection-completion notifications at or behind the newest queued or committed
+frontier are ignored before exact-successor proof. After the provider
+acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
+before any hosted tool effect or final delivery may proceed. Missing input, a
+causal gap, a boundary change, or a missed live window remains pending for a normal later
+assistant turn. Strict active-turn-targeted input still fails closed instead of
+falling through, and the assistant engine does not synthesize another provider
+request inside the same assistant turn. Final-delivery and hosted-tool effect
+keys use the newest accepted causal input as the stable replay anchor while the
+full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
 the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark.
+Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
+owns artifact failure disposition: transport, object-read, key-resolution
+request, and service failures remain retryable, while a persisted object with
+a malformed envelope, unavailable key ID, or deterministic decryption failure
+is terminal. If a retryable read
+failure reaches receipt recovery, the runtime discards that local tree and
+fails the invocation without changing the durable receipt fingerprint; a later
+invocation retries the same input. If the artifact failure is terminal, or if
+referenced content is missing, malformed, conflicting, or fails application,
+the runtime instead reloads the authoritative snapshot before admitting
+foreground work.
+That failed receipt batch is rejected as unauthorized recovery input and its
+active fingerprint is removed; the runtime reports the degraded recovery but
+does not create a repair owner or claim the rejected batch remains repairable.
+A later canonical write starts from the authoritative snapshot with a fresh
+receipt log, so repeated deterministic recovery failures cannot acquire
+foreground authority or checkpoint partial state.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
-local assistant-service path. The same-reply coalescing window ends when the
-live provider turn ends, not at physical provider delivery; mailbox input that
-arrives after that boundary remains durable staged input for a later turn.
+local assistant-service path. The same-reply coalescing window closes when the
+bounded batch is selected before provider start; mailbox input that arrives
+after that boundary remains durable staged input for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
@@ -880,7 +1035,8 @@ provider confirms a safe retry contract.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but
-before the final runtime-owned idle or scheduled-wake checkpoint succeeds, the next
+before the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown`
+checkpoint succeeds, the next
 invocation reimports from the web-owned mailbox because the staged watermark was
 never checkpointed. If reset happens after a successful final checkpoint but
 before terminal handling, the next invocation must still run the assistant
@@ -901,7 +1057,7 @@ inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through hosted provider-cleanup after the next successful runtime-owned
-idle or scheduled-wake workspace checkpoint. The first deferred cleanup wake is
+idle-floor workspace checkpoint. The first deferred cleanup wake is
 scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
 the warm idle window; actual cleanup failures use the provider-cleanup retry
 delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
@@ -927,8 +1083,11 @@ or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log ref, bounded to 64 pending entries
 and 64 KiB, through a status-only workspace checkpoint that retains the prior
-snapshot ref. Capacity and log shape are validated before referenced payloads
-are uploaded. If that checkpoint has an ambiguous transport outcome, the
+snapshot ref. Capacity, log shape, and payload lengths are validated before
+upload. The complete immutable payload, receipt, and log artifact set then
+uploads in small fixed concurrent waves; every started wave settles before a
+failure returns, and the checkpoint publishes the log ref only after the whole
+set succeeds. If that checkpoint has an ambiguous transport outcome, the
 Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
@@ -1003,11 +1162,14 @@ v2 snapshot, restore must still be correct from durable mailbox, exact canonical
 write receipts, transcript, and assistant runtime state even if provider-native
 resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
-committed transcript history; primary native-resume attempts do not replay that
-history into the provider prompt. Active-turn input is not serialized as
-provider prompt history; it is either folded in before the first provider
-request, steered through the live Codex turn, or left unaccepted for a later
-normal turn when it misses the live steering window.
+committed transcript history. That history is semantic assistant content and
+must exclude runtime-owned capability URLs that were appended only for user
+delivery. Primary native-resume attempts do not replay committed history into
+the provider prompt, and the provider-native turn never receives those
+runtime-appended URLs. Active-turn input is not serialized as provider prompt
+history; it is either folded in before the first provider request, steered
+through the live Codex turn, or left unaccepted for a later normal turn when it
+misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses browser-session backstops from the latest replica
@@ -1080,19 +1242,30 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
-Checkpoint-required wake metadata remains checkpoint-gated. A new due or
-projected assistant wake moves the next `idle_shutdown` no later than its own
-deadline, so the warm invocation persists and services it instead of waiting
-out the idle timer. If servicing an already-committed due assistant wake
-immediately produces another due wake, the continuation keeps the idle delay to
-bound repeated failing passes. Other pending work, including mailbox budget
-exhaustion and deferred durable checkpoint follow-ups, preserves its
-invocation-local wake candidate without pulling checkpointing earlier. A
-durable checkpoint-effect follow-up still carries its real typed wake.
-Conversation input actually imported and staged before a shutdown yield carries
-a due assistant wake on its real dirty-state checkpoint; a bare runtime wake or
+In production, the configured idle checkpoint delay is at least 180 seconds,
+and every dirty foreground pass restarts that hard lower bound. The exact
+assistant wake projected directly by the current foreground assistant phase may
+run once per dirty checkpoint generation before that boundary against the warm
+projected state, without entering maintenance or publishing a snapshot. A
+no-progress hot attempt preserves its exact wake without replaying it again in
+the same invocation; a dirty progressed attempt restarts the full idle window.
+Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
+follow-ups, and inherited, committed, or otherwise unproven wake keys remain
+checkpoint-first and do not shorten the routine floor. Shutdown does not use the
+hot-service exception; it may take the separate last-chance durability
+checkpoint. A restored or committed due wake may run ordinarily when the
+workspace is clean, but a dirty invocation checkpoints first. A durable
+checkpoint-effect follow-up still carries its real typed wake. Conversation
+input actually imported and staged before a shutdown yield carries a due
+assistant wake on its real dirty-state checkpoint; a bare runtime wake or
 no-work mailbox notification observed during shutdown does not become a
 metadata-only assistant handoff.
+Routine snapshot planning, archive construction, and direct object upload remain
+interruptible until canonical checkpoint publication begins. A foreground wake
+aborts that pre-publication work, unwinds the snapshot session and temporary
+archive, and returns to foreground import. Once canonical publication begins,
+the checkpoint completes and the consumed wake is retained for immediate
+post-commit foreground handling.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.
@@ -1138,6 +1311,9 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
+- Assistant Ask target resolution, membership-generation and origin binding,
+  deterministic request/completion identity, expiry checks, and private return
+  route authority; encrypted mailbox rows remain the only durable ask state
 
 The runtime may attach one bounded usage-notice delivery target to an assistant
 usage record only when every accepted input for that provider request resolves
@@ -1157,6 +1333,8 @@ routing.
 - runtime timers, assistant next wake projection, and inbox media retention wake
   projection
 - checkpoint timing
+- the invocation-local one-child Assistant Ask controller, sealed group context
+  builder, and exact-child abort/await lifecycle; none is durable queue state
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)
@@ -1167,15 +1345,17 @@ routing.
 - lease/fencing generation
 - alarm/fence coordination
 - container invocation
-- optional signed web allow-decision payload compatibility on legacy foreground
-  requests; Cloudflare does not validate it as runner-start authority and
-  missing, stale, mismatched, or invalid decisions never trigger a live web
-  usage-gate callback before the hot reply path starts
+- no signed usage-allow decision or live Web usage-gate callback in runner-start
+  authority; Temporal consumes the web-owned member-access decision, and
+  Cloudflare/runner #587 or newer is the permanent rollback floor while Web
+  omits the retired callback route
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
+- signed Assistant Ask Web-control transport and normal runner-container process
+  hosting; Cloudflare does not own ask routing, membership, queueing, or results
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 hosted AI usage spend, assistant channel enablement state, outbox truth, or

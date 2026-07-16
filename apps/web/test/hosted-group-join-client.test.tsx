@@ -174,6 +174,7 @@ test("opens the post-auth destination only after membership succeeds", async () 
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
       permissions: [],
@@ -189,7 +190,10 @@ test("opens the post-auth destination only after membership succeeds", async () 
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
-    payload: { selectedVaultShareProjectionScopes: [] },
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [],
+    },
     url: "/api/groups/join/JOIN123/accept",
   });
   expect(mocks.routerPush).not.toHaveBeenCalled();
@@ -205,4 +209,97 @@ test("opens the post-auth destination only after membership succeeds", async () 
   });
 
   expect(mocks.routerPush).toHaveBeenCalledWith("/home?initialVisit=true");
+});
+
+test("binds an existing-member sharing update to the rendered membership id", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: true,
+      expectedMembershipId: "membership_existing",
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [],
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: "membership_existing",
+      selectedVaultShareProjectionScopes: [],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
+});
+
+test("confirms the provider boundary before leaving and returns home", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true, status: "left" });
+  const { GroupJoinLeaveButton } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinLeaveButton, {
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+    }),
+  );
+  cleanupRender = cleanup;
+  const confirmLeave = vi.fn(() => true);
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: confirmLeave,
+  });
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(confirmLeave).toHaveBeenCalledWith(expect.stringMatching(
+    /ends your Murph membership.*queues its shared copies for cleanup.*won't remove you from the iMessage chat.*provider history.*backups.*outside Murph/u,
+  ));
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    url: "/api/groups/join/JOIN123/leave",
+  });
+  expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+});
+
+test("does not leave when the confirmation is cancelled", async () => {
+  const { GroupJoinLeaveButton } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinLeaveButton, {
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+    }),
+  );
+  cleanupRender = cleanup;
+  const confirmLeave = vi.fn(() => false);
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: confirmLeave,
+  });
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(confirmLeave).toHaveBeenCalledOnce();
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  expect(mocks.routerPush).not.toHaveBeenCalled();
 });

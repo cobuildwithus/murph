@@ -43,7 +43,6 @@ import type {
 import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
-  type HostedAssistantInputSelection,
 } from "./turn-input.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -60,8 +59,6 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
-const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
-
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 
@@ -159,15 +156,6 @@ export async function runHostedAssistantAutomationLane(input: {
 }): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
   const freshAssistantInputIds = input.freshAssistantInputIds ?? [];
-  const initialBackgroundSelection = freshAssistantInputIds.length === 0
-    ? await selectHostedAssistantInputIds({
-        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-        mode: "background",
-        vaultRoot: input.vaultRoot,
-      })
-    : null;
-  const hasRecoveredReplyableInput =
-    (initialBackgroundSelection?.inputIds.length ?? 0) > 0;
   const resolveReadiness = async () => {
     const readinessStartedAt = Date.now();
     const readiness = await resolveHostedAssistantAutomationReadiness({
@@ -212,9 +200,6 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
-          ...(hasRecoveredReplyableInput && initialBackgroundSelection
-            ? { initialInputSelection: initialBackgroundSelection }
-            : {}),
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -237,6 +222,7 @@ export async function runHostedAssistantAutomationLane(input: {
         redactedLogEntries: [],
         replyFailed: 0,
         selectedInputIds: [],
+        selectedInputWakeAt: null,
         terminalLinqCleanup: null,
         timings: undefined,
       };
@@ -261,6 +247,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationScanElapsedMs: assistantResult.timings?.scanElapsedMs ?? null,
     assistantAutomationSelectedInputIds: assistantResult.selectedInputIds,
+    assistantAutomationSelectedInputWakeAt: assistantResult.selectedInputWakeAt,
     assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
@@ -286,7 +273,6 @@ export async function runHostedAssistantAutomation(
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
-    initialInputSelection?: HostedAssistantInputSelection;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
@@ -301,6 +287,7 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
   selectedInputIds: string[];
+  selectedInputWakeAt: string | null;
   terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
@@ -327,20 +314,19 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
-  const selectedInputIds = options?.initialInputSelection
-    ?? await selectHostedAssistantInputIds(
-      freshAssistantInputIdCount > 0
-        ? {
-            freshAssistantInputIds,
-            mode: "foreground",
-            vaultRoot,
-          }
-        : {
-            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-            mode: "background",
-            vaultRoot,
-          },
-    );
+  const selectedInputIds = await selectHostedAssistantInputIds(
+    freshAssistantInputIdCount > 0
+      ? {
+          freshAssistantInputIds,
+          mode: "foreground",
+          vaultRoot,
+        }
+      : {
+          limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          mode: "background",
+          vaultRoot,
+        },
+  );
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
@@ -348,9 +334,8 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
-  const shouldDeferCronForSelectedInput = selectedInputIds.inputIds.length > 0;
   const shouldDeferCron = () =>
-    shouldDeferCronForSelectedInput
+    baseInputSource.readSelectedInputIds().length > 0
     || options?.shouldYieldBackgroundMaintenance?.() === true;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
@@ -370,7 +355,7 @@ export async function runHostedAssistantAutomation(
             query,
             queryIndex,
             result,
-            selectedInputCount: selectedInputIds.inputIds.length,
+            selectedInputCount: baseInputSource.readSelectedInputIds().length,
           }),
           wake,
           message: "Hosted assistant input candidate query finished.",
@@ -404,11 +389,7 @@ export async function runHostedAssistantAutomation(
     },
     async refresh(refreshInput) {
       const result = await baseInputSource.refresh(refreshInput);
-      if (
-        selectedInputIds.mode === "background"
-        && result.progressed
-        && result.reason === "ingested_input"
-      ) {
+      if (result.progressed && result.reason === "ingested_input") {
         activeTurnInputIngested = true;
       }
 
@@ -431,9 +412,10 @@ export async function runHostedAssistantAutomation(
   let passStartedAt: number | null = null;
   try {
     passStartedAt = Date.now();
-    const maxPerScan = selectedInputIds.mode === "foreground"
-      ? Math.max(1, selectedInputIds.inputIds.length)
-      : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
+    const maxPerScan = Math.max(1, selectedInputIds.inputIds.length);
+    const maxInputPerScan = selectedInputIds.inputIds.length > 0
+      ? maxPerScan
+      : DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
     const buildBackgroundDynamicContextPrompt =
       selectedInputIds.mode === "background"
       && selectedInputIds.inputIds.length === 0
@@ -452,6 +434,7 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
+      ...(maxInputPerScan === maxPerScan ? {} : { maxInputPerScan }),
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,
@@ -580,10 +563,15 @@ export async function runHostedAssistantAutomation(
     };
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
+    const wakeNowMs = resolveHostedMaintenanceWakeNowMs(wake);
+    const selectedInputWakeAt = selectedInputIds.mode === "foreground"
+      ? normalizeHostedFutureWakeAt(replies.nextWakeAt ?? null, wakeNowMs)
+      : null;
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-      nowMs: resolveHostedMaintenanceWakeNowMs(wake),
+      inferBacklogFromSaturation: selectedInputIds.mode === "background",
+      nowMs: wakeNowMs,
       resultNextWakeAt: result.nextWakeAt,
-      scanLimit: maxPerScan,
+      scanLimit: Math.max(1, baseInputSource.readSelectedInputIds().length),
       scanResult: {
         replies,
         routing,
@@ -622,6 +610,7 @@ export async function runHostedAssistantAutomation(
       redactedLogEntries,
       replyFailed: replies.failed,
       selectedInputIds: baseInputSource.readSelectedInputIds(),
+      selectedInputWakeAt,
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
@@ -661,6 +650,7 @@ export async function runHostedAssistantAutomation(
         redactedLogEntries,
         replyFailed: 0,
         selectedInputIds: baseInputSource.readSelectedInputIds(),
+        selectedInputWakeAt: selectedInputIds.mode === "foreground" ? nextWakeAt : null,
         terminalLinqCleanup: null,
       };
     }
@@ -812,6 +802,7 @@ async function sleep(delayMs: number): Promise<void> {
 }
 
 function resolveHostedAssistantAutomationNextWakeAt(input: {
+  inferBacklogFromSaturation: boolean;
   nowMs: number;
   resultNextWakeAt: string | null;
   scanLimit: number;
@@ -831,7 +822,9 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
       input.resultNextWakeAt,
       input.nowMs,
     ),
-    resolveHostedAssistantBacklogWakeAt(input),
+    input.inferBacklogFromSaturation
+      ? resolveHostedAssistantBacklogWakeAt(input)
+      : null,
   );
 }
 

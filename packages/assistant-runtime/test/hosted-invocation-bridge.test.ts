@@ -1,10 +1,27 @@
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  buildHostedExecutionAssistantAskCompletedWake,
+  buildHostedExecutionAssistantAskRequestedWake,
+} from "@murphai/hosted-execution";
 import type {
+  HostedExecutionAssistantAskCompletedWake,
+  HostedExecutionAssistantAskRequestedWake,
   HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -23,6 +40,12 @@ import {
 import {
   withCanonicalWriteLock,
 } from "@murphai/core";
+import {
+  readHostedWorkspaceSkippedInlineFiles,
+  sha256HostedBundleHex,
+  snapshotHostedBundleRoots,
+  writeHostedWorkspaceSkippedInlineFiles,
+} from "@murphai/runtime-state/node";
 
 import {
   type HostedRuntimePlatform,
@@ -233,6 +256,261 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("does not let snapshot-session abort cleanup block checkpoint interruption", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    calls.abortSnapshotSession.mockImplementationOnce(async () => {
+      return await new Promise<never>(() => {});
+    });
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic checkpoint interruption.");
+    let resolveArchiveStarted: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      resolveArchiveStarted = resolve;
+    });
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async (input) => {
+        expect(input.signal).toBe(controller.signal);
+        resolveArchiveStarted?.();
+        const signal = input.signal;
+        if (!signal) {
+          throw new Error("Checkpoint signal was not propagated to archive construction.");
+        }
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectWithInterruption = () => {
+            reject(signal.reason);
+          };
+          if (signal.aborted) {
+            rejectWithInterruption();
+            return;
+          }
+          signal.addEventListener("abort", rejectWithInterruption, {
+            once: true,
+          });
+        });
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    const snapshot = Promise.resolve(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    ));
+    const snapshotOutcome = snapshot.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ error, status: "rejected" as const }),
+    );
+    await archiveStarted;
+    controller.abort(interruption);
+    let promptRejectionTimeout: ReturnType<typeof setTimeout> | undefined;
+    const promptOutcome = await Promise.race([
+      snapshotOutcome,
+      new Promise<{ status: "timeout" }>((resolve) => {
+        promptRejectionTimeout = setTimeout(() => {
+          resolve({ status: "timeout" });
+        }, 250);
+      }),
+    ]);
+    if (promptRejectionTimeout) {
+      clearTimeout(promptRejectionTimeout);
+    }
+    expect(promptOutcome.status).toBe("rejected");
+    if (promptOutcome.status === "rejected") {
+      expect(promptOutcome.error).toBe(interruption);
+    }
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {
+    const vaultRoot = await createVaultRoot();
+    const workspaceRoot = path.dirname(path.dirname(vaultRoot));
+    const runtimeRoot = path.join(
+      workspaceRoot,
+      "durable",
+      "home",
+      ".codex-hosted",
+      "nested",
+    );
+    const symlinkTarget = path.join(workspaceRoot, "runtime-symlink-target.txt");
+    const symlinkPaths = [
+      path.join(runtimeRoot, "first-link"),
+      path.join(runtimeRoot, "second-link"),
+    ];
+    await mkdir(runtimeRoot, { recursive: true });
+    await writeFile(symlinkTarget, "runtime-owned symlink target\n", "utf8");
+    await Promise.all(symlinkPaths.map(async (symlinkPath) => {
+      await symlink(symlinkTarget, symlinkPath);
+    }));
+
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic foreground cleanup interruption.");
+    const nativeThrowIfAborted = controller.signal.throwIfAborted.bind(
+      controller.signal,
+    );
+    let untouchedPathAtInterruption: string | null = null;
+    Object.defineProperty(controller.signal, "throwIfAborted", {
+      configurable: true,
+      value() {
+        const remainingPaths = symlinkPaths.filter((symlinkPath) =>
+          existsSync(symlinkPath)
+        );
+        if (!controller.signal.aborted && remainingPaths.length === 1) {
+          [untouchedPathAtInterruption] = remainingPaths;
+          controller.abort(interruption);
+        }
+        nativeThrowIfAborted();
+      },
+    });
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+
+    expect(symlinkPaths.filter((symlinkPath) => existsSync(symlinkPath)))
+      .toEqual([untouchedPathAtInterruption]);
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).not.toHaveBeenCalled();
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("publishes legacy skipped-inline files atomically before surfacing a wake", async () => {
+    const vaultRoot = await createVaultRoot();
+    const workspaceRoot = path.dirname(path.dirname(vaultRoot));
+    const sourceVaultRoot = path.join(workspaceRoot, "legacy-source");
+    const firstRelativePath = "raw/legacy/first.txt";
+    const secondRelativePath = "raw/legacy/second.txt";
+    const firstBytes = Buffer.from("first legacy bytes\n", "utf8");
+    const secondBytes = Buffer.from("second legacy bytes\n", "utf8");
+    await mkdir(path.dirname(path.join(sourceVaultRoot, firstRelativePath)), {
+      recursive: true,
+    });
+    await writeFile(path.join(sourceVaultRoot, firstRelativePath), firstBytes);
+    await writeFile(path.join(sourceVaultRoot, secondRelativePath), secondBytes);
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [{
+        root: sourceVaultRoot,
+        rootKey: "vault",
+      }],
+    });
+    expect(baseBundle).not.toBeNull();
+    if (!baseBundle) {
+      throw new Error("Expected a legacy hosted workspace bundle.");
+    }
+    const baseHash = sha256HostedBundleHex(baseBundle);
+    const legacySnapshotRef = {
+      hash: baseHash,
+      key: `legacy/${baseHash}.bundle`,
+      size: baseBundle.byteLength,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const skippedInlineFiles = [
+      {
+        path: firstRelativePath,
+        root: "vault",
+        sha256: sha256HostedBundleHex(firstBytes),
+        size: firstBytes.byteLength,
+      },
+      {
+        path: secondRelativePath,
+        root: "vault",
+        sha256: sha256HostedBundleHex(secondBytes),
+        size: secondBytes.byteLength,
+      },
+    ] as const;
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: skippedInlineFiles,
+      vaultRoot,
+    });
+    const { calls, platform: basePlatform } = createRuntimePlatform();
+    const legacyWorkspace = createCheckpointResponse({
+      snapshotRef: legacySnapshotRef,
+      userId: TEST_REQUEST.userId,
+      version: TEST_REQUEST.workspaceVersion,
+    }).workspace;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        get: async (sha256) => sha256 === baseHash ? baseBundle : null,
+        put: async () => {},
+      },
+      workspacePort: {
+        checkpoint: async () => ({
+          checkpointed: true,
+          workspace: legacyWorkspace,
+        }),
+        read: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: legacyWorkspace,
+        }),
+      },
+    };
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic wake after legacy migration commit.");
+    const baseArchiveBuilder = createSnapshotArchiveBuilder();
+    let archiveAttempt = 0;
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async (input) => {
+        archiveAttempt += 1;
+        if (archiveAttempt === 1) {
+          controller.abort(interruption);
+          throw interruption;
+        }
+        return await baseArchiveBuilder.buildEncryptedSnapshot(input);
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+
+    expect(await readFile(path.join(vaultRoot, firstRelativePath), "utf8"))
+      .toBe("first legacy bytes\n");
+    expect(await readFile(path.join(vaultRoot, secondRelativePath), "utf8"))
+      .toBe("second legacy bytes\n");
+    expect(await readHostedWorkspaceSkippedInlineFiles({ vaultRoot })).toEqual([]);
+    expect(await readdir(path.join(workspaceRoot, "scratch"))).toEqual([]);
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+
+    await rm(path.join(vaultRoot, firstRelativePath));
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    await expectMissing(path.join(vaultRoot, firstRelativePath));
+    expect(await readFile(path.join(vaultRoot, secondRelativePath), "utf8"))
+      .toBe("second legacy bytes\n");
+    expect(await readHostedWorkspaceSkippedInlineFiles({ vaultRoot })).toEqual([]);
+    expect(await readdir(path.join(workspaceRoot, "scratch"))).toEqual([]);
+    expect(calls.startSnapshotSession).toHaveBeenCalledTimes(2);
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
@@ -617,6 +895,48 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "deferred",
     });
   });
+
+  it("binds paired Assistant Ask payloads to the mailbox row id and expiry", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const wakes = [
+      createAssistantAskRequestedWake(),
+      createAssistantAskCompletedWake(),
+    ];
+
+    for (const wake of wakes) {
+      const options = createBridgeOptions({
+        mailboxPayloadDecoder: createMailboxPayloadDecoder({
+          status: "decoded",
+          wake,
+        }),
+        platform,
+        vaultRoot,
+      });
+
+      await expect(options.importItem(createAssistantAskMailboxImportItem(wake, {
+        id: `${wake.eventId}_different_row`,
+      }))).resolves.toEqual({
+        reasonCode: "payload.decode_mismatch",
+        retryable: false,
+        status: "blocked",
+      });
+      await expect(options.importItem(createAssistantAskMailboxImportItem(wake, {
+        expiresAt: "2026-07-15T12:11:00.000Z",
+      }))).resolves.toEqual({
+        reasonCode: "payload.decode_mismatch",
+        retryable: false,
+        status: "blocked",
+      });
+
+      const matchingResult = await options.importItem(
+        createAssistantAskMailboxImportItem(wake),
+      );
+      expect(matchingResult).not.toMatchObject({
+        reasonCode: "payload.decode_mismatch",
+      });
+    }
+  });
 });
 
 function createBridgeOptions(input: {
@@ -977,6 +1297,81 @@ function createMemberChannelsWake(input: {
     },
     occurredAt: input.occurredAt ?? "2026-05-01T00:00:00.000Z",
     userId: input.userId ?? TEST_REQUEST.userId,
+  };
+}
+
+function createAssistantAskRequestedWake(): HostedExecutionAssistantAskRequestedWake {
+  return buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt: "2026-07-15T12:10:00.000Z",
+      originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+      target: {
+        kind: "joined_group",
+        membershipId: "hgrpm_generation_bridge",
+        requestedLabel: "100 Club",
+      },
+    },
+    eventId: "haask_request_bridge",
+    memberId: TEST_REQUEST.userId,
+    occurredAt: "2026-07-15T12:00:00.000Z",
+  });
+}
+
+function createAssistantAskCompletedWake(): HostedExecutionAssistantAskCompletedWake {
+  return buildHostedExecutionAssistantAskCompletedWake({
+    ask: {
+      expiresAt: "2026-07-15T12:10:00.000Z",
+      originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+      requestId: "haask_request_bridge",
+      result: {
+        answer: "Squats plus the pelvic sequence.",
+        outcome: "answered",
+      },
+      targetLabel: "100 Club",
+    },
+    eventId: "haask_completion_bridge",
+    memberId: TEST_REQUEST.userId,
+    occurredAt: "2026-07-15T12:05:00.000Z",
+  });
+}
+
+function createAssistantAskMailboxImportItem(
+  wake: HostedExecutionAssistantAskRequestedWake | HostedExecutionAssistantAskCompletedWake,
+  overrides: {
+    expiresAt?: string;
+    id?: string;
+  } = {},
+): Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0] {
+  const routeAction = wake.kind === "assistant.ask.requested"
+    ? "run-assistant-ask"
+    : "continue-assistant-ask";
+  const base = createSystemMailboxImportItem();
+  return {
+    ...base,
+    item: {
+      ...base.item,
+      dedupeKey: wake.eventId,
+      expiresAt: overrides.expiresAt ?? wake.ask.expiresAt,
+      id: overrides.id ?? wake.eventId,
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      userId: wake.userId,
+    },
+    route: {
+      action: routeAction,
+      advanceProgress: true,
+      itemRef: {
+        id: overrides.id ?? wake.eventId,
+        kind: wake.kind,
+        lane: "system",
+        laneSeq: base.item.laneSeq,
+      },
+      state: "route",
+    },
   };
 }
 

@@ -38,12 +38,15 @@ export function createAssistantStateWriteLock<
   async function withWriteLock<TResult>(
     paths: TPaths,
     run: () => Promise<TResult>,
+    signal?: AbortSignal | null,
   ): Promise<TResult> {
+    signal?.throwIfAborted()
     const reentrantRoots = reentrantRootStorage.getStore()
     if (reentrantRoots?.has(paths.assistantStateRoot)) {
       const handle = await acquireWriteLock(paths)
 
       try {
+        signal?.throwIfAborted()
         return await run()
       } finally {
         await handle.release()
@@ -61,10 +64,15 @@ export function createAssistantStateWriteLock<
       () => queued,
     )
     processWriteChains.set(paths.assistantStateRoot, tail)
-
-    await prior.catch(() => undefined)
+    void tail.then(() => {
+      if (processWriteChains.get(paths.assistantStateRoot) === tail) {
+        processWriteChains.delete(paths.assistantStateRoot)
+      }
+    })
 
     try {
+      await waitForAssistantStateWriteTurn(prior, signal)
+      signal?.throwIfAborted()
       const nextReentrantRoots = new Set(reentrantRoots ?? [])
       nextReentrantRoots.add(paths.assistantStateRoot)
 
@@ -72,6 +80,7 @@ export function createAssistantStateWriteLock<
         const handle = await acquireWriteLock(paths)
 
         try {
+          signal?.throwIfAborted()
           return await run()
         } finally {
           await handle.release()
@@ -79,9 +88,6 @@ export function createAssistantStateWriteLock<
       })
     } finally {
       releaseQueue()
-      if (processWriteChains.get(paths.assistantStateRoot) === tail) {
-        processWriteChains.delete(paths.assistantStateRoot)
-      }
     }
   }
 
@@ -167,6 +173,39 @@ export function createAssistantStateWriteLock<
     clearWriteLock,
     isWriteLockMetadata: isAssistantStateWriteLockMetadata,
   }
+}
+
+async function waitForAssistantStateWriteTurn(
+  prior: Promise<void>,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  if (!signal) {
+    await prior
+    return
+  }
+
+  signal.throwIfAborted()
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    const settle = (complete: () => void) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      complete()
+    }
+    const onAbort = () => settle(() => reject(signal.reason))
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    void prior.then(
+      () => settle(resolve),
+      (error: unknown) => settle(() => reject(error)),
+    )
+    if (signal.aborted) {
+      onAbort()
+    }
+  })
 }
 
 function isAssistantStateWriteLockMetadata(

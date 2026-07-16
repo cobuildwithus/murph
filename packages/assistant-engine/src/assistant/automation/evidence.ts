@@ -9,9 +9,6 @@ import {
 import {
   normalizeNullableString,
 } from '../shared.js'
-import {
-  assistantInputIdFromInboxCaptureId,
-} from '../input-source.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { readAssistantTurnReceipt } from '../turns.js'
 import { readAssistantAutoReplyReceiptMetadata } from './auto-reply-retry.js'
@@ -154,20 +151,20 @@ async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {
   evidence: AssistantAutoReplyTerminalEvidence
   vault: string
 }): Promise<boolean> {
-  const groupInputIds = [
+  const groupEvidenceIds = [
     ...new Set(
       input.evidence.groupInputIds && input.evidence.groupInputIds.length > 0
         ? input.evidence.groupInputIds
-        : input.evidence.groupCaptureIds.map(assistantInputIdFromInboxCaptureId),
+        : input.evidence.groupCaptureIds,
     ),
   ]
-  if (groupInputIds.length === 0) {
+  if (groupEvidenceIds.length === 0) {
     return true
   }
 
   const groupEvidence = await Promise.all(
-    groupInputIds.map((inputId) =>
-      readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId),
+    groupEvidenceIds.map((evidenceId) =>
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, evidenceId),
     ),
   )
   return groupEvidence.every((item) => item !== null)
@@ -479,7 +476,7 @@ function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoR
       ? record.groupInputIds
           .map((item) => normalizeUnknownNullableString(item))
           .filter((item): item is string => item !== null)
-      : [inputId],
+      : [],
     groupId,
     inputId,
     primaryCaptureId,

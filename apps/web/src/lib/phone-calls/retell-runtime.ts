@@ -3,6 +3,7 @@ import type {
 } from "@murphai/hosted-execution/phone-calls";
 import {
   Retell,
+  UnprocessableEntityError,
 } from "retell-sdk";
 import type { ClientOptions } from "retell-sdk";
 import type {
@@ -24,6 +25,8 @@ const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 const RETELL_WEBHOOK_PATH = "/api/retell/webhook";
 const RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE = "murph_public_base_url";
 const RETELL_WEBHOOK_EVENTS = ["call_ended", "call_analyzed"] as const;
+const RETELL_MISSING_ASSET_MESSAGE =
+  "Cannot find requested asset under given api key.";
 
 export function createRetellPhoneCallRuntime(input: {
   fetchImpl?: typeof fetch;
@@ -32,14 +35,14 @@ export function createRetellPhoneCallRuntime(input: {
 }
 
 export interface RetellPhoneCallAccountDeletionRuntime {
+  deleteProviderCall(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   resolveProviderCall(
     murphPhoneCallId: string,
     options?: { signal?: AbortSignal },
   ): Promise<PhoneCallRuntimeReconciliationResult>;
-  stopIfActive(
-    providerCallId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void>;
 }
 
 export function createRetellPhoneCallAccountDeletionRuntime(input: {
@@ -144,6 +147,45 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
     };
   }
 
+  async deleteProviderCall(
+    providerCallId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const client = this.buildClient();
+    let call: Awaited<ReturnType<typeof client.call.retrieve>>;
+    try {
+      call = await client.call.retrieve(providerCallId, {
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (isRetellMissingCallError(error)) {
+        return;
+      }
+      throw error;
+    }
+    if (call.call_status === "registered" || call.call_status === "ongoing") {
+      try {
+        await client.call.stop(providerCallId, {
+          signal: options.signal,
+        });
+      } catch (error) {
+        if (isRetellMissingCallError(error)) {
+          return;
+        }
+        throw error;
+      }
+    }
+    try {
+      await client.call.delete(providerCallId, {
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (!isRetellMissingCallError(error)) {
+        throw error;
+      }
+    }
+  }
+
   async stopIfActive(
     providerCallId: string,
     options: { signal?: AbortSignal } = {},
@@ -173,6 +215,17 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
     return new Retell(options);
   }
 
+}
+
+function isRetellMissingCallError(error: unknown): boolean {
+  if (!(error instanceof UnprocessableEntityError)) {
+    return false;
+  }
+
+  const responseBody = error.error;
+  return typeof responseBody === "object"
+    && responseBody !== null
+    && Reflect.get(responseBody, "message") === RETELL_MISSING_ASSET_MESSAGE;
 }
 
 function buildRetellStorageModeMismatchError(input: {

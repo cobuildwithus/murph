@@ -30,11 +30,11 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveHostedMurphContactOption: vi.fn(async () => ({
+  resolveMurphContactOptions: vi.fn(() => [{
     href: "sms:+15550100001?body=voice%20test",
     kind: "text",
     label: "Messages",
-  })),
+  }]),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
@@ -79,13 +79,12 @@ const mocks = vi.hoisted(() => ({
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   prisma: {
+    $transaction: vi.fn(),
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
     },
   },
-  readHostedAccountSettingsSnapshot: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
+  readHostedAccountSettingsPageSnapshot: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
@@ -116,20 +115,13 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
-}));
-
 vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
-  readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
+  readHostedAccountSettingsPageSnapshot:
+    mocks.readHostedAccountSettingsPageSnapshot,
   withServerApprovedPrivyAccountHints: mocks.withServerApprovedPrivyAccountHints,
 }));
 
@@ -167,8 +159,8 @@ vi.mock("@/src/components/settings/customize-murph-settings", () => ({
   CustomizeMurphSettings: mocks.CustomizeMurphSettings,
 }));
 
-vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
-  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+vi.mock("@/src/lib/murph-contact-routing", () => ({
+  resolveMurphContactOptions: mocks.resolveMurphContactOptions,
 }));
 
 vi.mock("@/src/components/settings/hosted-assistant-model-settings", () => ({
@@ -196,8 +188,35 @@ vi.mock("@/src/lib/sensitive-actions/secure-approval-status", () => ({
   readHostedSecureApprovalStatus: mocks.readHostedSecureApprovalStatus,
 }));
 
+const EMPTY_ACCOUNT_SETTINGS = {
+  email: {
+    address: null,
+    verifiedAt: null,
+  },
+  phone: {
+    number: null,
+    verifiedAt: null,
+  },
+  telegram: {
+    telegramUserId: null,
+  },
+};
+
+function mockSettingsPageSnapshot(input: {
+  account?: unknown;
+  billingRef?: unknown;
+  routing?: unknown;
+} = {}): void {
+  mocks.readHostedAccountSettingsPageSnapshot.mockResolvedValue({
+    account: input.account ?? EMPTY_ACCOUNT_SETTINGS,
+    billingRef: input.billingRef ?? null,
+    routing: input.routing ?? null,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
@@ -207,55 +226,6 @@ beforeEach(() => {
     status: "unavailable",
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
-});
-
-test("HostedFamilySettings explains family member privacy without enumerating data categories", async () => {
-  const { HostedFamilySettings } = await vi.importActual<
-    typeof import("@/src/components/settings/hosted-family-settings")
-  >("@/src/components/settings/hosted-family-settings");
-
-  const ownerSnapshot = {
-    billingActive: true,
-    billingStatus: HostedBillingStatus.active,
-    displayName: "Family",
-    groupId: "hbag_family",
-    invites: [],
-    members: [
-      {
-        isOwner: true,
-        joinedAt: new Date("2026-06-18T12:00:00.000Z"),
-        label: "You",
-        memberId: "member_owner",
-        planCode: "pulse",
-        role: "owner",
-        status: "active",
-      },
-    ],
-    ownerMemberId: "member_owner",
-    plans: {
-      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
-    },
-    seats: {
-      active: 1,
-      billed: 2,
-      invited: 0,
-      max: 4,
-      min: 2,
-      remaining: 3,
-      used: 1,
-    },
-    suspendedAt: null,
-  } satisfies Parameters<typeof HostedFamilySettings>[0]["ownerSnapshot"];
-
-  const markup = renderToStaticMarkup(React.createElement(HostedFamilySettings, {
-    ownerSnapshot,
-  }));
-
-  assert.match(
-    markup,
-    /You pay for your family&#x27;s access, but what they share with Murph stays private to them\./,
-  );
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -321,6 +291,26 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
 });
 
+test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  await expect(SettingsPage()).rejects.toThrow("NEXT_REDIRECT:/");
+
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+  expect(mocks.readHostedFamilyAccessForMember).not.toHaveBeenCalled();
+  expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
+  expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+  expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+});
+
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
@@ -356,24 +346,6 @@ test("SettingsPage reads the app session and persisted account settings into the
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: "+15550100001",
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
-    currentBillingPhase: "paid",
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: "standard",
-    memberId: "member_123",
-    stripeCustomerId: "cus_123",
-    stripeSubscriptionId: "sub_123",
-  });
   const accountSnapshot = {
     assistant: {
       configurationAvailable: true,
@@ -393,7 +365,27 @@ test("SettingsPage reads the app session and persisted account settings into the
       telegramUserId: "456",
     },
   };
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
+  mockSettingsPageSnapshot({
+    account: accountSnapshot,
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+    routing: {
+      linqChatId: null,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    },
+  });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "configured" });
   const usageStatus = {
     accessKind: "paid",
@@ -456,17 +448,11 @@ test("SettingsPage reads the app session and persisted account settings into the
       initialModel: "gpt-5.6-sol",
       solAvailable: true,
     }, undefined);
-    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
     });
-    expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: mocks.prisma,
-    });
-    expect(mocks.readHostedAccountSettingsSnapshot).toHaveBeenCalledWith({
-      memberId: "member_123",
-    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
@@ -499,11 +485,19 @@ test("SettingsPage reads the app session and persisted account settings into the
         label: "Messages",
       },
     }), undefined);
-    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledWith({
+      contactChannels: {
+        email: false,
+        telegram: true,
+        text: true,
+      },
       message: {
         body: "just picked a new voice for you! send me a voice memo so I can hear it",
       },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
       preferredKind: "text",
+      userEmailAddress: "verified@example.com",
     });
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
@@ -551,16 +545,16 @@ test.each([
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
-    currentBillingPhase: "paid",
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: "standard",
-    memberId: "member_123",
-    stripeCustomerId: "cus_123",
-    stripeSubscriptionId: "sub_123",
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
   });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -596,17 +590,6 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: "+15550100003",
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   const accountSnapshot = {
     email: {
       address: null,
@@ -620,7 +603,19 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
       telegramUserId: null,
     },
   };
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
+  mockSettingsPageSnapshot({
+    account: accountSnapshot,
+    routing: {
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: "+15550100003",
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    },
+  });
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -649,26 +644,26 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.com",
-      verifiedAt: "2025-03-27T08:30:00.000Z",
-    },
-    phone: {
-      number: null,
-      verifiedAt: null,
-    },
-    telegram: {
-      telegramUserId: null,
+  mockSettingsPageSnapshot({
+    account: {
+      email: {
+        address: "member@example.com",
+        verifiedAt: "2025-03-27T08:30:00.000Z",
+      },
+      phone: {
+        number: null,
+        verifiedAt: null,
+      },
+      telegram: {
+        telegramUserId: null,
+      },
     },
   });
-  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+  mocks.resolveMurphContactOptions.mockReturnValueOnce([{
     href: "mailto:murph@mail.withmurph.ai?body=test",
     kind: "email",
     label: "Email",
-  });
+  }]);
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -695,25 +690,16 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
-    currentBillingPhase: null,
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: "pulse_trial_7d",
-    memberId: "member_123",
-    stripeCustomerId: "cus_123",
-    stripeSubscriptionId: "sub_123",
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -746,18 +732,6 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     billingActive: false,
     billingStatus: "not_started",
@@ -825,17 +799,6 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
       privyUserId: "did:privy:user_123",
     },
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   const accountSnapshot = {
     email: {
       address: null,
@@ -849,7 +812,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
       telegramUserId: "456",
     },
   };
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
+  mockSettingsPageSnapshot({ account: accountSnapshot });
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 

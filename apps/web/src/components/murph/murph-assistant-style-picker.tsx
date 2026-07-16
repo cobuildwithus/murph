@@ -507,7 +507,15 @@ function VoiceCard({
         </span>
         <SelectedCheck selected={selected} />
       </label>
-      <div onClick={(event) => event.stopPropagation()} role="presentation">
+      <div
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!disabled) {
+            onSelect();
+          }
+        }}
+        role="presentation"
+      >
         <VoiceMemoPlayer
           ref={playerRef}
           src={option.previewPath}
@@ -599,13 +607,11 @@ const TONE_OPTIONS: ReadonlyArray<{
   {
     id: "formal",
     label: "Formal",
-    sample:
-      "You are up 3 pounds this week, but your sleep is down. Want to work on sleep first?",
+    sample: "Your sleep is down this week. Want to work on sleep first?",
   },
   {
     id: "casual",
     label: "Casual",
-    sample:
-      "you're up 3 lbs this week but sleep is way down. wanna fix sleep first?",
+    sample: "sleep is way down this week. wanna fix sleep first?",
   },
 ];

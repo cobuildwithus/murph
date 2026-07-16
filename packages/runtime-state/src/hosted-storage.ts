@@ -3,6 +3,7 @@ const HOSTED_STORAGE_CONTEXT_SALT = new TextEncoder().encode(
 );
 
 export const HOSTED_CIPHER_ENVELOPE_SCHEMA = "murph.hosted-cipher.v1";
+const HOSTED_CIPHER_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 
 export type HostedCipherEnvelopeSchema = typeof HOSTED_CIPHER_ENVELOPE_SCHEMA;
 
@@ -113,7 +114,7 @@ export function parseHostedCipherEnvelope(
     algorithm: "AES-GCM",
     ciphertext: requireString(record.ciphertext, `${label}.ciphertext`),
     iv: requireString(record.iv, `${label}.iv`),
-    keyId: requireString(record.keyId, `${label}.keyId`),
+    keyId: requireHostedCipherKeyId(record.keyId, `${label}.keyId`),
     schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
     scope,
   };
@@ -126,6 +127,7 @@ export async function encryptHostedStoragePayload(input: {
   plaintext: Uint8Array;
   scope: HostedStorageScope;
 }): Promise<HostedCipherEnvelope> {
+  const keyId = requireHostedCipherKeyId(input.keyId, "Hosted cipher envelope.keyId");
   const scopedKey = await deriveHostedStorageKey(input.key, input.scope);
   const cryptoKey = await importAesKey(scopedKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -149,7 +151,7 @@ export async function encryptHostedStoragePayload(input: {
     algorithm: "AES-GCM",
     ciphertext: encodeBase64(ciphertext),
     iv: encodeBase64(iv),
-    keyId: input.keyId,
+    keyId,
     schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
     scope: input.scope,
   };
@@ -234,6 +236,14 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireHostedCipherKeyId(value: unknown, label: string): string {
+  const keyId = requireString(value, label);
+  if (!HOSTED_CIPHER_KEY_ID_PATTERN.test(keyId)) {
+    throw new TypeError(`${label} must be a 1-256 character portable identifier.`);
+  }
+  return keyId;
 }
 
 function isHostedStorageScope(value: string): value is HostedStorageScope {

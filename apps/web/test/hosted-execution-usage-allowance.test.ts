@@ -1003,7 +1003,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain('UPDATE "hosted_ai_usage_period"');
     expect(sqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
     expect(sqlText).toContain('"last_usage_at" = GREATEST');
-    expect(sqlText).not.toContain('"limit_notice_sent_at"');
     expect(sqlText).toContain('"blocked_at" = CASE');
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
@@ -1106,36 +1105,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         message: expect.not.stringContaining("https://"),
       },
     });
-  });
-
-  it("returns a crossing candidate when the marker exists so the delivery claim resolves ownership", async () => {
-    const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
-      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      limitNoticeSentAt: new Date("2026-03-28T12:00:00.000Z"),
-      spentUsdMicros: 9_999_000n,
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
-      tx: tx as never,
-    })).resolves.toEqual({
-      crossedAt: new Date("2026-03-29T12:00:05.000Z"),
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      sourceUsageId: "turn_123.attempt-1",
-      userNotice: expect.objectContaining({
-        code: "pulse_upgrade_edge",
-        message: expect.any(String),
-      }),
-    });
-
-    const [sql] = tx.$executeRaw.mock.calls[0] ?? [];
-    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
-    expect(sqlText).not.toContain('"limit_notice_sent_at"');
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {
@@ -1417,6 +1386,56 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
         allowancePricingVersion: "openai-api-pricing-2026-05-05-standard",
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
+  it("uses a Family calendar period while the sponsor period projection is missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      familyAccessActive: true,
+      familyPeriodEnd: null,
+      familyPeriodStart: null,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-09T12:00:01.000Z",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-04-09T12:00:05.000Z"),
+        allowanceCostUsdMicros: 1896n,
+        allowanceCounted: true,
+        allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        allowancePricingVersion: "openai-api-pricing-2026-05-05-standard",
+      }),
+    }));
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        memberId: "member_123",
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
       }),
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
@@ -1966,13 +1985,15 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("denies Family-sponsored members when the group billing period is missing", async () => {
+  it("uses a calendar period for Family-sponsored members when the group period is missing", async () => {
     const prisma = createGatePrisma({
       billingStatus: HostedBillingStatus.not_started,
       familyAccessActive: true,
       familyPeriodEnd: null,
       familyPeriodStart: null,
       findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 0n,
     });
 
@@ -1981,14 +2002,18 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
+      allowanceSource: "family_sponsored_plan",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
-  it("does not treat non-Family group billing as sponsored access", async () => {
+  it("keeps Family sponsorship when the group billing projection is invalid", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       billingStatus: HostedBillingStatus.canceled,
@@ -2009,11 +2034,14 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
@@ -2195,8 +2223,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("raises the current period limit without lowering spend or clearing the sent notice", async () => {
-    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
+  it("raises the current period limit without lowering spend", async () => {
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return {
@@ -2209,7 +2236,6 @@ describe("resolveHostedAiUsageGate", () => {
     });
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
-      limitNoticeSentAt: priorNoticeSentAt,
       limitUsdMicros: 10_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -2235,54 +2261,6 @@ describe("resolveHostedAiUsageGate", () => {
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
-    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
-    expect(updateData).not.toHaveProperty("spentUsdMicros");
-  });
-
-  it("does not rewrite sent usage-limit notice markers during same-period normalization", async () => {
-    const priorBlockedAt = new Date("2026-03-28T11:59:00.000Z");
-    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
-    const update = vi.fn(async (args?: unknown) => {
-      void args;
-      return undefined;
-    });
-    const prisma = createGatePrisma({
-      billingPlanCode: "launch_edge_monthly",
-      findUniquePeriod: {
-        billingPlanCode: "launch_edge_monthly",
-        blockedAt: priorBlockedAt,
-        limitNoticeSentAt: priorNoticeSentAt,
-        limitUsdMicros: 25_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 14_000_000n,
-      },
-      limitUsdMicros: 25_000_000n,
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      spentUsdMicros: 14_000_000n,
-      update,
-    });
-
-    await expect(resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-03-29T12:00:00.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      allowed: true,
-      billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
-      remainingUsdMicros: 11_000_000n,
-    });
-
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        blockedAt: null,
-      }),
-    }));
-    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
-      ?.data;
-    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
@@ -2350,7 +2328,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("clears stale block metadata without clearing the sent notice marker", async () => {
+  it("clears stale block metadata without rewriting usage totals", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-20T12:00:00.000Z"),
@@ -2369,7 +2347,6 @@ describe("resolveHostedAiUsageGate", () => {
       findUniquePeriod: {
         billingPlanCode: "launch_edge_monthly",
         blockedAt: new Date("2026-04-20T12:00:00.000Z"),
-        limitNoticeSentAt: new Date("2026-04-20T12:01:00.000Z"),
         limitUsdMicros: 25_000_000n,
         periodEnd: new Date("2026-05-15T00:00:00.000Z"),
         periodStart: new Date("2026-04-15T00:00:00.000Z"),
@@ -2402,7 +2379,6 @@ describe("resolveHostedAiUsageGate", () => {
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
-    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
@@ -2925,9 +2901,10 @@ function createAllowanceTx(input: {
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
   familyPlanCode?: "edge" | "pulse";
+  familyPeriodEnd?: Date | null;
+  familyPeriodStart?: Date | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
-  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -2938,6 +2915,12 @@ function createAllowanceTx(input: {
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
+  const familyPeriodStart = input.familyPeriodStart === undefined
+    ? input.periodStart ?? new Date("2026-03-01T00:00:00.000Z")
+    : input.familyPeriodStart;
+  const familyPeriodEnd = input.familyPeriodEnd === undefined
+    ? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z")
+    : input.familyPeriodEnd;
   const defaultAggregate = vi.fn()
     .mockResolvedValueOnce({
       _max: {
@@ -2969,7 +2952,6 @@ function createAllowanceTx(input: {
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
-        limitNoticeSentAt: input.limitNoticeSentAt ?? null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
@@ -2979,14 +2961,12 @@ function createAllowanceTx(input: {
         data?: {
           billingPlanCode?: string;
           blockedAt?: Date | null;
-          limitNoticeSentAt?: Date | null;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
         blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
-        limitNoticeSentAt: args?.data?.limitNoticeSentAt ?? input.limitNoticeSentAt ?? null,
         limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
         periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
@@ -3020,8 +3000,8 @@ function createAllowanceTx(input: {
             billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
-            currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
-            currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+            currentPeriodEnd: familyPeriodEnd,
+            currentPeriodStart: familyPeriodStart,
           }
         : null),
     },
@@ -3072,13 +3052,11 @@ function createGatePrisma(input: {
     billingPlanCode: string;
     blockedAt?: Date | null;
     lastUsageAt?: Date | null;
-    limitNoticeSentAt?: Date | null;
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
     spentUsdMicros: bigint;
   } | null;
-  limitNoticeSentAt?: Date | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -3132,7 +3110,6 @@ function createGatePrisma(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
-    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
     periodEnd,
     periodStart,
@@ -3166,7 +3143,6 @@ function createGatePrisma(input: {
       update: input.update ?? vi.fn(async (args?: {
         data?: {
           billingPlanCode?: string;
-          limitNoticeSentAt?: Date | null;
           limitUsdMicros?: bigint;
           periodEnd?: Date;
         };

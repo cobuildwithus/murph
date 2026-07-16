@@ -1,7 +1,7 @@
 # How Murph Talks
 
-Last verified: 2026-07-14
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
+Last verified: 2026-07-15
+Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, private Humor, Push, and Detail controls, and authenticated group-sender self-service
 
 ## Product Contract
 
@@ -64,6 +64,12 @@ The effective defaults are:
 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` and the member-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
 
+For hosted conversational personality writes, Web also owns accepted-input
+admission and the Settings projection transaction. It updates only the requested
+Humor, Push, or Detail columns and their per-dial causal watermarks atomically
+with the sparse canonical mutation event carrying the accepted turn's original
+causal sequence. Canonical personality values still live only in the vault.
+
 The `murph.assistant_style` `show` action resolves missing dial values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
@@ -91,12 +97,34 @@ the runtime has its web-owned port:
   for that request to settle instead of reporting a shorter local timeout while
   the preference write can still complete.
 
+Authenticated non-direct Linq group turns expose the same five member-owned
+settings through `murph.group` rather than the direct-only personalization and
+style tools:
+
+- `read_own_assistant_style` returns the current sender's effective tone,
+  voice, Humor, Push, and Detail, including default/custom source labels for
+  the three numeric dials.
+- `update_own_assistant_style` accepts a non-empty sparse combination of tone,
+  voice, and dial changes. A null dial removes that override and restores its
+  default.
+- The model supplies settings only. The runtime derives exactly one sender
+  handle from the accepted Linq inbound and injects it after parsing; Web
+  resolves that handle to one active member and uses the existing preference
+  mutation and mailbox owner. The model cannot name a member or reuse a visible
+  sender string as authority.
+- Group email, direct, missing, ambiguous, unknown, suspended, and inactive
+  sender contexts fail closed. A successful update applies on that member's
+  future private turn and generated voice, not to the group room or the reply
+  already running.
+
 Model and reasoning mutations belong exclusively to
 `murph.assistant_configuration`. That operation reads the current-turn and
 saved next-turn configuration, requires user-sourced intent for an exact update,
-and saves only after the matching passkey approval is consumed. A pending
-approval does not change configuration, and a saved update starts on the next
-turn rather than changing the turn that requested it.
+and saves only when web binds the terminal input id from the locally revalidated
+bounded exact-successor provider batch to the callback member and one live
+conversation mailbox row. This preference change does not require passkey
+approval. A saved update starts on the next turn rather than changing the turn
+that requested it.
 
 Voice labels shown to members map to tool ids from the shared
 `assistantVoiceOptions` roster; voice guidance derives the complete mapping
@@ -115,11 +143,13 @@ the fallback for tone, model, or reasoning changes.
 
 ## Personality Dial Conversation Control
 
-The assistant uses the headless `murph.assistant_style` operation. Turn
-planning registers it only for the exact current private direct conversation;
-other audiences receive no style operation or style prompt surface. Its closed
-actions are `show`, `set` with one exact integer score, and `reset` for one dial
-or all dials. Raw CLI style commands are intentionally absent so no registered
+The assistant uses the headless `murph.assistant_style` operation in an exact
+current private direct conversation. Its closed actions are `show`, `set` with
+one exact integer score, and `reset` for one dial or all dials. An authenticated
+Linq group turn uses only the self-bound `murph.group` actions documented above;
+it never receives the direct style tool or applies a member's settings to the
+room prompt. Other audiences receive no style operation or style prompt
+surface. Raw CLI style commands are intentionally absent so no registered
 general command advertises an audience-independent path around the turn-level
 gate. This is a tool-registration and prompt-surface policy, not a filesystem
 sandbox around the privileged Codex runtime.
@@ -155,47 +185,82 @@ reset, it treats the returned `settings` snapshot as authoritative for the rest
 of that reply:
 
 - Confirm the exact effective score and whether it is custom or default.
-- If `updated` is false, say the setting was already in that state.
+- Interpret each requested dial's outcome directly: `saved` means Web accepted
+  that intent, `unchanged` means it was already current, and `superseded` means
+  newer intent won. Report the returned effective setting instead of echoing a
+  superseded request. `updated` is true only when a saved requested dial changes
+  the effective same-turn snapshot.
 - If the operation errors or returns no `settings` snapshot, say the result is unconfirmed. Do not claim that it changed or stayed unchanged. One `show` may report current canonical state without claiming whether the original action caused it.
-- When Humor changes above 0 and the context is safe, include one fresh, fitting funny line.
+- When Humor changes above 0 and the context is safe, the acknowledgement may include at most one earned joke; no strong beat means no joke.
 - When Humor changes to 0, confirm it plainly without a joke.
 - Do not hard-code a recurring acknowledgement joke.
+
+In local mode, `set` and `reset` continue to write the canonical vault directly.
+In hosted mode, they send one strict `update_personality` request through the
+member-bound signed personalization callback, carrying invocation-owned
+assistant-input authority rather than a model-supplied sequence. Web returns the
+effective projection and a per-requested-dial outcome of `saved`, `unchanged`,
+or `superseded`. Accepted results form an invocation-only overlay so a later
+style operation in the same turn sees what Web accepted before the mailbox
+event reaches the vault. `show` always starts from canonical vault state and
+applies only that turn-scoped overlay; the overlay is not persisted and cannot
+replace mailbox convergence.
 
 ## Behavior Bands
 
 The exact integer is preserved and shown to the user. Prompt behavior uses five reviewed bands because adjacent scores do not need separate policy text.
 
+These boundaries are product-design choices, not a validated psychological
+scale. They follow four perception rules:
+
+- Warmth, competence, respect, calibrated uncertainty, and urgent safety
+  guidance stay high at every score. The dials scale style, not the quality or
+  safety of the answer.
+- Humor scales creative latitude, not joke frequency or aggression. It is
+  permission, not a quota: a specific beat must sharpen the point or reward
+  shared context, and no strong beat means no joke at any score. Factual answers
+  get at most one humor beat. Humor notices Murph or a concrete absurdity in the
+  situation; it never makes the member, their identity, body, symptoms,
+  condition, competence, or effort the joke. Stock personification, canned meme
+  templates, forced analogies, and repeated or explained punchlines are out.
+- Push scales directness and accountability around a member-chosen goal while
+  preserving a visible choice to commit, revise, or decline. Higher Push is not
+  broader consent to control the member.
+- Detail uses answer-first progressive disclosure. Higher scores add
+  decision-relevant depth and navigation, not repetition, jargon, or an
+  indiscriminate context dump.
+
 ### Humor
 
 | Score | Behavior |
 | ---: | --- |
-| 0 | No intentional jokes, bits, teasing, or funny asides. |
-| 1–3 | Occasional light, dry humor when it fits. |
-| 4–6 | Regular wit when useful; usefulness still leads. |
-| 7–9 | Prominent, bold, dry humor; prefer one strong line over several jokes. |
-| 10 | Maximum safe comedic ambition in ordinary contexts. Bold, surprising, slightly unhinged deadpan is welcome, but never forced or repetitive. |
+| 0 | No jokes, puns, teasing, comic metaphors, or playful asides. Warmth comes from plain language rather than comedy. |
+| 1–3 | Occasional, subtle situational wit only when the current exchange is already playful; keep it to one brief aside. |
+| 4–6 | When a strong opportunity arises in a safe, low-stakes reply, use one concise dry observation or playful analogy grounded in the actual situation; keep the factual point obvious. |
+| 7–9 | When humor is welcome, take a bold, situation-specific swing with deadpan understatement, a precise callback, or absurd but unmistakably nonliteral escalation. Make the contrast large enough to read as a joke; never create plausible harm or ambiguity about facts or intended actions. After the beat, return to the point. |
+| 10 | When humor is clearly welcome, take the largest safe creative swing with one bold deadpan beat, ridiculous escalation, or precise callback. Keep absurdity unmistakably nonliteral; only in a long, explicitly playful reply may one brief callback extend the joke. Creative risk applies to wording, never clarity, seriousness, emotional safety, or action status. |
 
 ### Push
 
 | Score | Behavior |
 | ---: | --- |
-| 0 | No motivational pressure. Give calm options and let the user choose. |
-| 1–3 | Supportive teammate energy and a small, reversible next step. |
-| 4–6 | High-school-coach energy around a user-chosen goal and one clear next step. |
-| 7–9 | Strict college-coach energy around a user-chosen goal. Name avoidance plainly without judging the person. |
-| 10 | Terse, theatrical drill-sergeant energy for a user-chosen, low-risk goal. Never insult, shame, threaten, coerce, punish, or create false urgency. |
+| 0 | Reflect, inform, and offer choices without unsolicited challenge, pressure, or accountability; leave the decision visibly with the member. |
+| 1–3 | Encourage gently around a stated goal; acknowledge stated friction, offer one small reversible next step, and make it easy to choose, change, or decline. |
+| 4–6 | Be direct and action-oriented around an explicit member-chosen, low-risk goal; recommend one concrete, achievable next step, name a practical obstacle only when the conversation supports it, and include an easy fallback. |
+| 7–9 | Use firm accountability only for an explicit member-chosen, low-risk, non-sensitive goal. When the conversation shows a gap between the stated plan and reported behavior, describe that observable gap without inferring motive; prioritize one next action or smaller fallback and ask for a specific time, commitment, or revision. |
+| 10 | Use maximum directness and brevity only for an explicit member-chosen, low-risk, non-sensitive goal. Name an observable plan-or-behavior gap, never motive or character; ask for a commitment, revision, or decline, then respect the answer. |
 
-Push controls delivery, not authority. It never turns health into compliance or moral worth. It cannot make Murph demand unsafe exertion, override a stop rule, manufacture urgency, or continue pressure after the user says to stop.
+Push controls delivery, not authority. It never turns health into compliance or moral worth. It cannot make Murph demand unsafe exertion, override a stop rule, manufacture urgency, continue pressure after the user says to stop, pressure a reply, signup, sharing, spending, consent, or authorization, or change notification and follow-up cadence.
 
 ### Detail
 
 | Score | Behavior |
 | ---: | --- |
-| 0 | The shortest complete answer, often one sentence, with required safety context retained. |
-| 1–3 | Concise answer with only the essential reason or next step. |
-| 4–6 | Balanced explanation with the most useful supporting context. |
-| 7–9 | Relevant context, tradeoffs, uncertainty, and a practical plan. |
-| 10 | Comprehensive treatment when warranted: assumptions, options, edge cases, and evidence limits, without repetition. |
+| 0 | Lead with the shortest complete answer: the bottom line, essential action when relevant, and any material caveat. Omit optional background. |
+| 1–3 | Lead with the bottom line, then give up to three key points and one next step when relevant. Required warnings, uncertainty, confirmations, and urgent guidance do not count against that limit. |
+| 4–6 | Give answer-first balanced detail with the most useful rationale and context; add a main tradeoff or practical next step only when relevant. |
+| 7–9 | Give a thorough, answer-first response; add decision-relevant assumptions, uncertainty, alternatives, tradeoffs, implementation, and safety considerations in clear chunks without tangents or repetition. |
+| 10 | Give the most complete decision-relevant answer the evidence supports. Start with the conclusion and, when relevant, the immediate action; then cover relevant mechanisms, material alternatives, likely edge cases, and evidence limits. Do not imply completeness, enumerate remote possibilities, or add background that would not change understanding or action. |
 
 Detail controls presentation, not completeness of material warnings. A low score never removes a contraindication, stop rule, material uncertainty, required confirmation, or emergency guidance.
 
@@ -203,7 +268,12 @@ Detail controls presentation, not completeness of material warnings. A low score
 
 The stored document remains sparse, and the thread-context personality block appears only when at least one explicit override exists. This preserves the current prompt and thread contract for members who never use the dials.
 
-Classic Murph's static personality text explicitly embodies the defaults: occasional light, dry humor when it fits; supportive teammate energy with small reversible next steps; and balanced detail with useful context. If a default changes, the shared default constant, this static baseline, docs, and prompt regression must change together.
+Classic Murph's static personality text explicitly embodies the defaults:
+Humor 3 means at most one earned situational beat when playful, with no canned
+bits or member-directed jokes; Push 3 means one small reversible step with
+visible member choice; Detail 5 means answer first, then useful context. If a
+default changes, the shared default constant, this static baseline, docs, and
+prompt regression must change together.
 
 Each explicit override renders its exact score and reviewed band in thread context. Missing sibling dials are not rendered. Because thread context participates in the assistant contract fingerprint, a changed dial starts one fresh compatible Codex thread on the next turn while committed transcript history preserves conversation continuity. No custom session invalidation or prompt hot-reload mechanism is needed.
 
@@ -219,13 +289,18 @@ Personality settings change expression only. The precedence order is:
 4. The saved personality dials.
 5. Classic Murph defaults.
 
+Fit every dial inside the current channel's pacing: Detail sets the length
+budget, Humor and Push fit inside it, and Humor never gets its own bubble. When
+urgent action is needed, lead with the action, timeframe, and safety essentials;
+when the member has limited capacity, omit optional background.
+
 Humor is suppressed for plausible emergencies, direct self-harm language, serious medication or health decisions, grief, trauma, abuse, acute distress, and sensitive privacy, authentication, billing, consent, or irreversible-action confirmations. Jokes must not ambiguously claim that Murph sent, bought, booked, changed, deleted, disclosed, or authorized something.
 
 The dials never change notification eligibility or frequency, quiet hours, tool access, spending or confirmation requirements, diagnostic confidence, model selection, data access, or real-world action authority. Personality preferences do not enter notification-decision or private maintenance prompts.
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
+Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. A group prompt never receives or applies a member's private tone, voice, or dials as room style. An authenticated non-direct Linq sender may nevertheless inspect or mutate their own member-owned settings through the hidden current-sender `murph.group` actions; the saved result affects later private conversations and generated voice. The group model sees no identity selector, and email, ambiguous, unknown, or inactive senders fail closed. Private direct turns receive the headless style and personalization operations; group turns omit those direct tools, and indeterminate routes omit every style surface.
 
 The raw style CLI hard cut is effective only after every old assistant runner
 bundle has drained or restarted. A gradual rollout that leaves warm older
@@ -234,7 +309,7 @@ runner/CLI change as an immediate convergence and verify the live fleet reports
 the new bundle before treating the audience boundary as active. The first
 personality-aware reader/writer release remains the rollback floor.
 
-A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
+A future room-level style control still needs separate group-scoped authority and storage. It must not reuse any participant's private preference as room-wide truth.
 
 ## Hosted Settings Projection
 
@@ -248,8 +323,9 @@ Settings-side display/write projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
 
 `POST /api/settings/assistant-style` validates the authenticated member's
-values, updates requested columns, appends one `member.preferences.updated`
-event, and best-effort signals the runtime. While the web rollout gate is off,
+values, updates requested columns, and, when at least one requested field
+applies, appends one `member.preferences.updated` event and best-effort signals
+the runtime. While the web rollout gate is off,
 tone/voice events retain the legacy complete tone/voice snapshot required by
 the old coalescing consumer. Once the gate is enabled, events contain only the
 request delta. Personality payloads are strict,
@@ -258,15 +334,33 @@ scores, and mixed tone-or-voice plus personality requests before persistence.
 The response returns the full web projection so the Settings row can update
 without inventing a second readback service.
 
-Conversation-written personality values do not reverse-sync into the web
-projection. Settings therefore resolves missing columns to the shared defaults
-for display but submits only dials deliberately touched in that dialog, even
-when a touched dial returns to its displayed value. Projection equality must
-not suppress that explicit canonical intent. The dialog must never submit all
-three displayed defaults automatically. Personality events always carry only
-fields touched by the request. Tone/voice events gain that same sparse contract
-when the web gate is enabled, so a steady-state web save cannot overwrite an
-unseen canonical sibling preference.
+Hosted conversation `set` and `reset` now converge the web projection before
+the tool reports success. Inside one signed, accepted-input-bound transaction,
+Web resolves the turn's canonical sequence, atomically updates each applicable
+requested dial and its watermark, and, when at least one dial applies, appends one sparse
+`member.preferences.updated` event with `causalOrigin: "turn"` and that original
+sequence. The mailbox event then converges the same sparse intent into canonical
+vault state. Settings
+continues to submit only dials deliberately touched in its dialog, even when a
+touched dial returns to its displayed value. Projection equality must not
+suppress that explicit canonical intent, and the dialog must never submit all
+three displayed defaults automatically.
+
+Group-origin self-service writes use that same transaction without borrowing
+the synthetic room's mailbox sequence. The transaction appends a fresh
+member-owned preference event, whose member mailbox sequence becomes the
+field-local watermark. This keeps ordering inside the existing preference
+owner and avoids comparing a group-container causal sequence with a member's
+private sequence. The resulting projection and canonical state remain the
+member's; no group preference record is created.
+
+There is no push channel into an already open Settings page, so a page that was
+open during a conversational change needs a reload before it shows the new
+projection. Values written in conversation before this convergence path shipped
+cannot be reconstructed safely from the web database; an affected member may
+see one stale dial until that dial's next conversational set/reset or Settings
+save. Sparse writes do not repair untouched siblings. That historical one-time
+gap is not an ongoing source-of-truth exception.
 
 After the web gate is enabled, `member.preferences.updated` is a delta contract,
 not a replaceable snapshot. The hosted system mailbox applies every preference
@@ -287,31 +381,36 @@ system pending item or conversation input record, and passed into the canonical
 preference mutation. `bank/preferences.json` retains only each sparse field's
 value. The canonical companion document
 `bank/assistant-preference-mutations.json` retains each sparse field's
-last-applied sequence. An older or equal Settings event terminally ignores only
-stale fields, still applies a newer sibling, and advances `updatedAt` whenever
-a sibling value really changes. Conversational commands from one accepted turn
-may apply at the same sequence in command order. Replaying a Settings event
-after the canonical commit is therefore an idempotent no-op without an event
-receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
-Ordering never uses the web projection or wall-clock comparison.
+last-applied sequence. Ordering is field-local: a newer sequence applies and
+advances its dial's watermark even if the visible projection value is
+unchanged; an older sequence is a stale no-op for that dial while a fresh
+sibling may still apply; the same sequence and value is an exact idempotent
+retry; and the same sequence with a different value is a later command from the
+same accepted turn and applies in command order. The same rules govern Web's
+per-dial projection watermarks and the canonical companion watermarks. Ordering
+never uses
+wall-clock comparison, and replay needs no separate receipt, reservation,
+lifecycle cap, or mailbox-removal acknowledgment.
 
 New `conversation.message` mailbox rows also store a nullable server-keyed
 lookup of the existing deterministic assistant input id. The raw id is not
 persisted in that projection; the mailbox wire shape, `sourceRef`, and event id
-do not change. For an update, the conversation personalization callback carries the
-sole input id only when the provider accepted exactly one input; it does not
+do not change. For an update, the conversation personalization callback carries
+the terminal provider-accepted input id only after the accepted ids revalidate
+as one same-conversation, same-reply-anchor, exact-successor batch; it does not
 carry a sequence. Inside the mutation transaction,
 web derives the configured lookup-key candidates and resolves the callback
 member and one matching key to one live conversation-lane
 `conversation.message` row and reads its canonical causal sequence. Missing,
 legacy, mismatched, or ambiguous identity fails closed without a numeric
-sequence fallback. The web projection stores nullable per-field tone and voice
-watermarks and stale-no-ops only requested fields whose later Settings or
-conversation intent already has a higher sequence. A conversation wake keeps
-its origin sequence and `turn` origin for canonical application even though
-the mailbox row receives a newer transport sequence; Settings wakes continue
-to use their row sequence. This keeps the display projection and canonical
-vault on the same field-local order without making callback time a new intent.
+sequence fallback. The web projection stores nullable per-field tone, voice,
+Humor, Push, and Detail watermarks and stale-no-ops only requested fields whose
+later Settings or conversation intent already has a higher sequence. A
+conversation wake keeps its origin sequence and `turn` origin for canonical
+application even though the mailbox row receives a newer transport sequence;
+Settings wakes continue to use their row sequence. This keeps the display
+projection and canonical vault on the same field-local order without making
+callback time a new intent.
 During the legacy complete-snapshot rollout, additive `requestedFields`
 metadata preserves the caller's exact tone/voice field set for new runtimes;
 the web projection still advances every field visible to an old snapshot
@@ -324,19 +423,27 @@ retention wakes do not block it. The web checkpoint transaction advances the
 durable system `consumed_seq` together with the snapshot CAS, so a conflict or
 rollback leaves pending work replayable.
 
-The canonical assistant-input selector admits at most one mailbox-backed input
-to each hosted provider turn. Later accepted inputs remain pending for a later
-turn instead of being folded into or steered through a turn with a different
-causal anchor. For web-owned tone and voice, the runtime forwards the selected
-provider-accepted input id through the dedicated personalization port. The
-model cannot provide or replace that id or a numeric sequence. The id is
-invocation-local transport only; web's mailbox row remains the ordering
-authority. At local `murph.assistant_style` mutation time, the signed Web
-personalization port binds that sole provider-accepted input id to the callback
-member and one live mailbox row, then returns the canonical sequence for Humor,
-Push, and Detail ordering. Persisted assistant-input files are never numeric
-authority; missing or ambiguous authority fails the hosted write closed without
-blocking the ordinary reply.
+The canonical assistant-input selector admits a bounded, cursor-ordered compound
+batch. Foreground starts with the oldest fresh input in the current wake and may
+add only later fresh siblings; it never pulls older pending backlog ahead of that
+batch. Background starts with the oldest replyable pending input. A batch
+continues only while every input has the same canonical conversation and
+provider-native reply anchor and each positive per-member mailbox causal
+sequence is the exact successor of the previous one. A conversation or
+reply-anchor change, sequence gap, 50-input bound, or legacy sequence-zero input
+ends the batch, and the remainder stays pending.
+
+The accepted-input boundary forwards the batch's terminal provider-accepted
+input id through the dedicated personalization port. The model cannot provide
+or replace that id or a numeric sequence. Web binds the id to the callback
+member and one live mailbox row, then derives the canonical sequence for tone,
+voice, Humor, Push, and Detail ordering. Exact-successor proof means the
+terminal input cannot cross an intervening system-lane Settings mutation. The
+selected batch is frozen before the provider starts; mailbox input accepted
+later remains pending for another turn. The id is invocation-local transport
+only and is cleared after the provider attempt; persisted assistant-input files
+are never numeric authority. Missing or ambiguous authority fails the hosted
+write closed without blocking the ordinary reply.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy
@@ -362,49 +469,74 @@ so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The sparse-delta, shared-causal-sequence, and personalization-authority
-transition uses one additive expansion followed by a hard cut:
+The sparse-delta, shared-causal-sequence, personalization-authority, and
+conversation-to-Settings convergence transition uses additive expansion
+followed by a hard cut:
 
 1. Vercel predeploy applies the nullable `causal_seq` expansion and the
-   nullable keyed assistant-input lookup projection. Deploy the new web build
-   with
+   nullable keyed assistant-input lookup projection, plus nullable Humor,
+   Push, and Detail projection-watermark columns. Deploy the new web build with
    `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
-   personality controls remain unavailable while old functions drain. That
-   build writes a server-keyed lookup of the existing deterministic assistant
-   input id for new conversation messages and hard-rejects personalization callbacks that do
-   not resolve it. It does not change the mailbox wire, `sourceRef`, or event
-   id. This web build is the rollback floor.
+   personality controls and hosted personality mutation action remain
+   unavailable while old functions drain. That build writes a server-keyed
+   lookup of the existing deterministic assistant input id for new conversation
+   messages, supports the signed input-bound personality transaction, and
+   hard-rejects callbacks that do not resolve it. It also rejects the retired
+   direct-vault `resolve_preference_causal_seq` action; old Vercel functions may
+   still serve that action only during their bounded pre-contract drain. It does
+   not change the mailbox wire, `sourceRef`, or event id. This web build is the
+   rollback floor.
 2. The normal post-deploy contract-migration lane waits for the old Vercel
    function window, then fails closed only if a legacy preference row remains
    above the authoritative system-lane `consumed_seq`. It installs the
    new-write check `NOT VALID`, so handled retained history does not block the
    rollout and new null-sequence preference writes are rejected. After that
-   same drain, it advances each populated web projection field to the member's
-   current mailbox causal counter. That one-time cutover barrier makes every
-   pre-cutover conversational turn stale at the projection without inventing
-   ordering for an absent field.
+   same drain, it seeds all three personality projection watermarks to each
+   member's current causal barrier, including dials whose projection value is
+   null. This is an intentional exception to the populated-field rule used for
+   tone and voice: before reverse convergence, a null personality projection
+   could still disagree with a custom canonical vault value. The barrier makes
+   older pre-cutover turns stale without pretending the unavailable historical
+   value can be backfilled. The boundary row at the barrier keeps the normal
+   equal-sequence command semantics; every message accepted after the committed
+   seed is strictly newer. A direct-vault write completed through an old Vercel
+   function before the drain ends joins the bounded historical non-backfill
+   caveat; after the drain, the hard-cut route cannot create another one.
 3. Deploy the new Cloudflare worker and runner with
    `container_rollout=immediate`; prove the managed fleet has converged. The
-   runtime forwards the sole input id only when the provider accepted exactly
-   one input, and web derives its causal sequence from the live member-owned
-   mailbox row inside the write transaction. There is no sequence fallback.
-4. Enable the Vercel gate. Settings switches tone/voice to sparse deltas and
-   exposes personality controls only after the FIFO consumer fleet is present.
-   Existing reply styling, ordinary conversation, and current-inbound replies
-   stay available throughout.
+   runtime forwards the terminal input id only from a locally revalidated
+   same-conversation, same-anchor, exact-successor accepted-input batch, and Web
+   derives its causal sequence from the live member-owned mailbox row inside
+   the write transaction. There is no sequence fallback.
+4. Set `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=1` and redeploy Web.
+   Settings switches tone/voice to sparse deltas and
+   exposes personality controls and hosted conversation convergence only after
+   the FIFO consumer fleet is present. Existing reply styling, ordinary
+   conversation, and current-inbound replies stay available throughout.
 
 The new consumer accepts already-imported tokenless v1 local pending items
 through the explicit sequence-zero path. The pre-switch drain ensures that
 compatibility path is not asked to reconstruct unavailable cross-lane order.
 
-During the web-first mixed-version window, legacy runtimes continue ordinary
-replies while conversational preference writes fail closed. Deploying web and
-Cloudflare/runtime in tandem minimizes that temporary unavailable-write window.
-Keep web at or above the hard-cut build during any runtime rollback; an older
-runtime may continue replies but cannot write preferences through the rejected
-legacy numeric-sequence callback. Post-deploy, save one dial, run a
+During the old-Vercel-function drain, a legacy runtime may still complete the
+old direct-vault path through an old function. After that drain, hard-cut Web
+rejects the retired resolver: legacy runtimes continue ordinary replies, but
+style writes fail closed as unconfirmed until the input-bound fleet converges.
+Deploying Web and Cloudflare/runtime in tandem minimizes both windows. Keep Web
+at or above the hard-cut build during any runtime rollback; an older runtime
+continues ordinary replies but its style writes remain unavailable. Do not
+enable the gate until the converged fleet uses the input-bound personality
+transaction. Post-deploy, save one dial, run a
 conversational change to the same dial, confirm the later accepted intent wins
-canonically, and confirm no preference item remains rejected or stuck.
+in both the refreshed Settings projection and canonical vault, exercise a
+reset, and confirm no preference item remains rejected or stuck. An already
+open Settings page needs a reload; do not mistake that client snapshot for
+failed server convergence.
+
+After the gate is enabled, set it to `0` and redeploy Web before a runtime
+rollback if unavailable controls must be hidden. Keep Web at or above the
+hard-cut transaction rollback floor while personality watermarks exist; never
+restore a Web build that serves the retired direct-vault resolver.
 
 ## Preview Clips
 

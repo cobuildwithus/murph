@@ -1,7 +1,9 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { createReadStream, promises as fs, type Stats } from "node:fs";
+
+import { auditRecordSchema } from "@murphai/contracts";
 
 import {
   copyFileAtomic,
@@ -336,6 +338,7 @@ export interface PruneTerminalWriteOperationRecordsInput {
   now?: DateInput;
   retainedOperationCount?: number;
   retentionMs?: number;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }
 
@@ -732,37 +735,126 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     }
   }
 
-  if (existing.byteLength < originalSize) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base size is not present.",
-    );
+  const baseSizeIsPresent = existing.byteLength >= originalSize;
+  const baseReceipt = baseSizeIsPresent
+    ? createCommittedPayloadReceipt(existing.subarray(0, input.baseByteLength))
+    : null;
+  const baseMatches = baseReceipt?.sha256 === input.baseSha256
+    && baseReceipt.byteLength === input.baseByteLength;
+  if (baseMatches) {
+    const appendedEnd = originalSize + input.bytes.byteLength;
+    if (
+      existing.byteLength >= appendedEnd &&
+      Buffer.from(existing.subarray(originalSize, appendedEnd)).equals(Buffer.from(input.bytes))
+    ) {
+      return;
+    }
+    if (existing.byteLength === originalSize) {
+      await fs.appendFile(target.absolutePath, input.bytes);
+      return;
+    }
   }
 
-  const baseReceipt = createCommittedPayloadReceipt(existing.subarray(0, input.baseByteLength));
-  if (baseReceipt.sha256 !== input.baseSha256 || baseReceipt.byteLength !== input.baseByteLength) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base content does not match the receipt.",
-    );
-  }
-
-  const appendedEnd = originalSize + input.bytes.byteLength;
-  if (
-    existing.byteLength >= appendedEnd &&
-    Buffer.from(existing.subarray(originalSize, appendedEnd)).equals(Buffer.from(input.bytes))
-  ) {
+  if (await tryReconcileHostedCanonicalAuditAppend({
+    bytes: input.bytes,
+    comparisonOptions,
+    existing,
+    target,
+  })) {
     return;
   }
+  throw new VaultError(
+    "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+    baseSizeIsPresent
+      ? "Hosted canonical JSONL append base content does not match the receipt."
+      : "Hosted canonical JSONL append base size is not present.",
+  );
+}
 
-  if (existing.byteLength !== originalSize) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base content does not match the receipt.",
-    );
+async function tryReconcileHostedCanonicalAuditAppend(input: {
+  bytes: Uint8Array;
+  comparisonOptions: VaultPathComparisonOptions;
+  existing: Uint8Array;
+  target: ResolvedVaultPath;
+}): Promise<boolean> {
+  const comparisonRelativePath = normalizeRelativeVaultPathForComparison(
+    input.target.relativePath,
+    input.comparisonOptions,
+  );
+  const auditDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.auditDirectory,
+    input.comparisonOptions,
+  );
+  if (
+    !comparisonRelativePath.startsWith(`${auditDirectory}/`) ||
+    !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)
+  ) {
+    return false;
   }
 
-  await fs.appendFile(target.absolutePath, input.bytes);
+  const payload = Buffer.from(input.bytes).toString("utf8");
+  if (!payload.endsWith("\n")) {
+    return false;
+  }
+  const payloadLines = payload.slice(0, -1).split("\n");
+  if (payloadLines.length !== 1 || payloadLines[0]?.length === 0) {
+    return false;
+  }
+  const incomingRecord = parseHostedAuditRecordLine(payloadLines[0]);
+  if (!incomingRecord) {
+    return false;
+  }
+
+  const existingText = Buffer.from(input.existing).toString("utf8");
+  if (existingText.length > 0 && !existingText.endsWith("\n")) {
+    return false;
+  }
+  const existingLines = existingText.length === 0 ? [] : existingText.slice(0, -1).split("\n");
+  const existingRecordIds = new Set<string>();
+  let matchingRecord: typeof incomingRecord | null = null;
+  for (const line of existingLines) {
+    if (line.length === 0) {
+      return false;
+    }
+    const record = parseHostedAuditRecordLine(line);
+    if (!record) {
+      return false;
+    }
+    if (existingRecordIds.has(record.id)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+        "Hosted canonical audit replay found a duplicate existing audit record ID.",
+      );
+    }
+    existingRecordIds.add(record.id);
+    if (record.id === incomingRecord.id) {
+      matchingRecord = record;
+    }
+  }
+
+  if (matchingRecord) {
+    if (JSON.stringify(matchingRecord) !== JSON.stringify(incomingRecord)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+        "Hosted canonical audit replay found conflicting content for an existing audit record ID.",
+      );
+    }
+    return true;
+  }
+
+  await fs.appendFile(input.target.absolutePath, input.bytes);
+  return true;
+}
+
+function parseHostedAuditRecordLine(line: string) {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const result = auditRecordSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 function isArchivedIntegrationIngestAppendError(
@@ -968,6 +1060,60 @@ async function safeUnlink(absolutePath: string): Promise<void> {
   }
 }
 
+async function removeTreeInterruptibly(
+  absolutePath: string,
+  signal: AbortSignal | null | undefined,
+): Promise<void> {
+  signal?.throwIfAborted();
+
+  let stats: Stats;
+  try {
+    stats = await fs.lstat(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+
+  if (!stats.isDirectory()) {
+    await safeUnlink(absolutePath);
+    signal?.throwIfAborted();
+    return;
+  }
+
+  let childNames: string[];
+  try {
+    childNames = await fs.readdir(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+
+  childNames.sort((left, right) => left.localeCompare(right));
+  for (const childName of childNames) {
+    signal?.throwIfAborted();
+    await removeTreeInterruptibly(path.join(absolutePath, childName), signal);
+  }
+
+  try {
+    await fs.rmdir(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+}
+
 export function isTerminalWriteOperationStatus(status: string): boolean {
   return status === "committed" || status === "rolled_back";
 }
@@ -1015,6 +1161,7 @@ export async function listWriteOperationMetadataPathsWithStageDirectories(
 export async function pruneTerminalWriteOperationRecords(
   input: PruneTerminalWriteOperationRecordsInput,
 ): Promise<PruneTerminalWriteOperationRecordsResult> {
+  input.signal?.throwIfAborted();
   const checkpointedAfterMs = parsePruneBoundaryMs(input.checkpointedAfter);
   const nowMs = parsePruneBoundaryMs(input.now ?? new Date());
   const retainedOperationCount = normalizeTerminalWriteOperationRetainedCount(
@@ -1042,7 +1189,10 @@ export async function pruneTerminalWriteOperationRecords(
 
   const candidates: PrunableTerminalWriteOperationRecord[] = [];
   const cutoffMs = nowMs - retentionMs;
-  for (const relativePath of await listWriteOperationMetadataPaths(input.vaultRoot)) {
+  const metadataPaths = await listWriteOperationMetadataPaths(input.vaultRoot);
+  input.signal?.throwIfAborted();
+  for (const relativePath of metadataPaths) {
+    input.signal?.throwIfAborted();
     result.scannedCount += 1;
     const operationId = operationIdFromMetadataPath(relativePath);
     if (!operationId) {
@@ -1051,6 +1201,7 @@ export async function pruneTerminalWriteOperationRecords(
     }
 
     const operation = await readStrictPrunableWriteOperation(input.vaultRoot, relativePath);
+    input.signal?.throwIfAborted();
     if (!operation || operation.operationId !== operationId) {
       result.invalidCount += 1;
       continue;
@@ -1076,20 +1227,26 @@ export async function pruneTerminalWriteOperationRecords(
       input.vaultRoot,
       path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
     )).absolutePath;
+    input.signal?.throwIfAborted();
     if (updatedAtMs >= checkpointedAfterMs) {
-      if (await pathExists(stageRoot)) {
+      const stageRootExists = await pathExists(stageRoot);
+      input.signal?.throwIfAborted();
+      if (stageRootExists) {
         result.retainedStageDirectoryCount += 1;
       }
       result.retainedUncheckpointedTerminalCount += 1;
       continue;
     }
 
-    if (await pathExists(stageRoot)) {
-      await fs.rm(stageRoot, { force: true, recursive: true });
+    const stageRootExists = await pathExists(stageRoot);
+    input.signal?.throwIfAborted();
+    if (stageRootExists) {
+      await removeTreeInterruptibly(stageRoot, input.signal);
       result.prunedStageDirectoryCount += 1;
     }
 
     await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
+    input.signal?.throwIfAborted();
 
     candidates.push({
       metadataRelativePath: relativePath,
@@ -1105,6 +1262,7 @@ export async function pruneTerminalWriteOperationRecords(
   );
 
   for (const [index, candidate] of candidates.entries()) {
+    input.signal?.throwIfAborted();
     if (index < retainedOperationCount) {
       result.retainedNewestTerminalCount += 1;
       continue;
@@ -1115,8 +1273,10 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    if (await pathExists(candidate.stageRoot)) {
-      await fs.rm(candidate.stageRoot, { force: true, recursive: true });
+    const stageRootExists = await pathExists(candidate.stageRoot);
+    input.signal?.throwIfAborted();
+    if (stageRootExists) {
+      await removeTreeInterruptibly(candidate.stageRoot, input.signal);
       result.prunedStageDirectoryCount += 1;
     }
 
@@ -1124,8 +1284,11 @@ export async function pruneTerminalWriteOperationRecords(
       input.vaultRoot,
       candidate.metadataRelativePath,
     )).absolutePath;
+    input.signal?.throwIfAborted();
     const measured = await measureExistingFile(metadataPath);
+    input.signal?.throwIfAborted();
     await safeUnlink(metadataPath);
+    input.signal?.throwIfAborted();
     result.prunedCount += 1;
     result.prunedFileCount += measured.fileCount;
     result.prunedByteCount += measured.byteCount;

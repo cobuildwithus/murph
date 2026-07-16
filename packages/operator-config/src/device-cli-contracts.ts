@@ -190,11 +190,23 @@ export const deviceAccountShowResultSchema = z.object({
   account: deviceSyncAccountSchema,
 })
 
-export const deviceAccountReconcileResultSchema = z.object({
+const localDeviceAccountReconcileResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,
   account: deviceSyncAccountSchema,
   job: deviceSyncJobSchema,
 })
+
+const hostedDeviceAccountReconcileResultSchema = z.object({
+  accountId: z.string().min(1),
+  backend: z.literal('hosted'),
+  occurredAt: isoTimestampSchema,
+  status: z.literal('queued'),
+}).strict()
+
+export const deviceAccountReconcileResultSchema = z.union([
+  localDeviceAccountReconcileResultSchema,
+  hostedDeviceAccountReconcileResultSchema,
+])
 
 export const deviceAccountDisconnectResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema,

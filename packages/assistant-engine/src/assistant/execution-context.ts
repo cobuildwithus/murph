@@ -93,9 +93,6 @@ export interface AssistantHostedPlanUsageTool {
 }
 
 export interface AssistantHostedPersonalizationTool {
-  resolvePreferenceCausalSeq?(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -165,7 +162,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
-  currentAssistantPersonalizationInputId?: () => string | null
+  currentAssistantPreferenceInputId?: () => string | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
@@ -255,10 +252,10 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(typeof hosted?.currentAssistantPersonalizationInputId === 'function'
+      ...(typeof hosted?.currentAssistantPreferenceInputId === 'function'
         ? {
-            currentAssistantPersonalizationInputId:
-              hosted.currentAssistantPersonalizationInputId,
+            currentAssistantPreferenceInputId:
+              hosted.currentAssistantPreferenceInputId,
           }
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
@@ -416,12 +413,6 @@ function normalizeAssistantPersonalizationTool(
   }
 
   return {
-    ...(typeof input.resolvePreferenceCausalSeq === 'function'
-      ? {
-          resolvePreferenceCausalSeq:
-            input.resolvePreferenceCausalSeq.bind(input),
-        }
-      : {}),
     request: input.request.bind(input),
   }
 }

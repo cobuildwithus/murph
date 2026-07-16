@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
@@ -6,6 +7,7 @@ import {
   readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
+  type AssistantInputCandidateByIdQuery,
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
@@ -16,6 +18,11 @@ import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  shouldGroupAdjacentAssistantInputCandidates,
+} from "@murphai/assistant-engine/assistant-automation";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
+
+import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
 } from "./pending-input-index.ts";
@@ -24,7 +31,7 @@ const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
 type HostedPendingInputRefreshMode = "compact" | "none";
 
-export type HostedAssistantInputSelection =
+type HostedAssistantInputSelection =
   | {
       freshInputIds: string[];
       inputIds: string[];
@@ -38,8 +45,45 @@ export type HostedAssistantInputSelection =
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
+  listInputCandidatesByIds(
+    input: AssistantInputCandidateByIdQuery,
+  ): Promise<AssistantInputCandidateBatch>;
   readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
+}
+
+export async function resolveHostedPersonalizationInputIdForAcceptedInputs(input: {
+  assistantInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string | null> {
+  const inputIds = uniqueStrings(input.assistantInputIds);
+  if (
+    inputIds.length === 0
+    || inputIds.length !== input.assistantInputIds.length
+  ) {
+    return null;
+  }
+  let events: AssistantInputEventRecord[];
+  try {
+    events = await readHostedAssistantInputEventsById({
+      inputIds,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch {
+    return null;
+  }
+  let batch: AssistantInputEventRecord[];
+  try {
+    batch = selectHostedAssistantInputEventBatch({
+      events,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    });
+  } catch {
+    return null;
+  }
+  return batch.length === events.length
+    ? batch.at(-1)?.inputId ?? null
+    : null;
 }
 
 export function createHostedAssistantInputSource(input: {
@@ -90,11 +134,18 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
+      const appendablePendingEvents = await readHostedAssistantInputEventsById({
+        inputIds: newPendingInputIds,
+        vaultRoot: input.vaultRoot,
+      });
+      const appendablePendingInputIds = selectedInputIds.length === 0
+        ? selectHostedAssistantInputEventBatch({
+            events: appendablePendingEvents,
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          }).map((event) => event.inputId)
+        : [];
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: newPendingInputIds.slice(
-          0,
-          Math.max(0, 1 - selectedInputIds.length),
-        ),
+        inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
@@ -114,6 +165,42 @@ export function createHostedAssistantInputSource(input: {
       return filterHostedAssistantInputCandidates({
         candidates,
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
+        query,
+      });
+    },
+    async listInputCandidatesByIds(query) {
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const inputIds = uniqueStrings(query.inputIds);
+      for (const inputId of inputIds) {
+        observedInputIds.add(inputId);
+      }
+      const events = await readHostedAssistantInputEventsById({
+        inputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const replyableEvents = events.length === inputIds.length
+        ? await filterHostedReplyablePendingAssistantInputEvents({
+            events,
+            vaultRoot: input.vaultRoot,
+          })
+        : [];
+      const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
+        afterCursor: query.afterCursor ?? null,
+        events,
+        replyableInputIds: new Set(
+          replyableEvents.map((event) => event.inputId),
+        ),
+        vaultRoot: input.vaultRoot,
+      });
+      const candidates = await createHostedAssistantInputCandidates({
+        events: exactSuccessors,
+        vaultRoot: input.vaultRoot,
+      });
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return filterHostedAssistantInputCandidates({
+        candidates,
+        ignoreAfterCursor: true,
         query,
       });
     },
@@ -167,14 +254,12 @@ export async function selectHostedAssistantInputIds(
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
-    const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
     return {
-      inputIds: pendingEvents
-        .sort((left, right) =>
-          compareAssistantInputCursors(left.cursor, right.cursor)
-        )
-        .slice(0, Math.min(limit, 1))
-        .map((event) => event.inputId),
+      inputIds: selectHostedAssistantInputEventBatch({
+        events: pendingEvents,
+        limit,
+      }).map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
     };
@@ -197,15 +282,118 @@ export async function selectHostedAssistantInputIds(
 
   return {
     freshInputIds,
-    inputIds: freshEvents
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .slice(0, 1)
-      .map((event) => event.inputId),
+    inputIds: selectHostedAssistantInputEventBatch({
+      events: freshEvents,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    }).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds: [],
   };
+}
+
+function selectHostedAssistantInputEventBatch(input: {
+  events: readonly AssistantInputEventRecord[];
+  limit: number;
+}): AssistantInputEventRecord[] {
+  const orderedEvents = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const selected: AssistantInputEventRecord[] = [];
+  let previousEvent: AssistantInputEventRecord | null = null;
+
+  for (const event of orderedEvents) {
+    if (selected.length >= input.limit) {
+      break;
+    }
+    if (
+      previousEvent
+      && !isHostedAssistantInputEventBatchSuccessor(previousEvent, event)
+    ) {
+      break;
+    }
+    selected.push(event);
+    previousEvent = event;
+  }
+
+  return selected;
+}
+
+async function selectHostedAssistantExactSuccessorEvents(input: {
+  afterCursor: AssistantInputCursor | null;
+  events: readonly AssistantInputEventRecord[];
+  replyableInputIds: ReadonlySet<string>;
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const afterCursor = input.afterCursor;
+  if (!afterCursor || input.events.length === 0) {
+    return [];
+  }
+  const [anchor] = await readHostedAssistantInputEventsById({
+    inputIds: [afterCursor.inputId],
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  if (!anchor) {
+    return [];
+  }
+
+  // Exact notification avoids a global scan, but it does not weaken the
+  // compound-batch boundary. Ignore duplicate notifications at or behind the
+  // supplied frontier, then stop at the first missing causal successor,
+  // incomplete projection, or non-replyable event and leave later IDs pending.
+  const successorEvents = [...input.events]
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    )
+    .filter((event) =>
+      compareAssistantInputCursors(event.cursor, afterCursor) > 0
+    );
+  const selected: AssistantInputEventRecord[] = [];
+  let previous = anchor;
+  for (const event of successorEvents) {
+    if (
+      event.projection.status === "pending"
+      || !input.replyableInputIds.has(event.inputId)
+      || !isHostedAssistantInputEventBatchSuccessor(previous, event)
+    ) {
+      break;
+    }
+    selected.push(event);
+    previous = event;
+  }
+  return selected;
+}
+
+function isHostedAssistantInputEventBatchSuccessor(
+  previous: AssistantInputEventRecord,
+  candidate: AssistantInputEventRecord,
+): boolean {
+  if (
+    !shouldGroupAdjacentAssistantInputCandidates(
+      assistantInputCandidateFromStoredEvent(previous),
+      assistantInputCandidateFromStoredEvent(candidate),
+    )
+  ) {
+    return false;
+  }
+
+  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
+  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
+  return previousCausalSeq !== null
+    && candidateCausalSeq !== null
+    && candidateCausalSeq === previousCausalSeq + 1n;
+}
+
+function readPositiveHostedAssistantInputCausalSeq(
+  event: AssistantInputEventRecord,
+): bigint | null {
+  if (event.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  const causalSeq = BigInt(
+    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
+  );
+  return causalSeq > 0n ? causalSeq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -213,11 +401,21 @@ async function readHostedAssistantInputCandidatesById(input: {
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
+  return createHostedAssistantInputCandidates({
+    events,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function createHostedAssistantInputCandidates(input: {
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputCandidate[]> {
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
-    inputIds: events.map((event) => event.inputId),
+    inputIds: input.events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
-  return events
+  return [...input.events]
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
@@ -237,6 +435,7 @@ async function readHostedAssistantInputCandidatesById(input: {
 
 async function readHostedAssistantInputEventsById(input: {
   inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const events: AssistantInputEventRecord[] = [];
@@ -246,6 +445,9 @@ async function readHostedAssistantInputEventsById(input: {
       vault: input.vaultRoot,
     });
     if (!event) {
+      if (input.missingInput === "skip") {
+        continue;
+      }
       throw new Error(
         `Hosted assistant input source references a missing input event: ${inputId}`,
       );
@@ -259,7 +461,21 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
   inputIds: readonly string[];
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
-  const events = await readHostedAssistantInputEventsById(input);
+  const events = await readHostedAssistantInputEventsById({
+    inputIds: input.inputIds,
+    vaultRoot: input.vaultRoot,
+  });
+  return filterHostedReplyablePendingAssistantInputEvents({
+    events,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function filterHostedReplyablePendingAssistantInputEvents(input: {
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const events = input.events;
   if (events.length === 0) {
     return [];
   }
@@ -279,14 +495,17 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
 
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
-  emittedCursorKeys: Set<string>;
+  emittedCursorKeys?: Set<string>;
+  ignoreAfterCursor?: boolean;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
-  const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
-    afterCursor: input.query.afterCursor ?? null,
-    emittedCursorKeys: input.emittedCursorKeys,
-  });
+  const afterCursor = input.ignoreAfterCursor === true
+    ? null
+    : readEffectiveHostedAssistantInputSourceAfterCursor({
+        afterCursor: input.query.afterCursor ?? null,
+        emittedCursorKeys: input.emittedCursorKeys ?? new Set(),
+      });
   const batch = buildHostedAssistantInputCandidateBatch({
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
@@ -304,7 +523,7 @@ function filterHostedAssistantInputCandidates(input: {
     limit: input.query.limit,
   });
   for (const candidate of batch.inputs) {
-    input.emittedCursorKeys.add(hostedAssistantInputCursorKey(candidate.event.cursor));
+    input.emittedCursorKeys?.add(hostedAssistantInputCursorKey(candidate.event.cursor));
   }
   return batch;
 }
@@ -393,6 +612,16 @@ function normalizeHostedAssistantInputQueryLimit(value: number | undefined): num
     return DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT;
   }
   return Math.max(1, Math.trunc(value));
+}
+
+function normalizeHostedAssistantInputBatchLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
+  }
+  return Math.min(
+    DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    Math.max(1, Math.trunc(value)),
+  );
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

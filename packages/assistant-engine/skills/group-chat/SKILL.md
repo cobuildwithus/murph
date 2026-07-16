@@ -29,6 +29,59 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Additive permissions
+
+When the room adds a sharing permission to a group that already exists, default
+to `murph.group action="post_join_offer"`. Do not tell existing members to join
+again or make them open the link as the primary action. Lead the offer with the
+exact words "Like this message," then say that liking opts them into the exact
+`{{share_scope}}`. Keep `{{join_url}}` as the secondary customize path for
+someone who wants to share more or less. Liking adds only the disclosed
+permission snapshot; it does not make an existing member redo membership or
+their other grants. Use `create_join_link` when the room explicitly asks for a
+standalone link, not as the default for an additive permission.
+
+## Leaving a hosted group
+
+Do not leave a membership from inside the group room or treat the visible
+sender as private-account authority. If someone asks here to leave the Murph
+group, tell them to ask Murph in their private one-to-one conversation. If they
+already have the group's join page, they can also manage their own membership
+there; do not create, reconstruct, or reveal a reusable join URL for an
+ordinary member.
+
+In the member's private Murph conversation, act only on that member's explicit
+request. Call `murph.group action="list_memberships"` first, match the group
+they chose, and call `action="leave_membership"` with the exact nonempty
+`membershipId` returned in that result. Never guess an id, accept one supplied
+by the user, target a group by its name alone, or remove someone else.
+
+Report the tool result exactly. `left` means their Murph group membership and
+future sharing ended. It does not remove them from the iMessage chat or erase
+historical messages, provider history, backups, or copies already held by
+other people. `already_left` means there was no current membership to remove.
+For `owner_cannot_leave`, explain that the group's owner cannot leave their own
+group. Never claim success after `unavailable`.
+
+## A sender's own Murph style
+
+An authenticated Linq speaker may inspect or change their own private Murph
+style without leaving the room. When that speaker asks for their tone, voice,
+Humor, Push, or Detail, use `murph.group` with
+`action="read_own_assistant_style"`. When they explicitly request a change,
+use `action="update_own_assistant_style"` with only the requested fields.
+Humor, Push, and Detail are integer scores from 0 through 10; null restores the
+default.
+
+The runtime binds these actions to the accepted inbound sender. Never pass,
+infer, ask for, or accept a member id or handle, and never use the action to
+change another participant. The result changes that sender's future private
+Murph conversations and generated voice; it does not tune this room or the
+reply already running. If the tool reports `unavailable`, say the change did
+not complete. Do not replace it with a personal settings link in the group.
+These actions are unavailable for group-email replies and ambiguous or
+unrecognized senders.
+
 ## The decision ladder
 
 Run this on every inbound group message, top to bottom, and take the first
@@ -162,10 +215,10 @@ messages are expected; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
-- Do not say an update is saved, scheduled, or active until the
-  `vault-cli automation save` command succeeds. If it fails, correct the
-  command or tell the group plainly that setup did not complete; never turn a
-  failed command into a confirmation.
+- Do not say an update is saved, scheduled, changed, or active until its
+  `vault-cli automation` command succeeds. If it fails, correct the command or
+  tell the group plainly that the requested change did not complete; never
+  turn a failed command into a confirmation.
 
 ## Group health newsletter
 
@@ -177,8 +230,8 @@ section owns the group-room setup, consent, notice, and opt-out behavior.
 
 The group health newsletter is a single cron automation in the group runtime's
 vault, not a new scheduler or private data store. Any member can set it up,
-edit it, or stop it. One automation per group wins, and the latest request
-replaces the previous one.
+edit it, or stop it. One automation per group wins; apply later requests to
+the same stable slug.
 
 When a group asks for a newsletter, do not create it immediately with invented
 defaults. First send one short setup message that gets the essentials: what the
@@ -193,10 +246,11 @@ do not re-interrogate them. Use the current group's non-blank `displayName` from
 generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name
-used in the setup notice, and the group display name for the join surface. For
-the newsletter react-to-join path, pass that same chosen name as `displayName`
-on `murph.group action="post_join_offer"`. If you mint a standalone join link
-instead, pass the same `displayName` on `murph.group action="create_join_link"`.
+used in the setup notice, and the group display name for the permissions
+surface. For the newsletter like-to-consent path, pass that same chosen name
+as `displayName` on `murph.group action="post_join_offer"`. If you mint a
+standalone join link instead, pass the same `displayName` on
+`murph.group action="create_join_link"`.
 The chosen schedule becomes the cron expression; `0 9 * * 0` is the Sunday 9am
 default. Tone and any custom notes belong in the automation instructions.
 
@@ -206,7 +260,8 @@ newsletter email tool. Set up a normal scheduled group-chat update automation
 under the Scheduled updates and automations rules above; it reads the same
 shared vault projections and needs no email grant.
 
-Set up or edit it with `vault-cli automation save` using:
+Create a new newsletter under the developer prompt's shared automation action
+rules using:
 
 - the group's chosen name as the positional `<title>`
 - Use exactly `--slug group-health-newsletter`. Any other slug will not be able to send
@@ -214,7 +269,6 @@ Set up or edit it with `vault-cli automation save` using:
 - `--schedule-kind cron`
 - `--schedule-cron "0 9 * * 0"` unless the group chose another schedule
 - `--continuity-policy fresh`
-- the current group channel
 - instructions that say this is the group health newsletter, include the
   exact chosen name, chosen tone, and any optional custom note, and explicitly
   require the scheduled run to read and follow
@@ -223,7 +277,8 @@ Set up or edit it with `vault-cli automation save` using:
   newsletter label. Future notification turns may not read this skill, so keep
   that complete naming rule in the saved instructions.
 
-Stop it with `vault-cli automation set-status group-health-newsletter --status archived`.
+For changes or stopping, follow the developer prompt's shared automation
+action rules and apply only the requested fields to `group-health-newsletter`.
 
 When creating or materially editing the newsletter, post one clear group notice
 in the chat. Say what will be shared, that it goes only to members who granted
@@ -239,15 +294,16 @@ decision sequence in the `group-newsletter` skill. Do not duplicate or
 improvise a second run sequence from this setup section.
 
 If a member never granted email sharing and expresses interest, or the group
-asks how someone can join the newsletter, post a join offer scoped to
+asks how someone can opt into the newsletter, post a permission offer scoped to
 `group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. Every join offer must lead with "Like this message," immediately
-say what liking it will do, include `{{share_scope}}` exactly once, and
+different set. Every permission offer must lead with "Like this message,"
+immediately say what liking it will do, include `{{share_scope}}` exactly once, and
 include `{{join_url}}` exactly once as the customize link so a member can share
 more or less. When this offer names the newsletter group, pass the group's
 chosen name as `displayName` on the `post_join_offer` call. Liking the message
-grants the disclosed snapshot; the link lets a member pick a different set.
+adds the disclosed snapshot; the link lets a member pick a different set. For
+existing participants, call this permission opt-in, never joining or rejoining.
 Never silently share health data that the message did not disclose, never include any other
 URL, and never repeatedly re-offer to someone who declined.
 

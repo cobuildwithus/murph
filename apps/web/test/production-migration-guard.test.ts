@@ -533,6 +533,44 @@ describe("hosted web production migration guard", () => {
     assert.match(sql, /DROP FUNCTION IF EXISTS clear_orphaned_hosted_linq_home_participant\(\)/u);
   });
 
+  test("repeats the Linq invite orphan scrub in the post-drain contract lane", async () => {
+    const migrationId =
+      "20260715150000_delete_orphaned_linq_invite_deliveries_after_drain";
+    const migrations = await listHostedWebContractMigrations();
+    const migration = migrations.find(({ id }) => id === migrationId);
+    const predeploySql = await readFile(
+      path.join(
+        appRoot,
+        "prisma",
+        "migrations",
+        "20260715120000_delete_orphaned_linq_invite_deliveries",
+        "migration.sql",
+      ),
+      "utf8",
+    );
+
+    assert.ok(migration, `Expected contract migration ${migrationId}`);
+    assert.equal(migration.sql, predeploySql);
+  });
+
+  test("pins the Linq invite deletion producer rollback floor in operator docs", async () => {
+    const readme = await readFile(path.join(appRoot, "README.md"), "utf8");
+
+    assert.match(
+      readme,
+      /Linq invite-delivery data-producer rollback floor is\s+`e67aedb61fd021f50cadae147b92006fef43b97e`/u,
+    );
+    assert.match(readme, /do not\s+roll Vercel below this floor/iu);
+    assert.match(
+      readme,
+      /Rerunning the existing workflow is not a repair[\s\S]*recorded migration ID[\s\S]*make its SQL skip/u,
+    );
+    assert.match(
+      readme,
+      /new\s+timestamped cleanup migration or explicit operator SQL/u,
+    );
+  });
+
   test("applies hosted web contract migrations idempotently and rejects checksum drift", async () => {
     const database = new FakeContractMigrationDatabase();
     const migration: HostedWebContractMigration = {

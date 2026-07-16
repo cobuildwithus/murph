@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -1231,20 +1231,20 @@ beforeEach(() => {
         return false
       }
 
-      const groupInputIds =
+      const groupEvidenceIds =
         evidence.groupInputIds.length > 0
           ? evidence.groupInputIds
-          : evidence.groupCaptureIds.map((captureId: string) => `inbox:${captureId}`)
-      const uniqueGroupInputIds = Array.from(new Set(groupInputIds))
-      if (uniqueGroupInputIds.length === 0) {
+          : evidence.groupCaptureIds
+      const uniqueGroupEvidenceIds = Array.from(new Set(groupEvidenceIds))
+      if (uniqueGroupEvidenceIds.length === 0) {
         return true
       }
 
       const groupEvidence = await Promise.all(
-        uniqueGroupInputIds.map((inputId) =>
+        uniqueGroupEvidenceIds.map((evidenceId) =>
           evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
             input.vault,
-            inputId,
+            evidenceId,
           ),
         ),
       )
@@ -1783,6 +1783,135 @@ describe('assistant automation scanner', () => {
       considered: 2,
       skipped: 2,
     })
+  })
+
+  it('repairs serialized legacy partial evidence before scanner filtering and stays handled after restart', async () => {
+    const context = await createTempVaultContext('assistant-legacy-terminal-repair-')
+    tempRoots.push(context.parentRoot)
+    const first = createCaptureSummary({
+      captureId: 'capture-legacy-partial-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-legacy-partial-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    })
+    const items = [createReplyGroupItem(first), createReplyGroupItem(second)]
+    const itemsByInputId = new Map(items.map((item) => [item.summary.inputId, item]))
+    const actualEvidence = await vi.importActual<
+      typeof import('../src/assistant/automation/evidence.ts')
+    >('../src/assistant/automation/evidence.ts')
+    const actualReply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    const { resolveAssistantStatePaths } = await vi.importActual<
+      typeof import('../src/assistant/store/paths.ts')
+    >('../src/assistant/store/paths.ts')
+    const evidenceDirectory = path.join(
+      resolveAssistantStatePaths(context.vaultRoot).assistantStateRoot,
+      'auto-reply',
+      'evidence',
+    )
+    await mkdir(evidenceDirectory, { recursive: true })
+    await writeFile(
+      path.join(evidenceDirectory, `${encodeURIComponent(first.captureId)}.json`),
+      `${JSON.stringify({
+        captureId: first.captureId,
+        groupCaptureIds: [first.captureId, second.captureId],
+        groupId: 'group_capture-legacy-partial-1__capture-legacy-partial-2',
+        primaryCaptureId: first.captureId,
+        providerCleanup: {
+          linqMessageIds: [],
+          queuedAt: null,
+        },
+        recordedAt: '2026-04-08T00:10:00.000Z',
+        schema: 'murph.assistant-auto-reply-terminal-evidence.v1',
+        terminal: {
+          deliveryIntentId: null,
+          kind: 'replied',
+          sessionId: 'session-legacy-partial',
+        },
+      })}\n`,
+      'utf8',
+    )
+
+    evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
+      .mockImplementation(actualEvidence.hasCompleteAssistantAutoReplyTerminalEvidence)
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId)
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplyReplyTerminalEvidence)
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplySuppressionEvidence)
+    scannerReplyMocks.createAssistantAutoReplyGroupContext
+      .mockImplementation(actualReply.createAssistantAutoReplyGroupContext)
+    scannerReplyMocks.processAssistantAutoReplyGroup
+      .mockImplementation(actualReply.processAssistantAutoReplyGroup)
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementation(
+      async (input: {
+        inputSummaries: Array<ReturnType<typeof createReplyGroupItem>['summary']>
+        startIndex: number
+      }) => {
+        const groupedItems = input.inputSummaries
+          .slice(input.startIndex)
+          .map((summary) => itemsByInputId.get(summary.inputId))
+          .filter((item): item is ReturnType<typeof createReplyGroupItem> => item !== undefined)
+        return {
+          endIndex: input.startIndex + groupedItems.length - 1,
+          items: groupedItems,
+        }
+      },
+    )
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+    const scan = () => scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: context.vaultRoot,
+    })
+
+    await expect(scan()).resolves.toMatchObject({
+      replies: {
+        checkpointRequired: true,
+        considered: 2,
+        replied: 0,
+        skipped: 2,
+      },
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledTimes(1)
+    await expect(
+      actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        context.vaultRoot,
+        items[1]!.inputCandidate.event.inputId,
+      ),
+    ).resolves.toMatchObject({
+      groupCaptureIds: [first.captureId, second.captureId],
+      groupInputIds: items.map((item) => item.inputCandidate.event.inputId),
+      terminal: {
+        kind: 'replied',
+        sessionId: 'session-legacy-partial',
+      },
+    })
+
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence.mockClear()
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence.mockClear()
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockClear()
+    await expect(scan()).resolves.toMatchObject({
+      replies: {
+        considered: 0,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('admits captureless assistant input events without scanning inbox captures', async () => {
@@ -2497,20 +2626,759 @@ describe('assistant auto-reply runtime', () => {
     expect(
       evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mock.calls
         .filter(([, evidenceId]) => evidenceId === capturelessInput.event.inputId),
-    ).toHaveLength(2)
+    ).toHaveLength(1)
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
-  it('marks groups handled when terminal evidence already exists in full', async () => {
-    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockResolvedValue(
-      createTerminalEvidence(),
-    )
+  it('repairs partial compound terminal evidence by input id without inbox captures', async () => {
+    const firstInputId = 'ain_captureless_repair_first_0123456789'
+    const secondInputId = 'ain_captureless_repair_second_012345678'
+    const first = createCapturelessAssistantInputCandidate({
+      inputId: firstInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'captureless repair first',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      inputId: secondInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'captureless repair second',
+    })
+    const partialEvidence = createTerminalEvidence({
+      captureId: firstInputId,
+      groupCaptureIds: [],
+      groupInputIds: [firstInputId, secondInputId],
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === firstInputId ? partialEvidence : null
+      )
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
     const context = reply.createAssistantAutoReplyGroupContext([
-      createReplyGroupItem(createCaptureSummary()),
+      createCapturelessReplyGroupItem(first),
+      createCapturelessReplyGroupItem(second),
     ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 2,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: [],
+      deliveryIntentId: null,
+      inputIds: [firstInputId, secondInputId],
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+      terminalKind: 'replied',
+      vault: '/tmp/assistant-automation-vault',
+    })
+  })
+
+  it('repairs incomplete split terminal evidence partitions independently', async () => {
+    const suppressedInputId = 'ain_split_suppressed_012345678901234567'
+    const repliedInputId = 'ain_split_replied_01234567890123456789'
+    const missingInputId = 'ain_split_missing_01234567890123456789'
+    const suppressed = createCapturelessAssistantInputCandidate({
+      inputId: suppressedInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'split partition suppressed input',
+    })
+    const replied = createCapturelessAssistantInputCandidate({
+      inputId: repliedInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'split partition replied input',
+    })
+    const missing = createCapturelessAssistantInputCandidate({
+      inputId: missingInputId,
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      text: 'split partition missing evidence input',
+    })
+    const evidenceByInputId = new Map([
+      [
+        suppressedInputId,
+        createTerminalEvidence({
+          captureId: suppressedInputId,
+          groupCaptureIds: [],
+          groupInputIds: [suppressedInputId],
+          terminal: {
+            kind: 'suppressed',
+            reason: 'already handled without a reply',
+          },
+        }),
+      ],
+      [
+        repliedInputId,
+        createTerminalEvidence({
+          captureId: repliedInputId,
+          groupCaptureIds: [],
+          groupInputIds: [repliedInputId, missingInputId],
+        }),
+      ],
+    ])
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceByInputId.get(evidenceId) ?? null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(suppressed),
+      createCapturelessReplyGroupItem(replied),
+      createCapturelessReplyGroupItem(missing),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 3,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: [],
+      deliveryIntentId: null,
+      inputIds: [repliedInputId, missingInputId],
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+      terminalKind: 'replied',
+      vault: '/tmp/assistant-automation-vault',
+    })
+  })
+
+  it('persists split terminal evidence repair and treats the restarted group as handled', async () => {
+    const context = await createTempVaultContext('assistant-terminal-evidence-repair-')
+    tempRoots.push(context.parentRoot)
+    const suppressedInputId = 'ain_persisted_suppressed_0123456789012345'
+    const repliedInputId = 'ain_persisted_replied_0123456789012345678'
+    const missingInputId = 'ain_persisted_missing_0123456789012345678'
+    const actualEvidence = await vi.importActual<
+      typeof import('../src/assistant/automation/evidence.ts')
+    >('../src/assistant/automation/evidence.ts')
+    const { resolveAssistantStatePaths } = await vi.importActual<
+      typeof import('../src/assistant/store/paths.ts')
+    >('../src/assistant/store/paths.ts')
+
+    await actualEvidence.writeAssistantAutoReplySuppressionEvidence({
+      captureIds: [],
+      inputIds: [suppressedInputId],
+      linqMessageIds: [],
+      reason: 'already handled without a reply',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      vault: context.vaultRoot,
+    })
+    await actualEvidence.writeAssistantAutoReplyReplyTerminalEvidence({
+      captureIds: [],
+      deliveryIntentId: null,
+      inputIds: [repliedInputId, missingInputId],
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-persisted-repair',
+      terminalKind: 'replied',
+      vault: context.vaultRoot,
+    })
+    await unlink(path.join(
+      resolveAssistantStatePaths(context.vaultRoot).assistantStateRoot,
+      'auto-reply',
+      'evidence',
+      `${encodeURIComponent(missingInputId)}.json`,
+    ))
+
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId)
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplyReplyTerminalEvidence)
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplySuppressionEvidence)
+
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const group = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(createCapturelessAssistantInputCandidate({
+        inputId: suppressedInputId,
+        occurredAt: '2026-04-08T00:01:00.000Z',
+        receivedAt: '2026-04-08T00:01:01.000Z',
+        text: 'persisted suppressed input',
+      })),
+      createCapturelessReplyGroupItem(createCapturelessAssistantInputCandidate({
+        inputId: repliedInputId,
+        occurredAt: '2026-04-08T00:02:00.000Z',
+        receivedAt: '2026-04-08T00:02:01.000Z',
+        text: 'persisted replied input',
+      })),
+      createCapturelessReplyGroupItem(createCapturelessAssistantInputCandidate({
+        inputId: missingInputId,
+        occurredAt: '2026-04-08T00:03:00.000Z',
+        receivedAt: '2026-04-08T00:03:01.000Z',
+        text: 'persisted missing input',
+      })),
+    ])
+    if (!group) {
+      throw new Error('expected reply context')
+    }
+    const processGroup = () => reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: group,
+      deliveryDispatchMode: 'queue-only' as const,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: context.vaultRoot,
+    })
+
+    await expect(processGroup()).resolves.toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 3,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledTimes(1)
+    await expect(
+      actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        context.vaultRoot,
+        suppressedInputId,
+      ),
+    ).resolves.toMatchObject({
+      groupInputIds: [suppressedInputId],
+      terminal: {
+        kind: 'suppressed',
+        reason: 'already handled without a reply',
+      },
+    })
+    for (const inputId of [repliedInputId, missingInputId]) {
+      await expect(
+        actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+          context.vaultRoot,
+          inputId,
+        ),
+      ).resolves.toMatchObject({
+        groupInputIds: [repliedInputId, missingInputId],
+        terminal: {
+          deliveryIntentId: null,
+          kind: 'replied',
+          sessionId: 'session-persisted-repair',
+        },
+      })
+    }
+
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence.mockClear()
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence.mockClear()
+    await expect(processGroup()).resolves.toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 3,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('repairs a handled prefix before processing a post-freeze successor after restart', async () => {
+    const context = await createTempVaultContext('assistant-terminal-prefix-repair-')
+    tempRoots.push(context.parentRoot)
+    const firstInputId = 'ain_prefix_repair_first_012345678901234567'
+    const secondInputId = 'ain_prefix_repair_second_01234567890123456'
+    const successorInputId = 'ain_prefix_repair_successor_012345678901234'
+    const unrelatedInputId = 'ain_prefix_repair_unrelated_012345678901234'
+    const first = createCapturelessAssistantInputCandidate({
+      inputId: firstInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'handled batch first input',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      inputId: secondInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'handled batch second input',
+    })
+    const successor = createCapturelessAssistantInputCandidate({
+      inputId: successorInputId,
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      text: 'post-freeze successor input',
+    })
+    const unrelated = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_unrelated',
+      inputId: unrelatedInputId,
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      text: 'later unrelated input',
+    })
+    const actualEvidence = await vi.importActual<
+      typeof import('../src/assistant/automation/evidence.ts')
+    >('../src/assistant/automation/evidence.ts')
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    const actualReply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    const { resolveAssistantStatePaths } = await vi.importActual<
+      typeof import('../src/assistant/store/paths.ts')
+    >('../src/assistant/store/paths.ts')
+
+    await actualEvidence.writeAssistantAutoReplyReplyTerminalEvidence({
+      captureIds: [],
+      deliveryIntentId: null,
+      inputIds: [firstInputId, secondInputId],
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-prefix-repair',
+      terminalKind: 'replied',
+      vault: context.vaultRoot,
+    })
+    await unlink(path.join(
+      resolveAssistantStatePaths(context.vaultRoot).assistantStateRoot,
+      'auto-reply',
+      'evidence',
+      `${encodeURIComponent(secondInputId)}.json`,
+    ))
+
+    evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
+      .mockImplementation(actualEvidence.hasCompleteAssistantAutoReplyTerminalEvidence)
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId)
+    evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplyReplyIntentEvidence)
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplyReplyTerminalEvidence)
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence
+      .mockImplementation(actualEvidence.writeAssistantAutoReplySuppressionEvidence)
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    scannerReplyMocks.createAssistantAutoReplyGroupContext
+      .mockImplementation(actualReply.createAssistantAutoReplyGroupContext)
+    scannerReplyMocks.processAssistantAutoReplyGroup
+      .mockImplementation(actualReply.processAssistantAutoReplyGroup)
+
+    const exposedCandidates = [first, second, successor, unrelated]
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
+    const inputSource: AssistantInputSource = {
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+      listInputCandidates: vi.fn(async (input) => {
+        const inputs = exposedCandidates
+          .filter((candidate) =>
+            input.sourceId ? candidate.event.source === input.sourceId : true
+          )
+          .filter((candidate) =>
+            input.afterCursor
+              ? compareAssistantInputCursors(
+                  candidate.event.cursor,
+                  input.afterCursor,
+                ) > 0
+              : true
+          )
+          .slice(0, input.limit ?? exposedCandidates.length)
+        return {
+          inputs,
+          nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+        }
+      }),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+    }
+    let state = createAutomationState({
+      autoReplyChannels: ['linq'],
+    })
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    const scan = (maxPerScan: number) => scanner.scanAssistantAutomationOnce({
+      beforeProviderAcceptedInputs,
+      inboxServices: createInboxServices(),
+      inputSource,
+      maxPerScan,
+      onStateProgress(next) {
+        state = {
+          ...state,
+          autoReply: next.autoReply,
+        }
+      },
+      state,
+      vault: context.vaultRoot,
+    })
+
+    await expect(scan(4)).resolves.toMatchObject({
+      replies: {
+        checkpointRequired: true,
+        considered: 3,
+        replied: 0,
+        skipped: 2,
+      },
+    })
+    expect(readAutoReplyCursor(state, 'linq')).toEqual(second.event.cursor)
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(beforeProviderAcceptedInputs).not.toHaveBeenCalled()
+    await expect(
+      actualEvidence.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        context.vaultRoot,
+        secondInputId,
+      ),
+    ).resolves.toMatchObject({
+      groupInputIds: [firstInputId, secondInputId],
+      terminal: {
+        kind: 'replied',
+        sessionId: 'session-prefix-repair',
+      },
+    })
+
+    await expect(scan(1)).resolves.toMatchObject({
+      replies: {
+        considered: 1,
+        replied: 1,
+        skipped: 0,
+      },
+    })
+    expect(readAutoReplyCursor(state, 'linq')).toEqual(successor.event.cursor)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ beforeProviderAcceptedInputs }),
+    )
+
+    await expect(scan(1)).resolves.toMatchObject({
+      replies: {
+        considered: 1,
+        replied: 1,
+        skipped: 0,
+      },
+    })
+    expect(readAutoReplyCursor(state, 'linq')).toEqual(unrelated.event.cursor)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ beforeProviderAcceptedInputs }),
+    )
+
+    await expect(scan(1)).resolves.toMatchObject({
+      replies: {
+        considered: 0,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps recovery fail-closed when terminal evidence starts after an uncovered input', async () => {
+    const firstInputId = 'ain_non_prefix_uncovered_0123456789012345678'
+    const secondInputId = 'ain_non_prefix_handled_first_012345678901234'
+    const thirdInputId = 'ain_non_prefix_handled_second_01234567890123'
+    const first = createCapturelessAssistantInputCandidate({
+      inputId: firstInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'oldest uncovered input',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      inputId: secondInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'later handled partition first input',
+    })
+    const third = createCapturelessAssistantInputCandidate({
+      inputId: thirdInputId,
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      text: 'later handled partition second input',
+    })
+    const nonPrefixEvidence = createTerminalEvidence({
+      captureId: secondInputId,
+      groupCaptureIds: [],
+      groupInputIds: [secondInputId, thirdInputId],
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === secondInputId ? nonPrefixEvidence : null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(first),
+      createCapturelessReplyGroupItem(second),
+      createCapturelessReplyGroupItem(third),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 3,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('does not repair a terminal evidence partition outside the current group', async () => {
+    const firstInputId = 'ain_partition_owner_012345678901234567890'
+    const secondInputId = 'ain_partition_current_0123456789012345678'
+    const externalInputId = 'ain_partition_external_012345678901234567'
+    const first = createCapturelessAssistantInputCandidate({
+      inputId: firstInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'partition owner input',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      inputId: secondInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'partition current input',
+    })
+    const outsideGroupEvidence = createTerminalEvidence({
+      captureId: firstInputId,
+      groupCaptureIds: [],
+      groupInputIds: [firstInputId, secondInputId, externalInputId],
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === firstInputId ? outsideGroupEvidence : null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(first),
+      createCapturelessReplyGroupItem(second),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 2,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('repairs partial compound suppression evidence by input id without inbox captures', async () => {
+    const firstInputId = 'ain_captureless_suppression_first_0123456'
+    const secondInputId = 'ain_captureless_suppression_second_012345'
+    const first = createCapturelessAssistantInputCandidate({
+      inputId: firstInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'captureless suppression first',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      inputId: secondInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'captureless suppression second',
+    })
+    const partialEvidence = createTerminalEvidence({
+      captureId: firstInputId,
+      groupCaptureIds: [],
+      groupInputIds: [firstInputId, secondInputId],
+      terminal: {
+        kind: 'suppressed',
+        reason: 'already handled safely',
+      },
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === firstInputId ? partialEvidence : null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(first),
+      createCapturelessReplyGroupItem(second),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 2,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).toHaveBeenCalledWith({
+      captureIds: [],
+      inputIds: [firstInputId, secondInputId],
+      linqMessageIds: [],
+      reason: 'already handled safely',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      vault: '/tmp/assistant-automation-vault',
+    })
+  })
+
+  it('marks groups handled when terminal evidence already exists in full', async () => {
+    const item = createReplyGroupItem(createCaptureSummary())
+    const inputId = item.inputCandidate.event.inputId
+    const terminalEvidence = createTerminalEvidence({
+      captureId: inputId,
+      groupCaptureIds: ['capture-1'],
+      groupInputIds: [inputId],
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === inputId ? terminalEvidence : null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([item])
 
     if (!context) {
       throw new Error('expected reply context')
@@ -2539,19 +3407,36 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
-  it('repairs the full terminal evidence group from one evidenced candidate', async () => {
+  it('repairs a legacy handled prefix without consuming its successor', async () => {
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
+    const first = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    }))
+    const second = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    }))
+    const successor = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-3',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+    }))
+    const legacyEvidence = createTerminalEvidence({
+      captureId: 'capture-1',
+      groupCaptureIds: ['capture-1', 'capture-2'],
+      groupInputIds: [],
+    })
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
-      .mockResolvedValueOnce(createTerminalEvidence({
-        captureId: 'capture-1',
-        groupCaptureIds: ['capture-1', 'capture-2'],
-      }))
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === 'capture-1' ? legacyEvidence : null
+      )
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
     const context = reply.createAssistantAutoReplyGroupContext([
-      createReplyGroupItem(createCaptureSummary({
-        captureId: 'capture-1',
-      })),
+      first,
+      second,
+      successor,
     ])
 
     if (!context) {
@@ -2560,6 +3445,7 @@ describe('assistant auto-reply runtime', () => {
 
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
+      beforeProviderAcceptedInputs,
       context,
       enabledChannels: ['telegram'],
       inboxServices: createInboxServices(),
@@ -2572,15 +3458,21 @@ describe('assistant auto-reply runtime', () => {
       advanceCursor: true,
       checkpointRequired: true,
       failed: 0,
+      lastInputCursor: second.inputCandidate.event.cursor,
       nextWakeAt: null,
       replied: 0,
-      skipped: 1,
-      stopScanning: false,
+      skipped: 2,
+      stopScanning: true,
     })
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(beforeProviderAcceptedInputs).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
       captureIds: ['capture-1', 'capture-2'],
       deliveryIntentId: null,
+      inputIds: [
+        first.inputCandidate.event.inputId,
+        second.inputCandidate.event.inputId,
+      ],
       linqMessageIds: [],
       outcome: 'result',
       recordedAt: '2026-04-08T00:10:00.000Z',
@@ -2590,26 +3482,177 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('backfills legacy retry-exhausted evidence as ordinary suppression', async () => {
+  it('keeps same-owner modern and legacy terminal evidence conflicts fail-closed', async () => {
+    const first = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-mixed-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    }))
+    const second = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-mixed-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    }))
+    const inputIds = [
+      first.inputCandidate.event.inputId,
+      second.inputCandidate.event.inputId,
+    ]
+    const modernEvidence = createTerminalEvidence({
+      captureId: inputIds[0],
+      groupCaptureIds: ['capture-mixed-1', 'capture-mixed-2'],
+      groupInputIds: inputIds,
+    })
+    const conflictingLegacyEvidence = createTerminalEvidence({
+      captureId: 'capture-mixed-1',
+      groupCaptureIds: ['capture-mixed-1', 'capture-mixed-2'],
+      groupInputIds: [],
+      terminal: {
+        kind: 'suppressed',
+        reason: 'conflicting historical outcome',
+      },
+    })
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
-      .mockResolvedValueOnce(createTerminalEvidence({
-        captureId: 'capture-1',
-        groupCaptureIds: ['capture-1', 'capture-2'],
-        groupInputIds: ['ain_legacy_input_1', 'ain_legacy_input_2'],
-        terminal: {
-          failedAttempts: 3,
-          kind: 'retry_exhausted',
-          maxFailedAttempts: 3,
-          reason: 'legacy retry limit reached',
-        },
-      }))
+      .mockImplementation(async (_vault: string, evidenceId: string) => {
+        if (evidenceId === inputIds[0]) {
+          return modernEvidence
+        }
+        return evidenceId === 'capture-mixed-1'
+          ? conflictingLegacyEvidence
+          : null
+      })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([first, second])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 2,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('keeps ambiguous legacy capture ownership fail-closed', async () => {
+    const sharedCaptureId = 'capture-ambiguous-legacy-owner'
+    const firstCandidate = createCapturelessAssistantInputCandidate({
+      inputId: 'ain_ambiguous_legacy_first_01234567890123456',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'first pending input with ambiguous capture evidence',
+    })
+    const secondCandidate = createCapturelessAssistantInputCandidate({
+      inputId: 'ain_ambiguous_legacy_second_0123456789012345',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'second pending input with ambiguous capture evidence',
+    })
+    const firstBase = createCapturelessReplyGroupItem(firstCandidate)
+    const secondBase = createCapturelessReplyGroupItem(secondCandidate)
+    const first = {
+      ...firstBase,
+      summary: {
+        ...firstBase.summary,
+        captureId: sharedCaptureId,
+        optionalInboxCaptureId: sharedCaptureId,
+      },
+    }
+    const second = {
+      ...secondBase,
+      summary: {
+        ...secondBase.summary,
+        captureId: sharedCaptureId,
+        optionalInboxCaptureId: sharedCaptureId,
+      },
+    }
+    const legacyEvidence = createTerminalEvidence({
+      captureId: sharedCaptureId,
+      groupCaptureIds: [sharedCaptureId],
+      groupInputIds: [],
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === sharedCaptureId ? legacyEvidence : null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([first, second])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 2,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('backfills legacy retry-exhausted evidence as ordinary suppression', async () => {
+    const first = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    }))
+    const second = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    }))
+    const legacyEvidence = createTerminalEvidence({
+      captureId: 'capture-1',
+      groupCaptureIds: ['capture-1', 'capture-2'],
+      groupInputIds: [],
+      terminal: {
+        failedAttempts: 3,
+        kind: 'retry_exhausted',
+        maxFailedAttempts: 3,
+        reason: 'legacy retry limit reached',
+      },
+    })
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceId === 'capture-1' ? legacyEvidence : null
+      )
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
     const context = reply.createAssistantAutoReplyGroupContext([
-      createReplyGroupItem(createCaptureSummary({
-        captureId: 'capture-1',
-      })),
+      first,
+      second,
     ])
 
     if (!context) {
@@ -2632,13 +3675,17 @@ describe('assistant auto-reply runtime', () => {
       failed: 0,
       nextWakeAt: null,
       replied: 0,
-      skipped: 1,
+      skipped: 2,
       stopScanning: false,
     })
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
       .toHaveBeenCalledWith({
         captureIds: ['capture-1', 'capture-2'],
+        inputIds: [
+          first.inputCandidate.event.inputId,
+          second.inputCandidate.event.inputId,
+        ],
         linqMessageIds: [],
         reason: 'legacy retry limit reached',
         recordedAt: '2026-04-08T00:10:00.000Z',
@@ -5386,6 +6433,47 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('uses an input-only scan limit without widening the pass work budget', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      }),
+    }
+
+    await runLoop.runAssistantAutomationPass({
+      inputSource,
+      maxInputPerScan: 50,
+      maxPerScan: 1,
+      requestId: 'request-input-refresh-batch-limit',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxPerScan: 50,
+      }),
+    )
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 1,
+      }),
+    )
+  })
+
   it('skips dynamic context builder when the canonical refresh ingests input', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
@@ -7118,10 +8206,12 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     )
-    const listInputCandidates = vi.fn(async (input: {
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
       sourceId?: string | null
     }) => {
       expect(input.sourceId).toBe('linq')
+      expect(input.inputIds).toEqual([hostedInput.event.inputId])
       return {
         inputs: [hostedInput],
         nextCursor: hostedInput.event.cursor,
@@ -7134,19 +8224,21 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
-      listInputCandidates,
+      listInputCandidatesByIds,
       listNewConversationInputs,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
+        availableInputIds: [hostedInput.event.inputId],
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -7221,9 +8313,9 @@ describe('assistant auto-reply runtime', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
-    expect(listInputCandidates).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(refresh).not.toHaveBeenCalled()
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedInputIds: [hostedInput.event.inputId],
@@ -7238,6 +8330,185 @@ describe('assistant auto-reply runtime', () => {
           outcome: 'result',
         }),
       )
+  })
+
+  it('uses the newest queued exact input as the frontier before checkpoint', async () => {
+    const initialInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_81818181818181818181818181818181',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_initial',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'start the clinic call',
+    })
+    const firstFollowUp = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_82828282828282828282828282828282',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_first',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'use my full name',
+    })
+    const cancellation = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_83838383838383838383838383838383',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_cancel',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'stop and do not make the call',
+    })
+    const queriedFrontierInputIds: Array<string | null> = []
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      afterCursor?: AssistantInputCandidate['event']['cursor'] | null
+      inputIds: readonly string[]
+    }) => {
+      queriedFrontierInputIds.push(input.afterCursor?.inputId ?? null)
+      if (input.inputIds[0] === firstFollowUp.event.inputId) {
+        return {
+          inputs: [firstFollowUp],
+          nextCursor: firstFollowUp.event.cursor,
+        }
+      }
+      if (
+        input.inputIds[0] === cancellation.event.inputId &&
+        input.afterCursor?.inputId === firstFollowUp.event.inputId
+      ) {
+        return {
+          inputs: [cancellation],
+          nextCursor: cancellation.event.cursor,
+        }
+      }
+      return {
+        inputs: [],
+        nextCursor: input.afterCursor ?? null,
+      }
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidatesByIds,
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: initialInput.event.cursor,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (
+        checkpoint: AssistantActiveTurnInputCheckpointInput,
+      ) => Promise<void>
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [firstFollowUp.event.inputId],
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: firstFollowUp.event.inputId }),
+        ],
+        kind: 'accepted',
+      })
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [cancellation.event.inputId],
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: cancellation.event.inputId }),
+        ],
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          firstFollowUp.event.inputId,
+          cancellation.event.inputId,
+        ],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_queued_frontier_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-queued-frontier',
+        response: 'call cancelled',
+        session: { sessionId: 'session-queued-frontier' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+    if (!context) {
+      throw new Error('expected queued-frontier context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(queriedFrontierInputIds).toEqual([
+      initialInput.event.inputId,
+      firstFollowUp.event.inputId,
+    ])
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          firstFollowUp.event.inputId,
+          cancellation.event.inputId,
+        ],
+      }),
+    )
   })
 
   it('keeps a foreign group actor and later same-actor input pending on the account route', async () => {
@@ -7315,10 +8586,12 @@ describe('assistant auto-reply runtime', () => {
       threadIsDirect: false,
     })
     const routeCandidates = [otherAccount, actorB, laterActorA]
-    const listInputCandidates = vi.fn(async (input: {
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
       sourceId?: string | null
     }) => {
       expect(input.sourceId).toBe('linq')
+      expect(input.inputIds).toEqual(routeCandidates.map((candidate) => candidate.event.inputId))
       return {
         inputs: routeCandidates,
         nextCursor: laterActorA.event.cursor,
@@ -7335,18 +8608,22 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
-      listInputCandidates,
+      listInputCandidatesByIds,
       listNewConversationInputs,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await expect(input.activeTurnInput?.({
+        availableInputIds: routeCandidates.map(
+          (candidate) => candidate.event.inputId,
+        ),
         sessionId: 'session-group-order-a',
         turnId: 'turn-group-order-a',
         vault: '/tmp/assistant-automation-vault',
@@ -7388,9 +8665,9 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(listInputCandidates).toHaveBeenCalledTimes(1)
-    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
     expect(checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
@@ -8163,6 +9440,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
+            availableInputIds?: readonly string[]
             sessionId: string
             turnId: string
             vault: string
@@ -8188,6 +9466,7 @@ describe('assistant auto-reply runtime', () => {
           'raw_mailbox_item_active_initial',
         ])
         const admitted = await input.activeTurnInput?.({
+          availableInputIds: [lateInput.event.inputId],
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -8222,19 +9501,31 @@ describe('assistant auto-reply runtime', () => {
     if (!initialContext) {
       throw new Error('expected initial context')
     }
-    const inputSource = {
-      async refresh() {
+    const refresh = vi.fn(async () => {
         return {
           progressed: true,
           reason: 'ingested_input' as const,
         }
-      },
-      async listNewConversationInputs() {
+      })
+    const listNewConversationInputs = vi.fn(async () => {
         return {
           inputs: [lateInput],
           nextCursor: lateInput.event.cursor,
         }
-      },
+      })
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
+    }) => {
+      expect(input.inputIds).toEqual([lateInput.event.inputId])
+      return {
+        inputs: [lateInput],
+        nextCursor: lateInput.event.cursor,
+      }
+    })
+    const inputSource = {
+      listInputCandidatesByIds,
+      listNewConversationInputs,
+      refresh,
     }
 
     await reply.processAssistantAutoReplyGroup({
@@ -8248,6 +9539,9 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -8938,7 +10232,8 @@ describe('assistant auto-reply runtime', () => {
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockResolvedValue(
       createTerminalEvidence({
         captureId: hostedInput.event.inputId,
-        groupCaptureIds: [hostedInput.event.inputId],
+        groupCaptureIds: [],
+        groupInputIds: [hostedInput.event.inputId],
         terminal: {
           deliveryIntentId: 'intent-queue-only-replay',
           kind: 'reply_intent_committed',

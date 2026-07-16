@@ -126,7 +126,8 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
-  window before a dirty invocation checkpoints and returns
+  window before a dirty invocation checkpoints and returns; production rejects
+  lower values so routine checkpoints cannot bypass the three-minute quiet floor
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the native container shell
   activity-expiry cleanup lifecycle (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
@@ -164,10 +165,18 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
-invocations keep the same Durable Object write fence while the runtime waits for
-`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or a projected
-runtime wake. If local runtime state is dirty, the direct invocation checkpoints
-with reason `idle_shutdown` before returning success. When Cloudflare reports
+invocations keep the same Durable Object write fence while the runtime waits
+through `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`. Coalesced foreground input
+may preempt that wait. While dirty, the exact assistant wake projected by the
+current foreground phase may run once when due before the floor without
+publishing a snapshot; inherited or committed wakes and durability barriers
+remain checkpoint-first. If state remains dirty, the direct invocation
+checkpoints with reason `idle_shutdown` at the floor or during shutdown before
+returning success. A restored due wake in a clean workspace runs ordinarily.
+Foreground conversation staging also aborts runner-owned background maintenance,
+including an in-flight provider-cleanup request, without aborting the foreground
+invocation itself.
+When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.
 Each invocation runs in-process through `packages/assistant-runtime` with
@@ -177,6 +186,11 @@ per-invocation outbound proxy tokens or dynamically installed outbound
 handlers. The runner does not run a separate post-request PID sweep over the
 native Codex App Server; warm lifecycle is owned by the existing Codex
 app-server slot and explicit runner cleanup paths.
+
+Legacy artifact `GET` requests attach a validated read-purpose header and one
+UUID correlation id that is stable across replay-safe retries. Runner and Worker
+structured logs use only those fields plus bounded timing/status metadata; they
+do not log artifact hashes or bodies.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle

@@ -291,10 +291,9 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
     accounts: [],
   }).accounts, [])
   assert.equal(deviceAccountShowResultSchema.parse({ baseUrl, account }).account.id, account.id)
-  assert.equal(
-    deviceAccountReconcileResultSchema.parse({ baseUrl, account, job }).job.id,
-    job.id,
-  )
+  const reconcile = deviceAccountReconcileResultSchema.parse({ baseUrl, account, job })
+  assert.ok('job' in reconcile)
+  assert.equal(reconcile.job.id, job.id)
   assert.equal(
     deviceAccountDisconnectResultSchema.parse({ baseUrl, account }).account.id,
     account.id,

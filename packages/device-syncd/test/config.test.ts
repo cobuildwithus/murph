@@ -5,6 +5,10 @@ import { Writable } from "node:stream";
 import { test } from "vitest";
 
 import {
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
+
+import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   configuredDeviceSyncProviderKeys,
@@ -30,6 +34,7 @@ import {
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
 } from "../src/config/junction-connect-sources.ts";
+import { normalizeJunctionDeviceSyncRuntimeConfig } from "../src/config/provider-manifests.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
 
@@ -335,7 +340,6 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "JUNCTION_SUMMARY_BACKFILL_DAYS",
     "JUNCTION_SUMMARY_RESOURCES",
     "JUNCTION_TIMESERIES_BACKFILL_DAYS",
-    "JUNCTION_TIMESERIES_RESOURCES",
     "JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
     "OURA_API_BASE_URL",
     "OURA_AUTH_BASE_URL",
@@ -437,6 +441,31 @@ test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime
   );
 });
 
+test("Junction timeseries resources stay code-owned outside hosted runtime config", () => {
+  const env = {
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+    DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    JUNCTION_API_KEY: "sk_us_test_runtime",
+    JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_REGION: "us",
+    JUNCTION_TIMESERIES_RESOURCES: "steps,heartrate,weight",
+  };
+  const providerConfig = requireValue(readConfiguredDeviceSyncProviderConfigs(env).junction);
+
+  assert.equal(Object.hasOwn(providerConfig, "timeseriesResources"), false);
+  assert.deepEqual(
+    normalizeJunctionDeviceSyncRuntimeConfig(providerConfig).timeseriesResources,
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+  );
+
+  const runtimeConfig = requireValue(readConfiguredDeviceSyncRuntimeConfig(env));
+  assert.equal(
+    Object.hasOwn(requireValue(runtimeConfig.providerConfigs.junction), "timeseriesResources"),
+    false,
+  );
+});
+
 test("parseConfiguredDeviceSyncRuntimeConfig accepts the shared hosted runtime shape", () => {
   const parsed = parseConfiguredDeviceSyncRuntimeConfig(
     {
@@ -458,6 +487,27 @@ test("parseConfiguredDeviceSyncRuntimeConfig accepts the shared hosted runtime s
   assert.deepEqual(parsed.providerConfigs.strava?.clientId, "strava-client-id");
   assert.deepEqual(parsed.providerConfigs.strava?.clientSecret, "strava-client-secret");
   assert.deepEqual(parsed.providerConfigs.strava?.scopes, ["activity:read"]);
+});
+
+test("parseConfiguredDeviceSyncRuntimeConfig rejects Junction timeseries resource overrides", () => {
+  assert.throws(
+    () =>
+      parseConfiguredDeviceSyncRuntimeConfig(
+        {
+          providerConfigs: {
+            junction: {
+              environment: "sandbox",
+              region: "us",
+              timeseriesResources: ["blood_oxygen"],
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "codec-secret",
+        },
+        "runtime.deviceSync",
+      ),
+    /runtime\.deviceSync\.providerConfigs\.junction\.timeseriesResources is code-owned/u,
+  );
 });
 
 test("parseConfiguredDeviceSyncRuntimeConfig rejects unknown top-level runtime fields", () => {
@@ -496,6 +546,15 @@ test("readConfiguredDeviceSyncRuntimeConfig returns null when hosted runtime pre
       DEVICE_SYNC_SECRET: "runtime-codec-secret",
     }),
     null,
+  );
+  assert.throws(
+    () =>
+      readConfiguredDeviceSyncRuntimeConfig({
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+        DEVICE_SYNC_SECRET: "runtime-codec-secret",
+        OURA_CLIENT_ID: "oura-client-id",
+      }),
+    /Oura configuration is incomplete/u,
   );
 });
 

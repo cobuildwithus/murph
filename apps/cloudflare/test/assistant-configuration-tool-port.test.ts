@@ -6,10 +6,6 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
-import {
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -304,13 +300,9 @@ describe("hosted assistant configuration tool port", () => {
     });
     await expect(port.request({
       action: "update",
-      approval: buildAssistantConfigurationApprovalConsumeRequest(),
+      assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
       reasoningEffort: "high",
-      target: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "high",
-      },
     })).resolves.toMatchObject({
       action: "update",
       result: {
@@ -335,13 +327,9 @@ describe("hosted assistant configuration tool port", () => {
     await expect(requests[0]!.json()).resolves.toEqual({ action: "read" });
     await expect(requests[1]!.json()).resolves.toEqual({
       action: "update",
-      approval: buildAssistantConfigurationApprovalConsumeRequest(),
+      assistantInputId: `ain_${"c".repeat(32)}`,
       model: HOSTED_ASSISTANT_LUNA_MODEL,
       reasoningEffort: "high",
-      target: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
-        reasoningEffort: "high",
-      },
     });
   });
 
@@ -373,22 +361,3 @@ describe("hosted assistant configuration tool port", () => {
     );
   });
 });
-
-function buildAssistantConfigurationApprovalConsumeRequest() {
-  const request = buildHostedAssistantConfigurationApprovalRequest({
-    changes: {
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
-      reasoningEffort: "high",
-    },
-    returnContactKind: "text",
-    target: {
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
-      reasoningEffort: "high",
-    },
-  });
-  return {
-    approvalGeneration: "b".repeat(64),
-    consumerId: buildHostedAssistantConfigurationApprovalConsumerId(request),
-    request,
-  };
-}

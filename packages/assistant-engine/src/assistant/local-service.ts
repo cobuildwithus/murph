@@ -63,6 +63,9 @@ import {
   resolveAssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import {
+  bindAssistantResumeStateToThreadCompatibility,
+} from './codex-resume-binding.js'
+import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
 import {
@@ -86,7 +89,11 @@ import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
 } from './codex-turn-runner.js'
-import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
+import {
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
+} from './codex-thread-route.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -108,6 +115,7 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
+  resolveAssistantProductFeedbackAcceptedInputIds,
   shouldCreateAssistantProgressDelivery,
 } from './turn-progress.js'
 import {
@@ -614,6 +622,7 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
           initialAcceptedInputJournal.inputs
+        let beforeHostedToolExecution = async (): Promise<void> => {}
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
             await typingIndicator?.refreshAfterMessage?.()
@@ -696,27 +705,36 @@ export async function sendAssistantMessageLocal(
                 hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
+              beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,
               planUsageTool: hostedExecutionContext.planUsageTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
-              ...(hostedExecutionContext.currentAssistantPersonalizationInputId
+              ...(hostedExecutionContext.currentAssistantPreferenceInputId
                 ? {
-                    getAssistantPersonalizationInputId:
-                      hostedExecutionContext.currentAssistantPersonalizationInputId,
+                    getAssistantPreferenceInputId:
+                      hostedExecutionContext.currentAssistantPreferenceInputId,
                   }
                 : {}),
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getConversationScope: () =>
+                resolveAssistantConversationScope(
+                  sharedPlan.conversationPolicy.audience,
+                ),
               getUserActionAcceptedInputIds: () =>
                 resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),
+              getProductFeedbackAcceptedInputIds: () =>
+                resolveAssistantProductFeedbackAcceptedInputIds(
+                  acceptedInputItemsForProviderRequest,
+                ),
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -1027,6 +1045,12 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
         }
+        beforeHostedToolExecution = async () => {
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerRequestContinuation,
+            sessionId: currentSession.sessionId,
+          })
+        }
         const providerOutcome = await executeCodexTurnWithRecovery({
           acceptedInputItems: providerRequestAcceptedInputItems,
           activeTurnSteering: turnInputController,
@@ -1238,6 +1262,8 @@ export async function sendAssistantMessageLocal(
             codexThreadId: providerOutcome.codexThreadId,
             routeFingerprint:
               readCodexThreadRouteFingerprint(providerOutcome.route),
+            threadCompatibilityFingerprint:
+              readCodexThreadCompatibilityFingerprint(providerOutcome.route),
             session: currentSession,
             vault: input.vault,
           })
@@ -1269,11 +1295,14 @@ export async function sendAssistantMessageLocal(
               rawEvents: providerOutcome.rawEvents,
               reactions: recoveredReactions,
               response: '',
+              responseDeliveryContextOrdinal:
+                recoverableNoReplyDeliveryContextOrdinal,
               responseMedia: [],
               route: providerOutcome.route,
               session: failedNoReplySession,
               stderr: '',
               stdout: '',
+              transcriptResponse: null,
               usage: providerOutcome.usage,
               usageAttribution: providerOutcome.usageAttribution,
               workingDirectory: sharedPlan.requestedWorkingDirectory,
@@ -1447,16 +1476,11 @@ export async function sendAssistantMessageLocal(
         })
 
         const resolvedFinalReplyDeliveryContext =
-          typeof providerResult.responseDeliveryContextOrdinal === 'number'
-            ? resolveAssistantReplyDeliveryContextForSegment({
-                contexts: replyDeliveryContexts,
-                deliveryContextOrdinal:
-                  providerResult.responseDeliveryContextOrdinal,
-              })
-            : {
-                context: null,
-                invalidDeliveryContextOrdinal: null,
-              }
+          resolveAssistantReplyDeliveryContextForSegment({
+            contexts: replyDeliveryContexts,
+            deliveryContextOrdinal:
+              providerResult.responseDeliveryContextOrdinal,
+          })
         if (
           resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
           null
@@ -1551,9 +1575,21 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
                 sharedPlan,
               })
+        const rawTranscriptResponseText = noReplySelected
+          ? null
+          : providerResult.transcriptResponse
+        const transcriptResponseText =
+          rawTranscriptResponseText === null
+            ? null
+            : resolveAssistantPersistedReplyText({
+                messageInput: finalReplyInput,
+                rawResponse: rawTranscriptResponseText,
+                session: currentSession,
+                sharedPlan,
+              })
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
           media: providerResult.responseMedia,
-          response: finalResponseText,
+          response: transcriptResponseText,
         })
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
@@ -1962,7 +1998,13 @@ export async function updateAssistantSessionOptionsLocal(input: {
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
     nextProviderOptions.continuityFingerprint
-  const currentResumeState = readAssistantCodexResume(session.session)
+  const currentResumeState = bindAssistantResumeStateToThreadCompatibility({
+    resumeState: readAssistantCodexResume(session.session),
+    route: resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: session.session.target,
+    }).codexRoute,
+  })
 
   return saveAssistantSession(input.vault, {
     ...session.session,
@@ -2191,7 +2233,7 @@ function resolveAcceptedActiveTurnInputItems(input: {
 
 function resolveAssistantReplyDeliveryContextForSegment(input: {
   contexts: readonly AssistantReplyDeliveryContext[]
-  deliveryContextOrdinal?: number | null
+  deliveryContextOrdinal: number
 }): {
   context: AssistantReplyDeliveryContext | null
   invalidDeliveryContextOrdinal: number | null
@@ -2199,13 +2241,6 @@ function resolveAssistantReplyDeliveryContextForSegment(input: {
   if (input.contexts.length === 0) {
     return {
       context: null,
-      invalidDeliveryContextOrdinal: null,
-    }
-  }
-
-  if (input.deliveryContextOrdinal === undefined || input.deliveryContextOrdinal === null) {
-    return {
-      context: input.contexts[0] ?? null,
       invalidDeliveryContextOrdinal: null,
     }
   }

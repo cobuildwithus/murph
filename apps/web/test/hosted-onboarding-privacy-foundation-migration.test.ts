@@ -56,8 +56,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
     'assistantDetail Int? @map("assistant_detail")',
+    'assistantDetailCausalSeq BigInt? @map("assistant_detail_causal_seq")',
     'assistantHumor Int? @map("assistant_humor")',
+    'assistantHumorCausalSeq BigInt? @map("assistant_humor_causal_seq")',
     'assistantPush Int? @map("assistant_push")',
+    'assistantPushCausalSeq BigInt? @map("assistant_push_causal_seq")',
     'assistantTone String? @map("assistant_tone")',
     'assistantToneCausalSeq BigInt? @map("assistant_tone_causal_seq")',
     'assistantVoice String? @map("assistant_voice")',
@@ -572,6 +575,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const orphanedHostedLinqInviteDeliveryDeletionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715120000_delete_orphaned_linq_invite_deliveries/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const orphanedHostedLinqInviteDeliveryContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260715150000_delete_orphaned_linq_invite_deliveries_after_drain/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantModelPreferenceMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260709120000_hosted_member_assistant_model_preference/migration.sql",
@@ -589,6 +606,20 @@ describe("hosted Prisma baseline migration", () => {
     const hostedMemberAssistantPersonalityContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260713150000_require_assistant_personality_ranges/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedAssistantPersonalityProjectionWatermarkMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715190000_hosted_assistant_personality_projection_watermarks/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -638,6 +669,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedFamilyMixedTierCapacityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260714090000_hosted_family_mixed_tier_capacity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedFamilyPendingMemberPlanMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715150000_hosted_family_pending_member_plan/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -789,6 +827,9 @@ describe("hosted Prisma baseline migration", () => {
       "20260714090000_hosted_family_mixed_tier_capacity",
       "20260714120000_hosted_group_reaction_context",
       "20260714130000_hosted_mailbox_assistant_input_lookup",
+      "20260715120000_delete_orphaned_linq_invite_deliveries",
+      "20260715150000_hosted_family_pending_member_plan",
+      "20260715190000_hosted_assistant_personality_projection_watermarks",
       "migration_lock.toml",
     ]);
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
@@ -811,6 +852,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedFamilyMixedTierCapacityMigrationSql).not.toContain(
       'INSERT INTO "hosted_account_group_plan_capacity"',
+    );
+    expect(hostedFamilyPendingMemberPlanMigrationSql).toContain(
+      'ADD COLUMN "pending_plan_code" TEXT',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
@@ -883,7 +927,26 @@ describe("hosted Prisma baseline migration", () => {
       expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
         `"assistant_${setting}" NOT BETWEEN 0 AND 10`,
       );
+      expect(hostedAssistantPersonalityProjectionWatermarkMigrationSql).toContain(
+        `ADD COLUMN "assistant_${setting}_causal_seq" BIGINT`,
+      );
+      expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+        `"assistant_${setting}_causal_seq" = GREATEST(`,
+      );
+      expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+        `COALESCE(member."assistant_${setting}_causal_seq", 0)`,
+      );
     }
+    expect(hostedAssistantPersonalityProjectionWatermarkMigrationSql).not.toContain("UPDATE");
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      'FROM "hosted_mailbox_lane_counter" AS causal_counter',
+    );
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      'COALESCE(causal_counter."next_seq" - 1, 0)',
+    );
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      "causal_counter.\"lane\" = 'causal'",
+    );
     expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
       "IF EXISTS",
     );
@@ -1045,6 +1108,24 @@ describe("hosted Prisma baseline migration", () => {
       'hosted_linq_line_phone_number_key',
     );
     expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'DELETE FROM "hosted_linq_delivery"',
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      "'invite_signup', 'invite_signup_fallback'",
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'split_part("delivery"."source_ref", \':\', 2)',
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      "NOT EXISTS",
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'FROM "hosted_member"',
+    );
+    expect(orphanedHostedLinqInviteDeliveryContractMigrationSql).toBe(
+      orphanedHostedLinqInviteDeliveryDeletionMigrationSql,
+    );
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');

@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-07-12*
+*Last updated: 2026-07-15*
 
 This doc separates **facts** (true today), **strategy decisions** (chosen
 product direction), **hypotheses** (beliefs still to validate), and **target
@@ -25,11 +25,14 @@ mobile app is required for the main relationship.
 context, connected health data, research and interpretation, plans and
 actions, follow-through support, experiments, and group conversations.
 
-**Strategy decision:** Direct signups begin privately. Onboarding finds one
-useful first thread without narrowing Murph to that thread, establishes an
-ongoing support loop, then gathers a finite health-context foundation over
-separate turns. Friend or group support is suggested only when it fits and the
-member chooses it.
+**Strategy decision:** Direct signups begin privately. Onboarding briefly names
+one or two important aspiration threads—a desired change, something to
+understand, a task to handle, or help exploring where to focus—reflects and
+parks them, then gathers a finite health-context foundation over separate
+turns. Murph returns with that context and collaborates on the next useful step
+when the member wants one; the member may also leave the thread open. A
+discovery answer is not permission to prescribe. Friend or group support is
+suggested only when it fits and the member chooses it.
 
 **Differentiation hypothesis:** Persistent, well-retrieved personal context
 will make Murph materially more useful than a general-purpose model and create
@@ -67,11 +70,13 @@ can start with whatever matters today—a question, a task, data, a decision, a
 goal, or uncertainty about where to focus—and Murph becomes more personal as
 relevant context accumulates.
 
-The first useful thread makes the value concrete. It does not turn Murph into
-a single-goal coach, and onboarding should not make a member complete a health
-profile before receiving help. First value also should not end the relationship:
-Murph establishes a useful next step, then progressively gathers the finite
-foundation context that makes broad future help safer and more personal.
+The first useful thread makes the relationship concrete without turning Murph
+into a single-goal coach. During onboarding, Murph briefly understands and
+parks that thread, progressively gathers the finite foundation context that
+makes help safer and more personal, then returns to choose a useful next step
+with the member. An actual immediate request still gets immediate help; a goal
+disclosed in response to Murph's discovery question is context, not a plan
+request.
 
 ### Context advantage
 
@@ -86,6 +91,24 @@ knowing the member across time and using that knowledge well:
 5. reduce repeated questions as the relationship gets smarter
 
 Collection alone is not value. The proof is a better later decision or action.
+
+### Proactivity advantage
+
+General chatbots wait. Murph can return at the moment help matters. It should
+actively offer contextual reminders, check-ins, monitoring, and follow-through,
+then initiate the support a member authorizes. The differentiation is not
+message volume; it is a personal text that knows the goal, the plan, what has
+happened, and what would help now.
+
+### Delight as part of care
+
+Murph should actively try to improve the member's day, not merely provide a
+correct answer or generic reminder. In private as well as groups, it can be
+warm, specific, playful, and creative, including through a precise callback,
+reaction, image, voice memo, song, or celebration when the moment, route, and
+member preference support it. Delight is a strategy decision, not a media or
+engagement quota. It must never delay useful help, expose sensitive context,
+or compensate for a support loop that is not working.
 
 ### Private first, social when useful
 
@@ -124,6 +147,8 @@ points and composable help, not unlimited provider access or clinical scope.
   last evidence captured in this doc.
 - They were told Murph helps run health experiments and paid largely on trust,
   not proven product pull.
+- Founder-reported qualitative feedback says some members love Murph initiating
+  contextual texts. This is directional and unquantified, not validation.
 - Demand for the new private-assistant/context positioning is unproven. Do not
   present the 8 paid users as validation without this context.
 
@@ -142,8 +167,9 @@ points and composable help, not unlimited provider access or clinical scope.
 
 1. The member brings a health question, decision, task, data point, desired
    change, or request for direction.
-2. Murph reads relevant known context and resolves the need or asks the one
-   question that most improves the help.
+2. Murph reads relevant known context, identifies consequential unknowns, and
+   asks as many useful questions as the problem requires while helping along
+   the way.
 3. Murph uses the lightest useful primitive: answer, interpretation, action,
    plan, habit, private support, social support, monitoring, or experiment.
 4. The member gets a useful result now.
@@ -213,7 +239,7 @@ member still has to decide which tool owns the moment and connect the context.
 | “I do not have a health goal.” | A member does not need to invent one. Murph can help with whatever comes up or offer one optional baseline review. |
 | “I do not want another app.” | The main relationship works through existing messaging. The web vault is available when a richer review surface is useful. |
 | “I do not want my health data shared.” | Direct signup is private by default. Any friend, group, or public sharing is explicit and scoped. |
-| “I do not want constant nudges.” | Murph should get quieter as it learns, and reminders or accountability remain easy to decline, change, or stop. |
+| “I do not want constant nudges.” | Murph's outreach should be personal, purposeful, and controllable. Members can tune, pause, or stop it, and Murph should change a support loop that becomes noise instead of repeating it. |
 | “Is this medical advice?” | Murph supports understanding, decisions, and follow-through; it does not diagnose or replace clinicians. It should identify uncertainty and escalate when appropriate. |
 
 **Anti-persona:** people seeking diagnosis, emergency care, public body
@@ -244,8 +270,10 @@ No external metric currently proves the strategy. The next useful evidence is:
 | Question | Status |
 | --- | --- |
 | Do new members understand Murph's broad role after the first conversation? | Unproven |
-| Does a focused first thread create useful value without narrowing the product? | Unproven |
+| Does briefly parking an aspiration before foundation context make onboarding feel more personal and less prescriptive? | Unproven |
 | Does Murph reuse prior context in a way members notice and value? | Unproven |
+| Do timely, contextual reminders and outreach improve follow-through and member happiness without becoming noise? | Unproven |
+| Do earned, person-specific moments of delight make members feel happier, more understood, or more willing to act without creating noise? | Unproven |
 | Do members trust the current surface-specific context controls? | Unproven |
 | Do members need universal structured-record deletion beyond correction and status changes? | Unproven and not currently shipped |
 | Does contextual private accountability improve follow-through? | Unproven |
@@ -255,8 +283,9 @@ No external metric currently proves the strategy. The next useful evidence is:
 ## Voice
 
 In private, Murph is a calm, capable health partner: curious, direct,
-research-grounded, and able to act. It should not sound like a clinician, guru,
-intake form, or motivational drill sergeant.
+research-grounded, and able to act. It can also be warm, playful, surprising,
+and creative when that fits the member and the moment. It should not sound like
+a clinician, guru, intake form, or motivational drill sergeant.
 
 In a group, Murph can be more playful and referee-like while respecting the
 group's tone. These are two registers of one assistant, not two products. The
@@ -267,7 +296,9 @@ never weaken consent or health-data boundaries.
 
 - Curiosity beats compliance.
 - Silence is a feature.
-- Context should compound into fewer, better questions.
+- Context should eliminate repeated and low-value questions while enabling new,
+  better questions when consequential gaps remain.
+- Delight can be part of care; it is never engagement bait.
 - Compare interventions, not bodies.
 - Protocols are temporary tools, not identities.
 - Numbers are clues, not verdicts.

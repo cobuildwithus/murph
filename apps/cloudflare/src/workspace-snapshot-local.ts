@@ -143,7 +143,9 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
   ivBase64: string;
   maxEncryptedBytes: number;
   outputDir: string;
+  signal?: AbortSignal | null;
 }): Promise<EncryptedWorkspaceSnapshotFile> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const durableRoot = path.resolve(input.durableRoot);
   const outputDir = path.resolve(input.outputDir);
   if (isSameOrDescendantPath(outputDir, durableRoot)) {
@@ -161,10 +163,13 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
   let completed = false;
 
   try {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const preflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (preflight.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
       throw new RangeError("Hosted workspace snapshot exceeds the total plain size limit.");
     }
@@ -186,6 +191,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       maxBytes: input.maxEncryptedBytes,
     });
     await assertHostedWorkspaceSnapshotZstdCliAvailable();
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const tar = spawn("tar", [
       "-C",
       durableRoot,
@@ -204,6 +210,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     });
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
     const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+    const pipelineOptions = input.signal ? { signal: input.signal } : {};
 
     try {
       if (!tar.stdout) {
@@ -213,7 +220,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
         throw new Error("Hosted workspace snapshot zstd streams are unavailable.");
       }
       const archiveInputPipe = waitForHostedWorkspaceSnapshotProcessPipe(
-        pipeline(tar.stdout, zstd.stdin),
+        pipeline(tar.stdout, zstd.stdin, pipelineOptions),
         [tarExit, zstdExit],
       );
       await Promise.all([
@@ -224,6 +231,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
           cipher,
           encryptedCounter,
           createWriteStream(encryptedFilePath, { mode: 0o600 }),
+          pipelineOptions,
         ),
         tarExit,
         zstdExit,
@@ -235,6 +243,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
         tarExit,
         zstdExit,
       ]);
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -244,6 +253,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       throw error;
     }
 
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const authTag = cipher.getAuthTag();
     await appendFile(encryptedFilePath, authTag);
     encryptedObjectHash.update(authTag);
@@ -264,11 +274,15 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       encryptedFilePath,
       expected: preflight,
       iv,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const postArchivePreflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     assertHostedWorkspaceSnapshotDurableRootUnchanged(preflight, postArchivePreflight);
 
     completed = true;
@@ -289,6 +303,17 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       await rm(tempDir, { force: true, recursive: true });
     }
   }
+}
+
+function assertHostedWorkspaceSnapshotConstructionLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace snapshot construction was interrupted.");
 }
 
 function isSameOrDescendantPath(candidate: string, root: string): boolean {
@@ -612,9 +637,17 @@ interface HostedWorkspaceSnapshotDurableRootFileState {
 async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
   archiveEntries: readonly WorkspaceSnapshotArchiveEntryInput[];
   durableRoot: string;
+  signal?: AbortSignal | null;
 }): Promise<HostedWorkspaceSnapshotDurableRootState> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const root = path.resolve(input.durableRoot);
-  await access(root);
+  try {
+    await access(root);
+  } catch (error) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+    throw error;
+  }
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   let directoryCount = 0;
   let entryCount = 0;
   let fileCount = 0;
@@ -625,6 +658,7 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
   let totalPlainBytes = 0;
 
   for (const entry of input.archiveEntries) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const archivePath = normalizeHostedWorkspaceSnapshotArchivePath(entry.archivePath);
     if (seen.has(archivePath)) {
       throw new Error("Hosted workspace snapshot archive contains duplicate entries.");
@@ -644,7 +678,9 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
     const stats = await readHostedWorkspaceSnapshotSelectedEntryStats({
       archivePath,
       root,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (isHostedWorkspaceSnapshotEnvPath(archivePath)) {
       throw new Error("Hosted workspace snapshot durable root contains environment files.");
     }
@@ -684,13 +720,22 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
 async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
   archivePath: string;
   root: string;
+  signal?: AbortSignal | null;
 }): Promise<Stats> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const segments = input.archivePath.split("/");
   let currentPath = input.root;
   let stats: Awaited<ReturnType<typeof lstat>> | null = null;
   for (const [index, segment] of segments.entries()) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     currentPath = path.join(currentPath, segment);
-    stats = await lstat(currentPath);
+    try {
+      stats = await lstat(currentPath);
+    } catch (error) {
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+      throw error;
+    }
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (stats.isSymbolicLink()) {
       throw new Error("Hosted workspace snapshot durable root contains symlinks.");
     }
@@ -715,7 +760,9 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
   encryptedFilePath: string;
   expected: HostedWorkspaceSnapshotDurableRootState;
   iv: Buffer;
+  signal?: AbortSignal | null;
 }): Promise<void> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const expected = input.expected;
   const remaining = new Map(expected.entries);
   const seenPaths = new Set<string>();
@@ -724,6 +771,7 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
   let totalPlainBytes = 0;
 
   for (const entry of entries) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const parsed = parseHostedWorkspaceSnapshotVerboseTarEntry(entry);
     const parsedArchivePath = normalizeHostedWorkspaceSnapshotTarEntryPath(parsed.path);
     assertHostedWorkspaceSnapshotRelativePathSafe(
@@ -778,7 +826,9 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   encryptedByteSize: number;
   encryptedFilePath: string;
   iv: Buffer;
+  signal?: AbortSignal | null;
 }): Promise<string[]> {
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const decipher = createDecipheriv(
     "aes-256-gcm",
     Buffer.from(input.dataKey),
@@ -807,6 +857,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   tar.stdout.setEncoding("utf8");
   const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
   const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+  const pipelineOptions = input.signal ? { signal: input.signal } : {};
   const decryptPipe = waitForHostedWorkspaceSnapshotProcessPipe(
     pipeline(
       createReadStream(input.encryptedFilePath, {
@@ -815,11 +866,12 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
       }),
       decipher,
       zstd.stdin,
+      pipelineOptions,
     ),
     [zstdExit, tarExit],
   );
   const archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
-    pipeline(zstd.stdout, tar.stdin),
+    pipeline(zstd.stdout, tar.stdin, pipelineOptions),
     [zstdExit, tarExit],
   );
   const lines = createInterface({
@@ -829,6 +881,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
   const entries: string[] = [];
   try {
     for await (const line of lines) {
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       if (line.trim().length === 0) {
         continue;
       }
@@ -839,6 +892,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
     }
     await Promise.all([decryptPipe, archivePipe]);
     await Promise.all([zstdExit, tarExit]);
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   } catch (error) {
     zstd.kill("SIGTERM");
     tar.kill("SIGTERM");
@@ -847,6 +901,7 @@ async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
       tarExit,
     ]);
     await Promise.allSettled([decryptPipe, archivePipe]);
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (
       processFailure
       && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)

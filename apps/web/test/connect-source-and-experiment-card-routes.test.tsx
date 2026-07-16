@@ -205,7 +205,26 @@ test("experiment progress-card route returns a static-like PNG response for medi
         { start: "2026-06-05", cells: "CMAMMCP" },
         { start: "2026-06-12", cells: "MMCCSSS" },
       ],
-      movers: [],
+      movers: [
+        {
+          label: "HRV RMSSD",
+          changePct: "8%",
+          value: "52",
+          unit: "ms",
+          delta: "+4 ms",
+          direction: "up",
+          sentiment: "positive",
+        },
+        {
+          label: "Resting heart rate",
+          changePct: "3%",
+          value: "62",
+          unit: "bpm",
+          delta: "+2 bpm",
+          direction: "up",
+          sentiment: "negative",
+        },
+      ],
       confounders: [],
     },
   );
@@ -230,11 +249,14 @@ test("experiment progress-card route returns a static-like PNG response for medi
   assert.equal(init.width, 1200);
   assert.equal(init.height, 630);
   assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
-  const serializedImageTree = JSON.stringify(renderReactTree(imageTree));
+  const renderedImageTree = renderReactTree(imageTree);
+  const serializedImageTree = JSON.stringify(renderedImageTree);
   assert.match(serializedImageTree, /Bedtime silent meditation/u);
   assert.match(serializedImageTree, /5 done \(2 assumed\)/u);
   assert.doesNotMatch(serializedImageTree, /5 logged \(2 assumed\)/u);
   assert.match(serializedImageTree, /rgba\(90,110,50,0\.18\)/u);
+  assert.equal(findRenderedTextColor(renderedImageTree, "8%"), "#4F6B2C");
+  assert.equal(findRenderedTextColor(renderedImageTree, "3%"), "#A6692F");
 });
 
 function getImageResponseCall(): [unknown, MockImageResponseInit] {
@@ -283,6 +305,27 @@ function renderReactTree(value: unknown): unknown {
     props,
     children: renderReactTree(props.children),
   };
+}
+
+function findRenderedTextColor(value: unknown, text: string): string | null {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const color = findRenderedTextColor(child, text);
+      if (color !== null) return color;
+    }
+    return null;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (value.children === text) {
+    const props = isRecord(value.props) ? value.props : {};
+    const style = isRecord(props.style) ? props.style : {};
+    return typeof style.color === "string" ? style.color : null;
+  }
+
+  return findRenderedTextColor(value.children, text);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

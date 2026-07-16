@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
     onCompleted?: (payload: {
       activationPending: boolean;
+      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -27,6 +28,7 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     onCompleted?: (payload: {
       activationPending: boolean;
+      initialVisitEligible?: boolean;
       inviteCode: string;
       joinUrl: string;
       stage: string;
@@ -126,7 +128,7 @@ test("AuthProvider reloads a document that receives a cross-tab session transiti
   await rendered.cleanup();
 });
 
-test("AuthProvider resumes a pending device connect intent after sign-in completion", async () => {
+test("AuthProvider keeps a pending device connect intent ahead of the first-visit redirect", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -169,13 +171,14 @@ test("AuthProvider resumes a pending device connect intent after sign-in complet
     rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
-    (button) => button.textContent === "Complete auth",
-  );
-  expect(completeButton).toBeTruthy();
-
   await act(async () => {
-    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: true,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
   });
 
   expect(reload).toHaveBeenCalledTimes(1);
@@ -425,6 +428,61 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
   });
 
   expect(assign).toHaveBeenCalledWith("/home");
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider preserves the first-visit redirect for newly created members", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      {
+        type: "button",
+        onClick: openAuthDialog,
+      },
+      "Sign up",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, {
+      authenticated: false,
+    }, createElement(OpenAuthButton)),
+  );
+
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "",
+      href: "https://join.example.test/home",
+      origin: "https://join.example.test",
+      pathname: "/home",
+      search: "",
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: true,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(assign).toHaveBeenCalledWith("/home?initialVisit=true");
 
   await rendered.cleanup();
 });

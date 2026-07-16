@@ -19,7 +19,6 @@ import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
-  listGeneratedAssistantProtocolIndexEntries,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
@@ -32,6 +31,7 @@ import {
   loadGeneratedHealthCommonsWebRouteBundle,
   loadGeneratedHealthCommonsWebRouteIndex,
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+  resolveGeneratedHealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
@@ -243,6 +243,21 @@ function createMeasurementMethodCatalogReader() {
 }
 
 describe("@murphai/health-commons runtime catalog reader", () => {
+  it("resolves desired directions through canonical biomarker aliases", () => {
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:hrv"),
+    ).toBe("higher_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:hrv-rmssd"),
+    ).toBe("higher_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:resting_hr"),
+    ).toBe("lower_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:not-in-catalog"),
+    ).toBeNull();
+  });
+
   it("loads the compact generated biomarker browse index", () => {
     const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
     const publishedRouteIds = biomarkerIndex.biomarkers
@@ -313,30 +328,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(
       experimentIndex.experiments.find((entry) => entry.routeId === "finnish-sauna"),
     ).toEqual(expect.objectContaining({ sortRank: 10 }));
-  });
-
-  it("exposes a compact assistant protocol index from generated protocol artifacts", () => {
-    const protocolIndex = loadGeneratedHealthCommonsProtocolIndex();
-    const entries = listGeneratedAssistantProtocolIndexEntries();
-
-    expect(entries).toEqual(
-      protocolIndex.protocols.map((entry) => ({
-        category: expect.any(String),
-        routeId: entry.routeId,
-        title: entry.title,
-      })),
-    );
-    expect(entries).toContainEqual({
-      category: "Recovery",
-      routeId: "finnish-sauna",
-      title: "Finnish Dry Sauna",
-    });
-    expect(entries.some((entry) => entry.routeId === "creatine-monohydrate")).toBe(false);
-    expect(
-      entries.every((entry) =>
-        Object.keys(entry).sort().join(",") === "category,routeId,title"
-      ),
-    ).toBe(true);
   });
 
   it("falls back to package-relative generated artifacts when the package root env is unset", () => {
@@ -451,37 +442,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
         process.env[MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV] = previousPackageRoot;
       }
     }
-  });
-
-  it("builds assistant protocol entries from the compact protocol index without web artifacts", async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-protocol-index-"));
-    const protocolIndexPath = path.join(tempDir, "protocol-index.json");
-    const index = loadGeneratedHealthCommonsProtocolIndex();
-    const finnishSauna = index.protocols.find((protocol) =>
-      protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
-    );
-
-    if (!finnishSauna) {
-      throw new Error("Expected Finnish sauna in generated protocol index.");
-    }
-
-    await writeFile(
-      protocolIndexPath,
-      `${JSON.stringify({
-        catalogHash: index.catalogHash,
-        protocols: [finnishSauna],
-        schemaVersion: index.schemaVersion,
-      }, null, 2)}\n`,
-      "utf8",
-    );
-
-    expect(listGeneratedAssistantProtocolIndexEntries({ protocolIndexPath })).toEqual([
-      {
-        category: "Recovery",
-        routeId: "finnish-sauna",
-        title: "Finnish Dry Sauna",
-      },
-    ]);
   });
 
   it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {

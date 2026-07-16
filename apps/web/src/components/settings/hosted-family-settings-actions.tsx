@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Loader2, Minus, Plus } from "lucide-react";
+import { Check, Copy, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -44,6 +44,7 @@ export interface FamilyManagerMember {
   joinedAtIso: string | null;
   label: string | null;
   memberId: string;
+  pendingPlanCode: HostedPlanCode | null;
   planCode: HostedPlanCode;
 }
 
@@ -98,13 +99,10 @@ type PendingAction =
   | { id: string; kind: "cancel-invite"; label: string }
   | { id: string; kind: "remove-member"; label: string }
   | {
-      delta: -1 | 1;
-      kind: "change-capacity";
-      planCode: HostedPlanCode;
-    }
-  | {
+      canRemove: boolean;
       from: HostedPlanCode;
       id: string;
+      isOwner: boolean;
       kind: "change-plan";
       label: string;
       to: HostedPlanCode;
@@ -304,11 +302,9 @@ export function HostedFamilyManager(props: {
   const pendingTargetTier = pendingAction?.kind === "change-plan"
     ? props.tiers.find((tier) => tier.planCode === pendingAction.to) ?? null
     : null;
-  const pendingCapacityTier = pendingAction?.kind === "change-capacity"
-    ? props.tiers.find((tier) => tier.planCode === pendingAction.planCode) ?? null
+  const pendingSourceTier = pendingAction?.kind === "change-plan"
+    ? props.tiers.find((tier) => tier.planCode === pendingAction.from) ?? null
     : null;
-  const pendingTargetHasCapacity = pendingAction?.kind !== "change-plan" ||
-    props.plans[pendingAction.to].remaining > 0;
 
   function resetInviteForm() {
     setInviteChannel("imessage");
@@ -400,46 +396,22 @@ export function HostedFamilyManager(props: {
     setActionNotice(null);
     setIsActing(true);
     try {
-      if (pendingAction.kind === "change-capacity") {
-        const status = props.plans[pendingAction.planCode];
-        const targetQuantity = status.billed + pendingAction.delta;
-        const targetTotal = props.seats.billed + pendingAction.delta;
-        if (
-          targetQuantity < status.used ||
-          targetQuantity < 0 ||
-          targetTotal < props.seats.min ||
-          targetTotal > props.seats.max
-        ) {
-          setActionError("Family capacity changed. Refresh and try again.");
-          return;
-        }
+      const url = pendingAction.kind === "cancel-invite"
+        ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
+        : `/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}`;
+      if (pendingAction.kind === "change-plan") {
         const response = await requestHostedOnboardingJson<{ syncing: boolean }>({
           method: "PATCH",
-          payload: {
-            capacities: {
-              edge: props.plans.edge.billed,
-              pulse: props.plans.pulse.billed,
-              [pendingAction.planCode]: targetQuantity,
-            },
-          },
-          url: "/api/settings/billing/family/capacity",
+          payload: { planCode: pendingAction.to },
+          url,
         });
         setActionNotice(
           response.syncing
-            ? `${pendingCapacityTier?.name ?? "Family"} capacity change submitted. Stripe is still syncing; refresh in a moment.`
-            : pendingAction.delta > 0
-              ? `${pendingCapacityTier?.name ?? "Family"} capacity added.`
-              : `${pendingCapacityTier?.name ?? "Family"} capacity removed.`,
+            ? `${pendingAction.isOwner ? "Your plan" : `${pendingAction.label}'s plan`} is updating. Stripe is still syncing.`
+            : `${pendingAction.isOwner ? "You are" : `${pendingAction.label} is`} now on ${pendingTargetTier?.name}.`,
         );
       } else {
-        const url = pendingAction.kind === "cancel-invite"
-          ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
-          : `/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}`;
-        await requestHostedOnboardingJson(
-          pendingAction.kind === "change-plan"
-            ? { method: "PATCH", payload: { planCode: pendingAction.to }, url }
-            : { method: "DELETE", url },
-        );
+        await requestHostedOnboardingJson({ method: "DELETE", url });
       }
       setPendingAction(null);
       router.refresh();
@@ -451,9 +423,11 @@ export function HostedFamilyManager(props: {
             ? "Could not cancel that invite right now."
             : pendingAction.kind === "remove-member"
               ? "Could not remove that member right now."
-              : pendingAction.kind === "change-plan"
-                ? "Could not change that member's tier right now."
-                : "Could not change Family capacity right now.",
+            : pendingAction.kind === "change-plan"
+                ? pendingAction.isOwner
+                  ? "Could not change your tier right now."
+                  : "Could not change that member's tier right now."
+                : "Could not update your Family plan right now.",
         ),
       );
     } finally {
@@ -503,10 +477,10 @@ export function HostedFamilyManager(props: {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-foreground">
-              {props.seats.used} of {props.seats.billed} paid seats assigned
+              {props.members.length} {props.members.length === 1 ? "family member" : "family members"}
             </p>
             <p className="text-xs text-muted-foreground">
-              Reserve the exact Pulse and Edge mix your family needs.
+              Manage each person&apos;s Pulse or Edge access directly.
             </p>
           </div>
           <Button
@@ -520,71 +494,6 @@ export function HostedFamilyManager(props: {
             Invite member
           </Button>
         </div>
-        <div className="divide-y divide-border rounded-lg border border-border">
-          {props.tiers.map((tier) => {
-            const status = props.plans[tier.planCode];
-            const canRemove = props.billingActive &&
-              status.billed > status.used &&
-              props.seats.billed > props.seats.min;
-            const canAdd = props.billingActive && props.seats.billed < props.seats.max;
-            return (
-              <div
-                key={tier.planCode}
-                className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground">{tier.name}</span>
-                    <span className="text-xs text-muted-foreground">{tier.priceLabel}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{status.used} of {status.billed} assigned</span>
-                    <SeatPips max={status.billed} used={status.used} />
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove an empty ${tier.name} seat`}
-                    disabled={!canRemove}
-                    onClick={() => {
-                      setActionError(null);
-                      setActionNotice(null);
-                      setPendingAction({
-                        delta: -1,
-                        kind: "change-capacity",
-                        planCode: tier.planCode,
-                      });
-                    }}
-                  >
-                    <Minus className="size-4" aria-hidden="true" />
-                  </Button>
-                  <span className="w-5 text-center text-sm tabular-nums">{status.billed}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Add ${tier.name} seat at ${tier.priceLabel}`}
-                    disabled={!canAdd}
-                    onClick={() => {
-                      setActionError(null);
-                      setActionNotice(null);
-                      setPendingAction({
-                        delta: 1,
-                        kind: "change-capacity",
-                        planCode: tier.planCode,
-                      });
-                    }}
-                  >
-                    <Plus className="size-4" aria-hidden="true" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
         {actionNotice ? (
           <p role="status" className="text-xs leading-tight text-muted-foreground">
             {actionNotice}
@@ -593,81 +502,83 @@ export function HostedFamilyManager(props: {
       </div>
 
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[44rem] text-sm">
-        <thead className="sr-only">
-          <tr>
-            <th>Member</th>
-            <th>Tier</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-        {props.members.map((member) => (
-          <tr key={member.memberId}>
-            <td className="py-3 pr-3">
-              <div className="truncate font-medium text-foreground">
-                {member.isOwner ? "You" : member.label ?? "Family member"}
-              </div>
-              {!member.isOwner && member.joinedAtIso ? (
-                <div className="text-xs text-muted-foreground">
-                  Joined {formatFamilyDate(member.joinedAtIso)}
-                </div>
-              ) : null}
-            </td>
-            <td className="py-3 pr-3 align-top">
-              <Badge variant="outline">
-                {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
-              </Badge>
-            </td>
-            <td className="py-3 pr-3 align-top">
-              <Badge variant={member.isOwner ? "outline" : "default"}>
-                {member.isOwner ? "Owner" : "Active"}
-              </Badge>
-            </td>
-            <td className="py-3 text-right align-top">
-              <div className="inline-flex items-center gap-1">
-                {props.tiers
-                  .filter((tier) => tier.planCode !== member.planCode)
-                  .map((tier) => (
-                    <Button
-                      key={tier.planCode}
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPendingAction({
-                        from: member.planCode,
-                        id: member.memberId,
-                        kind: "change-plan",
-                        label: member.isOwner ? "yourself" : member.label ?? "this family member",
-                        to: tier.planCode,
-                      })}
-                    >
-                      Move to {tier.name}
-                    </Button>
-                  ))}
-              {member.isOwner ? null : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setPendingAction({
-                      id: member.memberId,
-                      kind: "remove-member",
-                      label: member.label ?? "this family member",
-                    })
-                  }
-                >
-                  Remove
-                </Button>
-              )}
-              </div>
-            </td>
-          </tr>
-        ))}
+        <table className="w-full min-w-[44rem] text-sm">
+          <thead className="sr-only">
+            <tr>
+              <th>Member</th>
+              <th>Tier</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {props.members.map((member) => {
+              const isRetry = member.pendingPlanCode !== null;
+              const targetPlanCode = member.pendingPlanCode
+                ?? props.tiers.find((tier) => tier.planCode !== member.planCode)?.planCode;
+              const targetTier = props.tiers.find(
+                (tier) => tier.planCode === targetPlanCode,
+              );
 
-        {props.invites.map((invite) => {
+              return (
+                <tr key={member.memberId}>
+                  <td className="py-3 pr-3">
+                    <div className="truncate font-medium text-foreground">
+                      {member.isOwner ? "You" : member.label ?? "Family member"}
+                    </div>
+                    {!member.isOwner && member.joinedAtIso ? (
+                      <div className="text-xs text-muted-foreground">
+                        Joined {formatFamilyDate(member.joinedAtIso)}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="py-3 pr-3 align-top">
+                    <Badge variant="outline">
+                      {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
+                    </Badge>
+                  </td>
+                  <td className="py-3 pr-3 align-top">
+                    <Badge variant={member.pendingPlanCode ? "secondary" : member.isOwner ? "outline" : "default"}>
+                      {member.pendingPlanCode
+                        ? `Updating to ${props.tiers.find((tier) => tier.planCode === member.pendingPlanCode)?.name}`
+                        : member.isOwner ? "Owner" : "Active"}
+                    </Badge>
+                  </td>
+                  <td className="py-3 text-right align-top">
+                    <div className="inline-flex items-center gap-1">
+                      {targetTier ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={isRetry
+                            ? member.isOwner
+                              ? `Retry updating your plan to ${targetTier.name}`
+                              : `Retry updating ${member.label ?? "this family member"}'s plan to ${targetTier.name}`
+                            : member.isOwner
+                              ? "Manage your plan"
+                              : `Manage ${member.label ?? "this family member"}'s plan`}
+                          disabled={isActing}
+                          onClick={() => setPendingAction({
+                            canRemove: !member.isOwner && !isRetry,
+                            from: member.planCode,
+                            id: member.memberId,
+                            isOwner: member.isOwner,
+                            kind: "change-plan",
+                            label: member.isOwner ? "you" : member.label ?? "this family member",
+                            to: targetTier.planCode,
+                          })}
+                        >
+                          {isRetry ? "Retry update" : "Manage"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+
+            {props.invites.map((invite) => {
           const link = inviteShareLink(invite);
           const secondary = invite.targetLabel ? inviteContacts(invite)[0] ?? null : null;
           return (
@@ -932,30 +843,29 @@ export function HostedFamilyManager(props: {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={pendingAction !== null} onOpenChange={(open) => { if (!open) { setPendingAction(null); setActionError(null); } }}>
-        <DialogContent className={DIALOG_CLASS}>
+      <Dialog open={pendingAction !== null} onOpenChange={(open) => {
+        if (!open && !isActing) {
+          setPendingAction(null);
+          setActionError(null);
+        }
+      }}>
+        <DialogContent className={DIALOG_CLASS} showCloseButton={!isActing}>
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
               {pendingAction?.kind === "remove-member"
                 ? "Remove family member"
                 : pendingAction?.kind === "change-plan"
-                  ? `Move to ${props.tiers.find((tier) => tier.planCode === pendingAction.to)?.name}`
-                  : pendingAction?.kind === "change-capacity"
-                    ? `${pendingAction.delta > 0 ? "Add" : "Remove"} ${pendingCapacityTier?.name} seat`
+                  ? pendingAction.isOwner ? "Manage your plan" : `Manage ${pendingAction.label}`
                     : "Cancel invite"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
                 ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
                 : pendingAction?.kind === "change-plan"
-                  ? pendingTargetHasCapacity
-                    ? `Change ${pendingAction.label} from ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} to ${pendingTargetTier?.name}?`
-                    : `Add a paid ${pendingTargetTier?.name} seat above, move ${pendingAction.label}, then remove the empty ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} seat if you no longer need it.`
-                  : pendingAction?.kind === "change-capacity"
-                    ? pendingAction.delta > 0
-                      ? `Add one ${pendingCapacityTier?.name} seat at ${pendingCapacityTier?.priceLabel}? Stripe updates immediately and may invoice the prorated amount now.`
-                      : `Remove one empty ${pendingCapacityTier?.name} seat? This lowers your charge at the next renewal; it does not issue an immediate credit.`
-                    : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
+                  ? pendingAction.to === "edge"
+                    ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
+                    : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
+                  : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -976,7 +886,7 @@ export function HostedFamilyManager(props: {
                 ? "destructive"
                 : "default"}
               onClick={() => void confirmPendingAction()}
-              disabled={isActing || !pendingTargetHasCapacity}
+              disabled={isActing}
               className="w-full"
             >
               {isActing
@@ -984,11 +894,28 @@ export function HostedFamilyManager(props: {
                 : pendingAction?.kind === "remove-member"
                   ? "Remove member"
                   : pendingAction?.kind === "change-plan"
-                    ? pendingTargetHasCapacity ? "Change tier" : `Add ${pendingTargetTier?.name} seat first`
-                    : pendingAction?.kind === "change-capacity"
-                      ? pendingAction.delta > 0 ? "Add paid seat" : "Remove empty seat"
+                    ? pendingAction.to === "edge" ? "Upgrade to Edge" : "Downgrade to Pulse"
                       : "Cancel invite"}
             </Button>
+            {pendingAction?.kind === "change-plan" && pendingAction.canRemove ? (
+              <Button
+                type="button"
+                size="xl"
+                variant="destructive"
+                onClick={() => {
+                  setActionError(null);
+                  setPendingAction({
+                    id: pendingAction.id,
+                    kind: "remove-member",
+                    label: pendingAction.label,
+                  });
+                }}
+                disabled={isActing}
+                className="w-full"
+              >
+                Remove from Family
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="xl"
@@ -997,7 +924,7 @@ export function HostedFamilyManager(props: {
               disabled={isActing}
               className="w-full"
             >
-              {pendingAction?.kind === "change-plan" || pendingAction?.kind === "change-capacity"
+              {pendingAction?.kind === "change-plan"
                 ? "Not now"
                 : "Keep"}
             </Button>
@@ -1005,19 +932,6 @@ export function HostedFamilyManager(props: {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function SeatPips({ max, used }: { max: number; used: number }) {
-  return (
-    <span className="flex items-center gap-1" aria-hidden="true">
-      {Array.from({ length: max }).map((_, index) => (
-        <span
-          key={index}
-          className={cn("size-1.5 rounded-full", index < used ? "bg-primary" : "bg-border")}
-        />
-      ))}
-    </span>
   );
 }
 

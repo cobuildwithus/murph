@@ -5,13 +5,16 @@ import { createConnection } from "node:net";
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  HostedCliBridgeRequestError,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
+  requestHostedCliDeviceAccountReconcile,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { expect, test, vi } from "vitest";
@@ -826,6 +829,7 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
     });
 
     expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: false,
       provider: "whoop",
       sourceProviderSlug: "garmin",
     });
@@ -850,6 +854,59 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
     assert.doesNotMatch(
       JSON.stringify(result),
       /redacted-token|redacted-refresh|state_that_must_not_cross_bridge|provider_user_that_must_not_cross_bridge/u,
+    );
+  });
+});
+
+test("hosted CLI runtime bridge reconciles one device account", async () => {
+  const reconcileAccount = vi.fn(async () => ({
+    connectionId: "dsc_whoop",
+    occurredAt: "2026-07-15T12:00:00.000Z",
+    status: "queued" as const,
+  }));
+  const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+    ...createDeviceSyncPortStub(),
+    reconcileAccount,
+  };
+
+  await withHostedCliBridgeInvocation({ deviceSyncPort }, async (bridge) => {
+    await expect(requestHostedCliDeviceAccountReconcile({
+      accountId: "dsc_whoop",
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+    })).resolves.toEqual({
+      connectionId: "dsc_whoop",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+  });
+
+  expect(reconcileAccount).toHaveBeenCalledWith({
+    connectionId: "dsc_whoop",
+    signal: null,
+  });
+  assert.equal(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH, "/device/accounts/reconcile");
+});
+
+test("hosted CLI runtime bridge tolerates a device-sync port without reconcile support", async () => {
+  await withHostedCliBridgeInvocation({
+    deviceSyncPort: createDeviceSyncPortStub(),
+  }, async (bridge) => {
+    await assert.rejects(
+      () => requestHostedCliDeviceAccountReconcile({
+        accountId: "dsc_whoop",
+        bridge: {
+          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedCliBridgeRequestError);
+        assert.equal(error.code, "HOSTED_DEVICE_ACCOUNT_RECONCILE_UNAVAILABLE");
+        return true;
+      },
     );
   });
 });

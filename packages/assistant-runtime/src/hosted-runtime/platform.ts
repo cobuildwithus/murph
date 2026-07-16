@@ -28,6 +28,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeAssistantAskControlRequest,
+  HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -84,6 +86,7 @@ import type {
   HostedExecutionDeviceSyncDirtyPendingResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncReconcileResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -98,14 +101,54 @@ import type {
   RuntimeLivenessPort,
 } from "./liveness.ts";
 
+export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES = [
+  "canonical_write_receipt",
+  "legacy_snapshot_materialization",
+  "workspace_artifact_materialization",
+  "workspace_restore",
+] as const;
+
+export type HostedRuntimeArtifactReadPurpose =
+  typeof HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES[number];
+
+export interface HostedRuntimeArtifactReadContext {
+  purpose: HostedRuntimeArtifactReadPurpose;
+  signal?: AbortSignal | null;
+}
+
 export interface HostedRuntimeArtifactReader {
-  get(sha256: string): Promise<Uint8Array | null>;
+  get(
+    sha256: string,
+    context: HostedRuntimeArtifactReadContext,
+  ): Promise<Uint8Array | null>;
+}
+
+export class HostedRuntimeArtifactReadError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime artifact read failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeArtifactReadError";
+    this.retryable = input.retryable;
+  }
 }
 
 export interface HostedRuntimeAssistantConfigurationToolPort {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
   ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
+}
+
+export interface HostedRuntimeAssistantAskPort {
+  request(
+    request: HostedRuntimeAssistantAskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeAssistantAskControlResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -214,7 +257,7 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -314,6 +357,10 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  reconcileAccount?(input: {
+    connectionId: string;
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
     includeCredentialMaterial?: boolean | null;
@@ -373,9 +420,6 @@ export interface HostedRuntimePlanUsageToolPort {
 }
 
 export interface HostedRuntimeAssistantPersonalizationToolPort {
-  resolvePreferenceCausalSeq(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>;
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -415,7 +459,7 @@ export interface HostedRuntimeMailboxPort {
 }
 
 export interface HostedRuntimeWorkspacePort {
-  read?(): Promise<HostedWorkspaceReadResponse>;
+  read?(context?: { signal?: AbortSignal | null }): Promise<HostedWorkspaceReadResponse>;
   checkpoint(
     request: HostedWorkspaceCheckpointRequest,
   ): Promise<HostedWorkspaceCheckpointResponse>;
@@ -477,6 +521,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     encryptedByteSize: number;
     encryptedObjectSha256: string;
     objectKey: string;
+    signal?: AbortSignal | null;
     sourceFilePath: string;
     snapshotId: string;
   }): Promise<HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails | void>;
@@ -491,11 +536,15 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     reason: "idle_shutdown";
+    signal?: AbortSignal | null;
   }): Promise<HostedRuntimeWorkspaceSnapshotSessionStart>;
 }
 
 export interface HostedRuntimeLogPort {
-  write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
+  write(
+    request: HostedRuntimeLogRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLogResponse>;
 }
 
 export interface HostedRuntimeLatencyTracePort {
@@ -523,6 +572,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantAskPort?: HostedRuntimeAssistantAskPort | null;
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;

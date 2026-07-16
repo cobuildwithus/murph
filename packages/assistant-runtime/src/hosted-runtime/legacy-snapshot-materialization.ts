@@ -1,4 +1,11 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -43,32 +50,44 @@ export interface LegacyWorkspaceRefsForV2SnapshotMaterializationPlan {
 export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
   artifactStore: HostedRuntimeArtifactReader;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<LegacyWorkspaceRefsForV2SnapshotMaterializationPlan> {
-  const currentSnapshotRef = await readHostedWorkspaceCurrentSnapshotRef({
-    platform: input.platform,
-  });
-  const legacyBundleRef = readHostedExecutionSnapshotBaseRef(currentSnapshotRef);
-  const preservedState = legacyBundleRef
-    ? await readHostedWorkspaceEffectivePreservedState({
-        artifactStore: input.artifactStore,
-        snapshotRef: currentSnapshotRef,
-      })
-    : null;
-  const skippedInlineFiles = legacyBundleRef
-    ? await readHostedWorkspaceSkippedInlineFiles({
-        vaultRoot: input.vaultRoot,
-      })
-    : [];
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+  try {
+    const currentSnapshotRef = await readHostedWorkspaceCurrentSnapshotRef({
+      platform: input.platform,
+      signal: input.signal,
+    });
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    const legacyBundleRef = readHostedExecutionSnapshotBaseRef(currentSnapshotRef);
+    const preservedState = legacyBundleRef
+      ? await readHostedWorkspaceEffectivePreservedState({
+          artifactStore: input.artifactStore,
+          signal: input.signal,
+          snapshotRef: currentSnapshotRef,
+        })
+      : null;
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    const skippedInlineFiles = legacyBundleRef
+      ? await readHostedWorkspaceSkippedInlineFiles({
+          vaultRoot: input.vaultRoot,
+        })
+      : [];
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
 
-  return {
-    currentSnapshotRefPresent: currentSnapshotRef !== null,
-    legacyBundleRefPresent: legacyBundleRef !== null,
-    preservedInlineFileCount: preservedState?.inlineFiles.length ?? 0,
-    preservedState,
-    skippedInlineFiles,
-    skippedInlineFileCount: skippedInlineFiles.length,
-  };
+    return {
+      currentSnapshotRefPresent: currentSnapshotRef !== null,
+      legacyBundleRefPresent: legacyBundleRef !== null,
+      preservedInlineFileCount: preservedState?.inlineFiles.length ?? 0,
+      preservedState,
+      skippedInlineFiles,
+      skippedInlineFileCount: skippedInlineFiles.length,
+    };
+  } catch (error) {
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    throw error;
+  }
 }
 
 export async function clearLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
@@ -95,71 +114,202 @@ export interface HostedWorkspaceEffectivePreservedState {
   inlineFiles: HostedBundleInlineLocation[];
 }
 
+interface StagedLegacyWorkspaceFile {
+  stagedPath: string;
+  targetPath: string;
+}
+
+interface StagedLegacyWorkspaceRefsForV2Snapshot {
+  files: readonly StagedLegacyWorkspaceFile[];
+  stagingRoot: string | null;
+}
+
 export async function materializeLegacyWorkspaceRefsForV2Snapshot(input: {
   artifactStore: HostedRuntimeArtifactReader;
   operatorHomeRoot: string;
   plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  scratchRoot: string;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<void> {
-  await materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot({
+  const staged = await stageLegacyWorkspaceRefsForV2Snapshot({
     artifactStore: input.artifactStore,
     files: input.plan.skippedInlineFiles,
     operatorHomeRoot: input.operatorHomeRoot,
     preservedState: input.plan.preservedState,
+    scratchRoot: input.scratchRoot,
+    signal: input.signal,
     vaultRoot: input.vaultRoot,
   });
+  try {
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    await commitStagedLegacyWorkspaceRefsForV2Snapshot({
+      plan: input.plan,
+      staged,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    await cleanupStagedLegacyWorkspaceRefs(staged);
+    throw error;
+  }
 }
 
 async function readHostedWorkspaceCurrentSnapshotRef(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal?: AbortSignal | null;
 }): Promise<HostedExecutionSnapshotRef | null> {
   if (!input.platform.workspacePort?.read) {
     return null;
   }
 
-  const currentWorkspace = await input.platform.workspacePort.read();
+  const currentWorkspace = await input.platform.workspacePort.read({
+    signal: input.signal,
+  });
   return currentWorkspace.workspace?.snapshotRef ?? null;
 }
 
-async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: {
+function assertHostedWorkspaceLegacySnapshotPreparationLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace legacy snapshot preparation was interrupted.");
+}
+
+async function stageLegacyWorkspaceRefsForV2Snapshot(input: {
   artifactStore: HostedRuntimeArtifactReader;
   files: readonly HostedWorkspaceSkippedInlineFile[];
   operatorHomeRoot: string;
   preservedState: HostedWorkspaceEffectivePreservedState | null;
+  scratchRoot: string;
+  signal?: AbortSignal | null;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<StagedLegacyWorkspaceRefsForV2Snapshot> {
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   const preservedInlineFiles = new Map(
     (input.preservedState?.inlineFiles ?? []).map((file) => [`${file.root}:${file.path}`, file]),
   );
   const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: input.vaultRoot,
   });
-  for (const file of input.files) {
-    const root = resolveHostedWorkspaceSkippedInlineFileRoot({
-      operatorHomeRoot: input.operatorHomeRoot,
-      root: file.root,
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+
+  let stagingRoot: string | null = null;
+  const stagedFiles: StagedLegacyWorkspaceFile[] = [];
+  try {
+    for (const file of input.files) {
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+      const root = resolveHostedWorkspaceSkippedInlineFileRoot({
+        operatorHomeRoot: input.operatorHomeRoot,
+        root: file.root,
+        vaultRoot: input.vaultRoot,
+      });
+      const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
+      if (
+        materializedArtifactPaths.has(`${file.root}:${file.path}`)
+        || await hostedWorkspaceSnapshotPathExists(targetPath)
+      ) {
+        continue;
+      }
+      const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
+      const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
+        ? inlineFile.bytes
+        : await input.artifactStore.get(file.sha256, {
+            purpose: "legacy_snapshot_materialization",
+            signal: input.signal,
+          });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+      if (bytes === null) {
+        throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
+      }
+      if (bytes.byteLength !== file.size || sha256HostedBundleHex(bytes) !== file.sha256) {
+        throw new Error("Hosted workspace skipped-inline artifact digest does not match its manifest.");
+      }
+      if (stagingRoot === null) {
+        stagingRoot = await createLegacyWorkspaceStagingRoot(input.scratchRoot);
+      }
+      const stagedPath = path.join(
+        stagingRoot,
+        `${String(stagedFiles.length).padStart(6, "0")}.artifact`,
+      );
+      await writeFile(stagedPath, bytes, { mode: 0o600 });
+      stagedFiles.push({
+        stagedPath,
+        targetPath,
+      });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    }
+
+    return {
+      files: stagedFiles,
+      stagingRoot,
+    };
+  } catch (error) {
+    await cleanupStagedLegacyWorkspaceRefs({
+      files: stagedFiles,
+      stagingRoot,
+    });
+    throw error;
+  }
+}
+
+async function commitStagedLegacyWorkspaceRefsForV2Snapshot(input: {
+  plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  staged: StagedLegacyWorkspaceRefsForV2Snapshot;
+  vaultRoot: string;
+}): Promise<void> {
+  const installedPaths: string[] = [];
+  const createdDirectoryRoots: string[] = [];
+  try {
+    for (const file of input.staged.files) {
+      if (await hostedWorkspaceSnapshotPathExists(file.targetPath)) {
+        continue;
+      }
+      const createdDirectoryRoot = await mkdir(path.dirname(file.targetPath), {
+        mode: 0o700,
+        recursive: true,
+      });
+      if (createdDirectoryRoot) {
+        createdDirectoryRoots.push(createdDirectoryRoot);
+      }
+      if (await hostedWorkspaceSnapshotPathExists(file.targetPath)) {
+        continue;
+      }
+      await rename(file.stagedPath, file.targetPath);
+      installedPaths.push(file.targetPath);
+    }
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.plan,
       vaultRoot: input.vaultRoot,
     });
-    const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
-    if (
-      materializedArtifactPaths.has(`${file.root}:${file.path}`)
-      || await hostedWorkspaceSnapshotPathExists(targetPath)
-    ) {
-      continue;
+  } catch (error) {
+    for (const installedPath of installedPaths.reverse()) {
+      await rm(installedPath, { force: true });
     }
-    const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
-    const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
-      ? inlineFile.bytes
-      : await input.artifactStore.get(file.sha256);
-    if (bytes === null) {
-      throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
+    for (const createdDirectoryRoot of createdDirectoryRoots.reverse()) {
+      await rm(createdDirectoryRoot, { force: true, recursive: true });
     }
-    if (bytes.byteLength !== file.size || sha256HostedBundleHex(bytes) !== file.sha256) {
-      throw new Error("Hosted workspace skipped-inline artifact digest does not match its manifest.");
-    }
-    await mkdir(path.dirname(targetPath), { mode: 0o700, recursive: true });
-    await writeFile(targetPath, bytes, { mode: 0o600 });
+    throw error;
+  } finally {
+    await cleanupStagedLegacyWorkspaceRefs(input.staged);
   }
+}
+
+async function createLegacyWorkspaceStagingRoot(scratchRoot: string): Promise<string> {
+  await mkdir(scratchRoot, { mode: 0o700, recursive: true });
+  return await mkdtemp(path.join(scratchRoot, "legacy-v2-"));
+}
+
+async function cleanupStagedLegacyWorkspaceRefs(
+  staged: StagedLegacyWorkspaceRefsForV2Snapshot,
+): Promise<void> {
+  if (staged.stagingRoot === null) {
+    return;
+  }
+  await rm(staged.stagingRoot, { force: true, recursive: true });
 }
 
 async function hostedWorkspaceSnapshotPathExists(filePath: string): Promise<boolean> {
@@ -207,6 +357,7 @@ function resolveSafeHostedWorkspaceSnapshotPath(root: string, relativePath: stri
 
 async function readHostedWorkspaceEffectivePreservedState(input: {
   artifactStore: HostedRuntimeArtifactReader;
+  signal?: AbortSignal | null;
   snapshotRef: HostedExecutionSnapshotRef | null;
 }): Promise<HostedWorkspaceEffectivePreservedState> {
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
@@ -214,7 +365,11 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
     return createHostedWorkspaceEffectivePreservedState();
   }
 
-  const baseBundle = await input.artifactStore.get(baseSnapshotRef.hash);
+  const baseBundle = await input.artifactStore.get(baseSnapshotRef.hash, {
+    purpose: "legacy_snapshot_materialization",
+    signal: input.signal,
+  });
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   if (!baseBundle) {
     throw new HostedWorkspaceCommittedStateUnavailableError();
   }
@@ -229,7 +384,11 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   if (!deltaSnapshotRef) {
     const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
     if (hotSnapshotRef) {
-      const hotBundle = await input.artifactStore.get(hotSnapshotRef.hash);
+      const hotBundle = await input.artifactStore.get(hotSnapshotRef.hash, {
+        purpose: "legacy_snapshot_materialization",
+        signal: input.signal,
+      });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
       if (!hotBundle) {
         throw new HostedWorkspaceCommittedStateUnavailableError();
       }
@@ -247,7 +406,11 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
     return createHostedWorkspaceEffectivePreservedState(baseInlineFiles);
   }
 
-  const deltaBundle = await input.artifactStore.get(deltaSnapshotRef.hash);
+  const deltaBundle = await input.artifactStore.get(deltaSnapshotRef.hash, {
+    purpose: "legacy_snapshot_materialization",
+    signal: input.signal,
+  });
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   if (!deltaBundle) {
     throw new HostedWorkspaceCommittedStateUnavailableError();
   }

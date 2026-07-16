@@ -23,6 +23,7 @@ import { normalizeNullableString, sha256Hex } from "../primitives";
 
 export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
   "message.received",
+  "message.sent",
   "message.delivered",
   "message.failed",
   "participant.added",
@@ -76,6 +77,13 @@ export type ParsedHostedLinqProviderEvent = {
 const GENERIC_LINE_PHONE_PATHS = [
   ["phone_number"],
   ["phoneNumber"],
+  ["chat", "owner_handle", "handle"],
+  ["chat", "ownerHandle", "handle"],
+  ["sender_handle", "handle"],
+  ["senderHandle", "handle"],
+  ["from_handle", "handle"],
+  ["fromHandle", "handle"],
+  ["from"],
   ["line", "phone_number"],
   ["line", "phoneNumber"],
   ["line", "number"],
@@ -184,13 +192,13 @@ export function isHostedLinqProviderEventType(value: string): value is HostedLin
   return (HOSTED_LINQ_PROVIDER_EVENT_TYPES as readonly string[]).includes(value);
 }
 
-export function normalizeHostedLinqGroupJoinOfferReaction(input: {
+export function isHostedLinqAffirmativeReaction(input: {
   customEmoji?: string | null;
   eventType: string;
   reactionType?: string | null;
-}): "accept" | null {
+}): boolean {
   if (input.eventType !== "reaction.added") {
-    return null;
+    return false;
   }
   const reactionType = normalizeReactionToken(input.reactionType);
   if (
@@ -200,11 +208,11 @@ export function normalizeHostedLinqGroupJoinOfferReaction(input: {
     || reactionType === "thumbsup"
     || reactionType === "heart"
   ) {
-    return "accept";
+    return true;
   }
 
   const customEmoji = normalizeReactionEmoji(input.customEmoji);
-  return customEmoji === "👍" || customEmoji === "❤" ? "accept" : null;
+  return customEmoji === "👍" || customEmoji === "❤";
 }
 
 function parseHostedLinqMessageReceivedProviderEvent(input: {
@@ -447,7 +455,14 @@ function parseGenericHostedLinqProviderEvent(input: {
       ["updated_at"],
       ["updatedAt"],
     ] as const))
-    : null;
+    : input.event.event_type === "message.sent"
+      ? parseProviderDate(readFirstStringAtPaths(data, [
+        ["sent_at"],
+        ["sentAt"],
+        ["message", "sent_at"],
+        ["message", "sentAt"],
+      ] as const))
+      : null;
   const failureCode = readFirstStringAtPaths(data, [
     ["code"],
     ["error_code"],
@@ -472,7 +487,8 @@ function parseGenericHostedLinqProviderEvent(input: {
   return buildParsedProviderEvent({
     chatId,
     deliveryStatus,
-    direction: readFirstStringAtPaths(data, [["direction"]] as const),
+    direction: readFirstStringAtPaths(data, [["direction"]] as const)
+      ?? (input.event.event_type === "message.sent" ? "outbound" : null),
     event: input.event,
     extraction: {
       chatIdPresent: chatId !== null,

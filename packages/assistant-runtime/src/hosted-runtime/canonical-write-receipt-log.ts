@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   HostedCanonicalWriteReceipt,
   HostedCanonicalWriteReceiptContentRef,
+  HostedCanonicalWritePayload,
 } from "@murphai/core";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
@@ -18,6 +19,7 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
+const HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY = 8;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES = 64;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES = 64 * 1024;
 const LEGACY_LOG_COUNT_STATUS_KEY = "hostedCanonicalWriteReceiptLogEntryCount";
@@ -43,7 +45,7 @@ export interface HostedCanonicalWriteReceiptRecoveryWake {
 
 export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   artifactStore: HostedRuntimeArtifactStore;
-  beforeReceiptUpload?: () => Promise<void>;
+  payloads: readonly HostedCanonicalWritePayload[];
   previousStatus: HostedRuntimeRedactedJson | null | undefined;
   receipt: HostedCanonicalWriteReceipt;
 }): Promise<HostedCanonicalWriteReceiptLogUpdate> {
@@ -66,18 +68,58 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   if (logArtifact.bytes.byteLength > HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES) {
     throw new Error("Hosted canonical write receipt log exceeds its size limit.");
   }
-  await input.beforeReceiptUpload?.();
-  await input.artifactStore.put({
-    bytes: receiptArtifact.bytes,
-    sha256: receiptArtifact.ref.sha256,
-  });
-  await input.artifactStore.put({
-    bytes: logArtifact.bytes,
-    sha256: logArtifact.ref.sha256,
+  for (const payload of input.payloads) {
+    if (payload.bytes.byteLength !== payload.byteLength) {
+      throw new TypeError(
+        "Hosted canonical write payload length does not match its receipt.",
+      );
+    }
+  }
+  await uploadHostedCanonicalWriteArtifacts({
+    artifacts: [
+      ...input.payloads.map((payload) => ({
+        bytes: payload.bytes,
+        sha256: payload.sha256,
+      })),
+      {
+        bytes: receiptArtifact.bytes,
+        sha256: receiptArtifact.ref.sha256,
+      },
+      {
+        bytes: logArtifact.bytes,
+        sha256: logArtifact.ref.sha256,
+      },
+    ],
+    artifactStore: input.artifactStore,
   });
   return {
     logRef: logArtifact.ref,
   };
+}
+
+async function uploadHostedCanonicalWriteArtifacts(input: {
+  artifacts: readonly {
+    bytes: Uint8Array;
+    sha256: string;
+  }[];
+  artifactStore: HostedRuntimeArtifactStore;
+}): Promise<void> {
+  for (
+    let offset = 0;
+    offset < input.artifacts.length;
+    offset += HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY
+  ) {
+    const results = await Promise.allSettled(
+      input.artifacts
+        .slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_UPLOAD_CONCURRENCY)
+        .map((artifact) => input.artifactStore.put(artifact)),
+    );
+    for (const result of results) {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+    }
+  }
 }
 
 export function hostedCanonicalWriteReceiptLogStatusFields(
@@ -150,7 +192,9 @@ export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   if (!ref) {
     return [];
   }
-  const bytes = await input.artifactStore.get(ref.sha256);
+  const bytes = await input.artifactStore.get(ref.sha256, {
+    purpose: "canonical_write_receipt",
+  });
   if (!bytes) {
     throw new Error("Hosted canonical write receipt log artifact is unavailable.");
   }

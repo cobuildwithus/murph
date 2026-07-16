@@ -33,6 +33,67 @@ test('message formatting renders simple emphasis spans with UTF-16 ranges', () =
   })
 })
 
+test('message formatting renders bold text before an em dash', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText(
+      'humor is set to **10/10**—the regulator has been removed entirely.',
+    ),
+    {
+      decorations: [
+        {
+          range: [16, 21],
+          style: 'bold',
+        },
+      ],
+      text: 'humor is set to 10/10—the regulator has been removed entirely.',
+    },
+  )
+})
+
+test('message formatting renders bold spans without an arbitrary content limit', () => {
+  const content = 'a'.repeat(321)
+
+  assert.deepEqual(renderMarkdownMessageText(`**${content}**`), {
+    decorations: [
+      {
+        range: [0, 321],
+        style: 'bold',
+      },
+    ],
+    text: content,
+  })
+})
+
+test('message formatting treats any non-empty text between paired double stars as bold', () => {
+  assert.deepEqual(
+    renderMarkdownMessageText('before** padded / text\n **after'),
+    {
+      decorations: [
+        {
+          range: [6, 22],
+          style: 'bold',
+        },
+      ],
+      text: 'before padded / text\n after',
+    },
+  )
+
+  assert.deepEqual(renderMarkdownMessageText('**/slash/**'), {
+    decorations: [
+      {
+        range: [0, 7],
+        style: 'bold',
+      },
+    ],
+    text: '/slash/',
+  })
+
+  assert.deepEqual(renderMarkdownMessageText('empty **** stays literal'), {
+    decorations: [],
+    text: 'empty **** stays literal',
+  })
+})
+
 test('message formatting renders star italics and underline spans', () => {
   assert.deepEqual(
     renderMarkdownMessageText(
@@ -92,14 +153,29 @@ test('message formatting leaves star and plus lookalikes untouched', () => {
   })
 })
 
-test('message formatting leaves ambiguous markdown-like text untouched', () => {
-  assert.deepEqual(
-    renderMarkdownMessageText(
-      'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, 变量_名称_值, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
-    ),
-    {
+test('message formatting leaves unmatched stars and ambiguous italic markers untouched', () => {
+  const values = [
+    'Keep snake_case, durable/home/*/rollout-*.jsonl, and src/**/*.ts intact.',
+    'Keep https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, and 变量_名称_值 intact.',
+  ]
+
+  for (const value of values) {
+    assert.deepEqual(renderMarkdownMessageText(value), {
       decorations: [],
-      text: 'Keep snake_case, durable/home/*/rollout-*.jsonl, src/**/*.ts, docs/**/README.md, https://example.test/download?filename=_report_.pdf, token _ABC_, _single_, 变量_名称_值, **multi\nline**, ** multiline\nbold **, and ** padded ** markers.',
+      text: value,
+    })
+  }
+
+  assert.deepEqual(
+    renderMarkdownMessageText('Keep docs/**/README.md and *italic*.'),
+    {
+      decorations: [
+        {
+          range: [27, 33],
+          style: 'italic',
+        },
+      ],
+      text: 'Keep docs/**/README.md and italic.',
     },
   )
 })

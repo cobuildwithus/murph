@@ -230,7 +230,10 @@ test("JoinInvitePageView renders Pulse Trial checkout disclosure when auto trial
   );
 
   assert.match(markup, /Pulse Trial/);
+  assert.match(markup, /Try Murph for 14 days, no charge\./);
+  assert.match(markup, /Start 14-day trial/);
   assert.match(markup, /Card required\. Then \$8\/month unless canceled\./);
+  assert.doesNotMatch(markup, /10 days|10-day trial/);
   assert.doesNotMatch(markup, /hosted AI usage/);
 });
 
@@ -258,7 +261,7 @@ test("JoinInvitePageView starts no-card auto Pulse Trial by default instead of r
   assert.match(markup, /data-auto-trial-island="true"/);
   assert.doesNotMatch(markup, /Starting Pulse Trial/);
   assert.doesNotMatch(markup, /data-checkout-plan=/);
-  assert.doesNotMatch(markup, /Start 10-day trial/);
+  assert.doesNotMatch(markup, /Start 14-day trial/);
   assert.doesNotMatch(markup, /Card required\. Then \$8\/month unless canceled\./);
   assert.doesNotMatch(markup, /Get Pulse/);
   assert.doesNotMatch(markup, /Get Edge/);

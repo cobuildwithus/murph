@@ -14,9 +14,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -222,7 +222,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-  currentAssistantPersonalizationInputId?: () => string | null;
+  currentAssistantPreferenceInputId?: () => string | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -266,11 +266,22 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         if (emailIngressPresent) {
           return await input.groupToolPort.request({ action: request.action });
         }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
+        const selfOptOut = resolveHostedGroupToolCurrentSenderContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+        );
+      }
+      if (
+        request.action === "read_own_assistant_style"
+        || request.action === "update_own_assistant_style"
+      ) {
+        const currentSender = resolveHostedGroupToolCurrentSenderContext({
+          linqDeliveryContexts: input.linqDeliveryContexts,
+        });
+        return await input.groupToolPort.request(
+          currentSender ? { ...request, currentSender } : request,
         );
       }
       if (
@@ -301,6 +312,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
+    case "ask":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
     case "list_memberships":
       return {
         action: request.action,
@@ -318,9 +334,16 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
+    case "read_own_assistant_style":
+    case "update_own_assistant_style":
+      return {
+        action: request.action,
+        result: { style: null, status: "unavailable", unavailableReason },
+      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
+    case "leave_membership":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -328,12 +351,13 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   }
 }
 
-function resolveHostedGroupToolSelfOptOutContext(input: {
+function resolveHostedGroupToolCurrentSenderContext(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
+}): HostedRuntimeGroupToolCurrentSenderContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolCurrentSenderContext>();
   // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
+  // header. Only the accepted Linq sender can become participant-self
+  // authority for opt-out or personal style actions.
   for (const context of input.linqDeliveryContexts) {
     if (context.threadIsDirect !== false) {
       continue;
@@ -619,10 +643,10 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(input.currentAssistantPersonalizationInputId
+        ...(input.currentAssistantPreferenceInputId
           ? {
-              currentAssistantPersonalizationInputId:
-                input.currentAssistantPersonalizationInputId,
+              currentAssistantPreferenceInputId:
+                input.currentAssistantPreferenceInputId,
             }
           : {}),
         assistantConfigurationTool:
@@ -905,6 +929,10 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
+      if (!assistantAutomationScheduleTrackingStarted) {
+        input.clearAssistantAutomationScheduleChanged?.();
+        assistantAutomationScheduleTrackingStarted = true;
+      }
       const automationBootstrapMs = elapsedSince(automationBootstrapStartedAt);
       const buildBackgroundDynamicContextPrompt =
         assistantRuntimeState?.assistantConfigured === true
@@ -988,6 +1016,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
+    let assistantAutomationScheduleTrackingStarted = false;
     const preAutomationLaneWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
       hasAssistantInputAtPassStart,
       input,
@@ -1114,12 +1143,14 @@ export async function runHostedWorkspaceAssistantPhase(
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     if (foregroundAssistantPass) {
       const foregroundCronReconciliationWake =
-        assistantMetrics.assistantAutomationCronStatusDeferred === true
+        input.assistantAutomationScheduleChanged?.() === true
           ? createHostedRuntimeWakeCandidate(
               new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString(),
               HOSTED_ASSISTANT_WAKE_REASON,
             )
-          : null;
+          : assistantMetrics.assistantAutomationCronStatusDeferred === true
+            ? createExistingHostedAssistantWorkspaceWakeCandidate(input)
+            : null;
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
@@ -1817,6 +1848,7 @@ function stripHostedAssistantPhaseWake(
   }
 
   const stripped: HostedWorkspaceRunnerAssistantPhaseResult = { ...result };
+  delete stripped.invocationLocalAssistantWakeAt;
   delete stripped.nextWakeAt;
   delete stripped.nextWakeReason;
   if (result.afterCheckpoint) {
@@ -1892,6 +1924,8 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   // assistant-lane result; carry it through the system-mailbox merge so the
   // workspace runner can gate the durable conversation consumed ack.
   const foregroundReplyFailed = input.assistantResult.foregroundReplyFailed;
+  const invocationLocalAssistantWakeAt =
+    input.assistantResult.invocationLocalAssistantWakeAt ?? null;
   if (progressedResult) {
     return {
       ...(afterCheckpoint ? { afterCheckpoint } : {}),
@@ -1904,6 +1938,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       checkpointReason: progressedResult.checkpointReason,
       ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+      ...(invocationLocalAssistantWakeAt
+        ? { invocationLocalAssistantWakeAt }
+        : {}),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -1920,6 +1957,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true } : {}),
     ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+    ...(invocationLocalAssistantWakeAt
+      ? { invocationLocalAssistantWakeAt }
+      : {}),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -3562,7 +3602,11 @@ async function runSystemMailboxMaintenancePhase(input: {
           nextWakeAt,
           outboxTerminalizedSendingCount: 0,
           progressed: true,
-          systemMailboxPrepared: systemMailboxPreparation.status === "retryable_failed" ? 0 : 1,
+          systemMailboxPrepared:
+            systemMailboxPreparation.status === "retryable_failed"
+              || systemMailboxPreparation.status === "preempted"
+              ? 0
+              : 1,
           systemMailboxRetryableFailed:
             systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
         }),
@@ -3919,6 +3963,20 @@ async function runForegroundAssistantReplyPhase(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   const deliveryEffects = preparedDeliveryEffects.effects;
+  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.nextWakeAt,
+  });
+  const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
+    assistantNextWakeAt,
+  });
+  const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
+  });
+  const invocationLocalAssistantWake = selectedInputWakeAt
+    ? { invocationLocalAssistantWakeAt: selectedInputWakeAt }
+    : {};
 
   if (
     shouldFastDispatchAssistantDeliveryEffects({
@@ -3929,6 +3987,7 @@ async function runForegroundAssistantReplyPhase(input: {
   ) {
     const fastDispatchBaseNextWake = resolveHostedFastDispatchBaseNextWake({
       assistantMetrics: input.assistantMetrics,
+      foregroundCronReconciliationWake: input.foregroundCronReconciliationWake,
       foregroundWorkspaceWake: input.foregroundWorkspaceWake,
       input: input.input,
       skippedDeviceSyncWake: input.skippedDeviceSyncWake,
@@ -3944,6 +4003,7 @@ async function runForegroundAssistantReplyPhase(input: {
       canConsumeWorkspaceAssistantWake: true,
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
+      postDeliveryReconciliationWake: input.foregroundCronReconciliationWake,
       providerCleanupPlan: input.providerCleanupPlan,
       redactedStatus: null,
       wake: input.wake,
@@ -3986,6 +4046,7 @@ async function runForegroundAssistantReplyPhase(input: {
     if (!progressed) {
       return {
         foregroundReplyFailed,
+        ...invocationLocalAssistantWake,
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
           ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -3997,6 +4058,7 @@ async function runForegroundAssistantReplyPhase(input: {
     return {
       checkpointReason: postDelivery.checkpointReason,
       foregroundReplyFailed,
+      ...invocationLocalAssistantWake,
       nextWakeAt,
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
         ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -4008,13 +4070,6 @@ async function runForegroundAssistantReplyPhase(input: {
 
   const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
-  });
-  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-    input: input.input,
-    nextWakeAt: input.assistantMetrics.nextWakeAt,
-  });
-  const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
-    assistantNextWakeAt,
   });
   const providerCleanupScheduledWakeAt =
     await resolveHostedProviderCleanupScheduledWakeAt({
@@ -4070,6 +4125,7 @@ async function runForegroundAssistantReplyPhase(input: {
   if (!progressed) {
     return {
       foregroundReplyFailed,
+      ...invocationLocalAssistantWake,
       ...(nextWakeAt ? { nextWakeAt } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -4100,6 +4156,7 @@ async function runForegroundAssistantReplyPhase(input: {
               canConsumeWorkspaceAssistantWake: true,
               input: input.input,
               linqDeliveryContexts: input.linqDeliveryContexts,
+              postDeliveryReconciliationWake: input.foregroundCronReconciliationWake,
               providerCleanupPlan: input.providerCleanupPlan,
               redactedStatus: null,
               wake: input.wake,
@@ -4120,6 +4177,7 @@ async function runForegroundAssistantReplyPhase(input: {
           wakeStateProgressed,
         }),
     foregroundReplyFailed,
+    ...invocationLocalAssistantWake,
     nextWakeAt,
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -4171,7 +4229,10 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
         userEnv: input.phaseInput.runtime.userEnv,
       }) as NodeJS.ProcessEnv,
       fetchImplementation: input.phaseInput.runtime.platform.providerFetch ?? null,
-      signal: input.phaseInput.signal ?? null,
+      signal:
+        input.phaseInput.backgroundMaintenanceSignal
+        ?? input.phaseInput.signal
+        ?? null,
       vaultRoot: input.phaseInput.restored.vaultRoot,
       wake: input.wake,
     });
@@ -4232,6 +4293,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   providerCleanupPlan: HostedProviderCleanupPlan;
+  postDeliveryReconciliationWake?: HostedRuntimeWakeCandidate | null;
   redactedStatus: HostedRuntimeRedactedJson | null;
   shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
@@ -4345,14 +4407,10 @@ async function drainHostedPostCheckpointDelivery(input: {
       vaultRoot: input.input.restored.vaultRoot,
     });
   const postDeliveryPendingAssistantInputWakeAt =
-    await resolvePendingAssistantInputWakeAt(input.input);
+    await resolvePendingAssistantInputWakeAt(input.input, { inspectOnly: true });
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
-  const postAssistantCronWake =
-    await resolveHostedAssistantCronWakeStateBestEffort(input.input, {
-      interruptOnBackgroundYield: input.assistantDeliveryEffects.length > 0,
-    });
   const dropConsumedWorkspaceAssistantWake = (
     candidate: HostedRuntimeWakeCandidate | null,
   ): HostedRuntimeWakeCandidate | null =>
@@ -4361,24 +4419,6 @@ async function drainHostedPostCheckpointDelivery(input: {
       canConsumeWorkspaceAssistantWake: input.canConsumeWorkspaceAssistantWake,
       phaseInput: input.input,
     });
-  let postAssistantCronWakeCandidate = dropConsumedWorkspaceAssistantWake(
-    resolveHostedAssistantCronWakeCandidate({
-      phaseInput: input.input,
-      state: postAssistantCronWake,
-    }),
-  );
-  if (!postAssistantCronWake.available) {
-    postAssistantCronWakeCandidate = selectHostedRuntimeWakeCandidate([
-      postAssistantCronWakeCandidate,
-      createHostedRuntimeWakeCandidate(
-        new Date(
-          resolveHostedAssistantPhaseNowMs(input.input)
-            + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
-        ).toISOString(),
-        HOSTED_ASSISTANT_WAKE_REASON,
-      ),
-    ]);
-  }
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4387,7 +4427,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   );
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
-    postAssistantCronWakeCandidate,
+    input.postDeliveryReconciliationWake,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
@@ -5023,8 +5063,10 @@ function resolveHostedAssistantPhaseNowMs(input: {
 
 async function resolvePendingAssistantInputWakeAt(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  options: { inspectOnly?: boolean } = {},
 ): Promise<string | null> {
   return await resolveHostedPendingAssistantInputWakeAt({
+    inspectOnly: options.inspectOnly,
     now: input.now,
     vaultRoot: input.restored.vaultRoot,
   });
@@ -5352,7 +5394,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   recorded: number | null;
   recordFailed: number | null;
   routeAction: string | null;
-  status: "processed" | "recorded" | "recording" | "retryable_failed";
+  status: "preempted" | "processed" | "recorded" | "recording" | "retryable_failed";
   wakeKind: string | null;
 }): Promise<void> {
   const errorCode = toHostedRuntimeLogCode(input.errorCode);
@@ -6489,7 +6531,10 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   }
 
   const item = input.preparation.item;
-  if (item.routeAction === "dispatch-assistant-notification") {
+  if (
+    item.routeAction === "dispatch-assistant-notification"
+    || item.routeAction === "continue-assistant-ask"
+  ) {
     return true;
   }
 
@@ -6533,6 +6578,7 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 
 function resolveHostedFastDispatchBaseNextWake(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
+  foregroundCronReconciliationWake?: HostedRuntimeWakeCandidate | null;
   foregroundWorkspaceWake?: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
@@ -6551,6 +6597,7 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   });
   return selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+    input.foregroundCronReconciliationWake ?? null,
     input.foregroundWorkspaceWake ?? null,
     skippedDeviceSyncWake,
     input.systemMailboxWake,

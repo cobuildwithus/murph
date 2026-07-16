@@ -1,6 +1,6 @@
 # Hosted Plan Usage Visibility
 
-Last verified: 2026-07-13
+Last verified: 2026-07-15
 
 ## Goal
 
@@ -32,6 +32,14 @@ The available projection keeps these access states distinct:
 | Direct paid Edge | Edge | Monthly | None |
 | Sponsored member | Family | Monthly | None |
 
+An active sponsored member keeps their assigned Family tier when the local
+Family billing projection is absent, invalid, or lacks a period containing the
+usage timestamp. Only a valid paid Family projection supplies period bounds;
+otherwise the shared allowance resolver uses its existing UTC calendar-month
+fallback, just as it does for direct paid plans. Because included usage is
+advisory rather than an exact prepaid meter, already-accounted fallback usage
+is not moved between periods later.
+
 Synthetic group-thread allowance is not personal plan usage. It returns the
 unavailable reason `group_not_supported` before exposing personal usage facts.
 Inactive hosted access and a trial awaiting conversion also return explicit
@@ -60,6 +68,15 @@ Clients render only the returned action descriptor and still use the existing
 server-authorized billing route. The tool cannot start checkout, upgrade a
 plan, or claim that a billing change happened.
 
+An explicit request in a private conversation to manage billing, or to perform
+a Family account change outside `murph.family_plan`'s status, checkout, and
+invite actions, may receive the canonical `/settings#subscription` handoff
+after `murph.plan_usage` returns `active`, `exhausted`, or
+`trial_conversion_pending`. This is neutral browser navigation, not a projected
+billing action or recommendation. The assistant must say that no billing or
+Family change happened. It must not provide the private management handoff for
+`group_not_supported` or `hosted_access_inactive`, or offer it proactively.
+
 ## Runtime Access And Notices
 
 Included usage is advisory. Reaching 100% does not deny otherwise-authorized
@@ -85,14 +102,16 @@ Every billing action in Settings, Home, or `murph.plan_usage` comes only from
 the projection's `recommendedAction`. A notice code, plan label, incomplete
 billing row, or legacy state must not independently imply **Start Pulse** or
 **Upgrade to Edge**. When the projection returns no action, the surface remains
-informational.
+informational. The explicit Settings handoff above remains navigation rather
+than an action and must not be presented as a plan recommendation.
 
 ## Assistant Policy
 
 `murph.plan_usage` accepts no arguments. Member identity comes from the signed
 runtime callback, not from the model. Murph may call it only when a member asks
-about their current plan or included usage, or when a trusted runtime
-instruction requests one manual private check.
+about their current plan or included usage, explicitly asks to manage billing
+or an unsupported Family account change, or when a trusted runtime instruction
+requests one manual private check.
 
 Do not turn this read into onboarding automation, a recurring threshold
 watcher, or a group-chat money prompt. Do not name a group payer, invent a

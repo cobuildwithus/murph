@@ -113,6 +113,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
       'linq-home-line-reroute-retry',
       'linq-lost-active-operation',
       'linq-onboarding-followup',
+      'linq-same-wake-batching',
       'linq-scheduled-reminder',
       'linq-unknown-first-contact-fallback',
       'linq-webhook',

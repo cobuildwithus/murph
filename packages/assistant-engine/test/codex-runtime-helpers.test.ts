@@ -1814,6 +1814,9 @@ describe('Codex assistant registry helpers', () => {
   it('prepends turn context to explicit prompts before Codex execution', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'codex-thread-turn-context',
@@ -1846,6 +1849,9 @@ describe('Codex assistant registry helpers', () => {
   it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'codex-thread-voice-memo',
@@ -1906,6 +1912,9 @@ describe('Codex assistant registry helpers', () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'codex-thread-reactions',
@@ -1987,6 +1996,9 @@ describe('Codex assistant registry helpers', () => {
       `Conversation context:\n${getAssistantBindingContextLines(sessionBinding).join('\n')}`
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'codex-thread-prompt-size',
@@ -2109,9 +2121,11 @@ describe('Codex assistant registry helpers', () => {
       precedingResponseSegments: [],
       rawEvents: [],
       response: 'Completed.',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: undefined,
       stderr: '',
       stdout: '',
+      transcriptResponse: 'Completed.',
       usage: {
         apiKeyEnv: null,
         baseUrl: null,
@@ -2151,6 +2165,10 @@ describe('Codex assistant registry helpers', () => {
 
         return {
           finalMessage: executionResult.response,
+          precedingAgentMessageSegments: [],
+          responseDeliveryContextOrdinal:
+            executionResult.responseDeliveryContextOrdinal,
+          transcriptMessage: executionResult.transcriptResponse,
           jsonEvents: executionResult.rawEvents,
           providerActionCount: 1,
           sessionId: executionResult.codexThreadId,
@@ -2208,6 +2226,9 @@ describe('Codex assistant registry helpers', () => {
 
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Final answer.',
       jsonEvents: [],
       providerActionCount: 1,
       responseMedia: [],
@@ -2237,6 +2258,41 @@ describe('Codex assistant registry helpers', () => {
       rawToolEvents: [],
       runtimeIssueInputs: [runtimeIssueInput],
     })
+  })
+
+  it('keeps runtime-owned delivery capabilities out of the provider transcript response', async () => {
+    const approvalUrl =
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: `Approval is required.\n\n${approvalUrl}`,
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      jsonEvents: [],
+      providerActionCount: 1,
+      responseMedia: [],
+      runtimeIssueInputs: [],
+      sessionId: 'provider-session-capability-split',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-capability-split',
+      transcriptMessage: 'Approval is required.',
+      turnId: 'turn-capability-split',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Send the report.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.response).toContain(approvalUrl)
+    expect(attempt.result.transcriptResponse).toBe('Approval is required.')
   })
 
   it('propagates failure-context runtime issue inputs through failed provider metadata', async () => {
@@ -2299,6 +2355,7 @@ describe('Codex assistant registry helpers', () => {
   it('preserves response delivery ordinals across the provider adapter', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
+      transcriptMessage: 'Final answer.',
       jsonEvents: [],
       precedingAgentMessageSegments: [
         {
@@ -2357,6 +2414,9 @@ describe('Codex assistant registry helpers', () => {
   it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed with Venice.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed with Venice.',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'venice-thread',
@@ -2400,6 +2460,9 @@ describe('Codex assistant registry helpers', () => {
     // precedence and silently reset that table to feature defaults.
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed hosted turn.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed hosted turn.',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'hosted-thread',
@@ -2437,6 +2500,9 @@ describe('Codex assistant registry helpers', () => {
   it('appends turn-local memory isolation after provider overrides', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed turn-local override.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed turn-local override.',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'turn-local-override-thread',
@@ -2490,6 +2556,9 @@ describe('Codex assistant registry helpers', () => {
       )
       .mockResolvedValueOnce({
         finalMessage: 'final after fallback',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after fallback',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread',
@@ -2600,6 +2669,9 @@ describe('Codex assistant registry helpers', () => {
       .mockRejectedValueOnce(expectedError)
       .mockResolvedValueOnce({
         finalMessage: 'final after transport fallback',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after transport fallback',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread-after-transport-failure',
@@ -2681,6 +2753,9 @@ describe('Codex assistant registry helpers', () => {
       .mockRejectedValueOnce(expectedError)
       .mockResolvedValueOnce({
         finalMessage: 'final after rpc fallback',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after rpc fallback',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread-after-rpc-failure',
@@ -2731,6 +2806,9 @@ describe('Codex assistant registry helpers', () => {
       .mockRejectedValueOnce(expectedError)
       .mockResolvedValueOnce({
         finalMessage: 'final after transport fallback despite provider action',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after transport fallback despite provider action',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread-after-provider-action-transport-failure',
@@ -2884,6 +2962,9 @@ describe('Codex assistant registry helpers', () => {
       .mockRejectedValueOnce(expectedError)
       .mockResolvedValueOnce({
         finalMessage: 'final after invalid resume fallback',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after invalid resume fallback',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread-after-invalid-output',
@@ -3007,6 +3088,9 @@ describe('Codex assistant registry helpers', () => {
       .mockRejectedValueOnce(expectedError)
       .mockResolvedValueOnce({
         finalMessage: 'final after provider-action invalid resume fallback',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'final after provider-action invalid resume fallback',
         jsonEvents: [],
         providerActionCount: 0,
         sessionId: 'fresh-thread-after-provider-action-invalid-output',

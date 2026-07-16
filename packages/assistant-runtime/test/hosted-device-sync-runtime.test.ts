@@ -18,6 +18,7 @@ import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/co
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
@@ -220,7 +221,7 @@ function buildDeviceSyncWake(input: {
   };
   occurredAt: string;
   provider?: string;
-  reason: "disconnected" | "reauthorization_required" | "webhook_hint";
+  reason: "disconnected" | "reauthorization_required" | "reconcile_due" | "webhook_hint";
 }) {
   return {
     connectionId: input.connectionId,
@@ -521,6 +522,97 @@ function clearAccountCredentialForTesting(service: DeviceSyncService, accountId:
 }
 
 describe("hosted device-sync runtime", () => {
+  test("reconciliation sends oversized legitimate updates as sequential bounded batches", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const store = getStore(service);
+      const updateCount = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1;
+      const localToHostedAccountIds = new Map<string, string>();
+      const hostedToLocalAccountIds = new Map<string, string>();
+      const observedTokenVersions = new Map<string, number | null>();
+
+      for (let index = 0; index < updateCount; index += 1) {
+        const account = store.upsertAccount({
+          connectedAt: "2026-04-06T09:00:00.000Z",
+          credential: {
+            credentialMetadata: {},
+            kind: "none",
+          },
+          displayName: `Device ${index}`,
+          externalAccountId: `external_${index}`,
+          provider: "demo",
+          scopes: [],
+          status: "active",
+        });
+        const hostedConnectionId = `hosted_conn_${index}`;
+        localToHostedAccountIds.set(account.id, hostedConnectionId);
+        hostedToLocalAccountIds.set(hostedConnectionId, account.id);
+        observedTokenVersions.set(hostedConnectionId, null);
+      }
+
+      let activeApplyCalls = 0;
+      let maxActiveApplyCalls = 0;
+      const appliedRequests: ApplyUpdatesRequest[] = [];
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          activeApplyCalls += 1;
+          maxActiveApplyCalls = Math.max(maxActiveApplyCalls, activeApplyCalls);
+          await Promise.resolve();
+          appliedRequests.push(input);
+          activeApplyCalls -= 1;
+          return {
+            appliedAt: "2026-04-06T09:11:00.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during reconciliation");
+        },
+        async fetchSnapshot() {
+          throw new Error("fetchSnapshot should not be called during reconciliation");
+        },
+      };
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state: {
+          hostedToLocalAccountIds,
+          localToHostedAccountIds,
+          observedTokenVersions,
+          pendingDirtyAcks: [],
+          pendingDirtyPayloadJobs: [],
+          snapshot: buildEmptyRuntimeSnapshot(),
+        },
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
+      });
+
+      assert.equal(appliedRequests.length, 2);
+      assert.equal(
+        appliedRequests[0]?.updates.length,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+      );
+      assert.equal(appliedRequests[1]?.updates.length, 1);
+      assert.equal(maxActiveApplyCalls, 1);
+      assert.deepEqual(
+        appliedRequests.flatMap((request) => request.updates.map((update) => update.connectionId)),
+        Array.from({ length: updateCount }, (_, index) => `hosted_conn_${index}`),
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("sync fails closed when no device-sync client is available", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -5063,6 +5155,55 @@ describe("hosted device-sync runtime", () => {
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("manual reconcile wakes delegate job creation to the device-sync service", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "manual-reconcile",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_manual_reconcile",
+        externalAccountId: connected.account.externalAccountId,
+        localState: {
+          nextReconcileAt: "2026-04-04T12:00:00.000Z",
+        },
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_manual_reconcile",
+          hint: { reason: "manual_reconcile" },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "reconcile_due",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0]?.kind, "reconcile");
+      assert.equal(jobs[0]?.priority, 80);
+      assert.equal(jobs[0]?.status, "queued");
+      assert.equal(
+        getStore(service).getAccountById(connected.account.id)?.nextReconcileAt,
+        "2026-04-04T12:00:00.000Z",
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

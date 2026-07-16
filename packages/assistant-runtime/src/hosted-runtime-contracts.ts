@@ -13,6 +13,8 @@ export type {
 } from "./hosted-runtime/models.ts";
 export type {
   AssistantResponseMedia,
+  HostedRuntimeArtifactReadContext,
+  HostedRuntimeArtifactReadPurpose,
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
   HostedRuntimeArtifactWriter,
@@ -58,6 +60,10 @@ export type {
   HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
   HostedRuntimeWorkspaceSnapshotSessionStart,
   HostedRuntimeWorkspaceSnapshotPort,
+} from "./hosted-runtime/platform.ts";
+export {
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES,
+  HostedRuntimeArtifactReadError,
 } from "./hosted-runtime/platform.ts";
 export {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,

@@ -17,6 +17,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   isHostedComputerWebControlRequest,
@@ -25,6 +26,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
@@ -55,6 +57,7 @@ export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
 };
 
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
@@ -65,6 +68,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_read"
   | "action_approval_request"
   | "assistant_runtime_issue_export"
+  | "assistant_ask"
   | "assistant_personalization_tool"
   | "assistant_configuration_tool"
   | "browser_vault_replica_publish"
@@ -77,6 +81,7 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_connect_link"
   | "device_sync_dirty_ack"
   | "device_sync_pending_dirty_state"
+  | "device_sync_reconcile"
   | "device_sync_runtime_apply"
   | "device_sync_runtime_snapshot"
   | "family_plan_tool"
@@ -108,6 +113,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH, "action_approval_read"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
+  [HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH, "assistant_ask"],
   [HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH, "assistant_personalization_tool"],
   [HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH, "assistant_configuration_tool"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
@@ -118,6 +124,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH, "device_sync_reconcile"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],

@@ -56,6 +56,7 @@ import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
+  type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
@@ -193,6 +194,8 @@ type CodexAppServerProcessState =
   | 'stopped'
   | 'stopping'
 
+export type CodexAppServerProcessLifetime = 'one-shot' | 'warm'
+
 type CodexAppServerColdStartReason =
   | 'node-process-first-use'
   | 'previous-explicit-stop'
@@ -243,6 +246,7 @@ type CodexAppServerActiveTurnBinding = {
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
+  model: string | null
   serviceTier: AssistantProviderServiceTier | null
   threadId: string
 }
@@ -424,6 +428,7 @@ export interface CodexAppServerTurnInput {
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
+  outputSchema?: Readonly<Record<string, unknown>> | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onFinishWithoutReplyAccepted?: ((event: {
@@ -439,11 +444,17 @@ export interface CodexAppServerTurnInput {
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
+  permissions?: string | null
+  processLifetime?: CodexAppServerProcessLifetime
   prompt: string
   images?: readonly CodexAppServerImageInput[] | null
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
+  ephemeral?: boolean | null
+  environments?: readonly Readonly<Record<string, unknown>>[] | null
+  runtimeWorkspaceRoots?: readonly string[] | null
+  threadConfig?: Readonly<Record<string, unknown>> | null
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
@@ -513,6 +524,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  transcriptMessage: string | null
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
@@ -526,7 +538,7 @@ export interface CodexAppServerTurnResult {
   // already finished an answer.
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns the selected final reply. */
-  responseDeliveryContextOrdinal?: number
+  responseDeliveryContextOrdinal: number
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -541,7 +553,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
-  deliveryContextOrdinal?: number
+  deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
 }
@@ -581,22 +593,20 @@ export function buildCodexAppServerSteerRequest(
   }
 }
 
-function appendRequiredComputerHandoffUrl(
+function appendRequiredVaultFileApprovalUrls(
   message: string,
-  handoffUrl: string,
+  approvalUrls: readonly string[],
 ): string {
-  const normalizedMessage = normalizeNullableString(message)
-  if (normalizedMessage?.includes(handoffUrl)) {
-    return normalizedMessage
-  }
-  return normalizedMessage
-    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
-    : `Take over here: ${handoffUrl}`
+  return [
+    normalizeNullableString(message),
+    ...approvalUrls,
+  ].filter((part): part is string => part !== null).join('\n\n')
 }
 
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const workingDirectory = path.resolve(input.workingDirectory)
   await assertCodexAppServerWorkingDirectory(workingDirectory)
@@ -617,6 +627,9 @@ export async function executeCodexAppServerTurn(
       configOverrides: input.configOverrides,
       env: input.env,
     }),
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
+      path.resolve(root),
+    ),
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
@@ -641,14 +654,68 @@ export async function executeCodexAppServerTurn(
     workingDirectory,
   }
 
+  let oneShotProcess: CodexAppServerProcess | null = null
   try {
+    if (preparedInput.processLifetime === 'one-shot') {
+      oneShotProcess = new CodexAppServerProcess({
+        args: preparedInput.args,
+        codexCommand: preparedInput.codexCommand,
+        coldStartReason: 'node-process-first-use',
+        env: preparedInput.env,
+        launchKey: preparedInput.launchKey,
+      })
+      oneShotProcess.reserveTurn()
+      return await runCodexAppServerTurnOnProcess(oneShotProcess, preparedInput)
+    }
+
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
     return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
-    await rm(tempRoot, {
-      recursive: true,
-      force: true,
-    })
+    try {
+      await oneShotProcess?.stop('one-shot-complete')
+    } finally {
+      await rm(tempRoot, {
+        recursive: true,
+        force: true,
+      })
+    }
+  }
+}
+
+function assertCodexAppServerPermissionRequest(
+  input: CodexAppServerTurnInput,
+): void {
+  const permissions = normalizeNullableString(input.permissions)
+  if (!permissions) {
+    return
+  }
+
+  const invalidFields = [
+    ...(input.sandbox ? ['sandbox'] : []),
+    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
+    ...(input.ephemeral === true ? [] : ['ephemeral']),
+    ...(input.processLifetime === 'one-shot' ? [] : ['processLifetime']),
+  ]
+  if (invalidFields.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
+      {
+        invalidFields,
+        retryable: false,
+      },
+    )
+  }
+
+  if (!input.runtimeWorkspaceRoots || input.runtimeWorkspaceRoots.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Named Codex permissions require at least one explicit runtime workspace root.',
+      {
+        invalidFields: ['runtimeWorkspaceRoots'],
+        retryable: false,
+      },
+    )
   }
 }
 
@@ -741,6 +808,7 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
+  private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1243,6 +1311,7 @@ class CodexAppServerProcess {
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
+      model: this.boundThreadModel,
       serviceTier: this.boundThreadServiceTier,
       threadId: update.threadId,
     }
@@ -1258,6 +1327,10 @@ class CodexAppServerProcess {
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
+  }
+
+  noteBoundThreadModel(model: string | null): void {
+    this.boundThreadModel = normalizeNullableString(model)
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1948,6 +2021,7 @@ export type CodexWarmThreadCompactionOutcome =
   | {
       kind: 'compacted'
       durationMs: number
+      model: string | null
       threadContextTokensBefore: number
       threadId: string
       serviceTier: AssistantProviderServiceTier | null
@@ -1961,7 +2035,13 @@ export type CodexWarmThreadCompactionOutcome =
     }
   | {
       kind: 'skipped'
-      reason: 'below_threshold' | 'no_thread_vitals' | 'no_warm_process' | 'turn_in_flight'
+      reason:
+        | 'below_threshold'
+        | 'model_not_accountable'
+        | 'no_thread_vitals'
+        | 'no_warm_process'
+        | 'turn_in_flight'
+      model?: string | null
       threadContextTokensBefore: number | null
     }
 
@@ -1974,6 +2054,7 @@ export type CodexWarmThreadCompactionOutcome =
 // because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
+  canAccountForModel?: ((model: string | null) => boolean) | null
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -1989,6 +2070,14 @@ export async function compactWarmCodexThread(input: {
     const vitals = processInstance.warmThreadTokenUsage
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
+    }
+    if (input.canAccountForModel && !input.canAccountForModel(vitals.model)) {
+      return {
+        kind: 'skipped',
+        model: vitals.model,
+        reason: 'model_not_accountable',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
     }
     if (vitals.lastInputTokens < input.minThreadTokens) {
       return {
@@ -2157,6 +2246,7 @@ export async function compactWarmCodexThread(input: {
       return {
         kind: 'compacted',
         durationMs: Date.now() - startedAt,
+        model: vitals.model,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
@@ -2417,10 +2507,15 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
+    settings: {},
+  }
   let finalActionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
+  const acceptedNoReplyDeliveryContextOrdinals: number[] = []
+  let noReplySettlementStarted = false
   let reactionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolReactionPatch
@@ -2441,7 +2536,7 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
-  let requiredComputerHandoffUrl: string | null = null
+  const requiredVaultFileApprovalUrls: string[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2542,6 +2637,25 @@ async function runCodexAppServerTurnOnProcess(
         .map((entry) => entry.deliveryContextOrdinal),
     )].sort((left, right) => left - right)
 
+  const hasRequiredUserVisibleOutput = (): boolean =>
+    computerToolsLockedAfterUserPause || requiredVaultFileApprovalUrls.length > 0
+
+  const settleNoReplyFinalActions = async (): Promise<void> => {
+    if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
+      return
+    }
+    noReplySettlementStarted = true
+    for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      await input.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal,
+      })
+      acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
+      await input.onFinishWithoutReplyRecorded?.({
+        deliveryContextOrdinal,
+      })
+    }
+  }
+
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
       return
@@ -2553,7 +2667,7 @@ async function runCodexAppServerTurnOnProcess(
       providerActionCount,
       runtimeIssueInputs: [...runtimeIssueInputs],
       acceptedNoReplyDeliveryContextOrdinals:
-        listNoReplyFinalActionPatchOrdinals(),
+        [...acceptedNoReplyDeliveryContextOrdinals],
       reactions: reactionPatches.map((entry) => ({
         deliveryContextOrdinal: entry.deliveryContextOrdinal,
         reaction: entry.patch.reaction,
@@ -2978,8 +3092,8 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   // Stateful dynamic tools run serialized in request order so response media,
-  // final-action patches, and computer pause barriers apply deterministically
-  // even if Codex issues overlapping tool requests.
+  // preference and configuration writes, final-action patches, and computer
+  // pause barriers apply deterministically even if Codex overlaps tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -3045,7 +3159,6 @@ async function runCodexAppServerTurnOnProcess(
     }
     if (
       precedingAgentMessageSegments.some((segment) =>
-        typeof segment.deliveryContextOrdinal !== 'number' ||
         segment.deliveryContextOrdinal < deliveryContextOrdinal
       )
     ) {
@@ -3080,7 +3193,11 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
-    if (patch.kind === 'none' && !canApplyNoReplyPatch(deliveryContextOrdinal)) {
+    if (
+      patch.kind === 'none' &&
+      (computerToolsLockedAfterUserPause ||
+        !canApplyNoReplyPatch(deliveryContextOrdinal))
+    ) {
       return false
     }
 
@@ -3092,40 +3209,17 @@ async function runCodexAppServerTurnOnProcess(
       return true
     }
 
-    let reservedNoReply = false
-    try {
-      if (patch.kind === 'none') {
-        reserveNoReplyDeliveryContext(deliveryContextOrdinal)
-        reservedNoReply = true
-        await input.onFinishWithoutReplyAccepted?.({
-          deliveryContextOrdinal,
-        })
-      }
-      finalActionPatches = [
-        ...finalActionPatches,
-        {
-          deliveryContextOrdinal,
-          patch,
-        },
-      ]
-      if (patch.kind === 'none') {
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-        await input.onFinishWithoutReplyRecorded?.({
-          deliveryContextOrdinal,
-        })
-      }
-      return true
-    } catch (error) {
-      if (
-        reservedNoReply &&
-        !finalActionPatches.some(
-          (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
-        )
-      ) {
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-      }
-      throw error
+    finalActionPatches = [
+      ...finalActionPatches,
+      {
+        deliveryContextOrdinal,
+        patch,
+      },
+    ]
+    if (patch.kind === 'none') {
+      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     }
+    return true
   }
 
   const resolveFinalActionPatch = (
@@ -3136,14 +3230,14 @@ async function runCodexAppServerTurnOnProcess(
     )?.patch ?? null
 
   const shouldSuppressDeliveryContext = (
-    deliveryContextOrdinal?: number,
+    deliveryContextOrdinal: number,
   ): boolean => {
     if (
-      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal ?? 0)
+      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal)
     ) {
       return true
     }
-    const patch = resolveFinalActionPatch(deliveryContextOrdinal ?? 0)
+    const patch = resolveFinalActionPatch(deliveryContextOrdinal)
     return patch?.kind === 'none'
   }
 
@@ -3247,6 +3341,25 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     if (
+      requiredVaultFileApprovalUrls.length > 0 &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
       computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
@@ -3316,45 +3429,59 @@ async function runCodexAppServerTurnOnProcess(
         : null
 
     if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      finalActionPatches = finalActionPatches.filter(
+        (entry) =>
+          entry.patch.kind !== 'none' ||
+          entry.deliveryContextOrdinal !==
+            dynamicToolRequestDeliveryContextOrdinal,
+      )
+      reservedNoReplyDeliveryContextOrdinals.delete(
+        dynamicToolRequestDeliveryContextOrdinal,
+      )
       computerToolsLockedAfterUserPause = true
       closeLiveTurn()
     }
 
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
-      async () => await executeMurphDynamicToolRequest({
-        assistantStyleSettingsAvailable: input.dynamicTools.some(
-          (tool) =>
-            tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-            tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-        ),
-        abortSignal: input.abortSignal
-          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-          : dynamicToolAbortController.signal,
-        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-        env: input.env,
-        fetchImpl: input.fetchImpl,
-        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-        currentResponseMedia: responseMedia,
-        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-        progressDelivery:
-          dynamicToolRequest.kind === 'send-progress-update'
-            ? dynamicToolProgressDelivery
-            : null,
-        publicFetchImpl: input.publicInternetFetch ?? null,
-        request: dynamicToolRequest,
-        requireHostedGeneratedImageUploader:
-          input.requireHostedGeneratedImageUploader ?? false,
-        vaultRoot: input.vaultRoot ?? null,
-        voiceMemoRuntime:
-          dynamicToolRequest.kind === 'generate-voice-memo' ||
-          dynamicToolRequest.kind === 'generate-song'
-            ? input.voiceMemoRuntime ?? null
-            : null,
-      }),
+      async () => {
+        const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
+        await hostedToolContext?.beforeToolExecution?.()
+        return await executeMurphDynamicToolRequest({
+          assistantStyleSettingsOverlay,
+          assistantStyleSettingsAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+          ),
+          abortSignal: input.abortSignal
+            ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+            : dynamicToolAbortController.signal,
+          codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+          env: input.env,
+          fetchImpl: input.fetchImpl,
+          hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+          hostedToolContext,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          currentResponseMedia: responseMedia,
+          nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+          progressDelivery:
+            dynamicToolRequest.kind === 'send-progress-update'
+              ? dynamicToolProgressDelivery
+              : null,
+          publicFetchImpl: input.publicInternetFetch ?? null,
+          request: dynamicToolRequest,
+          requireHostedGeneratedImageUploader:
+            input.requireHostedGeneratedImageUploader ?? false,
+          vaultRoot: input.vaultRoot ?? null,
+          voiceMemoRuntime:
+            dynamicToolRequest.kind === 'generate-voice-memo' ||
+            dynamicToolRequest.kind === 'generate-song'
+              ? input.voiceMemoRuntime ?? null
+              : null,
+        })
+      },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
@@ -3362,11 +3489,11 @@ async function runCodexAppServerTurnOnProcess(
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
       }
-      if (result.computerRunPausedForUser) {
-        computerToolsLockedAfterUserPause = true
-      }
-      if (result.requiredComputerHandoffUrl) {
-        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
+      if (
+        result.requiredVaultFileApprovalUrl &&
+        !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
+      ) {
+        requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
       }
       if (result.responseMediaPatch) {
         try {
@@ -4016,6 +4143,11 @@ async function runCodexAppServerTurnOnProcess(
         requestedThreadId: resumeThreadId,
         threadResult,
       })
+    } else if (normalizeNullableString(input.permissions)) {
+      assertCodexThreadStartPermissionAttestation({
+        input,
+        threadResult,
+      })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     codexProcess.noteBoundThreadId(codexThreadId)
@@ -4034,6 +4166,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadModel(input.model ?? null)
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnStartRequest = sendRequest(
       'turn/start',
@@ -4067,14 +4200,26 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_completed'
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
+    if (stdinFailure) {
+      throw stdinFailure
+    }
+    await settleNoReplyFinalActions()
     if (abortRequested || terminationSignalSent) {
       normalShutdown = true
       lifecycleStage = 'abort_cleanup'
       await codexProcess.poison('turn-completed-after-abort')
       lifecycleStage = 'shutdown_complete'
-      emitAppServerTimingTrace('warm-abort-poisoned')
+      emitAppServerTimingTrace(
+        input.processLifetime === 'one-shot'
+          ? 'one-shot-abort-stopped'
+          : 'warm-abort-poisoned',
+      )
     } else {
-      if (codexThreadId && normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])) {
+      if (
+        input.processLifetime !== 'one-shot' &&
+        codexThreadId &&
+        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
+      ) {
         lifecycleStage = 'background_terminal_cleanup'
         const cleanup = codexProcess.beginHostedBackgroundTerminalCleanup({
           binding: activeTurnBinding,
@@ -4092,11 +4237,12 @@ async function runCodexAppServerTurnOnProcess(
       if (!normalShutdown && !codexProcess.pendingPostTurnCleanup) {
         lifecycleStage = 'idle'
         codexProcess.releaseTurn(activeTurnBinding)
-        emitAppServerTimingTrace('warm-idle')
+        emitAppServerTimingTrace(
+          input.processLifetime === 'one-shot'
+            ? 'one-shot-complete'
+            : 'warm-idle',
+        )
       }
-    }
-    if (stdinFailure) {
-      throw stdinFailure
     }
   } catch (error) {
     const recordedEndReason = codexProcess.recordedEndReason
@@ -4120,13 +4266,18 @@ async function runCodexAppServerTurnOnProcess(
       (recordedEndReason === 'previous-turn-abort' ||
         (recordedEndReason === 'previous-process-exit' &&
           providerRequestStartedNotified))
-    const turnFailure = shouldApplyRecordedOwner
+    let turnFailure = shouldApplyRecordedOwner
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
+    try {
+      await settleNoReplyFinalActions()
+    } catch (settlementError) {
+      turnFailure = settlementError
+    }
     annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
@@ -4196,8 +4347,9 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
+  const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
   const noReplySelected =
-    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
+    finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
@@ -4205,12 +4357,10 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const finalMessage = requiredComputerHandoffUrl
-    ? appendRequiredComputerHandoffUrl(
-        modelFinalMessage,
-        requiredComputerHandoffUrl,
-      )
-    : modelFinalMessage
+  const finalMessage = appendRequiredVaultFileApprovalUrls(
+    modelFinalMessage,
+    requiredVaultFileApprovalUrls,
+  )
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -4232,19 +4382,20 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
+      acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredComputerHandoffUrl,
+      finalActionPatch !== null && !requiredUserVisibleOutput,
     finalMessage,
+    transcriptMessage:
+      normalizeNullableString(modelFinalMessage) ??
+      (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,
     })),
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
-      ...(typeof segment.deliveryContextOrdinal === 'number'
-        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
-        : {}),
+      deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
       media: [...segment.media],
     })),
@@ -4261,6 +4412,60 @@ async function runCodexAppServerTurnOnProcess(
     threadId: codexThreadId,
     turnId,
   }
+}
+
+function assertCodexThreadStartPermissionAttestation(input: {
+  input: CodexAppServerPreparedTurnInput
+  threadResult: unknown
+}): void {
+  const result = asCodexRecord(input.threadResult)
+  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
+  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
+  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
+  const instructionSources = Array.isArray(result?.instructionSources)
+    ? result.instructionSources
+    : null
+  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+  const mismatchedFields: string[] = []
+
+  const permissionProfileMismatch =
+    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
+      normalizeNullableString(input.input.permissions) ||
+    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+  if (permissionProfileMismatch) {
+    mismatchedFields.push('activePermissionProfile')
+  }
+  if (
+    !actualRoots ||
+    actualRoots.length !== expectedRoots.length ||
+    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
+  ) {
+    mismatchedFields.push('runtimeWorkspaceRoots')
+  }
+  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
+    mismatchedFields.push('cwd')
+  }
+  if (instructionSources === null || instructionSources.length !== 0) {
+    mismatchedFields.push('instructionSources')
+  }
+  if (
+    asCodexString(result?.approvalPolicy) !==
+    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
+  ) {
+    mismatchedFields.push('approvalPolicy')
+  }
+  if (mismatchedFields.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
+    'Codex app-server did not attest the requested read-only execution context.',
+    {
+      mismatchedFields,
+      retryable: false,
+    },
+  )
 }
 
 function emitCodexSuppressedFinalMessageTrace(input: {
@@ -4347,6 +4552,8 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'assistant-configuration' ||
+    request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
@@ -4441,7 +4648,9 @@ function resolveCodexRolloutRelativePath(input: {
 // remain attached (codex-rs `thread_processor.rs` `resume_running_thread`).
 // The thread/resume response echoes the effective execution context, so this
 // echo check is the only client-visible stale-rejoin signal before turn/start.
-// Fields with no requested value are skipped; requested fields must echo back.
+// Fields with no requested value are skipped; requested immutable execution
+// fields must echo back. Model is intentionally excluded because turn/start
+// applies its sticky model override atomically with the next user input.
 function assertCodexResumeContextMatches(input: {
   input: CodexAppServerPreparedTurnInput
   requestedThreadId: string
@@ -4461,11 +4670,6 @@ function assertCodexResumeContextMatches(input: {
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],
-    [
-      'model',
-      normalizeNullableString(input.input.model),
-      normalizeNullableString(asCodexString(result?.model)),
-    ],
     [
       'modelProvider',
       normalizeNullableString(input.input.modelProvider),
@@ -4523,6 +4727,12 @@ function asCodexRecord(value: unknown): Record<string, unknown> | null {
 
 function asCodexString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function asCodexStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? value
+    : null
 }
 
 const codexRolloutRelativePathPattern =

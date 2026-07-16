@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { access, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -155,6 +156,76 @@ describe('assistant runtime residue pruning', () => {
 
     expect(result.hostedMailboxInputItemMappingsPruned).toBe(1)
     await expectPathMissing(resolveHostedMailboxInputItemPath(paths, inputId))
+  })
+
+  it('stops residue deletion immediately and preserves the exact abort reason', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-aborted-deletion-',
+    )
+    const event = await createHostedInputEvent({
+      now: OLD_RECORD_AT,
+      seq: 10,
+      vaultRoot,
+    })
+    await recordHostedMailboxAssistantInputItem({
+      inputId: event.inputId,
+      mailboxItemId: 'mailbox-item-aborted-deletion',
+      vault: vaultRoot,
+    })
+    const firstDeletionPath = resolveAssistantInputEventPath({
+      inputId: event.inputId,
+      paths,
+    })
+    const laterDeletionPath = resolveHostedMailboxInputItemPath(
+      paths,
+      event.inputId,
+    )
+    const controller = new AbortController()
+    const reason = new Error('stop residue deletion')
+    const signal = controller.signal
+    const throwIfAborted = signal.throwIfAborted.bind(signal)
+    signal.throwIfAborted = () => {
+      if (
+        !signal.aborted &&
+        !existsSync(firstDeletionPath) &&
+        existsSync(laterDeletionPath)
+      ) {
+        controller.abort(reason)
+      }
+      throwIfAborted()
+    }
+
+    await expect(pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      signal,
+      vault: vaultRoot,
+    })).rejects.toBe(reason)
+    await expectPathMissing(firstDeletionPath)
+    await expectPathExists(laterDeletionPath)
+  })
+
+  it('does not start residue pruning with an already-aborted signal', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-already-aborted-',
+    )
+    const inputId = createInputId('1')
+    await recordHostedMailboxAssistantInputItem({
+      inputId,
+      mailboxItemId: 'mailbox-item-already-aborted',
+      vault: vaultRoot,
+    })
+    const controller = new AbortController()
+    const reason = new Error('stop residue pruning')
+    controller.abort(reason)
+
+    await expect(pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      signal: controller.signal,
+      vault: vaultRoot,
+    })).rejects.toBe(reason)
+    await expectPathExists(resolveHostedMailboxInputItemPath(paths, inputId))
   })
 
   it('retains orphaned mailbox mappings when any mapping file is malformed', async () => {

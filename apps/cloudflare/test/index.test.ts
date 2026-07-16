@@ -2871,6 +2871,7 @@ describe("cloudflare worker routes", () => {
 
     const readResponse = await callRunnerOutbound(
       new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        headers: ACTIVE_INVOCATION_LEASE_HEADERS,
         method: "GET",
       }),
       env,
@@ -2928,6 +2929,7 @@ describe("cloudflare worker routes", () => {
 
     const readResponse = await callRunnerOutbound(
       new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        headers: ACTIVE_INVOCATION_LEASE_HEADERS,
         method: "GET",
       }),
       env,

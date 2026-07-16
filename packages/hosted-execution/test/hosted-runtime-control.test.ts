@@ -26,11 +26,6 @@ import {
   parseHostedAssistantReasoningEffortOverride,
 } from "../src/assistant-model.ts";
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "../src/assistant-configuration-approval.ts";
-
-import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
@@ -193,6 +188,8 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "member.preferences.updated",
       "assistant.notification.requested",
+      "assistant.ask.requested",
+      "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
       "group-newsletter.email-needed",
@@ -403,38 +400,37 @@ describe("hosted runtime control contracts", () => {
       reasoningEffort: "none",
     })).toThrow(/not supported/u);
 
-    const target = {
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      reasoningEffort: "high" as const,
-    };
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: { reasoningEffort: "high" },
-      returnContactKind: "text",
-      target,
-    });
-    const approval = {
-      approvalGeneration: "b".repeat(64),
-      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-        approvalRequest,
-      ),
-      request: approvalRequest,
-    };
+    const assistantInputId = `ain_${"c".repeat(32)}`;
     expect(parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
-      approval,
-      reasoningEffort: "high",
-      target,
+      assistantInputId,
+      reasoningEffort: "medium",
     })).toEqual({
       action: "update",
-      approval,
-      reasoningEffort: "high",
-      target,
+      assistantInputId,
+      reasoningEffort: "medium",
     });
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
-      approval,
-      target,
-    })).toThrow(/requires a model or reasoning effort/u);
+      assistantInputId: `ain_${"c".repeat(31)}`,
+      reasoningEffort: "medium",
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId,
+      approval: {},
+      reasoningEffort: "medium",
+    })).toThrow(/not allowed/u);
+
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      approval: {},
+      reasoningEffort: "high",
+      target: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "high",
+      },
+    })).toThrow(/not allowed/u);
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
@@ -2255,6 +2251,30 @@ describe("hosted runtime control contracts", () => {
         safeErrorDetail: "retrying member_abc123",
       },
     })).toThrow(/direct identifier/u);
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorCause: "authorization=Bearer [redacted].",
+        safeErrorDetail: "request failed with token=[redacted]",
+      },
+    })).toMatchObject({
+      redactedJson: {
+        safeErrorCause: "authorization=Bearer [redacted].",
+        safeErrorDetail: "request failed with token=[redacted]",
+      },
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "request failed with token=[redacted]suffix",
+      },
+    })).toThrow(/secret-shaped content/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "request failed with token=[redacted].suffix",
+      },
+    })).toThrow(/secret-shaped content/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       outboxIntentRef: "<HOME_DIR>/intent.json",

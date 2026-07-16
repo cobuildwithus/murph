@@ -14,6 +14,7 @@ import {
   isHostedRuntimeProcessEnv,
   readHostedCliBridgeEnv,
   requestHostedCliDeviceAccountList,
+  requestHostedCliDeviceAccountReconcile,
   requestHostedCliDeviceConnectLink,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
@@ -329,6 +330,34 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async reconcileAccount(input) {
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
+        const bridge = readRequiredHostedBridge('account reconcile')
+        const result = await requestHostedCliDeviceAccountReconcile({
+          accountId: input.accountId,
+          bridge,
+        }).catch((error) => {
+          const bridgeCode = error instanceof HostedCliBridgeRequestError
+            ? error.code
+            : null
+          throw new VaultCliError(
+            bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
+              ? 'HOSTED_DEVICE_ACCOUNT_RECONCILE_BRIDGE_REQUEST_TIMEOUT'
+              : bridgeCode ?? 'HOSTED_DEVICE_ACCOUNT_RECONCILE_BRIDGE_REQUEST_FAILED',
+            error instanceof Error
+              ? error.message
+              : 'Hosted device account reconcile bridge request failed.',
+          )
+        })
+
+        return {
+          accountId: result.connectionId,
+          backend: 'hosted',
+          occurredAt: result.occurredAt,
+          status: result.status,
+        }
+      }
+
       assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
       const client = await createControlPlaneClient(input)
       const result = await client.reconcileAccount(input.accountId)
@@ -551,16 +580,19 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   }
 
   function readRequiredHostedBridge(
-    operation: 'account list' | 'connect',
+    operation: 'account list' | 'account reconcile' | 'connect',
   ): NonNullable<ReturnType<typeof readHostedCliBridgeEnv>> {
+    const errorPrefix = operation === 'connect'
+      ? 'HOSTED_DEVICE_CONNECT'
+      : operation === 'account list'
+        ? 'HOSTED_DEVICE_ACCOUNT_LIST'
+        : 'HOSTED_DEVICE_ACCOUNT_RECONCILE'
     let bridge
     try {
       bridge = readHostedCliBridgeEnv(process.env)
     } catch (error) {
       throw new VaultCliError(
-        operation === 'connect'
-          ? 'HOSTED_DEVICE_CONNECT_BRIDGE_INVALID'
-          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_INVALID',
+        `${errorPrefix}_BRIDGE_INVALID`,
         error instanceof Error
           ? error.message
           : `Hosted device ${operation} bridge configuration is invalid.`,
@@ -569,9 +601,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
 
     if (!bridge) {
       throw new VaultCliError(
-        operation === 'connect'
-          ? 'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE'
-          : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_UNAVAILABLE',
+        `${errorPrefix}_BRIDGE_UNAVAILABLE`,
         `Hosted device ${operation} is unavailable in this runtime.`,
       )
     }

@@ -260,6 +260,89 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("does not dispatch a signup link when its exact active invite is absent", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-deleted-member",
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture({ inviteAuthorized: false });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "invite_signup",
+      }],
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.any(Array), "member-1");
+    expect(prisma.hostedInvite.findUnique).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: "invite-1",
+        member: { suspendedAt: null },
+        memberId: "member-1",
+      },
+    });
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0])
+      .toBeLessThan(prisma.hostedInvite.findUnique.mock.invocationCallOrder[0] ?? 0);
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not create a fallback signup chat when its exact active invite is absent", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: "+15550100001",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      memberPhone: "+15551234567",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-deleted-member-fallback",
+      template: "invite_signup_fallback",
+    });
+    const prisma = createInviteSignupPrismaFixture({ inviteAuthorized: false });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "invite_signup_fallback",
+      }],
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.any(Array), "member-1");
+    expect(prisma.hostedInvite.findUnique).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: "invite-1",
+        member: { suspendedAt: null },
+        memberId: "member-1",
+      },
+    });
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0])
+      .toBeLessThan(prisma.hostedInvite.findUnique.mock.invocationCallOrder[0] ?? 0);
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
   it("does not share the contact card after a quota side effect with validated route authority", async () => {
     const route = buildAuthorizedLinqRouteFixture({
       memberId: "member-1",
@@ -775,53 +858,6 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
   });
 
-  it("sends claimable legacy AI usage quota replies with the legacy delivery key", async () => {
-    const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code-key";
-    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
-      .mockResolvedValueOnce({
-        idempotencyKey: legacyIdempotencyKey,
-        status: "claimed",
-      });
-    const effect = createHostedWebhookLinqMessageSideEffect({
-      chatId: "chat-1",
-      claimToken: {
-        periodStart: "2026-03-01T00:00:00.000Z",
-        sentAt: "2026-03-26T12:00:01.000Z",
-      },
-      memberId: "member-1",
-      message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-ai-usage",
-      template: "ai_usage_quota",
-    });
-
-    await expect(
-      drainHostedLinqSideEffectsDirect({
-        prisma: usagePrisma as never,
-        sideEffects: [effect],
-      }),
-    ).resolves.toEqual({
-      sentCount: 1,
-      skipped: [],
-    });
-
-    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        idempotencyKey: legacyIdempotencyKey,
-      }),
-    );
-    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
-      idempotencyKey: legacyIdempotencyKey,
-      linqChatId: "chat-1",
-      messageId: "provider-message-1",
-      prisma: expect.anything(),
-    });
-  });
-
   it("keeps AI usage quota delivery provider-correlated when accepted persistence fails after send", async () => {
     const acceptedError = new Error("acceptance write failed");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -986,63 +1022,7 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
-  it("skips AI usage quota replies already delivered under a legacy notice-code key", async () => {
-    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
-      .mockResolvedValueOnce({ status: "already_notified" });
-    const effect = createHostedWebhookLinqMessageSideEffect({
-      chatId: "chat-1",
-      claimToken: {
-        periodStart: "2026-03-01T00:00:00.000Z",
-        sentAt: "2026-03-26T12:00:01.000Z",
-      },
-      memberId: "member-1",
-      message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-ai-usage",
-      template: "ai_usage_quota",
-    });
-
-    await expect(
-      drainHostedLinqSideEffectsDirect({
-        prisma: usagePrisma as never,
-        sideEffects: [effect],
-      }),
-    ).resolves.toEqual({
-      sentCount: 0,
-      skipped: [
-        {
-          effectId: effect.effectId,
-          reason: "notice_already_claimed",
-          template: "ai_usage_quota",
-        },
-      ],
-    });
-
-    expect(startHostedAiUsageLimitNoticeDispatchTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        assertDispatchAuthority: expect.any(Function),
-        attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
-        memberId: "member-1",
-        noticeDeliveryTarget: {
-          channel: "linq",
-          replyToMessageId: "message-1",
-          routeAuthority: null,
-          target: "chat-1",
-        },
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        prisma: usagePrisma,
-        source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
-        targetKind: "thread",
-      }));
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
-  });
-
-  it("skips AI usage quota replies already delivered under the current delivery key before reading old period claims", async () => {
+  it("skips AI usage quota replies already delivered under the current delivery key", async () => {
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockResolvedValueOnce({ status: "already_notified" });
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -1079,38 +1059,6 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
-  });
-
-  it("sends AI usage quota replies through the delivery row after legacy delivery checks miss", async () => {
-    const effect = createHostedWebhookLinqMessageSideEffect({
-      chatId: "chat-1",
-      claimToken: {
-        periodStart: "2026-03-01T00:00:00.000Z",
-        sentAt: "2026-03-26T12:00:01.000Z",
-      },
-      memberId: "member-1",
-      message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-ai-usage",
-      template: "ai_usage_quota",
-    });
-
-    await expect(
-      drainHostedLinqSideEffectsDirect({
-        prisma: usagePrisma as never,
-        sideEffects: [effect],
-      }),
-    ).resolves.toEqual({
-      sentCount: 1,
-      skipped: [],
-    });
-
-    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalled();
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).toHaveBeenCalled();
-    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
   });
 
   it("sends AI usage quota replies from the delivery row", async () => {
@@ -1225,6 +1173,7 @@ describe("hosted Linq webhook transport", () => {
 
   it("creates fallback signup chats without thread-authority delivery", async () => {
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "invite-code",
@@ -1688,6 +1637,7 @@ describe("hosted Linq webhook transport", () => {
   it("does not mark invite signup notices sent when delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "invite-code",
@@ -1756,6 +1706,7 @@ describe("hosted Linq webhook transport", () => {
       });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "invite-code",
@@ -1909,14 +1860,25 @@ function buildAuthorizedLinqRouteFixture(input: {
   };
 }
 
-function createInviteSignupPrismaFixture() {
-  return {
+function createInviteSignupPrismaFixture(
+  input: { inviteAuthorized?: boolean } = {},
+) {
+  const transactionClient = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
     hostedInvite: {
-      findUnique: vi.fn().mockResolvedValue({
-        inviteCode: "invite-code",
-      }),
+      findUnique: vi.fn(async (query: { select?: { id?: boolean } }) =>
+        query.select?.id
+          ? input.inviteAuthorized === false ? null : { id: "invite-1" }
+          : { inviteCode: "invite-code" }
+      ),
       update: vi.fn().mockResolvedValue({}),
     },
+  };
+  return {
+    ...transactionClient,
+    $transaction: vi.fn(async (
+      operation: (prisma: typeof transactionClient) => Promise<unknown>,
+    ) => operation(transactionClient)),
   };
 }
 

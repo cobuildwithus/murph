@@ -7,9 +7,6 @@ import {
   type FamilyManagerMember,
 } from "./hosted-family-settings-actions";
 
-const OWNER_PRIVACY_COPY =
-  "You pay for your family's access, but what they share with Murph stays private to them.";
-
 export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSnapshot }) {
   const snapshot = props.ownerSnapshot;
 
@@ -18,6 +15,7 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
     joinedAtIso: member.joinedAt ? member.joinedAt.toISOString() : null,
     label: member.label,
     memberId: member.memberId,
+    pendingPlanCode: member.pendingPlanCode,
     planCode: member.planCode,
   }));
   const invites: FamilyManagerInvite[] = snapshot.invites.map((invite) => ({
@@ -35,7 +33,6 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="text-sm text-pretty text-muted-foreground">{OWNER_PRIVACY_COPY}</p>
       <HostedFamilyManager
         billingActive={snapshot.billingActive}
         invites={invites}

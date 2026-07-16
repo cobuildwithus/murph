@@ -111,7 +111,11 @@ describe("murph computer dynamic tools", () => {
     expect(openDescription).toMatch(/user handoff/iu);
 
     // computer_os_control must use the same open primitive for unknown outcomes.
-    expect(osControlDescription).toMatch(/unknown outcome/iu);
+    expect(osControlDescription).toMatch(/visible enabled control/iu);
+    expect(osControlDescription).toMatch(/fresh bounding box/iu);
+    expect(osControlDescription).toMatch(/set numClicks to 1 for every fallback click/iu);
+    expect(osControlDescription).toMatch(/blind second click/iu);
+    expect(osControlDescription).toMatch(/effect remains ambiguous/iu);
     expect(osControlDescription).toMatch(/computer_open/iu);
     expect(osControlDescription).not.toMatch(/computer_open.*before.*after/iu);
   });
@@ -875,9 +879,6 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(result.requiredComputerHandoffUrl).toBe(
-      "https://web.example.test/computer/handoff/raw-token",
-    );
     expect(result.rpcResult.contentItems[0]!.text).toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "login_needed",
@@ -955,11 +956,9 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(result.computerRunPausedForUser).toBe(true);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
       "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
     );
-    expect(result.computerRunPausedForUser).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

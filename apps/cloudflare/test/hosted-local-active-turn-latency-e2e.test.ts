@@ -68,6 +68,7 @@ const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() ||
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const idleShutdownDelayProbeIdleDelayMs = 180_000;
 const projectedWakeNoSnapshotObservationMs = 5_000;
+const slowPostDeliveryMaintenanceMs = 20_000;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
@@ -112,6 +113,29 @@ describe("hosted local active-turn latency e2e", () => {
     }
   }, 900_000);
 
+  it("replies to a second message while prior post-delivery maintenance is slow", async () => {
+    const database = await createSharedProbeDatabase();
+
+    try {
+      const result = await runPostDeliveryMaintenancePreemptionProbe({
+        localDatabaseUrl: database.url,
+      });
+
+      process.stdout.write(
+        `${[
+          "Hosted post-delivery maintenance preemption probe:",
+          `secondReplyLatency=${Math.round(result.secondReplyLatencyMs)}ms`,
+          `slowMaintenance=${slowPostDeliveryMaintenanceMs}ms`,
+        ].join(" ")}\n`,
+      );
+
+      expect(result.secondReplyLatencyMs).toBeLessThan(slowPostDeliveryMaintenanceMs);
+      expect(result.secondReplyObserved).toBe(true);
+    } finally {
+      await database.cleanup();
+    }
+  }, 900_000);
+
   it("does not run the full idle-shutdown snapshot immediately for projected wakes under the 180s idle delay", async () => {
     const database = await createSharedProbeDatabase();
 
@@ -128,12 +152,17 @@ describe("hosted local active-turn latency e2e", () => {
           `idleShutdownSnapshots=${proof.idleShutdownSnapshotCount}`,
           `snapshotObservationMs=${Math.round(proof.snapshotObservationMs)}`,
           `workspaceCheckpointChanged=${String(proof.workspaceCheckpointChanged)}`,
+          `checkpointedAtChanged=${String(proof.workspaceCheckpointedAtChanged)}`,
+          `snapshotRefChanged=${String(proof.workspaceSnapshotRefChanged)}`,
+          `workspaceVersionChanged=${String(proof.workspaceVersionChanged)}`,
         ].join(" ")}\n`,
       );
 
       expect(proof.providerCleanupDeleteObserved).toBe(true);
       expect(proof.idleShutdownSnapshotCount).toBe(0);
-      expect(proof.workspaceCheckpointChanged).toBe(false);
+      // Canonical receipt commits may advance status-only workspace metadata;
+      // the idle-floor invariant is that they retain the existing snapshot.
+      expect(proof.workspaceSnapshotRefChanged).toBe(false);
     } finally {
       await database.cleanup();
     }
@@ -260,6 +289,135 @@ async function runActiveTurnLatencyProbe(input: {
   }
 }
 
+async function runPostDeliveryMaintenancePreemptionProbe(input: {
+  localDatabaseUrl: string;
+}): Promise<{
+  secondReplyLatencyMs: number;
+  secondReplyObserved: boolean;
+}> {
+  const probeId = randomUUID().replace(/-/gu, "").slice(0, 12);
+  const userId = `member_local_post_delivery_preemption_${probeId}`;
+  const chatId = `chat_local_post_delivery_preemption_${probeId}`;
+  const memberPhone = buildLinqRecipientPhoneNumber(userId);
+  const homePhone = buildLinqHomePhoneNumber(userId);
+  const firstText = "post delivery preemption first input";
+  const secondText = "post delivery preemption second input";
+  const firstReplyText = "Post-delivery preemption first reply.";
+  const secondReplyText = "Post-delivery preemption second reply.";
+  const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+
+  await startProbeScenario({
+    idleCheckpointDelayMs: 3_000,
+    localDatabaseUrl: input.localDatabaseUrl,
+    memberPhone,
+  });
+
+  try {
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: userId,
+      memberPhone,
+    });
+    await requireScenario().runWake(buildActivationWake(userId), userId);
+    await requireScenario().waitForHostedCompletion(userId);
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId,
+      memberId: userId,
+      recipientPhone: memberPhone,
+    });
+
+    const firstSendBaseline = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstText,
+    });
+    const firstResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_post_delivery_preemption_first_${probeId}`,
+        messageId: `msg_post_delivery_preemption_first_${probeId}`,
+        text: firstText,
+      },
+    ));
+    expect(firstResponse.status).toBe(202);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await requireScenario().waitForLatestPendingWake(userId);
+    const firstReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: firstSendBaseline,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
+
+    const firstReplyMessageId = requireLinqStub().requireLatestObservedMessageId(chatId);
+    const cleanupPath = `/messages/${encodeURIComponent(firstReplyMessageId)}`;
+    const cleanupBaseline = requireLinqStub().countObservedRequests({
+      expectedMethod: "DELETE",
+      expectedPath: cleanupPath,
+    });
+    requireLinqStub().armNextRequestDelay({
+      delayMs: slowPostDeliveryMaintenanceMs,
+      expectedMethod: "DELETE",
+      expectedPath: cleanupPath,
+    });
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: cleanupBaseline,
+      expectedMethod: "DELETE",
+      expectedPath: cleanupPath,
+      scenario: requireScenario(),
+      userId,
+    });
+
+    const secondSendBaseline = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondText,
+    });
+    const secondStartedAt = performance.now();
+    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_post_delivery_preemption_second_${probeId}`,
+        messageId: `msg_post_delivery_preemption_second_${probeId}`,
+        text: secondText,
+      },
+    ));
+    expect(secondResponse.status).toBe(202);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await requireScenario().waitForLatestPendingWake(userId);
+    const secondReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: secondSendBaseline,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    const secondReplyLatencyMs = performance.now() - secondStartedAt;
+    const secondReplyObserved =
+      requireLinqStub().readObservedMessageText(secondReply) === secondReplyText;
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: 420_000,
+    });
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+
+    return {
+      secondReplyLatencyMs,
+      secondReplyObserved,
+    };
+  } finally {
+    await scenario?.stop();
+    scenario = null;
+    await linqStub?.stop();
+    linqStub = null;
+  }
+}
+
 async function runIdleShutdownDelayProbe(input: {
   localDatabaseUrl: string;
 }): Promise<{
@@ -268,6 +426,9 @@ async function runIdleShutdownDelayProbe(input: {
   providerCleanupObservationMs: number;
   snapshotObservationMs: number;
   workspaceCheckpointChanged: boolean;
+  workspaceCheckpointedAtChanged: boolean;
+  workspaceSnapshotRefChanged: boolean;
+  workspaceVersionChanged: boolean;
 }> {
   const probeId = randomUUID().replace(/-/gu, "").slice(0, 12);
   const userId = `member_local_idle_shutdown_delay_${probeId}`;
@@ -346,6 +507,12 @@ async function runIdleShutdownDelayProbe(input: {
     });
     const snapshotObservationMs = performance.now() - snapshotObservationStartedAt;
     const observedCheckpoint = readWorkspaceCheckpointFingerprint(snapshotStatus);
+    const workspaceCheckpointedAtChanged =
+      baselineCheckpoint.checkpointedAt !== observedCheckpoint.checkpointedAt;
+    const workspaceSnapshotRefChanged =
+      baselineCheckpoint.snapshotRefJson !== observedCheckpoint.snapshotRefJson;
+    const workspaceVersionChanged =
+      baselineCheckpoint.version !== observedCheckpoint.version;
 
     return {
       idleShutdownSnapshotCount:
@@ -354,7 +521,12 @@ async function runIdleShutdownDelayProbe(input: {
       providerCleanupObservationMs,
       snapshotObservationMs,
       workspaceCheckpointChanged:
-        !workspaceCheckpointFingerprintsMatch(baselineCheckpoint, observedCheckpoint),
+        workspaceCheckpointedAtChanged
+        || workspaceSnapshotRefChanged
+        || workspaceVersionChanged,
+      workspaceCheckpointedAtChanged,
+      workspaceSnapshotRefChanged,
+      workspaceVersionChanged,
     };
   } finally {
     await scenario?.stop();
@@ -365,6 +537,7 @@ async function runIdleShutdownDelayProbe(input: {
 }
 
 async function startProbeScenario(input: {
+  idleCheckpointDelayMs?: number;
   localDatabaseUrl: string;
   memberPhone: string;
 }): Promise<void> {
@@ -373,7 +546,7 @@ async function startProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(input.idleCheckpointDelayMs ?? 1_000),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -538,15 +711,6 @@ function readWorkspaceCheckpointFingerprint(
     snapshotRefJson: JSON.stringify(workspace?.snapshotRef ?? null),
     version: workspace?.version ?? null,
   };
-}
-
-function workspaceCheckpointFingerprintsMatch(
-  left: WorkspaceCheckpointFingerprint,
-  right: WorkspaceCheckpointFingerprint,
-): boolean {
-  return left.checkpointedAt === right.checkpointedAt
-    && left.snapshotRefJson === right.snapshotRefJson
-    && left.version === right.version;
 }
 
 function summarizeHostedStatusForFailure(status: HostedRunnerStatusResponse): string {

@@ -18,6 +18,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
+  parseHostedExecutionDeviceSyncReconcileRequest,
+  parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
@@ -25,6 +27,32 @@ import {
   sanitizeHostedRuntimeErrorText,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+
+describe("hosted device-sync reconcile contract", () => {
+  it("accepts only the bounded request and queued response shapes", () => {
+    expect(parseHostedExecutionDeviceSyncReconcileRequest({
+      connectionId: "dsc_123",
+    })).toEqual({ connectionId: "dsc_123" });
+    expect(parseHostedExecutionDeviceSyncReconcileResponse({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    })).toEqual({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+    expect(() => parseHostedExecutionDeviceSyncReconcileRequest({
+      action: "disconnect",
+      connectionId: "dsc_123",
+    })).toThrow(/action is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncReconcileResponse({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "disconnected",
+    })).toThrow(/status must be queued/u);
+  });
+});
 
 describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
   const companionPayload = {
@@ -519,6 +547,37 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
 });
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
+  it("rejects runtime apply request and response batches above the shared limit", () => {
+    const connectionIds = Array.from(
+      {
+        length:
+          hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1,
+      },
+      (_, index) => `conn_${index}`,
+    );
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: connectionIds.map((connectionId) => ({ connectionId })),
+        userId: "user_123",
+      })
+    ).toThrowError(/runtime apply request updates must include no more than 100 entries/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: connectionIds.map((connectionId) => ({
+          connection: null,
+          connectionId,
+          status: "missing",
+          tokenUpdate: "missing",
+          writeUpdate: "missing",
+        })),
+        userId: "user_123",
+      })
+    ).toThrowError(/runtime apply response updates must include no more than 100 entries/u);
+  });
+
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(

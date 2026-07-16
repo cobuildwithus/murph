@@ -74,7 +74,7 @@ export async function syncHostedVerifiedEmailAddress(input: {
   } catch (error) {
     return {
       errorMessage: toHostedEmailSyncErrorMessage(error),
-      successMessage: input.mode === "verify" ? `Email verified: ${input.verifiedEmailAddress}` : null,
+      successMessage: null,
       syncResult: null,
     };
   }
