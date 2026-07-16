@@ -37,7 +37,6 @@ export interface HostedUsageCreditNetReversalResult
 
 interface LockedHostedUsageCreditPurchase {
   beneficiaryMemberId: string;
-  fulfilledAt: Date | null;
   grantUsdMicros: bigint;
   id: string;
   paidAt: Date | null;
@@ -46,7 +45,6 @@ interface LockedHostedUsageCreditPurchase {
 }
 
 interface LockedHostedUsageCreditGrant {
-  beneficiarySequence: bigint;
   entryId: string;
   purchaseId: string;
   remainingCreditUsdMicros: bigint;
@@ -58,9 +56,9 @@ interface LockedHostedUsageCreditReversiblePurchase {
   purchase: LockedHostedUsageCreditPurchase;
 }
 
-type HostedUsageCreditReversalKind =
-  | "dispute_reversal"
-  | "refund_reversal";
+type HostedUsageCreditAdjustmentKind =
+  | "dispute_adjustment"
+  | "refund_adjustment";
 
 const PURCHASE_GRANT_SEMANTIC_SOURCE_VERSION = "v1";
 const USAGE_DEBIT_SEMANTIC_SOURCE_VERSION = "v1";
@@ -121,12 +119,10 @@ export async function lockHostedUsageCreditBeneficiaryTx(input: {
 }
 
 export async function grantHostedUsageCreditForPurchaseTx(input: {
-  effectiveAt: Date;
   paidAt: Date;
   purchaseId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedUsageCreditGrantResult> {
-  assertHostedUsageCreditDate(input.effectiveAt);
   assertHostedUsageCreditDate(input.paidAt);
 
   // This first read discovers the lock owner only. Every mutable purchase fact
@@ -183,7 +179,6 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
       || existingGrant.semanticSourceKey !== semanticSourceKey
       || purchase.status !== "fulfilled"
       || purchase.paidAt === null
-      || purchase.fulfilledAt === null
       || purchase.paidAt.getTime() !== input.paidAt.getTime()
     ) {
       throw new TypeError("Hosted usage-credit purchase grant invariant failed.");
@@ -197,7 +192,7 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     };
   }
 
-  if (purchase.status === "fulfilled" || purchase.fulfilledAt !== null) {
+  if (purchase.status === "fulfilled") {
     throw new TypeError("Hosted usage-credit fulfilled purchase is missing its grant.");
   }
   if (purchase.remainingCreditUsdMicros !== 0n) {
@@ -222,7 +217,7 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
       amountUsdMicros: purchase.grantUsdMicros,
       beneficiaryMemberId: purchase.beneficiaryMemberId,
       beneficiarySequence: projection.ledgerVersion,
-      effectiveAt: input.effectiveAt,
+      effectiveAt: input.paidAt,
       id: entryId,
       kind: "purchase_grant",
       purchaseId: purchase.id,
@@ -237,11 +232,10 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
       remainingCreditUsdMicros: 0n,
     },
     data: {
-      fulfilledAt: input.effectiveAt,
       paidAt: input.paidAt,
       remainingCreditUsdMicros: purchase.grantUsdMicros,
       status: "fulfilled",
-      terminalAt: input.effectiveAt,
+      terminalAt: input.paidAt,
     },
   });
 
@@ -252,7 +246,7 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
   await reconcileHostedUsageCreditCurrentPeriodBlockTx({
     balanceUsdMicros: projection.balanceUsdMicros,
     beneficiaryMemberId: purchase.beneficiaryMemberId,
-    effectiveAt: input.effectiveAt,
+    effectiveAt: input.paidAt,
     tx: input.tx,
   });
 
@@ -266,7 +260,6 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
 
 export async function settleHostedUsageCreditForUsageTx(input: {
   beneficiaryMemberId: string;
-  creditEligibilitySequence: bigint | null;
   debitUsdMicros: bigint;
   effectiveAt: Date;
   sourceUsageId: string;
@@ -276,12 +269,6 @@ export async function settleHostedUsageCreditForUsageTx(input: {
   if (input.debitUsdMicros < 0n) {
     throw new TypeError("Hosted usage-credit debit cannot be negative.");
   }
-  if (
-    input.creditEligibilitySequence !== null
-    && input.creditEligibilitySequence < 0n
-  ) {
-    throw new TypeError("Hosted usage-credit eligibility sequence cannot be negative.");
-  }
   if (!input.sourceUsageId) {
     throw new TypeError("Hosted usage-credit debit requires a source usage id.");
   }
@@ -290,12 +277,6 @@ export async function settleHostedUsageCreditForUsageTx(input: {
     beneficiaryMemberId: input.beneficiaryMemberId,
     tx: input.tx,
   });
-  if (
-    input.creditEligibilitySequence !== null
-    && input.creditEligibilitySequence > projection.ledgerVersion
-  ) {
-    throw new TypeError("Hosted usage-credit eligibility sequence is ahead of the ledger.");
-  }
 
   const existingDebits = await input.tx.hostedUsageCreditEntry.findMany({
     where: {
@@ -339,7 +320,6 @@ export async function settleHostedUsageCreditForUsageTx(input: {
   if (
     input.debitUsdMicros === 0n
     || projection.balanceUsdMicros === 0n
-    || input.creditEligibilitySequence === null
   ) {
     return {
       absorbedUsdMicros: input.debitUsdMicros,
@@ -349,9 +329,8 @@ export async function settleHostedUsageCreditForUsageTx(input: {
     };
   }
 
-  const grants = await lockHostedUsageCreditEligibleGrantsTx({
+  const grants = await lockHostedUsageCreditAvailableGrantsTx({
     beneficiaryMemberId: input.beneficiaryMemberId,
-    creditEligibilitySequence: input.creditEligibilitySequence,
     tx: input.tx,
   });
   let remainingDebitUsdMicros = input.debitUsdMicros;
@@ -362,8 +341,7 @@ export async function settleHostedUsageCreditForUsageTx(input: {
       break;
     }
     if (
-      grant.beneficiarySequence > input.creditEligibilitySequence
-      || grant.remainingCreditUsdMicros <= 0n
+      grant.remainingCreditUsdMicros <= 0n
     ) {
       throw new TypeError("Hosted usage-credit eligible grant invariant failed.");
     }
@@ -436,7 +414,7 @@ export async function reconcileHostedUsageCreditRefundNetReversalTx(input: {
 }): Promise<HostedUsageCreditNetReversalResult> {
   return reconcileHostedUsageCreditNetReversalTx({
     effectiveAt: input.effectiveAt,
-    kind: "refund_reversal",
+    kind: "refund_adjustment",
     purchaseId: input.purchaseId,
     sourceReferenceLookupKey: input.sourceReferenceLookupKey,
     targetNetReversalUsdMicros: input.targetNetReversalUsdMicros,
@@ -454,7 +432,7 @@ export async function reconcileHostedUsageCreditDisputeNetReversalTx(input: {
 }): Promise<HostedUsageCreditNetReversalResult> {
   return reconcileHostedUsageCreditNetReversalTx({
     effectiveAt: input.effectiveAt,
-    kind: "dispute_reversal",
+    kind: "dispute_adjustment",
     purchaseId: input.purchaseId,
     sourceReferenceLookupKey: input.sourceReferenceLookupKey,
     sourceReferenceLookupKeyCandidates:
@@ -466,7 +444,7 @@ export async function reconcileHostedUsageCreditDisputeNetReversalTx(input: {
 
 async function reconcileHostedUsageCreditNetReversalTx(input: {
   effectiveAt: Date;
-  kind: HostedUsageCreditReversalKind;
+  kind: HostedUsageCreditAdjustmentKind;
   purchaseId: string;
   sourceReferenceLookupKey: string;
   sourceReferenceLookupKeyCandidates?: readonly string[];
@@ -486,10 +464,10 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
     purchaseId: input.purchaseId,
     tx: input.tx,
   });
-  const reversalWhere: Prisma.HostedUsageCreditEntryWhereInput = {
+  const adjustmentWhere: Prisma.HostedUsageCreditEntryWhereInput = {
     kind: input.kind,
     purchaseId: input.purchaseId,
-    ...(input.kind === "dispute_reversal"
+    ...(input.kind === "dispute_adjustment"
       ? {
           sourceReferenceLookupKey: {
             in: sourceReferenceLookupKeys,
@@ -497,8 +475,8 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
         }
       : {}),
   };
-  const reversalEntries = await input.tx.hostedUsageCreditEntry.findMany({
-    where: reversalWhere,
+  const adjustmentEntries = await input.tx.hostedUsageCreditEntry.findMany({
+    where: adjustmentWhere,
     orderBy: {
       beneficiarySequence: "asc",
     },
@@ -510,62 +488,20 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
       sourceReferenceLookupKey: true,
     },
   });
-  const restorationWhere: Prisma.HostedUsageCreditEntryWhereInput = {
-    kind: "reversal_restoration",
-    purchaseId: input.purchaseId,
-    ...(input.kind === "refund_reversal"
-      ? {
-          semanticSourceKey: {
-            startsWith: buildHostedUsageCreditNetReversalSemanticPrefix({
-              kind: input.kind,
-              purchaseId: input.purchaseId,
-              sourceReferenceLookupKey: input.sourceReferenceLookupKey,
-            }),
-          },
-        }
-      : {
-          semanticSourceKey: {
-            startsWith: "hosted-usage-credit:dispute:",
-          },
-          sourceReferenceLookupKey: {
-            in: sourceReferenceLookupKeys,
-          },
-        }),
-  };
-  const restorationEntries = await input.tx.hostedUsageCreditEntry.findMany({
-    where: restorationWhere,
-    orderBy: {
-      beneficiarySequence: "asc",
-    },
-    select: {
-      amountUsdMicros: true,
-      beneficiaryMemberId: true,
-      beneficiarySequence: true,
-      parentGrantEntryId: true,
-      sourceReferenceLookupKey: true,
-    },
-  });
-  const canonicalSourceReferenceLookupKey = input.kind === "dispute_reversal"
+  const canonicalSourceReferenceLookupKey = input.kind === "dispute_adjustment"
     ? resolveHostedUsageCreditCanonicalSourceLookupKey({
         current: input.sourceReferenceLookupKey,
-        entries: [...reversalEntries, ...restorationEntries].sort(
-          compareHostedUsageCreditEntrySequence,
-        ),
+        entries: adjustmentEntries,
       })
     : input.sourceReferenceLookupKey;
-  const reversedUsdMicros = sumHostedUsageCreditReversalEntries({
+  const currentNetReversedUsdMicros = sumHostedUsageCreditAdjustmentEntries({
     beneficiaryMemberId: locked.purchase.beneficiaryMemberId,
-    entries: reversalEntries,
-    grantEntryId: locked.grantEntryId,
-  });
-  const restoredUsdMicros = sumHostedUsageCreditRestorationEntries({
-    beneficiaryMemberId: locked.purchase.beneficiaryMemberId,
-    entries: restorationEntries,
+    entries: adjustmentEntries,
     grantEntryId: locked.grantEntryId,
   });
 
-  if (restoredUsdMicros > reversedUsdMicros) {
-    throw new TypeError("Hosted usage-credit restoration exceeds its reversal.");
+  if (currentNetReversedUsdMicros < 0n) {
+    throw new TypeError("Hosted usage-credit adjustment restored more than it reversed.");
   }
   if (
     locked.projection.balanceUsdMicros
@@ -574,7 +510,6 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
     throw new TypeError("Hosted usage-credit purchase remaining exceeds its beneficiary balance.");
   }
 
-  const currentNetReversedUsdMicros = reversedUsdMicros - restoredUsdMicros;
   if (input.targetNetReversalUsdMicros === currentNetReversedUsdMicros) {
     return buildHostedUsageCreditNetReversalResult({
       entryId: null,
@@ -652,7 +587,7 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
       beneficiarySequence: projection.ledgerVersion,
       effectiveAt: input.effectiveAt,
       id: entryId,
-      kind: increasing ? input.kind : "reversal_restoration",
+      kind: input.kind,
       parentGrantEntryId: locked.grantEntryId,
       purchaseId: locked.purchase.id,
       semanticSourceKey: buildHostedUsageCreditNetReversalSemanticSourceKey({
@@ -710,7 +645,6 @@ async function lockHostedUsageCreditReversiblePurchaseTx(input: {
   if (
     purchase.beneficiaryMemberId !== projection.beneficiaryMemberId
     || purchase.status !== "fulfilled"
-    || purchase.fulfilledAt === null
     || purchase.paidAt === null
   ) {
     throw new TypeError("Hosted usage-credit reversal requires a fulfilled purchase.");
@@ -759,8 +693,7 @@ async function lockHostedUsageCreditPurchaseTx(input: {
       "grant_usd_micros" AS "grantUsdMicros",
       "remaining_credit_usd_micros" AS "remainingCreditUsdMicros",
       "status"::text AS "status",
-      "paid_at" AS "paidAt",
-      "fulfilled_at" AS "fulfilledAt"
+      "paid_at" AS "paidAt"
     FROM "hosted_usage_credit_purchase"
     WHERE "id" = ${input.purchaseId}
     FOR UPDATE
@@ -774,15 +707,13 @@ async function lockHostedUsageCreditPurchaseTx(input: {
   return purchase;
 }
 
-async function lockHostedUsageCreditEligibleGrantsTx(input: {
+async function lockHostedUsageCreditAvailableGrantsTx(input: {
   beneficiaryMemberId: string;
-  creditEligibilitySequence: bigint;
   tx: Prisma.TransactionClient;
 }): Promise<LockedHostedUsageCreditGrant[]> {
   return input.tx.$queryRaw<LockedHostedUsageCreditGrant[]>`
     SELECT
       entry."id" AS "entryId",
-      entry."beneficiary_sequence" AS "beneficiarySequence",
       purchase."id" AS "purchaseId",
       purchase."remaining_credit_usd_micros" AS "remainingCreditUsdMicros"
     FROM "hosted_usage_credit_entry" AS entry
@@ -790,7 +721,6 @@ async function lockHostedUsageCreditEligibleGrantsTx(input: {
       ON purchase."id" = entry."purchase_id"
     WHERE entry."beneficiary_member_id" = ${input.beneficiaryMemberId}
       AND entry."kind" = 'purchase_grant'
-      AND entry."beneficiary_sequence" <= ${input.creditEligibilitySequence}
       AND purchase."remaining_credit_usd_micros" > 0
     ORDER BY entry."beneficiary_sequence" ASC
     FOR UPDATE OF entry, purchase
@@ -898,11 +828,11 @@ function buildHostedUsageCreditUsageDebitSemanticSourceKey(input: {
 }
 
 function buildHostedUsageCreditNetReversalSemanticPrefix(input: {
-  kind: HostedUsageCreditReversalKind;
+  kind: HostedUsageCreditAdjustmentKind;
   purchaseId: string;
   sourceReferenceLookupKey: string;
 }): string {
-  if (input.kind === "refund_reversal") {
+  if (input.kind === "refund_adjustment") {
     return `hosted-usage-credit:refund:purchase:${input.purchaseId}:`;
   }
 
@@ -911,7 +841,7 @@ function buildHostedUsageCreditNetReversalSemanticPrefix(input: {
 
 function buildHostedUsageCreditNetReversalSemanticSourceKey(input: {
   beforeNetReversedUsdMicros: bigint;
-  kind: HostedUsageCreditReversalKind;
+  kind: HostedUsageCreditAdjustmentKind;
   ledgerVersion: bigint;
   nextNetReversedUsdMicros: bigint;
   purchaseId: string;
@@ -940,7 +870,7 @@ function buildHostedUsageCreditNetReversalResult(input: {
   };
 }
 
-function sumHostedUsageCreditReversalEntries(input: {
+function sumHostedUsageCreditAdjustmentEntries(input: {
   beneficiaryMemberId: string;
   entries: Array<{
     amountUsdMicros: bigint;
@@ -954,36 +884,13 @@ function sumHostedUsageCreditReversalEntries(input: {
     if (
       entry.beneficiaryMemberId !== input.beneficiaryMemberId
       || entry.parentGrantEntryId !== input.grantEntryId
-      || entry.amountUsdMicros >= 0n
+      || entry.amountUsdMicros === 0n
     ) {
-      throw new TypeError("Hosted usage-credit reversal entry invariant failed.");
-    }
-    total -= entry.amountUsdMicros;
-  }
-  return total;
-}
-
-function sumHostedUsageCreditRestorationEntries(input: {
-  beneficiaryMemberId: string;
-  entries: Array<{
-    amountUsdMicros: bigint;
-    beneficiaryMemberId: string;
-    parentGrantEntryId: string | null;
-  }>;
-  grantEntryId: string;
-}): bigint {
-  let total = 0n;
-  for (const entry of input.entries) {
-    if (
-      entry.beneficiaryMemberId !== input.beneficiaryMemberId
-      || entry.parentGrantEntryId !== input.grantEntryId
-      || entry.amountUsdMicros <= 0n
-    ) {
-      throw new TypeError("Hosted usage-credit restoration entry invariant failed.");
+      throw new TypeError("Hosted usage-credit adjustment entry invariant failed.");
     }
     total += entry.amountUsdMicros;
   }
-  return total;
+  return -total;
 }
 
 function normalizeHostedUsageCreditSourceLookupKeys(input: {
@@ -1011,15 +918,6 @@ function resolveHostedUsageCreditCanonicalSourceLookupKey(input: {
     throw new TypeError("Hosted usage-credit reversal stored an invalid source lookup key.");
   }
   return stored;
-}
-
-function compareHostedUsageCreditEntrySequence(
-  left: { beneficiarySequence: bigint },
-  right: { beneficiarySequence: bigint },
-): number {
-  if (left.beneficiarySequence < right.beneficiarySequence) return -1;
-  if (left.beneficiarySequence > right.beneficiarySequence) return 1;
-  return 0;
 }
 
 function assertHostedUsageCreditDate(value: Date): void {

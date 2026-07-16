@@ -1,7 +1,6 @@
 import type Stripe from "stripe";
 
 import {
-  HostedUsageCreditCheckoutCreateState,
   HostedUsageCreditPurchaseStatus,
   type HostedUsageCreditPurchase,
   type Prisma,
@@ -15,14 +14,10 @@ import {
   createHostedStripePriceLookupKey,
   hostedLookupKeyMatchesValue,
 } from "./contact-privacy";
-import {
-  isHostedPulseTrialBillingState,
-  parseHostedBillingPhase,
-  parseHostedBillingPlanCode,
-} from "./billing-plans";
 import { coerceStripeObjectId } from "./billing";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import { readHostedPersonalUsageCreditOfferCodes } from "./personal-usage-credit-eligibility";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApiMode,
@@ -46,14 +41,11 @@ import {
 } from "../hosted-web/encryption";
 import {
   generateHostedRandomPrefixedId,
-  isRecord,
-  sha256Hex,
 } from "../primitives";
 import { getPrisma } from "../prisma";
 
-const HOSTED_USAGE_CREDIT_AUTHORIZATION_CONTEXT = "personal_self_v1";
-const HOSTED_USAGE_CREDIT_CHECKOUT_RETRY_DURATION_MS = 30 * 60 * 1_000;
 const HOSTED_USAGE_CREDIT_CHECKOUT_EXPIRY_DURATION_MS = 90 * 60 * 1_000;
+const HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS = 30 * 60 * 1_000;
 const HOSTED_USAGE_CREDIT_CLIENT_REQUEST_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
@@ -96,16 +88,24 @@ export interface HostedUsageCreditCheckoutRequest {
 
 export interface HostedUsageCreditCheckoutResult {
   purchaseId: string;
+  recovered?: true;
+  restartAt?: string;
+  retryAllowed?: true;
   status: HostedUsageCreditPublicPurchaseStatus;
   url?: string;
 }
 
 export interface HostedUsageCreditPurchaseStatusResult {
-  checkoutExpiresAt: string;
-  fulfilledAt: string | null;
   purchaseId: string;
+  restartAt?: string;
   status: HostedUsageCreditPublicPurchaseStatus;
-  updatedAt: string;
+}
+
+export interface HostedActiveUsageCreditPurchaseProjection
+  extends HostedUsageCreditPurchaseStatusResult {
+  offerCode: HostedUsageCreditOfferCode;
+  retryAllowed: boolean;
+  url?: string;
 }
 
 export function parseHostedUsageCreditCheckoutRequest(
@@ -160,11 +160,6 @@ export async function createHostedUsageCreditCheckout(input: {
 }): Promise<HostedUsageCreditCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const requestFingerprint = buildHostedUsageCreditRequestFingerprint({
-    beneficiaryMemberId: input.memberId,
-    offerCode: input.offerCode,
-    payerMemberId: input.memberId,
-  });
   const existing = await prisma.hostedUsageCreditPurchase.findUnique({
     where: {
       payerMemberId_clientRequestKey: {
@@ -175,7 +170,11 @@ export async function createHostedUsageCreditCheckout(input: {
   });
 
   if (existing) {
-    assertHostedUsageCreditRequestFingerprintMatches(existing, requestFingerprint);
+    assertHostedUsageCreditRequestMatches({
+      memberId: input.memberId,
+      offerCode: input.offerCode,
+      purchase: existing,
+    });
     return continueHostedUsageCreditCheckout({
       now,
       prisma,
@@ -183,12 +182,7 @@ export async function createHostedUsageCreditCheckout(input: {
     });
   }
 
-  const checkoutConfig = requireHostedStripeUsageCreditCheckoutConfig({
-    offerCode: input.offerCode,
-  });
-  const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-  const purchaseId = generateHostedRandomPrefixedId("hucp");
-  const purchase = await prisma.$transaction(async (tx) => {
+  const resolution = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
 
     const racedExisting = await tx.hostedUsageCreditPurchase.findUnique({
@@ -200,36 +194,16 @@ export async function createHostedUsageCreditCheckout(input: {
       },
     });
     if (racedExisting) {
-      assertHostedUsageCreditRequestFingerprintMatches(racedExisting, requestFingerprint);
-      return racedExisting;
+      assertHostedUsageCreditRequestMatches({
+        memberId: input.memberId,
+        offerCode: input.offerCode,
+        purchase: racedExisting,
+      });
+      return {
+        purchase: racedExisting,
+        recovered: false,
+      };
     }
-
-    const member = await tx.hostedMember.findUnique({
-      select: {
-        accountGroupMemberships: {
-          select: { id: true },
-          where: { status: "active" },
-        },
-        billingStatus: true,
-        suspendedAt: true,
-        threadContainer: {
-          select: { memberId: true },
-        },
-      },
-      where: { id: input.memberId },
-    });
-    if (!member) {
-      throw buildHostedUsageCreditNotEligibleError();
-    }
-
-    const billingRef = await readHostedMemberStripeBillingRef({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    assertHostedUsageCreditPurchaseEligibility({
-      billingRef,
-      member,
-    });
 
     await closeExpiredUnattachedHostedUsageCreditPurchasesTx({
       now,
@@ -238,7 +212,6 @@ export async function createHostedUsageCreditCheckout(input: {
     });
 
     const existingActive = await tx.hostedUsageCreditPurchase.findFirst({
-      select: { id: true },
       where: {
         payerMemberId: input.memberId,
         status: {
@@ -247,13 +220,25 @@ export async function createHostedUsageCreditCheckout(input: {
       },
     });
     if (existingActive) {
-      throw hostedOnboardingError({
-        code: "HOSTED_USAGE_CREDIT_CHECKOUT_IN_PROGRESS",
-        httpStatus: 409,
-        message: "A usage-credit payment is already in progress.",
-      });
+      return {
+        purchase: existingActive,
+        recovered: true,
+      };
     }
 
+    const authorizedOfferCodes =
+      await readHostedPersonalUsageCreditOfferCodes({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+    if (!authorizedOfferCodes.includes(input.offerCode)) {
+      throw buildHostedUsageCreditNotEligibleError();
+    }
+
+    const billingRef = await readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const stripeCustomerId = billingRef?.stripeCustomerId;
     if (!stripeCustomerId || !billingRef?.stripeSubscriptionId) {
       throw hostedOnboardingError({
@@ -263,14 +248,15 @@ export async function createHostedUsageCreditCheckout(input: {
       });
     }
 
+    const checkoutConfig = requireHostedStripeUsageCreditCheckoutConfig({
+      offerCode: input.offerCode,
+    });
+    const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+    const purchaseId = generateHostedRandomPrefixedId("hucp");
     const offer = getHostedUsageCreditOfferDefinition(input.offerCode);
     const checkoutExpiresAt = new Date(
       now.getTime() + HOSTED_USAGE_CREDIT_CHECKOUT_EXPIRY_DURATION_MS,
     );
-    const checkoutCreateRetryCutoffAt = new Date(
-      now.getTime() + HOSTED_USAGE_CREDIT_CHECKOUT_RETRY_DURATION_MS,
-    );
-    const checkoutMetadata = buildHostedUsageCreditCheckoutMetadata(purchaseId);
     const checkoutSuccessUrl = buildHostedUsageCreditCheckoutReturnUrl({
       outcome: "success",
       publicBaseUrl,
@@ -280,15 +266,6 @@ export async function createHostedUsageCreditCheckout(input: {
       outcome: "cancel",
       publicBaseUrl,
       purchaseId,
-    });
-    const checkoutRequest = buildHostedUsageCreditStripeCheckoutRequest({
-      checkoutCancelUrl,
-      checkoutExpiresAt,
-      checkoutMetadata,
-      checkoutSuccessUrl,
-      priceId: checkoutConfig.priceId,
-      purchaseId,
-      stripeCustomerId,
     });
     const [stripePriceIdEncrypted, stripeCustomerIdEncrypted] = await Promise.all([
       encryptHostedUsageCreditPurchaseStripeField({
@@ -315,25 +292,18 @@ export async function createHostedUsageCreditCheckout(input: {
 
     const created = await tx.hostedUsageCreditPurchase.create({
       data: {
-        authorizationContext: HOSTED_USAGE_CREDIT_AUTHORIZATION_CONTEXT,
         beneficiaryMemberId: input.memberId,
         cashAmountMinor: offer.cashAmountMinor,
         cashCurrency: offer.cashCurrency,
         checkoutCancelUrl,
-        checkoutClientReferenceId: purchaseId,
-        checkoutCreateRetryCutoffAt,
         checkoutExpiresAt,
-        checkoutMetadataJson: checkoutMetadata,
-        checkoutRequestDigest: buildHostedUsageCreditCheckoutRequestDigest(checkoutRequest),
         checkoutRequestPolicyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
         clientRequestKey: input.clientRequestKey,
-        conversionPolicyVersion: offer.conversionPolicyVersion,
         createdAt: now,
         grantUsdMicros: offer.grantUsdMicros,
         id: purchaseId,
         offerCode: offer.code,
         payerMemberId: input.memberId,
-        requestFingerprint,
         status: HostedUsageCreditPurchaseStatus.created,
         stripeCustomerIdEncrypted: requireHostedUsageCreditEncryptedValue(
           stripeCustomerIdEncrypted,
@@ -350,35 +320,46 @@ export async function createHostedUsageCreditCheckout(input: {
         updatedAt: now,
       },
     });
-    const claimed = await tx.hostedUsageCreditPurchase.updateMany({
-      data: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.claimed,
-        reconciliationVersion: { increment: 1n },
-        updatedAt: now,
-      },
-      where: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.not_started,
-        id: created.id,
-        reconciliationVersion: created.reconciliationVersion,
-      },
-    });
-    if (claimed.count !== 1) {
-      throw buildHostedUsageCreditInvariantError("checkout_claim_failed");
-    }
-
     return {
-      ...created,
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.claimed,
-      reconciliationVersion: created.reconciliationVersion + 1n,
-      updatedAt: now,
+      purchase: created,
+      recovered: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  return continueHostedUsageCreditCheckout({
-    now,
-    prisma,
-    purchase,
-  });
+  try {
+    const checkout = await continueHostedUsageCreditCheckout({
+      now,
+      prisma,
+      purchase: resolution.purchase,
+    });
+    return resolution.recovered
+      ? { ...checkout, recovered: true }
+      : checkout;
+  } catch (error) {
+    if (
+      resolution.recovered &&
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
+    ) {
+      const purchase = await prepareHostedUsageCreditPurchaseForCheckout({
+        now,
+        prisma,
+        purchase: resolution.purchase,
+      });
+      const checkout = await projectHostedUsageCreditCheckoutResult({
+        prisma,
+        purchase,
+      });
+      return {
+        ...checkout,
+        recovered: true,
+        ...(canRetryHostedUsageCreditCheckoutCreate({ now, purchase })
+          ? { retryAllowed: true as const }
+          : {}),
+      };
+    }
+    throw error;
+  }
 }
 
 export async function readHostedUsageCreditPurchaseStatus(input: {
@@ -393,12 +374,9 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
   const prisma = input.prisma ?? getPrisma();
   const purchase = await prisma.hostedUsageCreditPurchase.findFirst({
     select: {
-      checkoutCreateState: true,
       checkoutExpiresAt: true,
-      fulfilledAt: true,
       id: true,
       status: true,
-      updatedAt: true,
     },
     where: {
       id: input.purchaseId,
@@ -410,6 +388,62 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
   }
 
   return buildHostedUsageCreditPurchaseStatusResult(purchase);
+}
+
+export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
+  now?: Date;
+  payerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedActiveUsageCreditPurchaseProjection | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const purchase = await prisma.hostedUsageCreditPurchase.findFirst({
+    orderBy: { createdAt: "desc" },
+    include: {
+      payer: {
+        select: { suspendedAt: true },
+      },
+    },
+    where: {
+      OR: [
+        {
+          status: {
+            in: [
+              HostedUsageCreditPurchaseStatus.checkout_open,
+              HostedUsageCreditPurchaseStatus.payment_pending,
+            ],
+          },
+        },
+        {
+          checkoutExpiresAt: { gt: now },
+          status: HostedUsageCreditPurchaseStatus.created,
+        },
+      ],
+      payerMemberId: input.payerMemberId,
+    },
+  });
+  if (!purchase) {
+    return null;
+  }
+
+  const offerCode = parseHostedUsageCreditOfferCode(purchase.offerCode);
+  if (!offerCode) {
+    throw buildHostedUsageCreditInvariantError("purchase_offer_invalid");
+  }
+  const checkout = purchase.payer.suspendedAt
+    ? buildHostedUsageCreditPurchaseStatusResult(purchase)
+    : await projectHostedUsageCreditCheckoutResult({
+        prisma,
+        purchase,
+      });
+
+  return {
+    ...checkout,
+    offerCode,
+    retryAllowed:
+      purchase.payer.suspendedAt === null &&
+      canRetryHostedUsageCreditCheckoutCreate({ now, purchase }),
+  };
 }
 
 export async function expireHostedUsageCreditCheckout(input: {
@@ -446,7 +480,7 @@ export async function expireHostedUsageCreditCheckout(input: {
     purchase.status === HostedUsageCreditPurchaseStatus.fulfilled ||
     purchase.status === HostedUsageCreditPurchaseStatus.expired ||
     purchase.status === HostedUsageCreditPurchaseStatus.payment_failed ||
-    purchase.checkoutCreateState !== HostedUsageCreditCheckoutCreateState.attached
+    purchase.status === HostedUsageCreditPurchaseStatus.created
   ) {
     return buildHostedUsageCreditPurchaseStatusResult(purchase);
   }
@@ -523,9 +557,6 @@ export async function expireHostedUsageCreditCheckout(input: {
     const expired = providerState === "expired";
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: expired
-          ? HostedUsageCreditCheckoutCreateState.closed
-          : HostedUsageCreditCheckoutCreateState.attached,
         lastReconciledAt: now,
         reconciliationVersion: { increment: 1n },
         status: expired
@@ -627,10 +658,7 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
   const prisma = input.prisma ?? getPrisma();
   const purchases = await prisma.hostedUsageCreditPurchase.findMany({
     select: {
-      authorizationContext: true,
       beneficiaryMemberId: true,
-      checkoutCreateState: true,
-      fulfilledAt: true,
       lastReconciledAt: true,
       paidAt: true,
       payerMemberId: true,
@@ -712,11 +740,12 @@ async function continueHostedUsageCreditCheckout(input: {
     prisma: input.prisma,
     purchase,
   });
-
   if (
-    purchase.checkoutCreateState !== HostedUsageCreditCheckoutCreateState.claimed ||
     purchase.status !== HostedUsageCreditPurchaseStatus.created ||
-    input.now.getTime() >= purchase.checkoutCreateRetryCutoffAt.getTime()
+    !canRetryHostedUsageCreditCheckoutCreate({
+      now: input.now,
+      purchase,
+    })
   ) {
     return projected;
   }
@@ -775,6 +804,16 @@ async function continueHostedUsageCreditCheckout(input: {
   });
 }
 
+function canRetryHostedUsageCreditCheckoutCreate(input: {
+  now: Date;
+  purchase: Pick<HostedUsageCreditPurchase, "createdAt" | "status">;
+}): boolean {
+  return input.purchase.status === HostedUsageCreditPurchaseStatus.created &&
+    input.now.getTime() <
+      input.purchase.createdAt.getTime() +
+        HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS;
+}
+
 async function prepareHostedUsageCreditPurchaseForCheckout(input: {
   now: Date;
   prisma: PrismaClient;
@@ -795,34 +834,24 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
     if (!member || member.suspendedAt) {
       throw buildHostedUsageCreditNotEligibleError();
     }
-    assertHostedUsageCreditRequestFingerprintMatches(
-      current,
-      input.purchase.requestFingerprint,
-    );
+    assertHostedUsageCreditRequestMatches({
+      memberId: input.purchase.payerMemberId,
+      offerCode: parseHostedUsageCreditOfferCode(input.purchase.offerCode),
+      purchase: current,
+    });
 
     if (
       current.status === HostedUsageCreditPurchaseStatus.created &&
-      (
-        current.checkoutCreateState === HostedUsageCreditCheckoutCreateState.not_started ||
-        current.checkoutCreateState === HostedUsageCreditCheckoutCreateState.claimed
-      ) &&
       input.now.getTime() >= current.checkoutExpiresAt.getTime()
     ) {
       const closed = await tx.hostedUsageCreditPurchase.updateMany({
         data: {
-          checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
           reconciliationVersion: { increment: 1n },
           status: HostedUsageCreditPurchaseStatus.expired,
           terminalAt: input.now,
           updatedAt: input.now,
         },
         where: {
-          checkoutCreateState: {
-            in: [
-              HostedUsageCreditCheckoutCreateState.not_started,
-              HostedUsageCreditCheckoutCreateState.claimed,
-            ],
-          },
           checkoutExpiresAt: { lte: input.now },
           id: current.id,
           reconciliationVersion: current.reconciliationVersion,
@@ -834,44 +863,13 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
       }
       return {
         ...current,
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
         reconciliationVersion: current.reconciliationVersion + 1n,
         status: HostedUsageCreditPurchaseStatus.expired,
         terminalAt: input.now,
         updatedAt: input.now,
       };
     }
-
-    if (
-      current.checkoutCreateState !== HostedUsageCreditCheckoutCreateState.not_started ||
-      current.status !== HostedUsageCreditPurchaseStatus.created
-    ) {
-      return current;
-    }
-
-    const claimed = await tx.hostedUsageCreditPurchase.updateMany({
-      data: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.claimed,
-        reconciliationVersion: { increment: 1n },
-        updatedAt: input.now,
-      },
-      where: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.not_started,
-        id: current.id,
-        reconciliationVersion: current.reconciliationVersion,
-        status: HostedUsageCreditPurchaseStatus.created,
-      },
-    });
-    if (claimed.count !== 1) {
-      throw buildHostedUsageCreditInvariantError("checkout_claim_failed");
-    }
-
-    return {
-      ...current,
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.claimed,
-      reconciliationVersion: current.reconciliationVersion + 1n,
-      updatedAt: input.now,
-    };
+    return current;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -924,10 +922,7 @@ async function bindHostedUsageCreditCheckoutSession(input: {
       return current;
     }
 
-    if (
-      current.checkoutCreateState !== HostedUsageCreditCheckoutCreateState.claimed ||
-      current.status !== HostedUsageCreditPurchaseStatus.created
-    ) {
+    if (current.status !== HostedUsageCreditPurchaseStatus.created) {
       return current;
     }
 
@@ -954,9 +949,6 @@ async function bindHostedUsageCreditCheckoutSession(input: {
         : HostedUsageCreditPurchaseStatus.checkout_open;
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: terminal
-          ? HostedUsageCreditCheckoutCreateState.closed
-          : HostedUsageCreditCheckoutCreateState.attached,
         reconciliationVersion: { increment: 1n },
         status,
         stripeCheckoutSessionIdEncrypted,
@@ -966,7 +958,6 @@ async function bindHostedUsageCreditCheckoutSession(input: {
         updatedAt: input.now,
       },
       where: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.claimed,
         id: current.id,
         reconciliationVersion: current.reconciliationVersion,
         status: HostedUsageCreditPurchaseStatus.created,
@@ -995,10 +986,7 @@ async function projectHostedUsageCreditCheckoutResult(input: {
     status !== "checkout_open" ||
     !input.purchase.stripeCheckoutUrlEncrypted
   ) {
-    return {
-      purchaseId: input.purchase.id,
-      status,
-    };
+    return buildHostedUsageCreditPurchaseStatusResult(input.purchase);
   }
 
   const url = await decryptHostedUsageCreditPurchaseStripeField({
@@ -1020,7 +1008,7 @@ async function projectHostedUsageCreditCheckoutResult(input: {
 
 function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
   HostedUsageCreditPurchase,
-  "checkoutCreateState" | "status"
+  "status"
 >): HostedUsageCreditPublicPurchaseStatus {
   switch (input.status) {
     case HostedUsageCreditPurchaseStatus.checkout_open:
@@ -1036,19 +1024,15 @@ function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
 
 function buildHostedUsageCreditPurchaseStatusResult(input: Pick<
   HostedUsageCreditPurchase,
-  | "checkoutCreateState"
-  | "checkoutExpiresAt"
-  | "fulfilledAt"
-  | "id"
-  | "status"
-  | "updatedAt"
+  "checkoutExpiresAt" | "id" | "status"
 >): HostedUsageCreditPurchaseStatusResult {
+  const status = projectHostedUsageCreditPublicPurchaseStatus(input);
   return {
-    checkoutExpiresAt: input.checkoutExpiresAt.toISOString(),
-    fulfilledAt: input.fulfilledAt?.toISOString() ?? null,
     purchaseId: input.id,
-    status: projectHostedUsageCreditPublicPurchaseStatus(input),
-    updatedAt: input.updatedAt.toISOString(),
+    ...(status === "reconciling"
+      ? { restartAt: input.checkoutExpiresAt.toISOString() }
+      : {}),
+    status,
   };
 }
 
@@ -1060,19 +1044,12 @@ async function closeExpiredUnattachedHostedUsageCreditPurchasesTx(input: {
 }): Promise<void> {
   await input.tx.hostedUsageCreditPurchase.updateMany({
     data: {
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       reconciliationVersion: { increment: 1n },
       status: HostedUsageCreditPurchaseStatus.expired,
       terminalAt: input.now,
       updatedAt: input.now,
     },
     where: {
-      checkoutCreateState: {
-        in: [
-          HostedUsageCreditCheckoutCreateState.not_started,
-          HostedUsageCreditCheckoutCreateState.claimed,
-        ],
-      },
       checkoutExpiresAt: { lte: input.now },
       ...(input.purchaseId ? { id: input.purchaseId } : {}),
       payerMemberId: input.payerMemberId,
@@ -1230,7 +1207,7 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
 
     for (const session of page.data) {
       if (
-        session.client_reference_id !== input.purchase.checkoutClientReferenceId &&
+        session.client_reference_id !== input.purchase.id &&
         session.metadata?.purchaseId !== input.purchase.id
       ) {
         continue;
@@ -1318,10 +1295,6 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
   const nextStatus = providerState === "expired"
     ? HostedUsageCreditPurchaseStatus.expired
     : HostedUsageCreditPurchaseStatus.payment_pending;
-  const nextCheckoutCreateState = providerState === "expired"
-    ? HostedUsageCreditCheckoutCreateState.closed
-    : HostedUsageCreditCheckoutCreateState.attached;
-
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.purchase.payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
@@ -1350,7 +1323,6 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
 
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: nextCheckoutCreateState,
         lastReconciledAt: input.now,
         reconciliationVersion: { increment: 1n },
         status: nextStatus,
@@ -1425,7 +1397,6 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
 
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
         lastReconciledAt: input.now,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.expired,
@@ -1508,11 +1479,10 @@ function assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership(input
   memberIds: readonly string[];
   purchase: Pick<
     HostedUsageCreditPurchase,
-    "authorizationContext" | "beneficiaryMemberId" | "payerMemberId"
+    "beneficiaryMemberId" | "payerMemberId"
   >;
 }): void {
   if (
-    input.purchase.authorizationContext !== HOSTED_USAGE_CREDIT_AUTHORIZATION_CONTEXT ||
     input.purchase.payerMemberId !== input.purchase.beneficiaryMemberId ||
     !input.memberIds.includes(input.purchase.payerMemberId)
   ) {
@@ -1522,8 +1492,6 @@ function assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership(input
 
 function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
   HostedUsageCreditPurchase,
-  | "checkoutCreateState"
-  | "fulfilledAt"
   | "lastReconciledAt"
   | "paidAt"
   | "status"
@@ -1535,11 +1503,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
   | "stripePaymentIntentLookupKey"
   | "terminalAt"
 >): boolean {
-  if (
-    input.checkoutCreateState !== HostedUsageCreditCheckoutCreateState.closed ||
-    !input.lastReconciledAt ||
-    !input.terminalAt
-  ) {
+  if (!input.lastReconciledAt || !input.terminalAt) {
     return false;
   }
   const hasSessionProof = Boolean(
@@ -1561,7 +1525,6 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
     case HostedUsageCreditPurchaseStatus.fulfilled:
       return Boolean(
         hasSessionProof &&
-        input.fulfilledAt &&
         input.paidAt &&
         input.stripeChargeIdEncrypted &&
         input.stripeChargeLookupKey &&
@@ -1580,10 +1543,8 @@ async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
   purchase: HostedUsageCreditPurchase;
 }): Promise<Stripe.Checkout.SessionCreateParams> {
   if (
-    input.purchase.authorizationContext !== HOSTED_USAGE_CREDIT_AUTHORIZATION_CONTEXT ||
     input.purchase.checkoutRequestPolicyVersion !==
-      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
-    input.purchase.checkoutClientReferenceId !== input.purchase.id
+      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
   ) {
     throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
   }
@@ -1612,27 +1573,15 @@ async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
     throw buildHostedUsageCreditInvariantError("checkout_customer_lookup_mismatch");
   }
 
-  const metadata = parseHostedUsageCreditCheckoutMetadata({
-    purchaseId: input.purchase.id,
-    value: input.purchase.checkoutMetadataJson,
-  });
-  const checkoutRequest = buildHostedUsageCreditStripeCheckoutRequest({
+  return buildHostedUsageCreditStripeCheckoutRequest({
     checkoutCancelUrl: input.purchase.checkoutCancelUrl,
     checkoutExpiresAt: input.purchase.checkoutExpiresAt,
-    checkoutMetadata: metadata,
+    checkoutMetadata: buildHostedUsageCreditCheckoutMetadata(input.purchase.id),
     checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
     priceId,
-    purchaseId: input.purchase.checkoutClientReferenceId,
+    purchaseId: input.purchase.id,
     stripeCustomerId,
   });
-  if (
-    buildHostedUsageCreditCheckoutRequestDigest(checkoutRequest) !==
-      input.purchase.checkoutRequestDigest
-  ) {
-    throw buildHostedUsageCreditInvariantError("checkout_request_digest_mismatch");
-  }
-
-  return checkoutRequest;
 }
 
 function buildHostedUsageCreditStripeCheckoutRequest(input: {
@@ -1724,27 +1673,8 @@ async function assertHostedUsageCreditStripePriceMatchesPurchase(input: {
   }
 }
 
-function buildHostedUsageCreditCheckoutRequestDigest(
-  request: Stripe.Checkout.SessionCreateParams,
-): string {
-  return sha256Hex(JSON.stringify(request));
-}
-
 function buildHostedUsageCreditCheckoutIdempotencyKey(purchaseId: string): string {
   return `hosted-usage-credit-checkout:${purchaseId}`;
-}
-
-function buildHostedUsageCreditRequestFingerprint(input: {
-  beneficiaryMemberId: string;
-  offerCode: HostedUsageCreditOfferCode;
-  payerMemberId: string;
-}): string {
-  return sha256Hex(JSON.stringify({
-    authorizationContext: HOSTED_USAGE_CREDIT_AUTHORIZATION_CONTEXT,
-    beneficiaryMemberId: input.beneficiaryMemberId,
-    offerCode: input.offerCode,
-    payerMemberId: input.payerMemberId,
-  }));
 }
 
 function buildHostedUsageCreditCheckoutReturnUrl(input: {
@@ -1759,39 +1689,20 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   return url.toString();
 }
 
-function assertHostedUsageCreditPurchaseEligibility(input: {
-  billingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>;
-  member: {
-    accountGroupMemberships: readonly { id: string }[];
-    billingStatus: string;
-    suspendedAt: Date | null;
-    threadContainer: { memberId: string } | null;
-  };
+function assertHostedUsageCreditRequestMatches(input: {
+  memberId: string;
+  offerCode: HostedUsageCreditOfferCode | null;
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    "beneficiaryMemberId" | "offerCode" | "payerMemberId"
+  >;
 }): void {
-  const billingPlanCode = parseHostedBillingPlanCode(
-    input.billingRef?.currentBillingPlanCode,
-  );
   if (
-    input.member.billingStatus !== "active" ||
-    input.member.suspendedAt ||
-    input.member.threadContainer ||
-    input.member.accountGroupMemberships.length > 0 ||
-    !billingPlanCode ||
-    parseHostedBillingPhase(input.billingRef?.currentBillingPhase) !== "paid" ||
-    isHostedPulseTrialBillingState({
-      currentBillingPhase: input.billingRef?.currentBillingPhase,
-      currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-    })
+    !input.offerCode ||
+    input.purchase.offerCode !== input.offerCode ||
+    input.purchase.payerMemberId !== input.memberId ||
+    input.purchase.beneficiaryMemberId !== input.memberId
   ) {
-    throw buildHostedUsageCreditNotEligibleError();
-  }
-}
-
-function assertHostedUsageCreditRequestFingerprintMatches(
-  purchase: Pick<HostedUsageCreditPurchase, "requestFingerprint">,
-  expected: string,
-): void {
-  if (purchase.requestFingerprint !== expected) {
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
       httpStatus: 409,
@@ -1810,7 +1721,7 @@ function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
     input.session.adaptive_pricing?.enabled !== false ||
     input.session.livemode !== input.purchase.stripeLiveMode ||
     input.session.mode !== "payment" ||
-    input.session.client_reference_id !== input.purchase.checkoutClientReferenceId ||
+    input.session.client_reference_id !== input.purchase.id ||
     !sessionCustomerId ||
     !createHostedStripeCustomerLookupKeyReadCandidates(sessionCustomerId)
       .includes(input.purchase.stripeCustomerLookupKey) ||
@@ -1819,17 +1730,6 @@ function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
   ) {
     throw buildHostedUsageCreditInvariantError("stripe_session_mismatch");
   }
-}
-
-function parseHostedUsageCreditCheckoutMetadata(input: {
-  purchaseId: string;
-  value: Prisma.JsonValue;
-}): Record<string, string> {
-  const expected = buildHostedUsageCreditCheckoutMetadata(input.purchaseId);
-  if (!isRecord(input.value) || !hostedUsageCreditMetadataEqual(input.value, expected)) {
-    throw buildHostedUsageCreditInvariantError("checkout_metadata_invalid");
-  }
-  return expected;
 }
 
 function hostedUsageCreditMetadataEqual(

@@ -15,6 +15,7 @@ const routingMocks = vi.hoisted(() => ({
 }));
 
 const noticeMocks = vi.hoisted(() => ({
+  projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
 }));
@@ -28,6 +29,11 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-message", () => ({
+  projectHostedAiUsageLimitNoticeForDelivery:
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -95,6 +101,9 @@ describe("recordHostedAiUsageRecords", () => {
     vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) => input.message,
+    );
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
       status: "sent",
@@ -129,6 +138,10 @@ describe("recordHostedAiUsageRecords", () => {
     );
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate(),
+    );
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValueOnce(
+      "You hit your monthly Murph AI limit.\n\n" +
+      "Add usage: https://www.withmurph.ai/settings?addUsage=true#subscription",
     );
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
@@ -165,11 +178,19 @@ describe("recordHostedAiUsageRecords", () => {
           usageCreditLedgerVersion: "0",
         },
         memberId: "member_123",
-        message: "You hit your monthly Murph AI limit.",
+        message:
+          "You hit your monthly Murph AI limit.\n\n" +
+          "Add usage: https://www.withmurph.ai/settings?addUsage=true#subscription",
         noticeCode: "edge_usage_limit_reached",
         occurredAt: "2026-03-29T12:00:05.000Z",
         prisma,
         sourceEventId: "turn_123.attempt-1",
+      });
+    expect(noticeMocks.projectHostedAiUsageLimitNoticeForDelivery)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "member_123",
+        message: "You hit your monthly Murph AI limit.",
+        prisma,
       });
   });
 

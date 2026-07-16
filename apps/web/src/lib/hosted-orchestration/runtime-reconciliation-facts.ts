@@ -38,6 +38,7 @@ import {
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
   sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
+import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -448,7 +449,11 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
         usageCreditLedgerVersion: decision.usageCreditLedgerVersion.toString(),
       },
       memberId: input.userId,
-      message: decision.userNotice.message,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.userId,
+        message: decision.userNotice.message,
+        prisma: input.prisma,
+      }),
       noticeCode: decision.userNotice.code,
       occurredAt: wake.occurredAt,
       prisma: input.prisma,
@@ -462,7 +467,11 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
   if (isHostedTelegramConversationMessageWake(wake)) {
     const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
       memberId: input.userId,
-      message: decision.userNotice.message,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.userId,
+        message: decision.userNotice.message,
+        prisma: input.prisma,
+      }),
       periodStart: decision.periodStart,
       prisma: input.prisma,
       replyToMessageId: wake.message.telegramMessage.messageId,

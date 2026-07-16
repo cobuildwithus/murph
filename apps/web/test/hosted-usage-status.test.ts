@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getHostedOnboardingEnvironment: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedPersonalUsageCreditOfferCodes: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -23,8 +23,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
+vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedPersonalUsageCreditOfferCodes:
+    mocks.readHostedPersonalUsageCreditOfferCodes,
 }));
 
 import {
@@ -42,13 +43,9 @@ const PERIOD_END = new Date("2026-07-11T00:00:00.000Z");
 describe("readHostedPersonalAiUsageStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      stripeUsageCreditPriceIdsByOffer: {
-        usage_10_usd: "price_usage_10",
-        usage_25_usd: null,
-        usage_5_usd: null,
-      },
-    });
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
+      "usage_10_usd",
+    ]);
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
       suspendedAt: null,
@@ -135,16 +132,14 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/UsdMicros|token|dollar/iu);
     expect(JSON.stringify(result)).not.toContain("price_usage_10");
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledWith({
+      memberId: "member_usage_2",
+      prisma: expect.any(Object),
+    });
   });
 
   it("does not recommend adding usage when no canonical offer is configured", async () => {
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      stripeUsageCreditPriceIdsByOffer: {
-        usage_10_usd: null,
-        usage_25_usd: null,
-        usage_5_usd: null,
-      },
-    });
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_paid_member_plan",
       limitUsdMicros: 10_000_000n,
@@ -164,6 +159,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
   });
 
   it("returns current Edge terms for an explicit request below the recommendation threshold", async () => {
@@ -190,6 +186,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberBillingEligibilityState).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
   });
 
   it("returns current Pulse terms for an explicit trial request below the recommendation threshold", async () => {
@@ -271,8 +268,9 @@ describe("readHostedPersonalAiUsageStatus", () => {
       usedPercent: 85,
     });
     expect(result).not.toHaveProperty("subscriptionActionQuote");
-    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberBillingEligibilityState).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
   });
 
   it("avoids trial action-state fanout without a public action URL", async () => {
@@ -301,6 +299,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
   });
 
   it("does not recommend adding usage when the paid billing state is ineligible", async () => {
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
@@ -332,6 +331,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
   ])(
     "does not recommend adding usage with incomplete Stripe billing references",
     async (hasStripeCustomerId, hasStripeSubscriptionId) => {
+      mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
       mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
@@ -360,10 +360,10 @@ describe("readHostedPersonalAiUsageStatus", () => {
     },
   );
 
-  it("keeps exhausted paid usage available when billing action state cannot be read", async () => {
+  it("keeps exhausted paid usage available when top-up eligibility cannot be read", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
-      new Error("private billing read failed"),
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockRejectedValueOnce(
+      new Error("private eligibility read failed"),
     );
     const prisma = buildPrisma(null);
 
@@ -386,15 +386,14 @@ describe("readHostedPersonalAiUsageStatus", () => {
         usedPercent: 100,
       });
       expect(warn).toHaveBeenCalledWith(
-        "Hosted plan usage action resolution failed.",
+        "Hosted personal usage-credit eligibility resolution failed.",
         {
-          accessKind: "paid",
           errorName: "Error",
           planCode: "launch_monthly",
         },
       );
       expect(JSON.stringify(warn.mock.calls)).not.toMatch(
-        /member_usage_action_failure|private billing read failed/u,
+        /member_usage_action_failure|private eligibility read failed/u,
       );
     } finally {
       warn.mockRestore();

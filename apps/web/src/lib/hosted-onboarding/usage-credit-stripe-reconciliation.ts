@@ -1,5 +1,4 @@
 import {
-  HostedUsageCreditCheckoutCreateState,
   HostedUsageCreditPurchaseStatus,
   Prisma,
   type PrismaClient,
@@ -86,9 +85,7 @@ const HOSTED_USAGE_CREDIT_PURCHASE_SELECT = {
   cashAmountMinor: true,
   cashCurrency: true,
   checkoutCancelUrl: true,
-  checkoutClientReferenceId: true,
   checkoutExpiresAt: true,
-  checkoutMetadataJson: true,
   checkoutRequestPolicyVersion: true,
   checkoutSuccessUrl: true,
   createdAt: true,
@@ -946,7 +943,6 @@ async function reconcileHostedUsageCreditCheckoutEventTx(input: {
       tx: input.tx,
     });
     await bindHostedUsageCreditStripeReferencesTx({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       expectedReconciliationVersion: input.expectedReconciliationVersion,
       lastReconciledAt: reconciledAt,
       privateReferences,
@@ -966,7 +962,6 @@ async function reconcileHostedUsageCreditCheckoutEventTx(input: {
     input.purchase.status === HostedUsageCreditPurchaseStatus.expired
   ) {
     await bindHostedUsageCreditStripeReferencesTx({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       expectedReconciliationVersion: input.expectedReconciliationVersion,
       lastReconciledAt: reconciledAt,
       privateReferences,
@@ -988,7 +983,6 @@ async function reconcileHostedUsageCreditCheckoutEventTx(input: {
       );
     }
     await transitionHostedUsageCreditCheckoutTx({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       expectedReconciliationVersion: input.expectedReconciliationVersion,
       lastReconciledAt: reconciledAt,
       privateReferences,
@@ -1007,7 +1001,6 @@ async function reconcileHostedUsageCreditCheckoutEventTx(input: {
       );
     }
     await transitionHostedUsageCreditCheckoutTx({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       expectedReconciliationVersion: input.expectedReconciliationVersion,
       lastReconciledAt: reconciledAt,
       privateReferences,
@@ -1020,7 +1013,6 @@ async function reconcileHostedUsageCreditCheckoutEventTx(input: {
   }
 
   await transitionHostedUsageCreditCheckoutTx({
-    checkoutCreateState: HostedUsageCreditCheckoutCreateState.attached,
     expectedReconciliationVersion: input.expectedReconciliationVersion,
     lastReconciledAt: reconciledAt,
     privateReferences,
@@ -1691,7 +1683,6 @@ async function reconcileAndBindHostedUsageCreditFinancialSnapshotTx(input: {
     tx: input.tx,
   });
   await bindHostedUsageCreditStripeReferencesTx({
-    checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
     expectedReconciliationVersion: input.expectedReconciliationVersion,
     lastReconciledAt: new Date(),
     privateReferences: input.privateReferences,
@@ -1722,7 +1713,6 @@ async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
   );
   const grant = await runHostedUsageCreditDatabaseOperation({
     read: () => grantHostedUsageCreditForPurchaseTx({
-      effectiveAt: paidAt,
       paidAt,
       purchaseId: input.purchase.id,
       tx: input.tx,
@@ -1925,15 +1915,10 @@ function assertHostedUsageCreditSession(input: {
   }
   if (
     normalizeNullableString(input.session.client_reference_id) !==
-      input.purchase.checkoutClientReferenceId ||
-    input.purchase.checkoutClientReferenceId !== input.purchase.id
+      input.purchase.id
   ) {
     throw new Error("Usage-credit Checkout client reference did not match.");
   }
-  assertHostedUsageCreditMetadata({
-    metadata: input.purchase.checkoutMetadataJson,
-    purchase: input.purchase,
-  });
   assertHostedUsageCreditMetadata({
     metadata: input.session.metadata,
     purchase: input.purchase,
@@ -2128,7 +2113,6 @@ async function buildHostedUsageCreditStripePrivateReferences(input: {
 }
 
 async function bindHostedUsageCreditStripeReferencesTx(input: {
-  checkoutCreateState: HostedUsageCreditCheckoutCreateState;
   expectedReconciliationVersion: bigint;
   lastReconciledAt: Date;
   privateReferences: Awaited<
@@ -2140,7 +2124,6 @@ async function bindHostedUsageCreditStripeReferencesTx(input: {
   const updated = await runHostedUsageCreditDatabaseOperation({
     read: () => input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: input.checkoutCreateState,
         lastReconciledAt: input.lastReconciledAt,
         reconciliationVersion: {
           increment: 1n,
@@ -2163,7 +2146,6 @@ async function bindHostedUsageCreditStripeReferencesTx(input: {
 }
 
 async function transitionHostedUsageCreditCheckoutTx(input: {
-  checkoutCreateState: HostedUsageCreditCheckoutCreateState;
   expectedReconciliationVersion: bigint;
   lastReconciledAt: Date;
   privateReferences: Awaited<
@@ -2177,7 +2159,6 @@ async function transitionHostedUsageCreditCheckoutTx(input: {
   const updated = await runHostedUsageCreditDatabaseOperation({
     read: () => input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        checkoutCreateState: input.checkoutCreateState,
         lastReconciledAt: input.lastReconciledAt,
         reconciliationVersion: {
           increment: 1n,

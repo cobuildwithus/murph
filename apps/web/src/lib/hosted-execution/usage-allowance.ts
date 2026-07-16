@@ -1689,21 +1689,8 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   let usageCreditLedgerVersion = input.period.usageCreditLedgerVersion;
 
   if (creditDebitUsdMicros > 0n) {
-    // The runtime does not transport an admission cutoff yet. Re-read the
-    // beneficiary projection under the row lock held by this transaction so a
-    // concurrent grant or debit has one serial order, then use that exact
-    // ledger version as the conservative v1 eligibility boundary.
-    const creditProjection = await input.tx.hostedMember.findUniqueOrThrow({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        usageCreditLedgerVersion: true,
-      },
-    });
     const settlement = await settleHostedUsageCreditForUsageTx({
       beneficiaryMemberId: input.memberId,
-      creditEligibilitySequence: creditProjection.usageCreditLedgerVersion ?? 0n,
       debitUsdMicros: creditDebitUsdMicros,
       effectiveAt: input.recordOccurredAt,
       sourceUsageId: input.sourceUsageId,

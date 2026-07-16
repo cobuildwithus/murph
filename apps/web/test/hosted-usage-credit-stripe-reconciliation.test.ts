@@ -1,5 +1,4 @@
 import {
-  HostedUsageCreditCheckoutCreateState,
   HostedUsageCreditPurchaseStatus,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -324,7 +323,6 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     });
 
     expect(mocks.grantUsageCredit).toHaveBeenCalledWith({
-      effectiveAt: new Date("2026-07-16T03:20:00.000Z"),
       paidAt: new Date("2026-07-16T03:20:00.000Z"),
       purchaseId: "hucp_purchase_123",
       tx: harness.client,
@@ -336,7 +334,6 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       vi.mocked(harness.client.$transaction),
     );
     expect(harness.purchase).toEqual(expect.objectContaining({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       lastReconciledAt: expect.any(Date),
       stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
       stripeCheckoutSessionLookupKey:
@@ -364,7 +361,6 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.attached,
       status: HostedUsageCreditPurchaseStatus.payment_pending,
       terminalAt: null,
     }));
@@ -427,7 +423,6 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       status: HostedUsageCreditPurchaseStatus.payment_failed,
       terminalAt: new Date("2026-07-16T03:20:00.000Z"),
     }));
@@ -458,7 +453,6 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     });
 
     expect(harness.purchase).toEqual(expect.objectContaining({
-      checkoutCreateState: HostedUsageCreditCheckoutCreateState.closed,
       status: HostedUsageCreditPurchaseStatus.payment_failed,
     }));
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
@@ -1347,16 +1341,12 @@ function makeUsageCreditPurchase(
     stripePaymentIntentLookupKey: string | null;
   }>,
 ) {
-  const metadata = makeUsageCreditMetadata();
   return {
     beneficiaryMemberId: "member_beneficiary",
     cashAmountMinor: 500,
     cashCurrency: "usd",
     checkoutCancelUrl: "https://murph.example/settings?usageCredit=cancel",
-    checkoutClientReferenceId: "hucp_purchase_123",
-    checkoutCreateState: HostedUsageCreditCheckoutCreateState.attached,
     checkoutExpiresAt: new Date("2026-07-16T04:50:00.456Z"),
-    checkoutMetadataJson: metadata,
     checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
     checkoutSuccessUrl: "https://murph.example/settings?usageCredit=success",
     createdAt: new Date("2026-07-16T03:20:00.000Z"),

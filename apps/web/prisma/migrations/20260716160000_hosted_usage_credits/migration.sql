@@ -1,10 +1,3 @@
-CREATE TYPE "HostedUsageCreditCheckoutCreateState" AS ENUM (
-  'not_started',
-  'claimed',
-  'attached',
-  'closed'
-);
-
 CREATE TYPE "HostedUsageCreditPurchaseStatus" AS ENUM (
   'created',
   'checkout_open',
@@ -17,26 +10,21 @@ CREATE TYPE "HostedUsageCreditPurchaseStatus" AS ENUM (
 CREATE TYPE "HostedUsageCreditEntryKind" AS ENUM (
   'purchase_grant',
   'usage_debit',
-  'refund_reversal',
-  'dispute_reversal',
-  'reversal_restoration'
+  'refund_adjustment',
+  'dispute_adjustment'
 );
 
 CREATE TABLE "hosted_usage_credit_purchase" (
   "id" TEXT NOT NULL,
   "payer_member_id" TEXT NOT NULL,
   "beneficiary_member_id" TEXT NOT NULL,
-  "authorization_context" TEXT NOT NULL,
   "offer_code" TEXT NOT NULL,
   "cash_currency" TEXT NOT NULL,
   "cash_amount_minor" INTEGER NOT NULL,
   "grant_usd_micros" BIGINT NOT NULL,
   "remaining_credit_usd_micros" BIGINT NOT NULL DEFAULT 0,
-  "conversion_policy_version" TEXT NOT NULL,
   "client_request_key" TEXT NOT NULL,
-  "request_fingerprint" TEXT NOT NULL,
   "checkout_request_policy_version" TEXT NOT NULL,
-  "checkout_create_state" "HostedUsageCreditCheckoutCreateState" NOT NULL DEFAULT 'not_started',
   "status" "HostedUsageCreditPurchaseStatus" NOT NULL DEFAULT 'created',
   "stripe_live_mode" BOOLEAN NOT NULL,
   "stripe_price_lookup_key" TEXT NOT NULL,
@@ -50,15 +38,10 @@ CREATE TABLE "hosted_usage_credit_purchase" (
   "stripe_payment_intent_id_encrypted" TEXT,
   "stripe_charge_lookup_key" TEXT,
   "stripe_charge_id_encrypted" TEXT,
-  "checkout_client_reference_id" TEXT NOT NULL,
   "checkout_success_url" TEXT NOT NULL,
   "checkout_cancel_url" TEXT NOT NULL,
-  "checkout_metadata_json" JSONB NOT NULL,
-  "checkout_request_digest" TEXT NOT NULL,
-  "checkout_create_retry_cutoff_at" TIMESTAMP(3) NOT NULL,
   "checkout_expires_at" TIMESTAMP(3) NOT NULL,
   "paid_at" TIMESTAMP(3),
-  "fulfilled_at" TIMESTAMP(3),
   "terminal_at" TIMESTAMP(3),
   "last_reconciled_at" TIMESTAMP(3),
   "reconciliation_version" BIGINT NOT NULL DEFAULT 0,
@@ -75,8 +58,6 @@ CREATE TABLE "hosted_usage_credit_purchase" (
       "remaining_credit_usd_micros" >= 0
       AND "remaining_credit_usd_micros" <= "grant_usd_micros"
     ),
-  CONSTRAINT "hosted_usage_credit_purchase_checkout_window_valid"
-    CHECK ("checkout_create_retry_cutoff_at" < "checkout_expires_at"),
   CONSTRAINT "hosted_usage_credit_purchase_reconciliation_version_nonnegative"
     CHECK ("reconciliation_version" >= 0),
   CONSTRAINT "hosted_usage_credit_purchase_payer_member_id_fkey"
@@ -104,9 +85,9 @@ CREATE TABLE "hosted_usage_credit_entry" (
   CONSTRAINT "hosted_usage_credit_entry_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"
     CHECK (
-      ("kind" IN ('purchase_grant', 'reversal_restoration') AND "amount_usd_micros" > 0)
-      OR
-      ("kind" IN ('usage_debit', 'refund_reversal', 'dispute_reversal') AND "amount_usd_micros" < 0)
+      ("kind" = 'purchase_grant' AND "amount_usd_micros" > 0)
+      OR ("kind" = 'usage_debit' AND "amount_usd_micros" < 0)
+      OR ("kind" IN ('refund_adjustment', 'dispute_adjustment') AND "amount_usd_micros" <> 0)
     ),
   CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"
     CHECK (
@@ -123,7 +104,7 @@ CREATE TABLE "hosted_usage_credit_entry" (
       )
       OR
       (
-        "kind" IN ('refund_reversal', 'dispute_reversal', 'reversal_restoration')
+        "kind" IN ('refund_adjustment', 'dispute_adjustment')
         AND "parent_grant_entry_id" IS NOT NULL
         AND "source_usage_id" IS NULL
         AND "source_reference_lookup_key" IS NOT NULL
@@ -154,17 +135,13 @@ CREATE UNIQUE INDEX "hosted_usage_credit_purchase_payer_request_key"
 
 CREATE UNIQUE INDEX "hosted_usage_credit_purchase_active_payer_key"
   ON "hosted_usage_credit_purchase"("payer_member_id")
-  WHERE "status" IN ('created', 'checkout_open', 'payment_pending')
-    OR "checkout_create_state" = 'claimed';
+  WHERE "status" IN ('created', 'checkout_open', 'payment_pending');
 
 CREATE INDEX "hosted_usage_credit_purchase_payer_status_idx"
   ON "hosted_usage_credit_purchase"("payer_member_id", "status", "created_at");
 
 CREATE INDEX "hosted_usage_credit_purchase_beneficiary_status_idx"
   ON "hosted_usage_credit_purchase"("beneficiary_member_id", "status", "created_at");
-
-CREATE INDEX "hosted_usage_credit_purchase_create_retry_idx"
-  ON "hosted_usage_credit_purchase"("checkout_create_state", "checkout_create_retry_cutoff_at");
 
 CREATE INDEX "hosted_usage_credit_purchase_price_lookup_idx"
   ON "hosted_usage_credit_purchase"("stripe_price_lookup_key");

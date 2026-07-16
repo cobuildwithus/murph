@@ -418,13 +418,6 @@ enum HostedStripeEventStatus {
   poisoned
 }
 
-enum HostedUsageCreditCheckoutCreateState {
-  not_started
-  claimed
-  attached
-  closed
-}
-
 enum HostedUsageCreditPurchaseStatus {
   created
   checkout_open
@@ -437,9 +430,8 @@ enum HostedUsageCreditPurchaseStatus {
 enum HostedUsageCreditEntryKind {
   purchase_grant
   usage_debit
-  refund_reversal
-  dispute_reversal
-  reversal_restoration
+  refund_adjustment
+  dispute_adjustment
 }
 
 enum HostedCryptoDomain {
@@ -1250,17 +1242,13 @@ model HostedUsageCreditPurchase {
   id                                String                               @id
   payerMemberId                     String                               @map("payer_member_id")
   beneficiaryMemberId               String                               @map("beneficiary_member_id")
-  authorizationContext              String                               @map("authorization_context")
   offerCode                         String                               @map("offer_code")
   cashCurrency                      String                               @map("cash_currency")
   cashAmountMinor                   Int                                  @map("cash_amount_minor")
   grantUsdMicros                    BigInt                               @map("grant_usd_micros")
   remainingCreditUsdMicros          BigInt                               @default(0) @map("remaining_credit_usd_micros")
-  conversionPolicyVersion           String                               @map("conversion_policy_version")
   clientRequestKey                  String                               @map("client_request_key")
-  requestFingerprint                String                               @map("request_fingerprint")
   checkoutRequestPolicyVersion      String                               @map("checkout_request_policy_version")
-  checkoutCreateState               HostedUsageCreditCheckoutCreateState @default(not_started) @map("checkout_create_state")
   status                            HostedUsageCreditPurchaseStatus       @default(created)
   stripeLiveMode                    Boolean                              @map("stripe_live_mode")
   stripePriceLookupKey              String                               @map("stripe_price_lookup_key")
@@ -1274,15 +1262,10 @@ model HostedUsageCreditPurchase {
   stripePaymentIntentIdEncrypted    String?                              @map("stripe_payment_intent_id_encrypted")
   stripeChargeLookupKey             String?                              @unique(map: "hosted_usage_credit_purchase_charge_lookup_key") @map("stripe_charge_lookup_key")
   stripeChargeIdEncrypted           String?                              @map("stripe_charge_id_encrypted")
-  checkoutClientReferenceId         String                               @map("checkout_client_reference_id")
   checkoutSuccessUrl                String                               @map("checkout_success_url")
   checkoutCancelUrl                 String                               @map("checkout_cancel_url")
-  checkoutMetadataJson              Json                                 @map("checkout_metadata_json")
-  checkoutRequestDigest             String                               @map("checkout_request_digest")
-  checkoutCreateRetryCutoffAt       DateTime                             @map("checkout_create_retry_cutoff_at")
   checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
   paidAt                            DateTime?                            @map("paid_at")
-  fulfilledAt                       DateTime?                            @map("fulfilled_at")
   terminalAt                        DateTime?                            @map("terminal_at")
   lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
   reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
@@ -1295,7 +1278,6 @@ model HostedUsageCreditPurchase {
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@index([payerMemberId, status, createdAt], map: "hosted_usage_credit_purchase_payer_status_idx")
   @@index([beneficiaryMemberId, status, createdAt], map: "hosted_usage_credit_purchase_beneficiary_status_idx")
-  @@index([checkoutCreateState, checkoutCreateRetryCutoffAt], map: "hosted_usage_credit_purchase_create_retry_idx")
   @@index([stripePriceLookupKey], map: "hosted_usage_credit_purchase_price_lookup_idx")
   @@index([stripeCustomerLookupKey], map: "hosted_usage_credit_purchase_customer_lookup_idx")
   @@map("hosted_usage_credit_purchase")

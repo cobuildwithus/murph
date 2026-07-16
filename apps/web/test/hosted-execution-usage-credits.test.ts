@@ -109,7 +109,6 @@ describe("hosted usage credits", () => {
     };
 
     await expect(grantHostedUsageCreditForPurchaseTx({
-      effectiveAt: EFFECTIVE_AT,
       paidAt: PAID_AT,
       purchaseId: "purchase_1",
       tx: tx as never,
@@ -136,7 +135,7 @@ describe("hosted usage credits", () => {
         amountUsdMicros: 5_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 1n,
-        effectiveAt: EFFECTIVE_AT,
+        effectiveAt: PAID_AT,
         kind: "purchase_grant",
         purchaseId: "purchase_1",
         semanticSourceKey:
@@ -145,11 +144,10 @@ describe("hosted usage credits", () => {
     });
     expect(purchaseUpdateMany).toHaveBeenCalledExactlyOnceWith({
       data: {
-        fulfilledAt: EFFECTIVE_AT,
         paidAt: PAID_AT,
         remainingCreditUsdMicros: 5_000_000n,
         status: "fulfilled",
-        terminalAt: EFFECTIVE_AT,
+        terminalAt: PAID_AT,
       },
       where: {
         beneficiaryMemberId: BENEFICIARY_ID,
@@ -170,7 +168,6 @@ describe("hosted usage credits", () => {
       }
       if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
         return [buildLockedPurchase({
-          fulfilledAt: EFFECTIVE_AT,
           paidAt: PAID_AT,
           remainingCreditUsdMicros: 3_000_000n,
           status: "fulfilled",
@@ -183,7 +180,6 @@ describe("hosted usage credits", () => {
     const executeRaw = vi.fn();
 
     await expect(grantHostedUsageCreditForPurchaseTx({
-      effectiveAt: EFFECTIVE_AT,
       paidAt: PAID_AT,
       purchaseId: "purchase_1",
       tx: {
@@ -273,7 +269,6 @@ describe("hosted usage credits", () => {
 
     await expect(settleHostedUsageCreditForUsageTx({
       beneficiaryMemberId: BENEFICIARY_ID,
-      creditEligibilitySequence: 2n,
       debitUsdMicros: 15_000_000n,
       effectiveAt: EFFECTIVE_AT,
       sourceUsageId: "usage_1",
@@ -334,47 +329,6 @@ describe("hosted usage credits", () => {
     ]);
   });
 
-  it("treats a missing eligibility cutoff as no purchased-credit authority", async () => {
-    const queryRaw = createTaggedSqlMock(({ sql }) => {
-      if (sql.includes('FROM "hosted_member"')) {
-        return [{
-          balanceUsdMicros: 5_000_000n,
-          beneficiaryMemberId: BENEFICIARY_ID,
-          ledgerVersion: 1n,
-        }];
-      }
-      throw new Error(`Unexpected SQL: ${sql}`);
-    });
-    const entryCreate = vi.fn();
-    const purchaseUpdateMany = vi.fn();
-
-    await expect(settleHostedUsageCreditForUsageTx({
-      beneficiaryMemberId: BENEFICIARY_ID,
-      creditEligibilitySequence: null,
-      debitUsdMicros: 2_000_000n,
-      effectiveAt: EFFECTIVE_AT,
-      sourceUsageId: "usage_legacy",
-      tx: {
-        $queryRaw: queryRaw,
-        hostedUsageCreditEntry: {
-          create: entryCreate,
-          findMany: vi.fn().mockResolvedValue([]),
-        },
-        hostedUsageCreditPurchase: {
-          updateMany: purchaseUpdateMany,
-        },
-      } as never,
-    })).resolves.toEqual({
-      absorbedUsdMicros: 2_000_000n,
-      balanceUsdMicros: 5_000_000n,
-      debitedUsdMicros: 0n,
-      ledgerVersion: 1n,
-    });
-
-    expect(entryCreate).not.toHaveBeenCalled();
-    expect(purchaseUpdateMany).not.toHaveBeenCalled();
-  });
-
   it("replays existing per-grant usage allocations without another debit", async () => {
     const queryRaw = createTaggedSqlMock(({ sql }) => {
       if (sql.includes('FROM "hosted_member"')) {
@@ -391,7 +345,6 @@ describe("hosted usage credits", () => {
 
     await expect(settleHostedUsageCreditForUsageTx({
       beneficiaryMemberId: BENEFICIARY_ID,
-      creditEligibilitySequence: 6n,
       debitUsdMicros: 7_000_000n,
       effectiveAt: EFFECTIVE_AT,
       sourceUsageId: "usage_replay",
@@ -441,7 +394,7 @@ describe("hosted usage credits", () => {
       beneficiarySequence: 2n,
       parentGrantEntryId: "grant_1",
       sourceReferenceLookupKey: "refund_lookup_prior",
-    }]).mockResolvedValueOnce([]);
+    }]);
 
     await expect(reconcileHostedUsageCreditRefundNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -472,13 +425,14 @@ describe("hosted usage credits", () => {
       data: expect.objectContaining({
         amountUsdMicros: -2_000_000n,
         beneficiarySequence: 6n,
-        kind: "refund_reversal",
+        kind: "refund_adjustment",
         parentGrantEntryId: "grant_1",
         semanticSourceKey:
           "hosted-usage-credit:refund:purchase:purchase_1:net:1000000:to:3000000:ledger:6:v2",
         sourceReferenceLookupKey: "refund_lookup_1",
       }),
     });
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
     expect(fixture.executeRaw).toHaveBeenCalledOnce();
   });
 
@@ -494,7 +448,7 @@ describe("hosted usage credits", () => {
       beneficiarySequence: 3n,
       parentGrantEntryId: "grant_1",
       sourceReferenceLookupKey: "refund_lookup_1",
-    }]).mockResolvedValueOnce([]);
+    }]);
 
     await expect(reconcileHostedUsageCreditRefundNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -513,6 +467,7 @@ describe("hosted usage credits", () => {
     });
 
     expect(fixture.entryCreate).not.toHaveBeenCalled();
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
     expect(fixture.purchaseUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -530,7 +485,7 @@ describe("hosted usage credits", () => {
       beneficiarySequence: 3n,
       parentGrantEntryId: "grant_1",
       sourceReferenceLookupKey: "refund_lookup_1",
-    }]).mockResolvedValueOnce([]);
+    }]);
 
     await expect(reconcileHostedUsageCreditRefundNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -552,13 +507,43 @@ describe("hosted usage credits", () => {
       data: expect.objectContaining({
         amountUsdMicros: 3_000_000n,
         beneficiarySequence: 7n,
-        kind: "reversal_restoration",
+        kind: "refund_adjustment",
         semanticSourceKey:
           "hosted-usage-credit:refund:purchase:purchase_1:net:3000000:to:0:ledger:7:v2",
         sourceReferenceLookupKey: "refund_lookup_failed",
       }),
     });
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
     expect(fixture.executeRaw).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when signed adjustments restore more than they reversed", async () => {
+    const fixture = createFinancialCreditFixture({
+      balanceUsdMicros: 5_000_000n,
+      ledgerVersion: 2n,
+      remainingCreditUsdMicros: 5_000_000n,
+    });
+    fixture.entryFindMany.mockResolvedValueOnce([{
+      amountUsdMicros: 1_000_000n,
+      beneficiaryMemberId: BENEFICIARY_ID,
+      beneficiarySequence: 2n,
+      parentGrantEntryId: "grant_1",
+      sourceReferenceLookupKey: "refund_lookup_corrupt",
+    }]);
+
+    await expect(reconcileHostedUsageCreditRefundNetReversalTx({
+      effectiveAt: EFFECTIVE_AT,
+      purchaseId: "purchase_1",
+      sourceReferenceLookupKey: "refund_lookup_corrupt",
+      targetNetReversalUsdMicros: 0n,
+      tx: fixture.tx as never,
+    })).rejects.toThrowError(
+      "Hosted usage-credit adjustment restored more than it reversed.",
+    );
+
+    expect(fixture.entryCreate).not.toHaveBeenCalled();
+    expect(fixture.purchaseUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.executeRaw).not.toHaveBeenCalled();
   });
 
   it("converges aggregate refunds when the provenance source changes", async () => {
@@ -613,22 +598,22 @@ describe("hosted usage credits", () => {
     }))).toEqual([
       {
         amountUsdMicros: -2_500_000n,
-        kind: "refund_reversal",
+        kind: "refund_adjustment",
         sourceReferenceLookupKey: "refund_lookup_r1",
       },
       {
         amountUsdMicros: -2_500_000n,
-        kind: "refund_reversal",
+        kind: "refund_adjustment",
         sourceReferenceLookupKey: "refund_lookup_r2",
       },
       {
         amountUsdMicros: 2_500_000n,
-        kind: "reversal_restoration",
+        kind: "refund_adjustment",
         sourceReferenceLookupKey: "refund_lookup_r1",
       },
       {
         amountUsdMicros: 2_500_000n,
-        kind: "reversal_restoration",
+        kind: "refund_adjustment",
         sourceReferenceLookupKey: "refund_lookup_r2",
       },
     ]);
@@ -648,7 +633,7 @@ describe("hosted usage credits", () => {
       beneficiarySequence: 2n,
       parentGrantEntryId: "grant_1",
       sourceReferenceLookupKey: "dispute_lookup_1",
-    }]).mockResolvedValueOnce([]);
+    }]);
 
     await expect(reconcileHostedUsageCreditDisputeNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -678,7 +663,7 @@ describe("hosted usage credits", () => {
         sourceReferenceLookupKey: true,
       },
       where: {
-        kind: "dispute_reversal",
+        kind: "dispute_adjustment",
         purchaseId: "purchase_1",
         sourceReferenceLookupKey: {
           in: ["dispute_lookup_1"],
@@ -688,11 +673,12 @@ describe("hosted usage credits", () => {
     expect(fixture.entryCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
         amountUsdMicros: -2_000_000n,
-        kind: "dispute_reversal",
+        kind: "dispute_adjustment",
         semanticSourceKey:
           "hosted-usage-credit:dispute:dispute_lookup_1:net:1000000:to:3000000:ledger:5:v2",
       }),
     });
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
   });
 
   it("partially restores a dispute and keeps its original lookup key across rotation", async () => {
@@ -703,21 +689,22 @@ describe("hosted usage credits", () => {
       nextLedgerVersion: 8n,
       remainingCreditUsdMicros: 2_000_000n,
     });
-    fixture.entryFindMany
-      .mockResolvedValueOnce([{
+    fixture.entryFindMany.mockResolvedValueOnce([
+      {
         amountUsdMicros: -3_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 2n,
         parentGrantEntryId: "grant_1",
         sourceReferenceLookupKey: "dispute_lookup_old",
-      }])
-      .mockResolvedValueOnce([{
+      },
+      {
         amountUsdMicros: 1_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 4n,
         parentGrantEntryId: "grant_1",
         sourceReferenceLookupKey: "dispute_lookup_old",
-      }]);
+      },
+    ]);
 
     await expect(reconcileHostedUsageCreditDisputeNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -738,21 +725,29 @@ describe("hosted usage credits", () => {
       unmetTargetUsdMicros: 0n,
     });
 
-    expect(fixture.entryFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      where: expect.objectContaining({
-        kind: "reversal_restoration",
-        semanticSourceKey: {
-          startsWith: "hosted-usage-credit:dispute:",
-        },
+    expect(fixture.entryFindMany).toHaveBeenCalledExactlyOnceWith({
+      orderBy: {
+        beneficiarySequence: "asc",
+      },
+      select: {
+        amountUsdMicros: true,
+        beneficiaryMemberId: true,
+        beneficiarySequence: true,
+        parentGrantEntryId: true,
+        sourceReferenceLookupKey: true,
+      },
+      where: {
+        kind: "dispute_adjustment",
+        purchaseId: "purchase_1",
         sourceReferenceLookupKey: {
           in: ["dispute_lookup_new", "dispute_lookup_old"],
         },
-      }),
-    }));
+      },
+    });
     expect(fixture.entryCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         amountUsdMicros: 1_000_000n,
-        kind: "reversal_restoration",
+        kind: "dispute_adjustment",
         semanticSourceKey:
           "hosted-usage-credit:dispute:dispute_lookup_old:net:2000000:to:1000000:ledger:8:v2",
         sourceReferenceLookupKey: "dispute_lookup_old",
@@ -766,21 +761,22 @@ describe("hosted usage credits", () => {
       ledgerVersion: 8n,
       remainingCreditUsdMicros: 3_000_000n,
     });
-    fixture.entryFindMany
-      .mockResolvedValueOnce([{
+    fixture.entryFindMany.mockResolvedValueOnce([
+      {
         amountUsdMicros: -3_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 2n,
         parentGrantEntryId: "grant_1",
         sourceReferenceLookupKey: "dispute_lookup_1",
-      }])
-      .mockResolvedValueOnce([{
+      },
+      {
         amountUsdMicros: 1_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
         beneficiarySequence: 4n,
         parentGrantEntryId: "grant_1",
         sourceReferenceLookupKey: "dispute_lookup_1",
-      }]);
+      },
+    ]);
 
     await expect(reconcileHostedUsageCreditDisputeNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -800,6 +796,7 @@ describe("hosted usage credits", () => {
     });
 
     expect(fixture.entryCreate).not.toHaveBeenCalled();
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
     expect(fixture.purchaseUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -809,7 +806,7 @@ describe("hosted usage credits", () => {
       ledgerVersion: 5n,
       remainingCreditUsdMicros: 0n,
     });
-    fixture.entryFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    fixture.entryFindMany.mockResolvedValueOnce([]);
 
     await expect(reconcileHostedUsageCreditDisputeNetReversalTx({
       effectiveAt: EFFECTIVE_AT,
@@ -829,6 +826,7 @@ describe("hosted usage credits", () => {
     });
 
     expect(fixture.entryCreate).not.toHaveBeenCalled();
+    expect(fixture.entryFindMany).toHaveBeenCalledOnce();
     expect(fixture.purchaseUpdateMany).not.toHaveBeenCalled();
     expect(fixture.executeRaw).not.toHaveBeenCalled();
   });
@@ -886,11 +884,11 @@ describe("hosted usage credits", () => {
       .toEqual([
         expect.objectContaining({
           amountUsdMicros: 2_000_000n,
-          kind: "reversal_restoration",
+          kind: "dispute_adjustment",
         }),
         expect.objectContaining({
           amountUsdMicros: -2_000_000n,
-          kind: "dispute_reversal",
+          kind: "dispute_adjustment",
         }),
       ]);
   });
@@ -902,7 +900,7 @@ describe("hosted usage credits", () => {
         buildFinancialEntry({
           amountUsdMicros: -3_000_000n,
           beneficiarySequence: 2n,
-          kind: "refund_reversal",
+          kind: "refund_adjustment",
           sourceReferenceLookupKey: "refund_lookup_failed",
         }),
         buildFinancialEntry({
@@ -945,7 +943,7 @@ describe("hosted usage credits", () => {
     });
 
     expect(fixture.entryCreate.mock.calls.map(([value]) => value.data.kind))
-      .toEqual(["reversal_restoration", "dispute_reversal"]);
+      .toEqual(["refund_adjustment", "dispute_adjustment"]);
   });
 
   it("uses ledger sequence to keep repeated target cycles uniquely append-only", async () => {
@@ -988,7 +986,6 @@ describe("hosted usage credits", () => {
 function buildLockedPurchase(
   overrides: Partial<{
     beneficiaryMemberId: string;
-    fulfilledAt: Date | null;
     grantUsdMicros: bigint;
     id: string;
     paidAt: Date | null;
@@ -998,7 +995,6 @@ function buildLockedPurchase(
 ) {
   return {
     beneficiaryMemberId: BENEFICIARY_ID,
-    fulfilledAt: null,
     grantUsdMicros: 5_000_000n,
     id: "purchase_1",
     paidAt: null,
@@ -1038,7 +1034,6 @@ function createFinancialCreditFixture(input: {
     }
     if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
       return [buildLockedPurchase({
-        fulfilledAt: EFFECTIVE_AT,
         paidAt: PAID_AT,
         remainingCreditUsdMicros: input.remainingCreditUsdMicros,
         status: "fulfilled",
@@ -1105,11 +1100,11 @@ interface FinancialEntryFixtureRow {
 function buildFinancialEntry(input: {
   amountUsdMicros: bigint;
   beneficiarySequence: bigint;
-  kind?: "dispute_reversal" | "refund_reversal";
+  kind?: "dispute_adjustment" | "refund_adjustment";
   sourceReferenceLookupKey: string;
 }): FinancialEntryFixtureRow {
-  const kind = input.kind ?? "dispute_reversal";
-  const semanticSourceKey = kind === "refund_reversal"
+  const kind = input.kind ?? "dispute_adjustment";
+  const semanticSourceKey = kind === "refund_adjustment"
     ? `hosted-usage-credit:refund:purchase:purchase_1:fixture:${input.beneficiarySequence}`
     : `hosted-usage-credit:dispute:${input.sourceReferenceLookupKey}:fixture:${input.beneficiarySequence}`;
   return {
@@ -1144,7 +1139,6 @@ function createStatefulFinancialCreditFixture(input: {
     }
     if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
       return [buildLockedPurchase({
-        fulfilledAt: EFFECTIVE_AT,
         paidAt: PAID_AT,
         remainingCreditUsdMicros,
         status: "fulfilled",

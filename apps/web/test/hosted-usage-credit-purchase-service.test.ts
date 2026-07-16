@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   ),
   getPrisma: vi.fn(),
   lockHostedMemberRow: vi.fn(async () => {}),
+  readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://join.example.test"),
   requireHostedStripeApiMode: vi.fn(),
@@ -58,6 +59,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedPersonalUsageCreditOfferCodes:
+    mocks.readHostedPersonalUsageCreditOfferCodes,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApiMode: mocks.requireHostedStripeApiMode,
@@ -83,11 +89,11 @@ import {
   createHostedUsageCreditCheckout,
   expireHostedUsageCreditCheckout,
   parseHostedUsageCreditCheckoutRequest,
+  readHostedActiveUsageCreditPurchaseForPayer,
   readHostedUsageCreditPurchaseStatus,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
-const RETRY_AT = new Date("2026-07-16T17:31:00.000Z");
 const MEMBER_ID = "hbm_member123";
 const CLIENT_REQUEST_KEY = "request_key_123456";
 
@@ -110,6 +116,11 @@ beforeEach(() => {
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
   });
+  mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
+    "usage_5_usd",
+    "usage_10_usd",
+    "usage_25_usd",
+  ]);
   mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(
     ({ offerCode }: { offerCode: string }) => ({
       offerCode,
@@ -170,18 +181,16 @@ describe("parseHostedUsageCreditCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
-  it("persists and claims the frozen purchase before one-time Checkout creation", async () => {
+  it("persists the purchase ambiguity fence before one-time Checkout creation", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripePriceRetrieve.mockImplementationOnce(async () => {
       const purchase = onlyPurchase(fake.purchases);
-      expect(purchase.checkoutCreateState).toBe("claimed");
       expect(purchase.status).toBe("created");
       return buildStripePrice();
     });
     mocks.stripeCheckoutCreate.mockImplementation(async (request, options) => {
       const purchase = onlyPurchase(fake.purchases);
-      expect(purchase.checkoutCreateState).toBe("claimed");
       expect(purchase.status).toBe("created");
       expect(request).toMatchObject({
         adaptive_pricing: { enabled: false },
@@ -225,11 +234,9 @@ describe("createHostedUsageCreditCheckout", () => {
       url: "https://checkout.stripe.test/session",
     });
     expect(purchase).toMatchObject({
-      authorizationContext: "personal_self_v1",
       cashAmountMinor: 1_000,
       cashCurrency: "usd",
-      checkoutCreateState: "attached",
-      conversionPolicyVersion: "hosted-usage-credit-v1",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
       grantUsdMicros: 10_000_000n,
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
@@ -251,6 +258,91 @@ describe("createHostedUsageCreditCheckout", () => {
     );
   });
 
+  it("projects the payer's frozen active Checkout without current eligibility or catalog reads", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    const checkout = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    });
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockReset();
+    mocks.requireHostedStripeUsageCreditCheckoutConfig.mockReset();
+
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toEqual({
+      offerCode: "usage_10_usd",
+      purchaseId: checkout.purchaseId,
+      retryAllowed: false,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
+    expect(mocks.requireHostedStripeUsageCreditCheckoutConfig).not.toHaveBeenCalled();
+  });
+
+  it("withholds the stored Checkout URL from a suspended payer while preserving cancel visibility", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    const checkout = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    });
+    fake.member.suspendedAt = NOW;
+
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toEqual({
+      offerCode: "usage_10_usd",
+      purchaseId: checkout.purchaseId,
+      retryAllowed: false,
+      status: "checkout_open",
+    });
+  });
+
+  it("withholds retry capability for a suspended payer's unattached purchase", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).rejects.toBeTruthy();
+    const purchase = onlyPurchase(fake.purchases);
+    fake.member.suspendedAt = NOW;
+    clearStripeProviderMockHistory();
+
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: new Date(NOW.getTime() + 60_000),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toEqual({
+      offerCode: "usage_10_usd",
+      purchaseId: purchase.id,
+      restartAt: (purchase.checkoutExpiresAt as Date).toISOString(),
+      retryAllowed: false,
+      status: "reconciling",
+    });
+    expectNoStripeProviderIo();
+  });
+
   it("retains a Session created during suspension without returning its Checkout URL", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
@@ -270,7 +362,6 @@ describe("createHostedUsageCreditCheckout", () => {
     });
 
     expect(onlyPurchase(fake.purchases)).toMatchObject({
-      checkoutCreateState: "attached",
       status: "checkout_open",
       stripeCheckoutSessionIdEncrypted: expect.any(String),
       stripeCheckoutSessionLookupKey: expect.any(String),
@@ -309,7 +400,6 @@ describe("createHostedUsageCreditCheckout", () => {
 
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
     expect(onlyPurchase(fake.purchases)).toMatchObject({
-      checkoutCreateState: "claimed",
       status: "created",
     });
   });
@@ -337,7 +427,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
 
-  it("replays the exact frozen request and stable key after an ambiguous response", async () => {
+  it("replays the purchase-derived request and stable key after an ambiguous response", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     const providerError = Object.assign(
@@ -380,7 +470,6 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(JSON.stringify(checkoutError)).not.toContain("price_private");
     expect(JSON.stringify(checkoutError)).not.toContain("cus_private");
     expect(onlyPurchase(fake.purchases)).toMatchObject({
-      checkoutCreateState: "claimed",
       status: "created",
     });
 
@@ -407,7 +496,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(1);
   });
 
-  it("rejects a corrupted frozen request before retrying Stripe", async () => {
+  it("rejects an unsupported Checkout request policy before retrying Stripe", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
@@ -419,7 +508,7 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
     })).rejects.toBeTruthy();
     const purchase = onlyPurchase(fake.purchases);
-    purchase.checkoutSuccessUrl = "https://tampered.example.test/settings";
+    purchase.checkoutRequestPolicyVersion = "hosted-usage-credit-checkout-v0";
     clearStripeProviderMockHistory();
 
     await expect(createHostedUsageCreditCheckout({
@@ -429,13 +518,50 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
     })).rejects.toMatchObject({
       code: "HOSTED_USAGE_CREDIT_CHECKOUT_INVARIANT_FAILED",
-      details: { code: "checkout_request_digest_mismatch" },
+      details: { code: "checkout_policy_mismatch" },
       httpStatus: 500,
     });
     expectNoStripeProviderIo();
   });
 
-  it("does not create or replace a claimed attempt after its retry cutoff", async () => {
+  it("stops provider creation retries at the derived 30-minute safety window", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).rejects.toBeTruthy();
+
+    const cutoffRecovery = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 30 * 60 * 1_000),
+      offerCode: "usage_10_usd",
+    });
+    expect(cutoffRecovery).toMatchObject({
+      restartAt: new Date(NOW.getTime() + 90 * 60 * 1_000).toISOString(),
+      status: "reconciling",
+    });
+    expect(cutoffRecovery).not.toHaveProperty("retryAllowed");
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: new Date(NOW.getTime() + 30 * 60 * 1_000),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      restartAt: new Date(NOW.getTime() + 90 * 60 * 1_000).toISOString(),
+      retryAllowed: false,
+      status: "reconciling",
+    });
+
+    expect(onlyPurchase(fake.purchases)).toMatchObject({ status: "created" });
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops projecting an unattached purchase at the exact frozen expiry", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
@@ -448,22 +574,31 @@ describe("createHostedUsageCreditCheckout", () => {
     })).rejects.toBeTruthy();
     clearStripeProviderMockHistory();
 
-    await expect(createHostedUsageCreditCheckout({
-      clientRequestKey: CLIENT_REQUEST_KEY,
-      memberId: MEMBER_ID,
-      now: RETRY_AT,
-      offerCode: "usage_10_usd",
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: new Date(NOW.getTime() + 89 * 60 * 1_000),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
     })).resolves.toMatchObject({
+      restartAt: new Date(NOW.getTime() + 90 * 60 * 1_000).toISOString(),
+      retryAllowed: false,
       status: "reconciling",
     });
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: new Date(NOW.getTime() + 90 * 60 * 1_000),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toBeNull();
+
+    expect(onlyPurchase(fake.purchases)).toMatchObject({ status: "created" });
     expectNoStripeProviderIo();
-    expect(fake.purchases.size).toBe(1);
   });
 
-  it("fences another request while one purchase is claimed", async () => {
+  it("recovers a created purchase for a fresh browser request", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockImplementationOnce(async (request) => buildStripeSession(request));
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -471,19 +606,140 @@ describe("createHostedUsageCreditCheckout", () => {
       now: NOW,
       offerCode: "usage_10_usd",
     })).rejects.toBeTruthy();
+
+    mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(() => {
+      throw new Error("Current offer configuration must not gate recovery.");
+    });
+    mocks.requireHostedOnboardingPublicBaseUrl.mockImplementation(() => {
+      throw new Error("Current public URL configuration must not gate recovery.");
+    });
+
+    const recovered = await createHostedUsageCreditCheckout({
+      clientRequestKey: "another_request_1234",
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      offerCode: "usage_5_usd",
+    });
+
+    expect(recovered).toMatchObject({
+      recovered: true,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      offerCode: "usage_10_usd",
+      status: "checkout_open",
+    });
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.requireHostedStripeUsageCreditCheckoutConfig).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedOnboardingPublicBaseUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the existing Checkout URL for a fresh browser request", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const checkout = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    });
+    clearStripeProviderMockHistory();
+    fake.member.billingStatus = "past_due";
+    mocks.readHostedMemberStripeBillingRef.mockImplementation(() => {
+      throw new Error("Current billing eligibility must not gate recovery.");
+    });
+    mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(() => {
+      throw new Error("Current offer configuration must not gate recovery.");
+    });
+    mocks.requireHostedOnboardingPublicBaseUrl.mockImplementation(() => {
+      throw new Error("Current public URL configuration must not gate recovery.");
+    });
+
+    const recovered = await createHostedUsageCreditCheckout({
+      clientRequestKey: "another_request_1234",
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      offerCode: "usage_5_usd",
+    });
+
+    expect(recovered).toEqual({
+      ...checkout,
+      recovered: true,
+    });
+    expect(fake.purchases.size).toBe(1);
+    expectNoStripeProviderIo();
+    expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedStripeUsageCreditCheckoutConfig).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedOnboardingPublicBaseUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns honest recovery state when the frozen create retry stays ambiguous", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockRejectedValue(new Error("connection lost"));
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    const purchase = onlyPurchase(fake.purchases);
+
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: "another_request_1234",
       memberId: MEMBER_ID,
-      now: NOW,
+      now: new Date(NOW.getTime() + 60_000),
       offerCode: "usage_5_usd",
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_CHECKOUT_IN_PROGRESS",
-      httpStatus: 409,
+    })).resolves.toEqual({
+      purchaseId: String(purchase.id),
+      recovered: true,
+      restartAt: (purchase.checkoutExpiresAt as Date).toISOString(),
+      retryAllowed: true,
+      status: "reconciling",
     });
+
     expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
   });
 
-  it("closes an expired unattached attempt before applying the active-purchase fence", async () => {
+  it("scopes active-purchase recovery to the authenticated payer", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockImplementation(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const first = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    });
+    const second = await createHostedUsageCreditCheckout({
+      clientRequestKey: "another_request_1234",
+      memberId: "hbm_othermember",
+      now: new Date(NOW.getTime() + 60_000),
+      offerCode: "usage_5_usd",
+    });
+
+    expect(first).not.toHaveProperty("recovered");
+    expect(second).not.toHaveProperty("recovered");
+    expect(second.purchaseId).not.toBe(first.purchaseId);
+    expect(fake.purchases.size).toBe(2);
+  });
+
+  it("closes an expired unbound purchase before applying the active-purchase fence", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
@@ -506,14 +762,13 @@ describe("createHostedUsageCreditCheckout", () => {
     })).resolves.toMatchObject({ status: "checkout_open" });
 
     expect(firstPurchase).toMatchObject({
-      checkoutCreateState: "closed",
       status: "expired",
     });
     expect(fake.purchases.size).toBe(2);
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
   });
 
-  it("closes a same-key unattached attempt after its frozen Checkout expiry", async () => {
+  it("closes a same-key unbound purchase after its Checkout expiry", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
@@ -532,7 +787,6 @@ describe("createHostedUsageCreditCheckout", () => {
     })).resolves.toMatchObject({ status: "expired" });
 
     expect(onlyPurchase(fake.purchases)).toMatchObject({
-      checkoutCreateState: "closed",
       status: "expired",
     });
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
@@ -561,15 +815,10 @@ describe("createHostedUsageCreditCheckout", () => {
   });
 
   it("fails closed for sponsored, synthetic, trial, or inactive members", async () => {
-    const ineligibleMembers = [
-      { accountGroupMemberships: [{ id: "membership_1" }] },
-      { threadContainer: { memberId: MEMBER_ID } },
-      { billingStatus: "past_due" },
-    ];
-
-    for (const memberOverride of ineligibleMembers) {
-      const fake = createFakePrisma({ memberOverride });
+    for (let caseIndex = 0; caseIndex < 3; caseIndex += 1) {
+      const fake = createFakePrisma();
       mocks.getPrisma.mockReturnValue(fake.prisma);
+      mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValueOnce([]);
       await expect(createHostedUsageCreditCheckout({
         clientRequestKey: CLIENT_REQUEST_KEY,
         memberId: MEMBER_ID,
@@ -583,13 +832,7 @@ describe("createHostedUsageCreditCheckout", () => {
 
     const trialFake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(trialFake.prisma);
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValueOnce([]);
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,
@@ -602,7 +845,7 @@ describe("createHostedUsageCreditCheckout", () => {
 });
 
 describe("expireHostedUsageCreditCheckout", () => {
-  it("does not treat a cancel return as authority for an unattached attempt", async () => {
+  it("does not treat a cancel return as authority for an unbound created purchase", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
@@ -621,14 +864,13 @@ describe("expireHostedUsageCreditCheckout", () => {
     })).resolves.toMatchObject({ status: "reconciling" });
 
     expect(purchase).toMatchObject({
-      checkoutCreateState: "claimed",
       status: "created",
     });
     expect(mocks.stripeCheckoutRetrieve).not.toHaveBeenCalled();
     expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
   });
 
-  it("expires only the payer-owned attached unpaid Stripe Session", async () => {
+  it("expires only the payer-owned bound unpaid Stripe Session", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -665,7 +907,6 @@ describe("expireHostedUsageCreditCheckout", () => {
       "cs_test_usage_credit_123",
     );
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       status: "expired",
     });
   });
@@ -705,7 +946,6 @@ describe("expireHostedUsageCreditCheckout", () => {
 
     expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
     expect(purchase).toMatchObject({
-      checkoutCreateState: "attached",
       status: "payment_pending",
     });
   });
@@ -738,12 +978,11 @@ describe("expireHostedUsageCreditCheckout", () => {
       httpStatus: 502,
     });
     expect(purchase).toMatchObject({
-      checkoutCreateState: "attached",
       status: "checkout_open",
     });
   });
 
-  it("does not reveal or mutate another payer's attached Session", async () => {
+  it("does not reveal or mutate another payer's bound Session", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -769,7 +1008,7 @@ describe("expireHostedUsageCreditCheckout", () => {
 });
 
 describe("usage-credit account-deletion convergence", () => {
-  it("expires an attached open Session before permitting local deletion", async () => {
+  it("expires a bound open Session before permitting local deletion", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -803,7 +1042,6 @@ describe("usage-credit account-deletion convergence", () => {
       "cs_test_usage_credit_123",
     );
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       status: "expired",
     });
     await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
@@ -811,7 +1049,7 @@ describe("usage-credit account-deletion convergence", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("replays a claimed attempt with its frozen request and stable key before expiring it", async () => {
+  it("replays an unresolved created purchase with its derived request and stable key before expiring it", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
@@ -836,7 +1074,7 @@ describe("usage-credit account-deletion convergence", () => {
 
     await closeHostedUsageCreditPurchasesForAccountDeletion({
       memberIds: [MEMBER_ID],
-      now: RETRY_AT,
+      now: new Date(NOW.getTime() + 60_000),
     });
 
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
@@ -845,13 +1083,12 @@ describe("usage-credit account-deletion convergence", () => {
     );
     expect(mocks.stripePriceRetrieve).toHaveBeenCalledTimes(1);
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
-      lastReconciledAt: RETRY_AT,
+      lastReconciledAt: new Date(NOW.getTime() + 60_000),
       status: "expired",
     });
   });
 
-  it("replays and verifies a locally expired claimed attempt before treating it as terminal", async () => {
+  it("replays and verifies a locally expired created purchase before treating it as terminal", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
@@ -873,7 +1110,6 @@ describe("usage-credit account-deletion convergence", () => {
       offerCode: "usage_10_usd",
     })).resolves.toMatchObject({ status: "expired" });
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       lastReconciledAt: null,
       status: "expired",
       stripeCheckoutSessionLookupKey: null,
@@ -904,7 +1140,6 @@ describe("usage-credit account-deletion convergence", () => {
       mocks.stripeCheckoutCreate.mock.calls[0],
     );
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       lastReconciledAt: deletionAt,
       status: "expired",
       stripeCheckoutSessionLookupKey: expect.any(String),
@@ -914,7 +1149,7 @@ describe("usage-credit account-deletion convergence", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("accepts provider-proven absence after an uncached frozen request expires", async () => {
+  it("accepts provider-proven absence after an unbound purchase expires", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
@@ -961,7 +1196,6 @@ describe("usage-credit account-deletion convergence", () => {
       limit: 100,
     });
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       lastReconciledAt: deletionAt,
       status: "expired",
       stripeCheckoutSessionIdEncrypted: null,
@@ -1003,12 +1237,11 @@ describe("usage-credit account-deletion convergence", () => {
 
     expect(mocks.stripeCheckoutRetrieve).toHaveBeenCalledTimes(2);
     expect(purchase).toMatchObject({
-      checkoutCreateState: "closed",
       status: "expired",
     });
   });
 
-  it("blocks deletion when Stripe cannot prove an attached Session is no longer open", async () => {
+  it("blocks deletion when Stripe cannot prove a bound Session is no longer open", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -1032,7 +1265,6 @@ describe("usage-credit account-deletion convergence", () => {
       retryable: true,
     });
     expect(purchase).toMatchObject({
-      checkoutCreateState: "attached",
       status: "checkout_open",
     });
     await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
@@ -1075,7 +1307,6 @@ describe("usage-credit account-deletion convergence", () => {
     });
     expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
     expect(purchase).toMatchObject({
-      checkoutCreateState: "attached",
       status: "payment_pending",
     });
   });
@@ -1112,7 +1343,7 @@ describe("usage-credit account-deletion convergence", () => {
 });
 
 describe("readHostedUsageCreditPurchaseStatus", () => {
-  it("projects a claimed purchase as reconciliation without provider I/O", async () => {
+  it("projects a created purchase as reconciliation without provider I/O", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
@@ -1130,6 +1361,7 @@ describe("readHostedUsageCreditPurchaseStatus", () => {
       purchaseId: String(purchase.id),
     })).resolves.toMatchObject({
       purchaseId: purchase.id,
+      restartAt: (purchase.checkoutExpiresAt as Date).toISOString(),
       status: "reconciling",
     });
     expectNoStripeProviderIo();
@@ -1220,14 +1452,19 @@ function buildStripePriceForId(priceId: string) {
 }
 
 function buildStripeSessionFromPurchase(purchase: Record<string, unknown>) {
+  const purchaseId = String(purchase.id);
   return {
     adaptive_pricing: { enabled: false },
-    client_reference_id: purchase.checkoutClientReferenceId,
+    client_reference_id: purchaseId,
     customer: "cus_123",
     expires_at: Math.floor((purchase.checkoutExpiresAt as Date).getTime() / 1_000),
     id: "cs_test_usage_credit_123",
     livemode: false,
-    metadata: purchase.checkoutMetadataJson,
+    metadata: {
+      policyVersion: "hosted-usage-credit-checkout-v1",
+      purchaseId,
+      purpose: "hosted_usage_credit",
+    },
     mode: "payment",
     payment_status: "unpaid",
     status: "open",
@@ -1242,8 +1479,6 @@ function createFakePrisma(input: {
   const hostedUsageCreditPurchase = {
     create: vi.fn(async (query: { data: Record<string, unknown> }) => {
       const record: Record<string, unknown> = {
-        checkoutCreateState: "not_started",
-        fulfilledAt: null,
         lastReconciledAt: null,
         paidAt: null,
         reconciliationVersion: 0n,
@@ -1266,7 +1501,13 @@ function createFakePrisma(input: {
       const record = [...purchases.values()].find((candidate) =>
         matchesPurchaseWhere(candidate, query.where)
       ) ?? null;
-      return projectFakeRecord(record, query.select);
+      const projected = projectFakeRecord(record, query.select);
+      return projected && query.include?.payer
+        ? {
+            ...projected,
+            payer: { suspendedAt: member.suspendedAt },
+          }
+        : projected;
     }),
     findMany: vi.fn(async (query: PurchaseQuery) =>
       [...purchases.values()]
@@ -1332,6 +1573,7 @@ function createFakePrisma(input: {
 }
 
 interface PurchaseQuery {
+  include?: Record<string, unknown>;
   select?: Record<string, boolean>;
   where: Record<string, unknown>;
 }
@@ -1359,6 +1601,9 @@ function matchesPurchaseWhere(
     }
     if (isFakeRecord(expected) && expected.lte instanceof Date) {
       return record[key] instanceof Date && record[key].getTime() <= expected.lte.getTime();
+    }
+    if (isFakeRecord(expected) && expected.gt instanceof Date) {
+      return record[key] instanceof Date && record[key].getTime() > expected.gt.getTime();
     }
     return record[key] === expected;
   });

@@ -19,6 +19,7 @@ import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "./usage-limit-notice";
+import { projectHostedAiUsageLimitNoticeForDelivery } from "./usage-limit-notice-message";
 import {
   readHostedMemberRoutingState,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -207,7 +208,11 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
             input.candidate.usageCreditLedgerVersion.toString(),
         },
         memberId: input.candidate.memberId,
-        message: input.candidate.userNotice.message,
+        message: await projectHostedAiUsageLimitNoticeForDelivery({
+          memberId: input.candidate.memberId,
+          message: input.candidate.userNotice.message,
+          prisma: input.prisma,
+        }),
         noticeCode: input.candidate.userNotice.code,
         occurredAt: input.candidate.crossedAt.toISOString(),
         prisma: input.prisma,
@@ -221,7 +226,11 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
     if (input.noticeDeliveryTarget?.channel === "telegram") {
       const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
         memberId: input.candidate.memberId,
-        message: input.candidate.userNotice.message,
+        message: await projectHostedAiUsageLimitNoticeForDelivery({
+          memberId: input.candidate.memberId,
+          message: input.candidate.userNotice.message,
+          prisma: input.prisma,
+        }),
         periodStart: input.candidate.periodStart,
         prisma: input.prisma,
         replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
@@ -263,7 +272,11 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
           input.candidate.usageCreditLedgerVersion.toString(),
       },
       memberId: input.candidate.memberId,
-      message: input.candidate.userNotice.message,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        prisma: input.prisma,
+      }),
       noticeCode: input.candidate.userNotice.code,
       occurredAt: input.candidate.crossedAt.toISOString(),
       prisma: input.prisma,

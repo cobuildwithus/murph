@@ -1199,10 +1199,11 @@ Current hosted billing assumptions:
   a Pulse Trial to paid before the accepted paid invoice.
 - Subscription chargebacks, disputes, and refunds suspend hosted access pending
   manual review. Matching usage-credit financial reversals are intercepted
-  before subscription handling. Successful refunds and withdrawn disputes
-  append capped reversals of unused credit; dispute reinstatement appends a
-  restoration. Reconciliation failures remain in the durable Stripe retry lane
-  and never silently suspend the subscription.
+  before subscription handling. Live financial-state changes append capped
+  signed `refund_adjustment` or `dispute_adjustment` entries against unused
+  credit, with positive entries restoring only value previously revoked.
+  Reconciliation failures remain in the durable Stripe retry lane and never
+  silently suspend the subscription.
 - No-card Pulse Trial signup is the default checkout-stage path when billing is
   configured and messaging setup is complete. Set
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.

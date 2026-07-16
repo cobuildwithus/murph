@@ -40,7 +40,7 @@ const secondInboundText = "Can you also update the plan for Saturday?";
 const firstAssistantReply = "Absolutely — here's a focused plan for tomorrow.";
 const secondAssistantReply = "I've updated the Saturday plan too.";
 const usageLimitNoticeUrl =
-  "https://withmurph.ai/settings?addUsage=true#subscription";
+  "https://www.withmurph.ai/settings?addUsage=true#subscription";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -69,6 +69,8 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD:
+          "price_local_usage_limit_5",
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -88,9 +90,12 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
   it("keeps one durable crossing notice while later over-limit work remains blocked", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
       memberPhone,
+      stripeCustomerId: `cus_local_usage_limit_${runId}`,
+      stripeSubscriptionId: `sub_local_usage_limit_${runId}`,
     });
     await requireScenario().runWake(buildActivationWake(), userId);
     await requireScenario().waitForHostedCompletion(userId);

@@ -72,28 +72,18 @@ async function createUsageCreditFixture(): Promise<UsageCreditFixture> {
   });
   await observer.hostedUsageCreditPurchase.create({
     data: {
-      authorizationContext: "personal_self_v1",
       beneficiaryMemberId,
       cashAmountMinor: 500,
       cashCurrency: "usd",
       checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
-      checkoutClientReferenceId: purchaseId,
-      checkoutCreateRetryCutoffAt: new Date("2026-07-16T12:15:00.000Z"),
       checkoutExpiresAt: new Date("2026-07-16T12:30:00.000Z"),
-      checkoutMetadataJson: {
-        purpose: "hosted_usage_credit",
-        purchaseId,
-      },
-      checkoutRequestDigest: `digest:${fixtureId}`,
       checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
       checkoutSuccessUrl: "https://example.test/settings?usage=return",
       clientRequestKey: `request:${fixtureId}`,
-      conversionPolicyVersion: "hosted-usage-credit-v1",
       grantUsdMicros: 5_000_000n,
       id: purchaseId,
       offerCode: "usage_5_usd",
       payerMemberId: beneficiaryMemberId,
-      requestFingerprint: `fingerprint:${fixtureId}`,
       stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}`,
       stripeCustomerLookupKey: `customer-lookup:${fixtureId}`,
       stripeLiveMode: false,
@@ -195,7 +185,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       >>> | null = null;
       const firstTransaction = fixture.firstClient.$transaction(async (tx) => {
         const grant = await grantHostedUsageCreditForPurchaseTx({
-          effectiveAt: paidAt,
           paidAt,
           purchaseId: fixture.purchaseId,
           tx,
@@ -210,7 +199,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         replayTransaction = fixture.secondClient.$transaction(async (tx) => {
           replayPid.resolve(await readBackendPid(tx));
           return grantHostedUsageCreditForPurchaseTx({
-            effectiveAt: paidAt,
             paidAt,
             purchaseId: fixture.purchaseId,
             tx,
@@ -285,7 +273,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         grantTransaction = fixture.secondClient.$transaction(async (tx) => {
           grantPid.resolve(await readBackendPid(tx));
           return grantHostedUsageCreditForPurchaseTx({
-            effectiveAt: new Date("2026-07-16T12:01:00.000Z"),
             paidAt: new Date("2026-07-16T12:01:00.000Z"),
             purchaseId: fixture.purchaseId,
             tx,
@@ -342,7 +329,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       >>> | null = null;
       const grantTransaction = fixture.firstClient.$transaction(async (tx) => {
         const grant = await grantHostedUsageCreditForPurchaseTx({
-          effectiveAt: paidAt,
           paidAt,
           purchaseId: fixture.purchaseId,
           tx,
@@ -358,7 +344,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           settlementPid.resolve(await readBackendPid(tx));
           return settleHostedUsageCreditForUsageTx({
             beneficiaryMemberId: fixture.beneficiaryMemberId,
-            creditEligibilitySequence: 1n,
             debitUsdMicros: 3_000_000n,
             effectiveAt: new Date("2026-07-16T12:03:00.000Z"),
             sourceUsageId: `usage:${fixture.purchaseId}`,
@@ -435,7 +420,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         grantTransaction = fixture.secondClient.$transaction(async (tx) => {
           grantPid.resolve(await readBackendPid(tx));
           return grantHostedUsageCreditForPurchaseTx({
-            effectiveAt: new Date("2026-07-16T12:04:00.000Z"),
             paidAt: new Date("2026-07-16T12:04:00.000Z"),
             purchaseId: fixture.purchaseId,
             tx,

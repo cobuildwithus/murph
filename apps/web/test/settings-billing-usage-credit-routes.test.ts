@@ -68,14 +68,12 @@ beforeEach(async () => {
   });
   mocks.expireHostedUsageCreditCheckout.mockResolvedValue({
     checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
-    fulfilledAt: null,
     purchaseId: "hucp_abcdefghijklmnop",
     status: "expired",
     updatedAt: "2026-07-16T17:06:00.000Z",
   });
   mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
     checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
-    fulfilledAt: null,
     purchaseId: "hucp_abcdefghijklmnop",
     status: "payment_pending",
     updatedAt: "2026-07-16T17:05:00.000Z",
@@ -112,6 +110,35 @@ describe("usage-credit checkout route", () => {
       clientRequestKey: "request_key_123456",
       memberId: "hbm_member123",
       offerCode: "usage_10_usd",
+      prisma: { label: "test-prisma" },
+    });
+  });
+
+  it("returns the payer-scoped active-purchase recovery marker unchanged", async () => {
+    mocks.createHostedUsageCreditCheckout.mockResolvedValueOnce({
+      purchaseId: "hucp_abcdefghijklmnop",
+      recovered: true,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/existing-session",
+    });
+    const request = createCheckoutRequest({
+      clientRequestKey: "fresh_request_123456",
+      offerCode: "usage_5_usd",
+    });
+
+    const response = await checkoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      purchaseId: "hucp_abcdefghijklmnop",
+      recovered: true,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/existing-session",
+    });
+    expect(mocks.createHostedUsageCreditCheckout).toHaveBeenCalledWith({
+      clientRequestKey: "fresh_request_123456",
+      memberId: "hbm_member123",
+      offerCode: "usage_5_usd",
       prisma: { label: "test-prisma" },
     });
   });

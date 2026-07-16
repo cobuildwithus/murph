@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
+  projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
@@ -50,6 +51,11 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
     mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
   sendHostedTrialConversionNoticeToLinqChat: mocks.sendHostedTrialConversionNoticeToLinqChat,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-message", () => ({
+  projectHostedAiUsageLimitNoticeForDelivery:
+    mocks.projectHostedAiUsageLimitNoticeForDelivery,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -132,6 +138,9 @@ describe("hosted orchestration reconciliation facts", () => {
       throw new Error("Configure Linq inbound evidence explicitly for engagement tests.");
     });
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
+    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) => input.message,
+    );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
@@ -666,6 +675,11 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
     const deniedDecision = buildUsageLimitExceededGateDecision();
+    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) =>
+        `${input.message}\n\nAdd usage: ` +
+        "https://www.withmurph.ai/settings?addUsage=true#subscription",
+    );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
@@ -716,13 +730,20 @@ describe("hosted orchestration reconciliation facts", () => {
         usageCreditLedgerVersion: "3",
       },
       memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
+      message:
+        `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
+        "https://www.withmurph.ai/settings?addUsage=true#subscription",
       noticeCode: deniedDecision.userNotice.code,
       occurredAt: FIXED_NOW,
       prisma: expect.objectContaining({ kind: "prisma" }),
       replyToMessageId: "msg_runtime_denied",
       routeAuthority,
       sourceEventId: "linq_event_runtime_denied",
+    });
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      message: deniedDecision.userNotice.message,
+      prisma: expect.objectContaining({ kind: "prisma" }),
     });
   });
 

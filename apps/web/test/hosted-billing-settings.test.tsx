@@ -237,7 +237,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        amountUsdCents: 500,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -265,17 +264,14 @@ describe("HostedBillingSettings", () => {
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          amountUsdCents: 500,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          amountUsdCents: 1_000,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          amountUsdCents: 2_500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -286,6 +282,44 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /\$8\.42/);
     assert.match(markup, /usage credit remaining/);
     assert.match(markup, /Add usage/);
+  });
+
+  test("renders server-projected top-up offers without duplicating billing eligibility", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus(),
+      usageTopUpInitialOpen: true,
+      usageTopUpOffers: [{
+        amountLabel: "$10",
+        offerCode: "usage_10_usd",
+      }],
+    }));
+
+    assert.match(markup, /Add usage/);
+    assert.match(markup, /\$10/);
+  });
+
+  test("shows the amount picker after an expired unattached purchase is omitted", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus(),
+      usageTopUpActivePurchase: null,
+      usageTopUpInitialOpen: true,
+      usageTopUpOffers: [{
+        amountLabel: "$10",
+        offerCode: "usage_10_usd",
+      }],
+    }));
+
+    assert.match(markup, /Add usage/);
+    assert.match(markup, /\$10/);
+    assert.match(markup, /Choose an amount/);
+    assert.doesNotMatch(markup, /Continue checkout/);
+    assert.doesNotMatch(markup, /reconcil/iu);
   });
 
   test("offers the same top-up primitive to a direct paid Edge member", async () => {
@@ -302,7 +336,6 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
-        amountUsdCents: 500,
         offerCode: "usage_5_usd",
       }],
     }));
@@ -326,71 +359,6 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /&lt;\$0\.01/);
     assert.match(markup, /usage credit remaining/);
     assert.doesNotMatch(markup, /\$0\.00 usage credit remaining/);
-  });
-
-  test.each([
-    {
-      billingStatus: "active",
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      familyState: "none" as const,
-      label: "Pulse Trial",
-      usageStatus: buildUsageStatus({
-        accessKind: "trial",
-        periodKind: "trial",
-        planName: "Pulse Trial",
-      }),
-    },
-    {
-      billingStatus: "active",
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      familyState: "sponsored" as const,
-      label: "sponsored Family",
-      usageStatus: buildUsageStatus({
-        accessKind: "family_sponsored",
-        planName: "Family",
-      }),
-    },
-    {
-      billingStatus: "active",
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      familyState: "none" as const,
-      label: "synthetic group",
-      usageStatus: {
-        generatedAt: "2026-07-10T12:00:00.000Z",
-        reason: "group_not_supported" as const,
-        recommendedAction: null,
-        status: "unavailable" as const,
-      },
-    },
-    {
-      billingStatus: "past_due",
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      familyState: "none" as const,
-      label: "inactive personal",
-      usageStatus: buildUsageStatus(),
-    },
-  ])("does not offer top-ups to $label access", async (input) => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
-
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      billingStatus: input.billingStatus,
-      currentBillingPhase: input.currentBillingPhase,
-      currentBillingPlanCode: input.currentBillingPlanCode,
-      familyState: input.familyState,
-      usageStatus: input.usageStatus,
-      usageTopUpOffers: [{
-        amountLabel: "$5",
-        amountUsdCents: 500,
-        offerCode: "usage_5_usd",
-      }],
-    }));
-
-    assert.doesNotMatch(markup, /Add usage/);
   });
 
   test("keeps unavailable and forecast-free usage states honest", async () => {

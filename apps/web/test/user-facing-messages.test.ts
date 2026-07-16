@@ -128,17 +128,16 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("points direct paid limits to the first-party usage settings", () => {
+  it("keeps direct paid limit templates neutral until delivery-time projection", () => {
     for (const key of [
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
-        expect(text).toMatch(/Murph is paused until .+ usage is added|Murph is paused until you add usage/iu);
-        expect(text).toContain(
-          "https://withmurph.ai/settings?addUsage=true#subscription",
+        expect(text).toMatch(/Murph is paused/iu);
+        expect(text).not.toMatch(
+          /add usage|top[ -]?up|checkout|https?:\/\/|until .+ usage is added|until you add usage/iu,
         );
-        expect(text).not.toMatch(/bit\.ly|tinyurl|less capable|lower-usage|lighter model/iu);
       }
     }
   });

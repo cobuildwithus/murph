@@ -456,7 +456,6 @@ interface HostedRuntimeSignalModule {
 
 interface HostedUsageCreditModule {
   grantHostedUsageCreditForPurchaseTx(input: {
-    effectiveAt: Date;
     paidAt: Date;
     purchaseId: string;
     tx: unknown;
@@ -981,28 +980,18 @@ export async function grantHostedUsageCreditForTest(input: {
     const effectiveAt = input.effectiveAt ?? new Date();
     await deps.prisma.hostedUsageCreditPurchase.create({
       data: {
-        authorizationContext: "personal_self_v1",
         beneficiaryMemberId: input.memberId,
         cashAmountMinor: 500,
         cashCurrency: "usd",
         checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
-        checkoutClientReferenceId: input.purchaseId,
-        checkoutCreateRetryCutoffAt: new Date(effectiveAt.getTime() + 15 * 60_000),
         checkoutExpiresAt: new Date(effectiveAt.getTime() + 30 * 60_000),
-        checkoutMetadataJson: {
-          purpose: "hosted_usage_credit",
-          purchaseId: input.purchaseId,
-        },
-        checkoutRequestDigest: `digest:${input.purchaseId}`,
         checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
         checkoutSuccessUrl: "https://example.test/settings?usage=return",
         clientRequestKey: `request:${input.purchaseId}`,
-        conversionPolicyVersion: "hosted-usage-credit-v1",
         grantUsdMicros: 5_000_000n,
         id: input.purchaseId,
         offerCode: "usage_5_usd",
         payerMemberId: input.memberId,
-        requestFingerprint: `fingerprint:${input.purchaseId}`,
         stripeCustomerIdEncrypted: `encrypted-customer:${input.purchaseId}`,
         stripeCustomerLookupKey: `customer-lookup:${input.purchaseId}`,
         stripeLiveMode: false,
@@ -1013,7 +1002,6 @@ export async function grantHostedUsageCreditForTest(input: {
     const usageCreditModule = await loadHostedUsageCreditModule();
     return deps.prisma.$transaction(async (tx) =>
       await usageCreditModule.grantHostedUsageCreditForPurchaseTx({
-        effectiveAt,
         paidAt: effectiveAt,
         purchaseId: input.purchaseId,
         tx,

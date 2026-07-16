@@ -7,8 +7,6 @@ export const HOSTED_USAGE_CREDIT_OFFER_CODES = [
 export type HostedUsageCreditOfferCode =
   (typeof HOSTED_USAGE_CREDIT_OFFER_CODES)[number];
 
-export const HOSTED_USAGE_CREDIT_CONVERSION_POLICY_VERSION =
-  "hosted-usage-credit-v1" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
   "hosted-usage-credit-checkout-v1" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE =
@@ -18,7 +16,6 @@ export interface HostedUsageCreditOfferDefinition {
   readonly cashAmountMinor: number;
   readonly cashCurrency: "usd";
   readonly code: HostedUsageCreditOfferCode;
-  readonly conversionPolicyVersion: typeof HOSTED_USAGE_CREDIT_CONVERSION_POLICY_VERSION;
   readonly grantUsdMicros: bigint;
   readonly priceIdEnvKey: string;
 }
@@ -27,21 +24,18 @@ const HOSTED_USAGE_CREDIT_OFFER_DEFINITIONS = {
   usage_5_usd: {
     cashAmountMinor: 500,
     cashCurrency: "usd",
-    conversionPolicyVersion: HOSTED_USAGE_CREDIT_CONVERSION_POLICY_VERSION,
     grantUsdMicros: 5_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD",
   },
   usage_10_usd: {
     cashAmountMinor: 1_000,
     cashCurrency: "usd",
-    conversionPolicyVersion: HOSTED_USAGE_CREDIT_CONVERSION_POLICY_VERSION,
     grantUsdMicros: 10_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
   },
   usage_25_usd: {
     cashAmountMinor: 2_500,
     cashCurrency: "usd",
-    conversionPolicyVersion: HOSTED_USAGE_CREDIT_CONVERSION_POLICY_VERSION,
     grantUsdMicros: 25_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD",
   },

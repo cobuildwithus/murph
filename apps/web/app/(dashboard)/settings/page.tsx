@@ -26,9 +26,6 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
-  isHostedPulseTrialBillingState,
-  parseHostedBillingPhase,
-  parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
@@ -37,7 +34,7 @@ import {
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { getHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/runtime";
+import { readHostedPersonalUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -45,8 +42,9 @@ import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usag
 import { readHostedUsageCreditProjection } from "@/src/lib/hosted-execution/usage-credits";
 import {
   getHostedUsageCreditOfferDefinition,
-  HOSTED_USAGE_CREDIT_OFFER_CODES,
+  type HostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
+import { readHostedActiveUsageCreditPurchaseForPayer } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -95,6 +93,8 @@ export default async function SettingsPage({
     secureApprovalStatus,
     usageStatus,
     usageCreditProjection,
+    usageTopUpOfferCodes,
+    usageTopUpActivePurchase,
   ] =
     authenticatedMember
       ? await Promise.all([
@@ -122,6 +122,14 @@ export default async function SettingsPage({
             beneficiaryMemberId: authenticatedMember.id,
             prisma,
           }),
+          readHostedPersonalUsageCreditOfferCodes({
+            memberId: authenticatedMember.id,
+            prisma,
+          }).catch(() => []),
+          readHostedActiveUsageCreditPurchaseForPayer({
+            payerMemberId: authenticatedMember.id,
+            prisma,
+          }).catch(() => null),
         ])
       : [
           null,
@@ -131,19 +139,15 @@ export default async function SettingsPage({
           { status: "unavailable" } as const,
           null,
           null,
+          [],
+          null,
         ];
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
-  const usageTopUpOffers = resolveHostedUsageTopUpOffers({
-    billingRef,
-    familyAccess,
-    familyOwner,
-    member: authenticatedMember,
-    usageStatus,
-  });
+  const usageTopUpOffers = projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
@@ -241,6 +245,7 @@ export default async function SettingsPage({
             usageCreditProjection?.balanceUsdMicros.toString() ?? null
           }
           usageStatus={usageStatus}
+          usageTopUpActivePurchase={usageTopUpActivePurchase}
           usageTopUpInitialOpen={openUsageTopUp}
           usageTopUpOffers={usageTopUpOffers}
           usageTopUpPurchaseReturn={usageTopUpPurchaseReturn}
@@ -379,60 +384,16 @@ function readUsageTopUpPurchaseReturn(
   };
 }
 
-function resolveHostedUsageTopUpOffers(input: {
-  billingRef: {
-    currentBillingPhase?: unknown;
-    currentBillingPlanCode?: unknown;
-    currentCheckoutOffer?: unknown;
-    stripeCustomerId?: unknown;
-    stripeSubscriptionId?: unknown;
-  } | null;
-  familyAccess: unknown;
-  familyOwner: unknown;
-  member: Parameters<typeof hasHostedMemberOwnActiveBilling>[0] | null;
-  usageStatus: Awaited<ReturnType<typeof readHostedPersonalAiUsageStatus>> | null;
-}): HostedUsageTopUpOffer[] {
-  const planCode = parseHostedBillingPlanCode(
-    input.billingRef?.currentBillingPlanCode,
-  );
-  const directPaidPlan =
-    input.member !== null &&
-    hasHostedMemberOwnActiveBilling({
-      billingStatus: input.member.billingStatus,
-      suspendedAt: input.member.suspendedAt,
-    }) &&
-    input.familyAccess === null &&
-    input.familyOwner === null &&
-    input.usageStatus?.status !== "unavailable" &&
-    input.usageStatus?.accessKind === "paid" &&
-    parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid" &&
-    (planCode === "launch_monthly" || planCode === "launch_edge_monthly") &&
-    !isHostedPulseTrialBillingState({
-      currentBillingPhase: input.billingRef?.currentBillingPhase,
-      currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-    }) &&
-    typeof input.billingRef?.stripeCustomerId === "string" &&
-    input.billingRef.stripeCustomerId.length > 0 &&
-    typeof input.billingRef?.stripeSubscriptionId === "string" &&
-    input.billingRef.stripeSubscriptionId.length > 0;
-
-  if (!directPaidPlan) {
-    return [];
-  }
-
-  const activePriceIds =
-    getHostedOnboardingEnvironment().stripeUsageCreditPriceIdsByOffer;
-
-  return HOSTED_USAGE_CREDIT_OFFER_CODES.flatMap((offerCode) => {
+function projectHostedUsageTopUpOffers(
+  offerCodes: readonly HostedUsageCreditOfferCode[],
+): HostedUsageTopUpOffer[] {
+  return offerCodes.map((offerCode) => {
     const offer = getHostedUsageCreditOfferDefinition(offerCode);
 
-    return activePriceIds[offerCode]
-      ? [{
-          amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
-          amountUsdCents: offer.cashAmountMinor,
-          offerCode: offer.code,
-        }]
-      : [];
+    return {
+      amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
+      offerCode: offer.code,
+    };
   });
 }
 

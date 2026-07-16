@@ -36,7 +36,7 @@ grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
 request idempotency; reconciliation suites exercise live Stripe re-fetch,
 one-time/subscription dispatch separation, replay-safe grants, refund/dispute
-reversals, and dispute restoration; component suites exercise the Settings
+signed adjustments in both directions; component suites exercise the Settings
 dialog selection, redirect, return polling, and error states. A guarded
 real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
 grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,

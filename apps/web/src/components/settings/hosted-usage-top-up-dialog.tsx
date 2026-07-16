@@ -45,8 +45,16 @@ type HostedUsageTopUpPurchaseStatus = (typeof PURCHASE_STATUSES)[number];
 
 interface HostedUsageTopUpOffer {
   offerCode: string;
-  amountUsdCents: number;
   amountLabel: string;
+}
+
+interface HostedUsageTopUpActivePurchase {
+  offerCode: string;
+  purchaseId: string;
+  restartAt?: string;
+  retryAllowed: boolean;
+  status: HostedUsageTopUpPurchaseStatus;
+  url?: string;
 }
 
 interface HostedUsageTopUpReturn {
@@ -55,6 +63,7 @@ interface HostedUsageTopUpReturn {
 }
 
 interface HostedUsageTopUpDialogProps {
+  activePurchase?: HostedUsageTopUpActivePurchase | null;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   purchaseReturn?: HostedUsageTopUpReturn | null;
@@ -62,19 +71,35 @@ interface HostedUsageTopUpDialogProps {
 
 interface HostedUsageTopUpPurchaseResponse {
   purchaseId: string;
+  recovered: boolean;
+  restartAt: string | null;
+  retryAllowed: boolean;
   status: HostedUsageTopUpPurchaseStatus;
   url: string | null;
 }
 
 function HostedUsageTopUpDialog({
+  activePurchase = null,
   initialOpen = false,
   offers,
   purchaseReturn = null,
 }: HostedUsageTopUpDialogProps) {
   const { refresh } = useRouter();
-  const initialPurchaseId = purchaseReturn?.purchaseId ?? null;
+  const initialPurchaseId =
+    purchaseReturn?.purchaseId ?? activePurchase?.purchaseId ?? null;
+  const initialPurchaseStatus = purchaseReturn
+    ? null
+    : activePurchase?.status ?? null;
+  const initialRecoveredCheckoutUrl =
+    initialPurchaseStatus === "checkout_open" && activePurchase?.url
+      ? readOptionalCheckoutUrl(activePurchase.url)
+      : null;
+  const initialRecoveryRestartAt =
+    initialPurchaseStatus === "reconciling"
+      ? readOptionalRestartAt(activePurchase?.restartAt)
+      : null;
   const [open, setOpen] = useState(
-    purchaseReturn !== null || (initialOpen && offers.length > 0),
+    purchaseReturn !== null || initialOpen,
   );
   const [selectedOfferCode, setSelectedOfferCode] = useState<string | null>(null);
   const [hasCheckoutAttempt, setHasCheckoutAttempt] = useState(false);
@@ -83,14 +108,26 @@ function HostedUsageTopUpDialog({
   const [activePurchaseId, setActivePurchaseId] = useState<string | null>(
     initialPurchaseId,
   );
+  const [recoveredCheckoutUrl, setRecoveredCheckoutUrl] = useState<string | null>(
+    initialRecoveredCheckoutUrl,
+  );
+  const [recoveryRestartAt, setRecoveryRestartAt] = useState<string | null>(
+    initialRecoveryRestartAt,
+  );
+  const [retryOfferCode, setRetryOfferCode] = useState<string | null>(
+    activePurchase?.retryAllowed === true ? activePurchase.offerCode : null,
+  );
   const [purchaseStatus, setPurchaseStatus] =
-    useState<HostedUsageTopUpPurchaseStatus | null>(null);
+    useState<HostedUsageTopUpPurchaseStatus | null>(initialPurchaseStatus);
   const [pollExhausted, setPollExhausted] = useState(false);
   const [statusCheckFailed, setStatusCheckFailed] = useState(false);
   const [statusCheckAttempt, setStatusCheckAttempt] = useState(0);
   const clientRequestKeyRef = useRef<string | null>(null);
   const checkoutControllerRef = useRef<AbortController | null>(null);
-  const purchaseStatusRef = useRef<HostedUsageTopUpPurchaseStatus | null>(null);
+  const statusControllerRef = useRef<AbortController | null>(null);
+  const purchaseStatusRef = useRef<HostedUsageTopUpPurchaseStatus | null>(
+    initialPurchaseStatus,
+  );
   const refreshedPurchaseIdsRef = useRef(new Set<string>());
   const handledReturnKeyRef = useRef(readReturnKey(purchaseReturn));
   const cleanedQueryKeyRef = useRef<string | null>(null);
@@ -134,15 +171,17 @@ function HostedUsageTopUpDialog({
     setPollExhausted(false);
     setStatusCheckFailed(false);
     setActivePurchaseId(purchaseReturn.purchaseId);
+    setRecoveryRestartAt(null);
     setOpen(true);
   }, [purchaseReturn, returnKey]);
 
   useEffect(() => () => {
     checkoutControllerRef.current?.abort();
+    statusControllerRef.current?.abort();
   }, []);
 
   useEffect(() => {
-    if (!activePurchaseId) {
+    if (!open || !activePurchaseId) {
       return;
     }
 
@@ -156,7 +195,7 @@ function HostedUsageTopUpDialog({
     }
 
     const controller = new AbortController();
-    let receivedStatus = false;
+    statusControllerRef.current = controller;
     const timeout = setTimeout(() => {
       setPollExhausted(false);
       setStatusCheckFailed(true);
@@ -164,9 +203,12 @@ function HostedUsageTopUpDialog({
     }, STATUS_CHECK_ATTEMPT_TIMEOUT_MS);
 
     function applyPurchaseStatus(response: HostedUsageTopUpPurchaseResponse) {
-      receivedStatus = true;
       purchaseStatusRef.current = response.status;
       setPurchaseStatus(response.status);
+      setRecoveryRestartAt(response.restartAt);
+      if (response.status !== "checkout_open") {
+        setRecoveredCheckoutUrl(null);
+      }
       setPollExhausted(false);
       setStatusCheckFailed(false);
 
@@ -240,7 +282,7 @@ function HostedUsageTopUpDialog({
       }
 
       if (!controller.signal.aborted) {
-        if (receivedStatus || purchaseStatusRef.current !== null) {
+        if (purchaseStatusRef.current !== null) {
           setPollExhausted(true);
         } else {
           setStatusCheckFailed(true);
@@ -250,13 +292,52 @@ function HostedUsageTopUpDialog({
 
     void reconcileReturnedPurchase().finally(() => {
       clearTimeout(timeout);
+      if (statusControllerRef.current === controller) {
+        statusControllerRef.current = null;
+      }
     });
 
     return () => {
       clearTimeout(timeout);
       controller.abort();
+      if (statusControllerRef.current === controller) {
+        statusControllerRef.current = null;
+      }
     };
-  }, [activePurchaseId, cancelReturnPurchaseId, refresh, statusCheckAttempt]);
+  }, [activePurchaseId, cancelReturnPurchaseId, open, refresh, statusCheckAttempt]);
+
+  useEffect(() => {
+    if (!open || !activePurchaseId || !recoveryRestartAt) {
+      return;
+    }
+
+    const restartAtMs = Date.parse(recoveryRestartAt);
+    const delayMs = restartAtMs - Date.now();
+    const restart = () => {
+      statusControllerRef.current?.abort();
+      clientRequestKeyRef.current = null;
+      purchaseStatusRef.current = null;
+      setSelectedOfferCode(null);
+      setHasCheckoutAttempt(false);
+      setCheckoutError(null);
+      setActivePurchaseId(null);
+      setRecoveredCheckoutUrl(null);
+      setRecoveryRestartAt(null);
+      setRetryOfferCode(null);
+      setPurchaseStatus(null);
+      setPollExhausted(false);
+      setStatusCheckFailed(false);
+      refresh();
+    };
+
+    if (delayMs <= 0) {
+      restart();
+      return;
+    }
+
+    const timeout = setTimeout(restart, delayMs);
+    return () => clearTimeout(timeout);
+  }, [activePurchaseId, open, recoveryRestartAt, refresh]);
 
   function resetForNewAttempt() {
     clientRequestKeyRef.current = null;
@@ -266,6 +347,9 @@ function HostedUsageTopUpDialog({
     setCheckoutInFlight(false);
     setCheckoutError(null);
     setActivePurchaseId(null);
+    setRecoveredCheckoutUrl(null);
+    setRecoveryRestartAt(null);
+    setRetryOfferCode(null);
     setPurchaseStatus(null);
     setPollExhausted(false);
     setStatusCheckFailed(false);
@@ -290,11 +374,12 @@ function HostedUsageTopUpDialog({
     setOpen(nextOpen);
   }
 
-  async function startCheckout() {
-    if (!selectedOffer || checkoutInFlight) {
+  async function startCheckout(offerCode = selectedOffer?.offerCode ?? null) {
+    if (!offerCode || checkoutInFlight) {
       return;
     }
 
+    statusControllerRef.current?.abort();
     setHasCheckoutAttempt(true);
     setCheckoutInFlight(true);
     setCheckoutError(null);
@@ -315,7 +400,7 @@ function HostedUsageTopUpDialog({
       const value = await requestHostedOnboardingJson<unknown>({
         method: "POST",
         payload: {
-          offerCode: selectedOffer.offerCode,
+          offerCode,
           clientRequestKey,
         },
         signal: controller.signal,
@@ -323,22 +408,56 @@ function HostedUsageTopUpDialog({
       });
       const response = readPurchaseResponse(value);
 
+      if (response.recovered) {
+        setRetryOfferCode(response.retryAllowed ? offerCode : null);
+        const checkoutUrl = response.url ? readCheckoutUrl(response.url) : null;
+        if (response.status === "checkout_open" && !checkoutUrl) {
+          throw new Error("Could not open Stripe right now. Try again.");
+        }
+        purchaseStatusRef.current = response.status;
+        setPurchaseStatus(response.status);
+        setRecoveryRestartAt(response.restartAt);
+        setRecoveredCheckoutUrl(
+          response.status === "checkout_open" ? checkoutUrl : null,
+        );
+        setPollExhausted(false);
+        setStatusCheckFailed(false);
+        setActivePurchaseId(response.purchaseId);
+        if (shouldPollPurchaseStatus(response.status)) {
+          setStatusCheckAttempt((attempt) => attempt + 1);
+        }
+        return;
+      }
+
       if (response.url) {
         window.location.assign(readCheckoutUrl(response.url));
         return;
       }
 
       purchaseStatusRef.current = response.status;
+      setRetryOfferCode(response.retryAllowed ? offerCode : null);
       setPurchaseStatus(response.status);
+      setRecoveryRestartAt(response.restartAt);
       setPollExhausted(false);
       setStatusCheckFailed(false);
       setActivePurchaseId(response.purchaseId);
+      if (shouldPollPurchaseStatus(response.status)) {
+        setStatusCheckAttempt((attempt) => attempt + 1);
+      }
     } catch (error) {
       setCheckoutError(
         isAbortError(error)
           ? "Checkout took too long to open. Try again."
           : toErrorMessage(error, "Could not open Stripe right now. Try again."),
       );
+      const currentStatus = purchaseStatusRef.current;
+      if (
+        activePurchaseId !== null &&
+        currentStatus !== null &&
+        shouldPollPurchaseStatus(currentStatus)
+      ) {
+        setStatusCheckAttempt((attempt) => attempt + 1);
+      }
     } finally {
       if (timeout !== null) {
         clearTimeout(timeout);
@@ -350,22 +469,95 @@ function HostedUsageTopUpDialog({
     }
   }
 
+  async function cancelRecoveredCheckout() {
+    if (!activePurchaseId || checkoutInFlight) {
+      return;
+    }
+
+    const purchaseId = activePurchaseId;
+    setCheckoutInFlight(true);
+    setCheckoutError(null);
+    statusControllerRef.current?.abort();
+
+    const controller = new AbortController();
+    checkoutControllerRef.current = controller;
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, CHECKOUT_REQUEST_TIMEOUT_MS);
+
+    try {
+      const value = await requestHostedOnboardingJson<unknown>({
+        credentials: "same-origin",
+        headers: {
+          accept: "application/json",
+        },
+        method: "POST",
+        signal: controller.signal,
+        url: `/api/settings/billing/usage-credit/purchases/${encodeURIComponent(purchaseId)}/expire`,
+      });
+      const response = readPurchaseResponse(value);
+      if (response.purchaseId !== purchaseId) {
+        throw new Error("Could not cancel this checkout right now. Try again.");
+      }
+
+      purchaseStatusRef.current = response.status;
+      setPurchaseStatus(response.status);
+      setRecoveryRestartAt(response.restartAt);
+      if (response.status !== "checkout_open") {
+        setRecoveredCheckoutUrl(null);
+      }
+      setPollExhausted(false);
+      setStatusCheckFailed(false);
+      if (response.status === "fulfilled") {
+        refreshPurchaseOnce(
+          purchaseId,
+          refreshedPurchaseIdsRef.current,
+          refresh,
+        );
+      }
+    } catch (error) {
+      setCheckoutError(
+        isAbortError(error)
+          ? "Canceling checkout took too long. Try again."
+          : toErrorMessage(
+              error,
+              "Could not cancel this checkout right now. Try again.",
+            ),
+      );
+    } finally {
+      clearTimeout(timeout);
+      if (checkoutControllerRef.current === controller) {
+        checkoutControllerRef.current = null;
+      }
+      setCheckoutInFlight(false);
+      setStatusCheckAttempt((attempt) => attempt + 1);
+    }
+  }
+
   const showingPurchaseStatus = activePurchaseId !== null;
+  const canResumeRecoveredCheckout =
+    purchaseStatus === "checkout_open" && recoveredCheckoutUrl !== null;
+  const canCancelRecoveredCheckout = purchaseStatus === "checkout_open";
+  const canRetryCheckout =
+    purchaseStatus === "reconciling" && retryOfferCode !== null;
   const statusContent = readStatusContent(
     purchaseStatus,
     pollExhausted,
     statusCheckFailed,
+    canResumeRecoveredCheckout,
+    canRetryCheckout,
+    purchaseReturn?.kind === "success" &&
+      purchaseReturn.purchaseId === activePurchaseId,
   );
   const canRetryStatusCheck =
     statusCheckFailed ||
     (pollExhausted &&
       (purchaseStatus === null || shouldPollPurchaseStatus(purchaseStatus)));
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      {offers.length > 0 ? (
+      {offers.length > 0 || activePurchaseId ? (
         <DialogTrigger render={<Button type="button" variant="outline" size="lg" />}>
-          Add usage
+          {activePurchaseId ? "Continue checkout" : "Add usage"}
         </DialogTrigger>
       ) : null}
 
@@ -375,12 +567,18 @@ function HostedUsageTopUpDialog({
       >
         <DialogHeader className="pr-10">
           <DialogTitle className="text-2xl leading-tight">
-            {showingPurchaseStatus ? statusContent.title : "Add usage"}
+            {showingPurchaseStatus
+              ? statusContent.title
+              : offers.length === 0
+                ? "Usage credit unavailable"
+                : "Add usage"}
           </DialogTitle>
           <DialogDescription>
             {showingPurchaseStatus
               ? "Murph checks Stripe before changing your available usage."
-              : "Choose how much usage credit to add. Stripe confirms the payment before Murph adds it."}
+              : offers.length === 0
+                ? "There isn’t a usage-credit offer available for this account right now."
+                : "Choose how much usage credit to add. Stripe confirms the payment before Murph adds it."}
           </DialogDescription>
         </DialogHeader>
 
@@ -395,7 +593,36 @@ function HostedUsageTopUpDialog({
                 {statusContent.message}
               </p>
             </div>
+            <FieldError>{checkoutError}</FieldError>
             <div className="flex flex-col gap-2">
+              {canResumeRecoveredCheckout ? (
+                <Button
+                  type="button"
+                  size="lg"
+                  className="w-full"
+                  disabled={checkoutInFlight}
+                  onClick={() => {
+                    window.location.assign(recoveredCheckoutUrl);
+                  }}
+                >
+                  Resume checkout
+                </Button>
+              ) : null}
+              {canCancelRecoveredCheckout ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  className="w-full"
+                  aria-busy={checkoutInFlight}
+                  disabled={checkoutInFlight}
+                  onClick={() => {
+                    void cancelRecoveredCheckout();
+                  }}
+                >
+                  {checkoutInFlight ? "Canceling checkout…" : "Cancel checkout"}
+                </Button>
+              ) : null}
               {canRetryStatusCheck ? (
                 <Button
                   type="button"
@@ -410,6 +637,20 @@ function HostedUsageTopUpDialog({
                   Check again
                 </Button>
               ) : null}
+              {canRetryCheckout ? (
+                <Button
+                  type="button"
+                  size="lg"
+                  className="w-full"
+                  aria-busy={checkoutInFlight}
+                  disabled={checkoutInFlight}
+                  onClick={() => {
+                    void startCheckout(retryOfferCode);
+                  }}
+                >
+                  {checkoutInFlight ? "Opening Stripe…" : "Retry checkout"}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -420,6 +661,23 @@ function HostedUsageTopUpDialog({
                 Close
               </Button>
             </div>
+          </div>
+        ) : offers.length === 0 ? (
+          <div className="flex flex-col gap-5">
+            <div className="rounded-2xl border border-border bg-muted/30 p-5">
+              <p className="text-pretty text-sm leading-6 text-foreground">
+                No purchase is available from this account at the moment.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="w-full"
+              onClick={() => handleOpenChange(false)}
+            >
+              Close
+            </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-5">
@@ -440,7 +698,7 @@ function HostedUsageTopUpDialog({
                 {offers.map((offer, index) => (
                   <ChoiceCard
                     key={offer.offerCode}
-                    id={`usage-top-up-${index}-${sanitizeIdPart(offer.offerCode)}`}
+                    id={`usage-top-up-${index}`}
                     value={offer.offerCode}
                     disabled={hasCheckoutAttempt}
                     title={
@@ -499,6 +757,10 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     value.purchaseId.trim().length === 0 ||
     value.purchaseId.length > 200 ||
     !isPurchaseStatus(value.status) ||
+    (value.recovered !== undefined && value.recovered !== true) ||
+    (value.restartAt !== undefined &&
+      (value.status !== "reconciling" || !isCanonicalIsoTimestamp(value.restartAt))) ||
+    (value.retryAllowed !== undefined && value.retryAllowed !== true) ||
     (value.url !== undefined && value.url !== null && typeof value.url !== "string")
   ) {
     throw new Error("Could not open Stripe right now. Try again.");
@@ -506,6 +768,9 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
 
   return {
     purchaseId: value.purchaseId,
+    recovered: value.recovered === true,
+    restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
+    retryAllowed: value.retryAllowed === true,
     status: value.status,
     url: typeof value.url === "string" && value.url.length > 0 ? value.url : null,
   };
@@ -523,10 +788,33 @@ function readCheckoutUrl(value: string): string {
   }
 }
 
+function readOptionalCheckoutUrl(value: string): string | null {
+  try {
+    return readCheckoutUrl(value);
+  } catch {
+    return null;
+  }
+}
+
+function readOptionalRestartAt(value: string | undefined): string | null {
+  return isCanonicalIsoTimestamp(value) ? value : null;
+}
+
+function isCanonicalIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
 function readStatusContent(
   status: HostedUsageTopUpPurchaseStatus | null,
   pollExhausted: boolean,
   statusCheckFailed: boolean,
+  canResumeCheckout: boolean,
+  canRetryCheckout: boolean,
+  returnedFromSuccessfulCheckout: boolean,
 ): { message: string; title: string } {
   if (statusCheckFailed) {
     return {
@@ -535,7 +823,29 @@ function readStatusContent(
     };
   }
 
+  if (status === "checkout_open") {
+    return canResumeCheckout
+      ? {
+          title: "Checkout already open",
+          message:
+            "You already have a usage-credit checkout in progress. Resume it or cancel it before starting a new one.",
+        }
+      : {
+          title: "Checkout already open",
+          message:
+            "An existing usage-credit checkout is open, but it can’t be resumed from this account right now. You can cancel it.",
+        };
+  }
+
   if (pollExhausted && (!status || shouldPollPurchaseStatus(status))) {
+    if (status === "reconciling" && !returnedFromSuccessfulCheckout) {
+      return {
+        title: "Checkout not open yet",
+        message: canRetryCheckout
+          ? "Stripe checkout still hasn’t opened. You can safely retry with the same purchase."
+          : "This purchase is still being reconciled. Checkout is not available right now.",
+      };
+    }
     return {
       title: "Payment confirmation pending",
       message:
@@ -564,13 +874,23 @@ function readStatusContent(
         title: "Confirming payment",
         message: "Payment submitted. Stripe is confirming it.",
       };
-    case "checkout_open":
-    case "reconciling":
     case null:
       return {
         title: "Confirming payment",
         message: "Confirming your payment with Stripe…",
       };
+    case "reconciling":
+      return returnedFromSuccessfulCheckout
+        ? {
+            title: "Confirming payment",
+            message: "Confirming your payment with Stripe…",
+          }
+        : {
+            title: "Checkout not open yet",
+            message: canRetryCheckout
+              ? "Stripe checkout hasn’t opened yet. You can safely retry with the same purchase."
+              : "This purchase is still being reconciled. Checkout is not available right now.",
+          };
   }
 }
 
@@ -601,10 +921,6 @@ function createClientRequestKey(): string {
   }
 
   return globalThis.crypto.randomUUID();
-}
-
-function sanitizeIdPart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/gu, "-");
 }
 
 function waitForNextStatusRead(signal: AbortSignal): Promise<void> {
@@ -645,6 +961,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export { HostedUsageTopUpDialog };
 export type {
+  HostedUsageTopUpActivePurchase,
   HostedUsageTopUpDialogProps,
   HostedUsageTopUpOffer,
   HostedUsageTopUpPurchaseStatus,

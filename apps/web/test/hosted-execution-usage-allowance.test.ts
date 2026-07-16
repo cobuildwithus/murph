@@ -1084,19 +1084,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_123",
-      creditEligibilitySequence: 7n,
       debitUsdMicros: 896n,
       effectiveAt: new Date("2026-03-29T12:00:00.000Z"),
       sourceUsageId: "turn_123.attempt-1",
       tx,
-    });
-    expect(tx.hostedMember.findUniqueOrThrow).toHaveBeenCalledWith({
-      select: {
-        usageCreditLedgerVersion: true,
-      },
-      where: {
-        id: "member_123",
-      },
     });
     const [, ...params] = executeRaw.mock.calls[0] ?? [];
     expect(params).toContain(4_104n);
@@ -1162,7 +1153,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        creditEligibilitySequence: 4n,
         debitUsdMicros: 896n,
       }),
     );
@@ -1852,9 +1842,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message: expect.stringContaining(
-          "https://withmurph.ai/settings?addUsage=true#subscription",
-        ),
+        message: expect.not.stringContaining("addUsage=true"),
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
@@ -1986,9 +1974,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "edge_usage_limit_reached",
-        message: expect.stringContaining(
-          "https://withmurph.ai/settings?addUsage=true#subscription",
-        ),
+        message: expect.not.stringContaining("addUsage=true"),
       },
     });
   });

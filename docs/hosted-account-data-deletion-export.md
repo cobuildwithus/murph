@@ -51,7 +51,8 @@ The Settings vault export does not include:
 - Active invite codes.
 - Hosted R2 object keys for workspace snapshots, browser-vault replicas, artifacts, runner secrets, or raw email.
 - API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
-- Usage-credit Checkout URLs, Stripe payment identifiers, request fingerprints, provider metadata, semantic source keys, source usage references, or per-grant allocation history.
+- Usage-credit Checkout URLs, Stripe payment identifiers, semantic source keys,
+  source usage references, or per-grant allocation history.
 
 ## Deletion workflow
 
@@ -96,7 +97,7 @@ The Settings vault export does not include:
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
 | `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
 | `prisma.hosted_usage_credit_entry` | Live delete | Not included in vault export | Deletes append-only usage-credit ledger rows before purchase and member rows. The deletion result reports row counts; browser-vault export omits semantic source keys, source usage references, and per-grant allocation history. |
-| `prisma.hosted_usage_credit_purchase` | Live delete | Not included in vault export | Deletes local purchase state and encrypted Stripe references after its ledger entries. The deletion result reports row counts; browser-vault export omits Checkout URLs, payment identifiers, request fingerprints, and provider metadata. Stripe retains legally required payment records under its own processes. |
+| `prisma.hosted_usage_credit_purchase` | Live delete | Not included in vault export | Deletes local purchase state and encrypted Stripe references after its ledger entries. The deletion result reports row counts; browser-vault export omits Checkout URLs and payment identifiers. Stripe retains legally required payment records under its own processes. |
 | `prisma.hosted_product_feedback` | Live delete | Confirmed data export | Deletes assistant-captured product feedback rows. Confirmed export includes safe kind/summary metadata and optional published changelog item ids while omitting internal feedback ids. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
 | `prisma.hosted_linq_invite_delivery` | Live delete | Metadata/counts | Deletes signup-link delivery records whose delivery identity contains the member id; unrelated operational delivery records remain under their normal retention policy. Historical orphan cleanup is finalized after production promotion and the prior-function drain. |
