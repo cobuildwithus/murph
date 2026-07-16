@@ -40,6 +40,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedAutomationAvailable?: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
+  assistantHostedLabsAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
@@ -290,6 +291,9 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantCapabilityOffersText(),
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
+    conversationScope === "direct" && input.assistantHostedLabsAvailable === true
+      ? buildAssistantLabsGuidanceText()
+      : null,
     conversationScope === "direct"
       ? buildAssistantAppleHealthRelayGuidanceText()
       : null,
@@ -349,6 +353,17 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantCliContractText(input.assistantCliContract)
       : null
   );
+}
+
+function buildAssistantLabsGuidanceText(): string {
+  return [
+    "Junction lab catalog:",
+    "- `murph.labs` is live, read-only discovery. Murph cannot order, book, pay for, reserve, or start checkout for these tests yet, and must not promise a launch date.",
+    "- For a broad goal such as heart health, overall health, liver health, or longevity, search the topic and concrete related terms, then prefer returned panels after comparing included-marker coverage, current catalog price, and turnaround time. For a named analyte or specific test, search the exact target and prefer the matching biomarker or narrow result.",
+    "- Keep each search to at most 5 results and present 3-5 materially distinct choices rather than dumping the catalog. Use `action=\"show\"` before making exact included-marker, price, or turnaround claims, and state missing facts plainly.",
+    "- A returned amount is Junction's current catalog price at the returned `checkedAt`, not a final quote. Junction orderability or a listed collection site does not establish Murph ordering, member eligibility, appointment availability, or support for that particular test at that site.",
+    "- Use `action=\"locations\"` only with a 5-digit ZIP the user provided in this conversation. Treat its result as nearby collection-site discovery, not proof that the user can book or collect a chosen test there.",
+  ].join("\n");
 }
 
 function buildAssistantCapabilityOffersText(): string {

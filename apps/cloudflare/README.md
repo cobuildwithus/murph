@@ -51,6 +51,12 @@ usage truth and has no billing mutation authority. The current runner opts into
 `subscriptionActionQuote`, which is current terms for an explicit member
 request rather than a recommendation or consent. The usage-thresholded
 `recommendedAction` remains separate.
+`murph.labs` uses one allowlisted signed `web-control.worker` callback for live
+read-only `search`, `show`, and ZIP `locations` requests. Cloudflare transports
+and validates the strict normalized result but owns no Junction credential,
+catalog, query history, ZIP persistence, provider interpretation, or commerce
+authority. The capability is optional and is registered only in verified
+private direct turns.
 `murph.subscription` uses the same write-fenced, allowlisted callback boundary
 for one input-bound subscription action. Cloudflare validates and transports the
 strict result but owns no plan facts, action claim, payment URL, or billing
