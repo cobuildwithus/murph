@@ -21,6 +21,7 @@ import {
   filterConnectSourcesForSearch,
   isHostedConsentRequiredError,
   isHostedDeviceConnectIntentUnavailableError,
+  isHostedWhoopDirectConnectCapReachedError,
   markCallbackConnectedSource,
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
@@ -34,6 +35,7 @@ import {
 } from "./connect-page-helpers";
 import { SourceCard } from "./connect-source-card";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
+import { WhoopAppleHealthFallback } from "./whoop-apple-health-fallback";
 import type {
   ConnectCallbackInput,
   ConnectCallbackNotice,
@@ -79,6 +81,7 @@ export function ConnectSourcesGrid({
   const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
+  const [showWhoopAppleHealthFallback, setShowWhoopAppleHealthFallback] = useState(false);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -161,6 +164,7 @@ export function ConnectSourcesGrid({
     setNotice(null);
     setConsentRequest(null);
     setConnectIntentRecovery(null);
+    setShowWhoopAppleHealthFallback(false);
 
     try {
       const authorizationUrl = await requestConnectionAuthorizationUrl(source, options);
@@ -180,6 +184,12 @@ export function ConnectSourcesGrid({
           message: error.message,
           sourceName: source.name,
         });
+        setPendingSourceId(null);
+        return;
+      }
+
+      if (isHostedWhoopDirectConnectCapReachedError(error)) {
+        setShowWhoopAppleHealthFallback(true);
         setPendingSourceId(null);
         return;
       }
@@ -232,6 +242,11 @@ export function ConnectSourcesGrid({
             intentClaim: activeConnectIntent.claim,
             source,
           });
+          return;
+        }
+
+        if (isHostedWhoopDirectConnectCapReachedError(error)) {
+          setShowWhoopAppleHealthFallback(true);
           return;
         }
 
@@ -320,46 +335,54 @@ export function ConnectSourcesGrid({
         )
       ) : null}
 
-      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            Sources
-          </p>
-          <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-            {filteredSources.length} of {displaySources.length} sources
-          </p>
-        </div>
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search sources"
-          aria-label="Search sources"
-          className="w-full sm:w-64"
+      {showWhoopAppleHealthFallback ? (
+        <WhoopAppleHealthFallback
+          onViewOtherSources={() => setShowWhoopAppleHealthFallback(false)}
         />
-      </div>
-
-      {filteredSources.length === 0 ? (
-        <Alert>
-          <AlertTitle>No sources matched</AlertTitle>
-          <AlertDescription>
-            Try a different search to get back to the full source list.
-          </AlertDescription>
-        </Alert>
       ) : (
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
-          {filteredSources.map((source) => (
-            <SourceCard
-              key={source.id}
-              authenticated={authenticated}
-              errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
-              pending={pendingSourceId === source.id}
-              pendingDisconnect={pendingDisconnectSourceId === source.id}
-              source={source}
-              onDisconnectTargetChange={setDisconnectSource}
-              onStartConnection={startConnection}
+        <>
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+                Sources
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                {filteredSources.length} of {displaySources.length} sources
+              </p>
+            </div>
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search sources"
+              aria-label="Search sources"
+              className="w-full sm:w-64"
             />
-          ))}
-        </div>
+          </div>
+
+          {filteredSources.length === 0 ? (
+            <Alert>
+              <AlertTitle>No sources matched</AlertTitle>
+              <AlertDescription>
+                Try a different search to get back to the full source list.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
+              {filteredSources.map((source) => (
+                <SourceCard
+                  key={source.id}
+                  authenticated={authenticated}
+                  errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
+                  pending={pendingSourceId === source.id}
+                  pendingDisconnect={pendingDisconnectSourceId === source.id}
+                  source={source}
+                  onDisconnectTargetChange={setDisconnectSource}
+                  onStartConnection={startConnection}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <ConnectConsentDialog

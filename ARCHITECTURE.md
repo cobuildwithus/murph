@@ -6,8 +6,6 @@ Last verified: 2026-07-16
 
 `apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
 
-An authenticated Linq group turn has one separate participant-self authority: `murph.group` may read or update the current sender's private tone, voice, Humor, Push, and Detail. The runtime derives exactly one sender handle from the accepted non-direct Linq delivery context and injects it after model parsing; the model cannot name or target a member. Web resolves that handle to one active hosted member, rechecks the synthetic group runtime and participant access, and uses the existing member-preference transaction and mailbox wake. Missing, email-derived, ambiguous, unknown, suspended, or inactive sender state fails closed. These settings remain member-owned and apply only to that member's private Murph turns and generated voice; the group container never stores or applies them as room style.
-
 ## Hosted Assistant Ask
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted
@@ -146,13 +144,17 @@ call audio.
 
 ## Hosted Assistant Personalization
 
-`apps/web` remains the canonical owner of hosted tone, voice, model, and
-reasoning preferences. The assistant-accessible `murph.personalization` tool
+`apps/web` remains the canonical projection and mutation owner for hosted tone,
+voice, model, and reasoning preferences; canonical tone, voice, and personality
+truth converges into the current runtime's `bank/preferences.json`. The
+assistant-accessible `murph.personalization` tool
 reads model availability as context but mutates only tone and voice through one
-active-runtime-write-fenced, member-bound, signed `web-control.worker` callback
+active-runtime-write-fenced, runtime-bound, signed `web-control.worker` callback
 with strict read/update contracts. The
 validated fence identity is the only member identity forwarded and signed for
-the web callback. New `conversation.message` mailbox rows also store a nullable
+the web callback: it is the person member in a direct runtime and the synthetic
+thread-container member in a hosted group runtime. No participant identity or
+model-selected target crosses this boundary. New `conversation.message` mailbox rows also store a nullable
 server-keyed lookup of their existing deterministic assistant input id; the raw
 id is not persisted there, and this adds no mailbox wire, `sourceRef`, or
 event-id field. For an update, the runtime forwards the terminal
@@ -162,7 +164,12 @@ transaction, web resolves the
 callback member plus a keyed lookup of that id to one live conversation-lane
 `conversation.message` row and uses the row's canonical causal sequence.
 Missing, legacy, mismatched, or ambiguous identity fails closed with no numeric
-sequence fallback. Tone and voice changes continue to
+sequence fallback. A person-runtime mutation additionally requires that exact
+input to be a direct conversation wake; explicitly authorized direct email is
+accepted, while non-direct Linq or email fails closed. A synthetic
+thread-container mutation requires that exact input to be a non-direct Linq
+wake whose current route authority is still bound to the same container; group
+email and stale, direct, missing, or cross-room authority fail closed. Tone and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
 runtime handling. Hosted `murph.assistant_style` set/reset operations use a
@@ -180,6 +187,17 @@ sequence plus a different value is a later command from the same accepted turn.
 The runtime uses Web's requested effective results as an invocation-only
 overlay, while `show` still begins from canonical vault state; the mailbox event
 remains the only durable path into `bank/preferences.json`.
+
+Authenticated hosted Linq group turns register the same `murph.personalization`
+and `murph.assistant_style` tools against the room runtime. The container's
+`HostedMember` projection fields and canonical room vault therefore own Tone,
+Voice, Humor, Push, and Detail for that group. Saved room tone and personality
+enter later hosted group prompts, saved room tone also governs hosted room
+notification decisions, and saved room voice enters later generated voice
+output. They never read, inherit, or mutate a speaker's private Murph
+preferences. Group email may apply the room's already saved style but cannot
+mutate it. Model and reasoning controls remain unavailable to group runtimes and
+continue to use their separate relation-derived resolution.
 
 Model and reasoning
 changes remain exclusively owned by `murph.assistant_configuration`. The
@@ -208,8 +226,9 @@ shared `formal`/`upbeat` presentation defaults), read-only model availability,
 and truthful saved/unchanged state so the assistant can confirm what actually
 happened. The personality response additionally reports each requested dial as
 saved, unchanged, or superseded so a delayed callback cannot echo stale intent.
-No vault-only setter or second personalization store exists for hosted writes;
-Settings is the fallback only when the hosted tool port is unavailable.
+No vault-only setter or second personalization store exists for hosted writes.
+Personal Settings remains a fallback for a person's direct Murph only; it is
+never presented as a way to configure a group room.
 
 Conversational subscription changes use a separate input-bound capability from
 the read-only `murph.plan_usage` projection. The projection keeps its
@@ -340,7 +359,7 @@ Current hosted external-data lookup boundary: `apps/web` owns read-only product 
 - Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. Cloudflare stays a thin runner. The assistant runtime builds the replica from the restored `vaultRoot`, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Browser-vault replica writes remain capped at 50 MiB; oversized or wake-interrupted refreshes degrade without blocking foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs under `vault/.runtime/operations/assistant/**`, including local transcript files, per-turn decision receipts, replay-safe outbound intent journals, pending anonymized assistant-runtime issue records, bounded local diagnostics/runtime event logs, diagnostics snapshot counters and recent warnings, persisted assistant status snapshots, and runtime automation execution state plus run history. Hosted assistant provider usage, including the requested and served model reported by Codex App Server, is recorded directly through the hosted runtime platform into the web-owned usage ledger instead of becoming assistant runtime state. Durable user-facing memory belongs canonically in `bank/memory.md`, typed preferences such as workout unit defaults and desired wearable providers belong canonically in `bank/preferences.json`, and durable scheduled prompt configuration belongs canonically in `bank/automations/*.md`; capture-scoped rebuildable audit artifacts stay under `derived/inbox/**`, while durable compiled knowledge dossiers live under `derived/knowledge/**`.
-- Assistant tone, voice, and private personality values remain canonical in `bank/preferences.json`. Nullable `HostedMember` assistant-style columns are only the authenticated web Settings display/write projection. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. An authenticated group turn may originate a self-only preference delta through the hidden current-sender group authority, but the resulting state is still member-owned and is never applied to the room container.
+- Assistant tone, voice, and personality values remain canonical in the active runtime's `bank/preferences.json`: a person vault configures that private Murph, while a synthetic thread-container vault configures the room Murph. Nullable `HostedMember` assistant-style columns are the authenticated web mutation projection; only person-member rows feed personal Settings. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. The scheduled preference-handoff backstop selects active people and active synthetic rooms through the same owner-or-current-participant access derivation before its bounded limit, then rechecks canonical runtime access before signaling.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
 - Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Murph stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, fixed auto-reply channel enablement state, timestamps/turn counts, provider session references, runtime automation run history, compact system-emitted turn receipts, idempotent outbound intent state, diagnostics counters/warnings, and persisted status snapshots under `vault/.runtime/operations/assistant/**`. Assistant runtime directories must stay private (`0700`) and assistant runtime files must stay private (`0600`). Secret-bearing provider headers for persisted sessions live only in private sidecars under `vault/.runtime/operations/assistant/secrets/**`; the general session JSON keeps only public headers, diagnostics/runtime-event writes redact inline secret material before persistence, and `assistant doctor --repair` can tighten permissive assistant runtime modes in place. Inline secret findings indicate stale local session data rather than a supported migration path. Fresh sessions may inject a small canonical memory block from `bank/memory.md`, and assistant turns now use one shared CLI-first Murph runtime surface plus a small helper-tool layer across manual and message-triggered automation turns. Codex App Server is the hard-cut assistant adapter: it reaches the canonical `vault-cli` surface through native local CLI/filesystem/env authority, defaults to unsandboxed execution plus no approval friction, and is trusted as a local operator path. Assistant-engine keeps one warm Codex App Server process for the current stable process launch key; each turn is an RPC into that process, prompt/session/turn ids stay in turn request data instead of process env, and launch-key mismatch, abort cleanup, malformed or off-turn output, process failure, or explicit shutdown stops or poisons it before reuse. Codex App Server owns provider-native web-search behavior; Murph normalizes Codex `web.search` events into assistant trace and status output without carrying a separate Murph-side search provider or web-read tool layer. Accepted inbound channel messages are therefore treated as operator-authorized actions for the bound vault and may use the assistant runtime, canonical `memory`, canonical `automation`, self-target, and vault query/write surface. Murph owns transcript policy, turn orchestration, and tool/runtime planning, while canonical vault records remain authoritative on conflicts.
 Assistant-engine intentionally keeps one warm Codex App Server slot per Node
