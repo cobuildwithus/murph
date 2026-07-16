@@ -5,11 +5,9 @@ const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
-  readHostedMailboxLiveItemById: vi.fn(),
-  readHostedMailboxPayload: vi.fn(),
-  readHostedMailboxRecentLiveConversationItemIds: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
+  runWithHostedDomainRootUnwrapCache: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
@@ -33,10 +31,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
-  readHostedMailboxLiveItemById: mocks.readHostedMailboxLiveItemById,
-  readHostedMailboxPayload: mocks.readHostedMailboxPayload,
-  readHostedMailboxRecentLiveConversationItemIds:
-    mocks.readHostedMailboxRecentLiveConversationItemIds,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
+  runWithHostedDomainRootUnwrapCache:
+    mocks.runWithHostedDomainRootUnwrapCache,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
@@ -62,9 +61,9 @@ describe("hosted Linq egress authority", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
-    mocks.readHostedMailboxLiveItemById.mockResolvedValue(null);
-    mocks.readHostedMailboxPayload.mockResolvedValue(null);
-    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([]);
+    mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
+      async (run: () => Promise<unknown>) => run(),
+    );
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
       linqChatId: null,
       linqRecipientPhone: null,
@@ -364,6 +363,7 @@ describe("hosted Linq egress authority", () => {
       mailboxItemId: "mailbox-current",
       messageId: "linq-message-current",
       occurredAt: "2026-07-14T00:02:47.000Z",
+      prisma,
       threadIsDirect: true,
     });
 
@@ -391,7 +391,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       userId: "member-1",
     });
-    expect(mocks.readHostedMailboxPayload).not.toHaveBeenCalled();
+    expect(prisma.hostedMailboxPayload.findMany).not.toHaveBeenCalled();
   });
 
   it("allows retry authority from persisted answered mailbox ids without current inbound context", async () => {
@@ -404,6 +404,7 @@ describe("hosted Linq egress authority", () => {
       mailboxItemId: "mailbox-retry",
       messageId: "linq-message-retry",
       occurredAt: "2026-07-14T00:04:47.000Z",
+      prisma,
       threadIsDirect: true,
     });
     mocks.getPrisma.mockReturnValue(prisma);
@@ -429,11 +430,7 @@ describe("hosted Linq egress authority", () => {
       ok: true,
       threadIsDirect: true,
     });
-    expect(mocks.readHostedMailboxLiveItemById).toHaveBeenCalledWith({
-      availableAt: expect.any(Date),
-      mailboxItemId: "mailbox-retry",
-      prisma: expect.any(Object),
-    });
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
@@ -447,11 +444,9 @@ describe("hosted Linq egress authority", () => {
       mailboxItemId: "mailbox-recovered",
       messageId: "linq-message-recovered",
       occurredAt: "2026-07-14T00:06:47.000Z",
+      prisma,
       threadIsDirect: true,
     });
-    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([
-      "mailbox-recovered",
-    ]);
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
@@ -462,11 +457,15 @@ describe("hosted Linq egress authority", () => {
       targetKind: "thread",
     })).resolves.toEqual({ targetOverride: null, threadIsDirect: true });
 
-    expect(mocks.readHostedMailboxRecentLiveConversationItemIds).toHaveBeenCalledWith({
-      availableAt: expect.any(Date),
-      limit: 100,
-      prisma: asRuntimeEngagementPrisma(prisma),
-      userId: "member-1",
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledWith({
+      orderBy: { laneSeq: "desc" },
+      select: expect.any(Object),
+      take: 100,
+      where: expect.objectContaining({
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member-1",
+      }),
     });
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
@@ -481,11 +480,9 @@ describe("hosted Linq egress authority", () => {
       mailboxItemId: "mailbox-former-group",
       messageId: "linq-message-former-group",
       occurredAt: "2026-07-14T00:07:47.000Z",
+      prisma,
       threadIsDirect: false,
     });
-    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue([
-      "mailbox-former-group",
-    ]);
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
@@ -498,6 +495,179 @@ describe("hosted Linq egress authority", () => {
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
+  });
+
+  it("batches the maximum answered and recent mailbox authority scan", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    const occurredAt = "2026-07-14T00:08:47.000Z";
+    const answeredMailboxItemIds = Array.from(
+      { length: 100 },
+      (_, index) => `mailbox-answered-${index}`,
+    );
+    const answeredRows = answeredMailboxItemIds.map((mailboxItemId, index) =>
+      buildPersistedLinqMailboxItem({
+        dedupeKey: `linq-event-answered-${index}`,
+        mailboxItemId,
+        occurredAt,
+        payloadRef: `hosted-mailbox-payload:${mailboxItemId}`,
+      }));
+    const recentRows = Array.from(
+      { length: 100 },
+      (_, index) => buildPersistedLinqMailboxItem({
+        dedupeKey: `linq-event-recent-${index}`,
+        mailboxItemId: `mailbox-recent-${index}`,
+        occurredAt,
+        payloadRef: `hosted-mailbox-payload:mailbox-recent-${index}`,
+      }),
+    );
+    const candidates = [...answeredRows].reverse().concat(recentRows);
+    prisma.hostedMailboxItem.findMany
+      .mockResolvedValueOnce(answeredRows)
+      .mockResolvedValueOnce(recentRows);
+    prisma.hostedMailboxPayload.findMany.mockResolvedValue(
+      candidates.map((item) => ({
+        mailboxItemId: item.id,
+        payloadCiphertext: `sidecar:${item.id}`,
+      })),
+    );
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      answeredMailboxItemIds,
+      authorityCheckOnly: false,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-unmatched",
+      target: "chat-unmatched",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMailboxPayload.findMany).toHaveBeenCalledTimes(1);
+    expect(mocks.runWithHostedDomainRootUnwrapCache).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenNthCalledWith(1, {
+      select: expect.any(Object),
+      where: {
+        createdAt: { gte: expect.any(Date) },
+        id: { in: answeredMailboxItemIds },
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: expect.any(Date) } },
+        ],
+      },
+    });
+    expect(prisma.hostedMailboxItem.findMany).toHaveBeenNthCalledWith(2, {
+      orderBy: { laneSeq: "desc" },
+      select: expect.any(Object),
+      take: 100,
+      where: {
+        createdAt: { gte: expect.any(Date) },
+        kind: "conversation.message",
+        lane: "conversation",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: expect.any(Date) } },
+        ],
+        userId: "member-1",
+      },
+    });
+    expect(prisma.hostedMailboxPayload.findMany).toHaveBeenCalledWith({
+      select: {
+        mailboxItemId: true,
+        payloadCiphertext: true,
+      },
+      where: {
+        mailboxItem: {
+          createdAt: { gte: expect.any(Date) },
+          OR: [
+            { expiresAt: null },
+            { expiresAt: { gt: expect.any(Date) } },
+          ],
+        },
+        mailboxItemId: {
+          in: candidates.map((item) => item.id),
+        },
+        userId: "member-1",
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(200);
+    expect(mocks.decodeHostedMailboxStoredPayload.mock.calls.map(
+      ([decodeInput]) => decodeInput.mailboxItemId,
+    )).toEqual(candidates.map((item) => item.id));
+    expect(mocks.decodeHostedMailboxStoredPayload.mock.calls.map(
+      ([decodeInput]) => decodeInput.payloadCiphertext,
+    )).toEqual(candidates.map((item) => `sidecar:${item.id}`));
+
+    const answeredQuery = prisma.hostedMailboxItem.findMany.mock.calls[0][0];
+    const recentQuery = prisma.hostedMailboxItem.findMany.mock.calls[1][0];
+    const payloadQuery = prisma.hostedMailboxPayload.findMany.mock.calls[0][0];
+    expect(answeredQuery.where.createdAt.gte).toEqual(
+      recentQuery.where.createdAt.gte,
+    );
+    expect(answeredQuery.where.OR[1].expiresAt.gt).toBe(
+      recentQuery.where.OR[1].expiresAt.gt,
+    );
+    expect(payloadQuery.where.mailboxItem).toEqual({
+      createdAt: answeredQuery.where.createdAt,
+      OR: answeredQuery.where.OR,
+    });
+    expect(
+      answeredQuery.where.OR[1].expiresAt.gt.getTime()
+      - answeredQuery.where.createdAt.gte.getTime(),
+    ).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+
+  it("keeps malformed refs outside payload reads and foreign rows outside decrypts", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    const malformedMemberItem = buildPersistedLinqMailboxItem({
+      dedupeKey: "linq-event-malformed-sidecar",
+      mailboxItemId: "mailbox-malformed-sidecar",
+      occurredAt: "2026-07-14T00:09:47.000Z",
+      payloadRef: "hosted-mailbox-payload:mailbox-other",
+    });
+    const foreignMemberItem = buildPersistedLinqMailboxItem({
+      dedupeKey: "linq-event-foreign-sidecar",
+      mailboxItemId: "mailbox-foreign-sidecar",
+      occurredAt: "2026-07-14T00:09:48.000Z",
+      payloadRef: "hosted-mailbox-payload:mailbox-foreign-sidecar",
+      userId: "member-2",
+    });
+    prisma.hostedMailboxItem.findMany
+      .mockResolvedValueOnce([malformedMemberItem, foreignMemberItem])
+      .mockResolvedValueOnce([]);
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      answeredMailboxItemIds: [
+        foreignMemberItem.id,
+        malformedMemberItem.id,
+      ],
+      authorityCheckOnly: false,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-unmatched",
+      target: "chat-unmatched",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMailboxPayload.findMany).not.toHaveBeenCalled();
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(1);
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mailboxItemId: malformedMemberItem.id,
+        payloadCiphertext: null,
+        payloadInlineCiphertext: null,
+        userId: "member-1",
+      }),
+    );
   });
 
   it.each([
@@ -572,6 +742,7 @@ describe("hosted Linq egress authority", () => {
       mailboxItemId: "mailbox-current",
       messageId: persistedMessageId,
       occurredAt: "2026-07-14T00:02:47.000Z",
+      prisma,
       threadIsDirect,
       userId: mailboxUserId,
     });
@@ -962,6 +1133,12 @@ function createPrismaStub(input: {
         telegramUserIdEncrypted: null,
       }),
     },
+    hostedMailboxItem: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    hostedMailboxPayload: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue(input.threadRouteContainerMemberId
         ? [buildHostedLinqRouteRow(input.threadRouteContainerMemberId)]
@@ -990,27 +1167,19 @@ function mockPersistedLinqInbound(input: {
   mailboxItemId: string;
   messageId: string;
   occurredAt: string;
+  prisma: ReturnType<typeof createPrismaStub>;
   threadIsDirect: boolean | null;
   userId?: string;
 }) {
   const userId = input.userId ?? "member-1";
-  mocks.readHostedMailboxLiveItemById.mockResolvedValue({
-    consumedAt: null,
-    createdAt: input.occurredAt,
-    dedupeKey: input.dedupeKey,
-    expiresAt: null,
-    id: input.mailboxItemId,
-    kind: "conversation.message",
-    lane: "conversation",
-    laneSeq: "1",
-    occurredAt: input.occurredAt,
-    payloadBytes: 1,
-    payloadInlineCiphertext: "encrypted-mailbox-payload",
-    payloadRef: null,
-    payloadSchema: "murph.hosted-mailbox-item-payload.v1",
-    updatedAt: input.occurredAt,
-    userId,
-  });
+  input.prisma.hostedMailboxItem.findMany.mockResolvedValue([
+    buildPersistedLinqMailboxItem({
+      dedupeKey: input.dedupeKey,
+      mailboxItemId: input.mailboxItemId,
+      occurredAt: input.occurredAt,
+      userId,
+    }),
+  ]);
   mocks.decodeHostedMailboxStoredPayload.mockResolvedValue({
     eventId: input.dedupeKey,
     kind: "conversation.message",
@@ -1039,6 +1208,31 @@ function mockPersistedLinqInbound(input: {
     occurredAt: input.occurredAt,
     userId,
   });
+}
+
+function buildPersistedLinqMailboxItem(input: {
+  dedupeKey: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  payloadRef?: string | null;
+  userId?: string;
+}) {
+  return {
+    createdAt: new Date(input.occurredAt),
+    dedupeKey: input.dedupeKey,
+    expiresAt: null,
+    id: input.mailboxItemId,
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: 1n,
+    occurredAt: new Date(input.occurredAt),
+    payloadInlineCiphertext: input.payloadRef
+      ? null
+      : "encrypted-mailbox-payload",
+    payloadRef: input.payloadRef ?? null,
+    payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+    userId: input.userId ?? "member-1",
+  };
 }
 
 function buildHostedLinqRouteRow(containerMemberId: string) {
