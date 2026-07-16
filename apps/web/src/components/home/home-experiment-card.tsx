@@ -70,14 +70,16 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
         "flex items-center justify-between gap-4 text-[11px] text-muted-foreground",
         variant === "history" ? "mt-3" : "mt-5",
       )}>
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate tabular-nums">
+        <span className="inline-flex min-w-0 items-center gap-1.5 tabular-nums">
           {variant === "history" && card.privateBadgeLabel ? (
             <>
               <LockKeyhole aria-hidden="true" className="size-3 shrink-0" />
               <span className="sr-only">{card.privateBadgeLabel}</span>
             </>
           ) : null}
-          {dateLabel ?? "Stored in your private vault"}
+          <span className="min-w-0 truncate">
+            {dateLabel ?? "Stored in your private vault"}
+          </span>
         </span>
         {variant === "default" && card.href ? (
           <span className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground/70 transition-colors group-hover:text-foreground">
@@ -137,7 +139,10 @@ function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
       <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         Experiment status
       </p>
-      <p className="mt-2 font-serif text-3xl font-semibold leading-none text-foreground">
+      <p className={cn(
+        "mt-2 font-serif font-semibold leading-none text-foreground",
+        variant === "history" ? "text-2xl" : "text-3xl",
+      )}>
         {fallback}
       </p>
     </div>
@@ -147,25 +152,33 @@ function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
 function ExperimentResults({ metrics }: { metrics: ExperimentRunCardMetric[] }) {
   return (
     <div className="grid w-full grid-cols-2 gap-x-4 gap-y-3">
-      {metrics.map((metric, index) => (
-        <div key={`${metric.label}:${index}`} className="min-w-0">
-          <p className="font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
-            {metric.label}
-          </p>
-          <p className={cn(
-            "mt-1 font-serif text-xl font-semibold leading-none tabular-nums",
-            resolveMetricTone(metric),
-          )}>
-            {metric.delta || metric.current}
-          </p>
-        </div>
-      ))}
+      {metrics.map((metric, index) => {
+        const sentimentLabel = resolveMetricSentimentLabel(metric);
+
+        return (
+          <div key={`${metric.label}:${index}`} className="min-w-0">
+            <p className="font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
+              {metric.label}
+            </p>
+            <p className={cn(
+              "mt-1 font-serif text-xl font-semibold leading-none tabular-nums",
+              resolveMetricTone(metric),
+            )}>
+              {metric.delta || metric.current}
+              {sentimentLabel ? (
+                <span className="sr-only">{sentimentLabel}</span>
+              ) : null}
+            </p>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function ExperimentResult({ metric }: { metric: ExperimentRunCardMetric }) {
   const headline = metric.delta || metric.current;
+  const sentimentLabel = resolveMetricSentimentLabel(metric);
 
   return (
     <div className="w-full">
@@ -177,6 +190,9 @@ function ExperimentResult({ metric }: { metric: ExperimentRunCardMetric }) {
         resolveMetricTone(metric),
       )}>
         {headline}
+        {sentimentLabel ? (
+          <span className="sr-only">{sentimentLabel}</span>
+        ) : null}
       </p>
       <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-y border-border/60 py-3">
         <ResultValue label="Baseline" value={metric.baseline ?? "—"} />
@@ -258,8 +274,14 @@ function resolveDateLabel(card: ExperimentLibraryCard): string | null {
 
 function resolveMetricTone(metric: ExperimentRunCardMetric): string {
   if (metric.sentiment === "positive") return "text-primary";
-  if (metric.sentiment === "negative") return "text-amber-600";
+  if (metric.sentiment === "negative") return "text-amber-700";
   return "text-foreground";
+}
+
+function resolveMetricSentimentLabel(metric: ExperimentRunCardMetric): string | null {
+  if (metric.sentiment === "positive") return ", favorable";
+  if (metric.sentiment === "negative") return ", unfavorable";
+  return null;
 }
 
 function isRedundantHistoryStatus(label: string): boolean {

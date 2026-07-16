@@ -50,11 +50,11 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
   );
   assert.match(
     markup,
-    /Sleep efficiency<\/p><p class="[^"]*text-amber-600[^"]*">-0\.7 percent<\/p>/,
+    /Sleep efficiency<\/p><p class="[^"]*text-amber-700[^"]*">-0\.7 percent<span class="sr-only">, unfavorable<\/span><\/p>/,
   );
   assert.match(
     markup,
-    /Deep sleep<\/p><p class="[^"]*text-primary[^"]*">\+20\.4 min<\/p>/,
+    /Deep sleep<\/p><p class="[^"]*text-primary[^"]*">\+20\.4 min<span class="sr-only">, favorable<\/span><\/p>/,
   );
   assert.match(
     markup,
@@ -64,6 +64,10 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
   assert.doesNotMatch(markup, /Latest/);
   assert.match(markup, /Private data/);
   assert.match(markup, /size-3 shrink-0/);
+  assert.match(
+    markup,
+    /<span class="min-w-0 truncate">May 1 to May 14<\/span>/,
+  );
   assert.match(
     markup,
     /^<a[^>]*href="\/experiments\/red-light-glasses"[^>]*><article/,
@@ -138,8 +142,31 @@ test("HomeExperimentCard keeps low-confidence completed runs concise", async () 
     card,
     variant: "history",
   }));
+  const defaultCard = resultCard();
+  defaultCard.runSummary = {
+    completionPercent: 100,
+    dateRange: "May 1 to May 14",
+    day: 14,
+    metrics: [],
+  };
+  const defaultMarkup = renderToStaticMarkup(createElement(HomeExperimentCard, {
+    card: defaultCard,
+    variant: "default",
+  }));
 
   assert.match(markup, /No clear signal/);
+  assert.match(
+    markup,
+    /<p class="[^"]*text-2xl[^"]*">No clear signal<\/p>/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /<p class="[^"]*text-3xl[^"]*">No clear signal<\/p>/,
+  );
+  assert.match(
+    defaultMarkup,
+    /<p class="[^"]*text-3xl[^"]*">No clear signal<\/p>/,
+  );
   assert.doesNotMatch(markup, /Sleep latency/);
   assert.doesNotMatch(markup, /18 min/);
   assert.doesNotMatch(markup, /Protocol preview copy that should stay hidden/);
@@ -207,6 +234,10 @@ test("HomeExperiments preserves the standard card treatment for stopped runs", a
   assert.match(markup, /h-full min-h-\[240px\] p-5/);
   assert.match(markup, />Stopped</);
   assert.match(markup, /Deep sleep/);
+  assert.match(
+    markup,
+    /\+20\.4 min<span class="sr-only">, favorable<\/span>/,
+  );
   assert.match(markup, /Baseline/);
   assert.match(markup, /Latest/);
   assert.doesNotMatch(markup, /Sleep latency/);

@@ -200,8 +200,9 @@ and mobile-landscape widths, and one where the open desktop sidebar constrains
 the content column.
 Inside each card, keep the category and title, then show every comparable result
 as a small primary-first grid of mono labels and Fraunces deltas. Positive
-evidence uses sage, unfavorable movement retains amber, and neutral movement
-stays slate so mixed results remain distinguishable. Keep the date, but omit the
+evidence uses sage, unfavorable movement uses Tailwind amber-700 rather than the
+lighter decorative amber grain token, and neutral movement stays slate so mixed
+results remain distinguishable. Keep the date, but omit the
 redundant Completed badge, circled privacy lock, Baseline-to-Latest block, and
 visible View arrow. The entire card remains the link to the detailed result.
 Active and paused cards keep the larger progress-first treatment, and stopped
