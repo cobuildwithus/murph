@@ -1,9 +1,9 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  parseHostedPlanUsageStatus,
-} from "@murphai/hosted-execution/plan-usage";
+  parseHostedRuntimeSubscriptionToolResponse,
+} from "@murphai/hosted-execution/subscription";
 import {
-  HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import {
@@ -11,28 +11,28 @@ import {
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
-export function createHostedRuntimePlanUsageToolPort(input: {
+export function createHostedRuntimeSubscriptionToolPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport;
-}): NonNullable<HostedRuntimePlatform["planUsageToolPort"]> {
+}): NonNullable<HostedRuntimePlatform["subscriptionToolPort"]> {
   return {
-    async read() {
+    async request(request) {
       const payload = await fetchHostedWebControlPlaneJson({
-        body: { includeSubscriptionActionQuote: true },
+        body: request,
         boundUserId: input.boundUserId,
-        description: "Hosted plan usage tool",
+        description: "Hosted subscription tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+        path: HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
 
       try {
-        return parseHostedPlanUsageStatus(payload);
+        return parseHostedRuntimeSubscriptionToolResponse(payload);
       } catch (error) {
-        throw new Error("Hosted plan usage tool returned invalid JSON.", {
+        throw new Error("Hosted subscription tool returned invalid JSON.", {
           cause: error,
         });
       }

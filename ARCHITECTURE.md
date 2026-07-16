@@ -183,6 +183,32 @@ saved, unchanged, or superseded so a delayed callback cannot echo stale intent.
 No vault-only setter or second personalization store exists for hosted writes;
 Settings is the fallback only when the hosted tool port is unavailable.
 
+Conversational subscription changes use a separate input-bound capability from
+the read-only `murph.plan_usage` projection. The projection keeps its
+thresholded `recommendedAction` separate from an opt-in
+`subscriptionActionQuote`: the recommendation is advice based on usage, while
+the quote is current server-owned terms for an explicit member request and is
+neither a recommendation nor consent. Callers that send the original empty
+request receive the original response shape with the quote field omitted.
+Assistant runtime advertises
+`murph.subscription` only for a private personal turn with current accepted
+member input, and it attaches that accepted input id rather than accepting one
+from the model. Cloudflare carries the bounded action over its signed
+`web-control.worker` transport without Stripe credentials or billing truth.
+Web binds the input to the callback member and a live conversation message,
+then atomically claims the first subscription action on that existing mailbox
+row. The claim is bounded by mailbox retention: an exact retry may continue,
+while a different action for the same input fails closed. This proves current
+authority and provenance but not the meaning of the member's text. Assistant
+policy requires the explicit exact choice. Web then re-derives current
+eligibility and delegates only continue-Pulse,
+start-Pulse-now, or upgrade-to-Edge choices to the existing billing services.
+Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal
+handoff when payment is required; a pending Edge change uses Customer Portal
+without a separate invoice lookup. This path adds no subscription table,
+scheduler, trial-ending webhook, custom checkout, App Clip, or automatic model
+change.
+
 ## Module Map
 
 Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. All other `packages/*` entries remain workspace-private owner packages. When a public package still needs one of those private workspace packages at runtime, the release flow bundles that private dependency into the public tarball instead of publishing it as a standalone npm package.

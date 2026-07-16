@@ -33,6 +33,10 @@ import type {
 import type {
   HostedPlanUsageStatus,
 } from '@murphai/hosted-execution/plan-usage'
+import type {
+  HostedRuntimeSubscriptionControlRequest,
+  HostedRuntimeSubscriptionToolResponse,
+} from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import { normalizeNullableString } from './shared.js'
@@ -90,6 +94,12 @@ export interface AssistantHostedFamilyPlanTool {
 
 export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
+}
+
+export interface AssistantHostedSubscriptionTool {
+  request(
+    request: HostedRuntimeSubscriptionControlRequest,
+  ): Promise<HostedRuntimeSubscriptionToolResponse>
 }
 
 export interface AssistantHostedPersonalizationTool {
@@ -162,7 +172,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
-  currentAssistantPreferenceInputId?: () => string | null
+  currentAssistantInputId?: () => string | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
@@ -173,6 +183,7 @@ export interface AssistantHostedExecutionContext {
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
@@ -238,6 +249,9 @@ export function normalizeAssistantExecutionContext(
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
+  const subscriptionTool = normalizeAssistantSubscriptionTool(
+    hosted?.subscriptionTool,
+  )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
@@ -252,10 +266,9 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(typeof hosted?.currentAssistantPreferenceInputId === 'function'
+      ...(typeof hosted?.currentAssistantInputId === 'function'
         ? {
-            currentAssistantPreferenceInputId:
-              hosted.currentAssistantPreferenceInputId,
+            currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
@@ -271,6 +284,7 @@ export function normalizeAssistantExecutionContext(
       ...(groupTool ? { groupTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(subscriptionTool ? { subscriptionTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
         ? { generatedImageUploaderRequired: true }
         : {}),
@@ -402,6 +416,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantSubscriptionTool(
+  input: AssistantHostedExecutionContext['subscriptionTool'] | undefined,
+): AssistantHostedSubscriptionTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 

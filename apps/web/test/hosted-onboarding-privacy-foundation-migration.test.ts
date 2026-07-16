@@ -617,6 +617,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMailboxSubscriptionActionClaimMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715230000_hosted_mailbox_subscription_action_claim/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
@@ -830,8 +837,15 @@ describe("hosted Prisma baseline migration", () => {
       "20260715120000_delete_orphaned_linq_invite_deliveries",
       "20260715150000_hosted_family_pending_member_plan",
       "20260715190000_hosted_assistant_personality_projection_watermarks",
+      "20260715230000_hosted_mailbox_subscription_action_claim",
       "migration_lock.toml",
     ]);
+    expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
+      'ALTER TABLE "hosted_mailbox_item"',
+    );
+    expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
+      'ADD COLUMN "subscription_action_claim" TEXT',
+    );
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
       'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
     );

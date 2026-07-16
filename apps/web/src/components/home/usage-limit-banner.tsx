@@ -27,15 +27,15 @@ const usageLimitBannerCopy: Record<
   }
 > = {
   edge_usage_limit_reached: {
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
     title: "Your Family has used 100% of this month's included usage",
   },
   pulse_upgrade_edge: {
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
     title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
@@ -43,7 +43,7 @@ const usageLimitBannerCopy: Record<
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
+    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
     title: "You've used 100% of your included trial usage",
   },
 };
