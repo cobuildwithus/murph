@@ -5,6 +5,7 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isEstablishedDeviceSyncConnection,
 } from "@murphai/device-syncd/public-account";
 import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
@@ -25,6 +26,7 @@ import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-conte
 import {
   assertCompanionHrvRmssdObservationFresh,
   resolveCompanionHrvRmssdConnection,
+  type CompanionConnectionIntent,
 } from "./companion";
 import {
   toHostedBrowserDeviceSyncConnectionSource,
@@ -169,19 +171,58 @@ export class HostedDeviceSyncPublicIngressService {
     return this.handleConnectionCallback(provider, options);
   }
 
-  /**
-   * Companion (mobile SDK) sign-in: ensures the established device-sync
-   * account through the same shared ingress core the Link callback uses,
-   * then mints the provider's short-lived SDK sign-in token. The token must
-   * never be logged or persisted.
-   */
+  /** Companion SDK sign-in. Only an explicit connect may change lifecycle state. */
   async createSdkSignInSession(
     userId: string,
     provider: string,
+    connectionIntent: CompanionConnectionIntent | null,
   ): Promise<SdkSignInSessionResult> {
-    return this.ingress.createSdkSignInSession({
-      provider,
-      ownerId: userId,
+    if (connectionIntent === "connect") {
+      return this.ingress.createSdkSignInSession({
+        provider,
+        ownerId: userId,
+      });
+    }
+
+    const providerConnections = (await this.context.store.listConnectionsForUser(userId))
+      .filter((connection) => connection.provider === provider);
+    const establishedConnections = providerConnections.filter(
+      isEstablishedDeviceSyncConnection,
+    );
+
+    if (establishedConnections.length > 1) {
+      throw deviceSyncError({
+        code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
+        message: "The companion could not identify one active device-sync connection.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    const establishedConnection = establishedConnections[0] ?? null;
+    if (establishedConnection) {
+      return this.ingress.resumeSdkSignInSession({
+        accountId: establishedConnection.id,
+        provider,
+        ownerId: userId,
+      });
+    }
+
+    // Older clients did not send an intent. Preserve their first connection,
+    // but never interpret missing local state as authority to clear a durable
+    // disconnect or other terminal server state.
+    if (connectionIntent === null && providerConnections.length === 0) {
+      return this.ingress.createSdkSignInSession({
+        provider,
+        ownerId: userId,
+      });
+    }
+
+    throw deviceSyncError({
+      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+      message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+      retryable: false,
+      httpStatus: 409,
     });
   }
 
@@ -192,11 +233,11 @@ export class HostedDeviceSyncPublicIngressService {
   }): Promise<void> {
     const resource = buildHostedCompanionHrvRmssdDirtyResource(input.observation);
     const connections = await this.context.store.listConnectionsForUser(input.userId);
-    const receipt = await this.context.store.inspectCompanionHrvCaptureReceipt({
-      captureId: input.observation.captureId,
+    const receipt = await this.context.store.inspectCompanionHrvNightReceipt({
       connectionIds: connections
         .filter((connection) => connection.provider === "junction")
         .map((connection) => connection.id),
+      nightDate: input.observation.nightDate,
       now: input.acceptedAt,
       resource,
       userId: input.userId,
@@ -206,8 +247,8 @@ export class HostedDeviceSyncPublicIngressService {
     }
     if (receipt === "conflict") {
       throw deviceSyncError({
-        code: "COMPANION_HRV_CAPTURE_CONFLICT",
-        message: "Companion HRV captureId was already accepted with different content.",
+        code: "COMPANION_HRV_NIGHT_CONFLICT",
+        message: "A different overnight HRV summary was already accepted for this night.",
         retryable: false,
         httpStatus: 409,
       });

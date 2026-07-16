@@ -192,6 +192,7 @@ export interface AssistantNotificationInput
       | 'operatorAuthority'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
+      | 'scheduledOccurrenceAt'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -1217,6 +1218,7 @@ function buildAssistantNotificationMessageInput(
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,

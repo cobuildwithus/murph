@@ -43,8 +43,9 @@ export const COMPANION_HEALTH_METADATA_BODY_LIMIT_BYTES =
 export type CompanionHealthMetadataKind = JunctionCompanionHealthMetadataKind;
 export type CompanionHealthMetadataRecord = JunctionCompanionHealthMetadataRecord;
 export type CompanionHealthMetadataBatch = JunctionCompanionHealthMetadataBatch;
-const COMPANION_HRV_MAXIMUM_AGE_MS = 24 * 60 * 60 * 1_000;
-const COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS = 5 * 60 * 1_000;
+const UTC_DAY_MS = 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_EARLIEST_NIGHT_DAY_OFFSET = -3;
+const COMPANION_HRV_LATEST_NIGHT_DAY_OFFSET = 1;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
   "authentication_failure",
@@ -155,15 +156,28 @@ interface CompanionAuthDiagnosticLog {
   appVersion: string | null;
 }
 
+export type CompanionConnectionIntent = "connect" | "resume";
+
 /**
- * Validates the optional companion sign-in request metadata and discards it.
+ * Validates the companion sign-in request and returns its lifecycle intent.
  *
  * A `companion_installations` record was considered in the MVP spec and is
- * deliberately deferred until operationally needed: the metadata carries no
- * load-bearing behavior today, so we validate the shape for forward
- * compatibility and persist or log nothing from it.
+ * deliberately deferred until operationally needed: installation metadata
+ * carries no load-bearing behavior today, so it is persisted and logged
+ * nowhere. A missing intent is retained only for legacy-client inference.
  */
-export function validateCompanionSignInRequestBody(body: Record<string, unknown>): void {
+export function validateCompanionSignInRequestBody(
+  body: Record<string, unknown>,
+): CompanionConnectionIntent | null {
+  const connectionIntent = body.connectionIntent;
+  if (
+    connectionIntent !== undefined
+    && connectionIntent !== "connect"
+    && connectionIntent !== "resume"
+  ) {
+    throw companionRequestInvalid("connectionIntent must be connect or resume when provided.");
+  }
+
   const platform = readOptionalBoundedString(body, "platform");
   if (platform !== null && platform !== "ios") {
     throw companionRequestInvalid("platform must be ios when provided.");
@@ -173,7 +187,7 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
 
   const sdkVersions = body.sdkVersions;
   if (sdkVersions === undefined || sdkVersions === null) {
-    return;
+    return connectionIntent ?? null;
   }
 
   if (typeof sdkVersions !== "object" || Array.isArray(sdkVersions)) {
@@ -190,6 +204,8 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
   }
+
+  return connectionIntent ?? null;
 }
 
 export function parseCompanionHrvRmssdObservationRequestBody(
@@ -203,7 +219,7 @@ export function parseCompanionHrvRmssdObservationRequestBody(
 }
 
 /**
- * Applies the first-admission clock gate after durable replay identity has
+ * Applies the first-admission night-date gate after durable replay identity has
  * been checked. Exact retained retries must remain idempotent even when the
  * original observation later becomes stale.
  */
@@ -211,14 +227,22 @@ export function assertCompanionHrvRmssdObservationFresh(
   observation: CompanionHrvRmssdObservation,
   options: { now?: Date } = {},
 ): void {
-  const nowMs = (options.now ?? new Date()).getTime();
-  const observedAtMs = Date.parse(observation.observedAt);
-  const captureEndedAtMs = observedAtMs + observation.durationMs;
+  const now = options.now ?? new Date();
+  const nowMs = now.getTime();
+  const currentUtcDateMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const nightDateMs = Date.parse(observation.nightDate);
 
   if (
     !Number.isFinite(nowMs)
-    || observedAtMs < nowMs - COMPANION_HRV_MAXIMUM_AGE_MS
-    || captureEndedAtMs > nowMs + COMPANION_HRV_MAXIMUM_FUTURE_SKEW_MS
+    || !Number.isFinite(nightDateMs)
+    || nightDateMs
+      < currentUtcDateMs + COMPANION_HRV_EARLIEST_NIGHT_DAY_OFFSET * UTC_DAY_MS
+    || nightDateMs
+      > currentUtcDateMs + COMPANION_HRV_LATEST_NIGHT_DAY_OFFSET * UTC_DAY_MS
   ) {
     throw companionRequestInvalid("HRV observation payload is invalid.");
   }
@@ -240,7 +264,7 @@ export async function resolveCompanionHrvRmssdConnection(input: {
   if (activeConnections.length === 0) {
     throw deviceSyncError({
       code: "COMPANION_HRV_CONNECTION_REQUIRED",
-      message: "Finish companion setup before uploading a spot HRV reading.",
+      message: "Finish companion setup before uploading an overnight HRV reading.",
       retryable: false,
       httpStatus: 409,
     });

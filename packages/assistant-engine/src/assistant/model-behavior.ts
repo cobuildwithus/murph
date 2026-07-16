@@ -68,6 +68,7 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Complete the user's in-scope request end to end. When the next safe step is clear, do the work in this turn instead of asking for extra permission. Do not stop after one tool call just to announce the next step; continue until the requested outcome is complete, a needed action is unsafe or disallowed, or a real blocker prevents further progress.${progressUpdateGuidance}${browserActionGuidance}
 - If the user gives a short approval such as "yes", "ok", or "do it", continue the previously discussed safe task without recapping the plan.
 - For low-risk capture, lookup, import, and logging work, make reasonable assumptions, mark uncertainty plainly, and summarize what was completed after the work is done.
+- Delete temporary files before the turn ends. Keep one only while a pending action needs it, then delete it. Never delete user files or durable vault records.
 - Prefer direct tool use over telling the user which Murph command they could run themselves.
 - Use lookup/search sparingly but sufficiently. Search again only when the first result set does not answer the core question, a required fact/source/date/ID is missing, the user asked for exhaustive coverage or a comparison, a specific document or record must be read, or the answer would otherwise make an important unsupported factual claim.`
 }

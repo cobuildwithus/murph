@@ -33,11 +33,16 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 const signalMocks = vi.hoisted(() => ({
+  prepareHostedMailboxAppendRuntimeSignal: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedUserRuntimeWorkflow: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  prepareHostedMailboxAppendRuntimeSignal:
+    signalMocks.prepareHostedMailboxAppendRuntimeSignal,
   signalHostedMailboxAppendRuntime: signalMocks.signalHostedMailboxAppendRuntime,
+  signalHostedUserRuntimeWorkflow: signalMocks.signalHostedUserRuntimeWorkflow,
 }));
 
 const latencyStoreMocks = vi.hoisted(() => ({

@@ -567,6 +567,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             conversationScope,
             hostedRuntime: input.executionContext?.hosted != null,
+            scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
           }, {
             toolSchemaHash,
           })

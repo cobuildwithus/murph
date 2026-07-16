@@ -21,7 +21,7 @@ import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-a
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
-import type { CompanionHrvCaptureReceiptInspection } from "./prisma-store/dirty-connections";
+import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
@@ -296,14 +296,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.upsertDirtyConnection(input);
   }
 
-  async inspectCompanionHrvCaptureReceipt(input: {
-    captureId: string;
+  async inspectCompanionHrvNightReceipt(input: {
     connectionIds: readonly string[];
+    nightDate: string;
     now: string;
     resource: HostedDeviceSyncDirtyResource;
     userId: string;
-  }): Promise<CompanionHrvCaptureReceiptInspection> {
-    return this.dirtyConnections.inspectCompanionHrvCaptureReceipt(input);
+  }): Promise<CompanionHrvNightReceiptInspection> {
+    return this.dirtyConnections.inspectCompanionHrvNightReceipt(input);
   }
 
   async getDirtyConnection(input: {

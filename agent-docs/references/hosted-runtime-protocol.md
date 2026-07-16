@@ -501,17 +501,21 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload) after the unconditional Temporal signal is accepted. This is a
-latency hint only, not a second durable wake authority: it is Linq-only because
-accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so a racing
-ensure may import an already-consumed row but it stages with a null reply target
-and cannot be answered again. Do not add workflow-side direct-wake flags,
-derived-floor SQL, or lag netting merely to avoid harmless post-delivery no-op
-ensures. There is no direct web-to-Cloudflare message path and no second durable
-wake authority. If the Temporal signal cannot be accepted after the mailbox row
-exists, the failure is logged as a post-commit best-effort handoff failure and
-does not make provider ingress fail; direct Linq ensure is not fired without
-the accepted Temporal signal. The existing Temporal scheduled-reconcile
+message payload) after the committed known checkpoint's owner matches and the
+canonical live active-access check succeeds. That participant-aware gate runs
+once; only then do the unconditional Temporal `signalWithStart` and the direct
+ensure start concurrently. An access failure starts neither operation. This is
+a latency hint only, not a second durable wake authority: it is Linq-only
+because accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so
+a racing ensure may import an already-consumed row but it stages with a null
+reply target and cannot be answered again. Do not add workflow-side direct-wake
+flags, derived-floor SQL, or lag netting merely to avoid harmless post-delivery
+no-op ensures. There is no direct web-to-Cloudflare message path and no second
+durable wake authority. If the Temporal signal cannot be accepted after the
+live gate, the existing post-commit handoff failure semantics remain
+authoritative even though the one-shot direct hint may already have fired.
+Temporal remains the sole durable retry and reconciliation owner. The existing
+Temporal scheduled-reconcile
 command also runs one bounded preference-handoff sweep. Web selects live
 `member.preferences.updated` rows above the authoritative system-lane
 `consumed_seq` for active person runtimes or synthetic room runtimes with an
