@@ -18,7 +18,7 @@ Key decisions:
 State:
 - Production includes the warm-restore, mailbox-lag, runner preemption, foreground nudge handoff, active-turn refresh, replay-window, live-restore, and refresh-container churn fixes through commit `e6881ee5e`.
 - Live iMessage cold, hot, and multi-message acceptance probes were sent after explicit approval. The user-visible reply path is now fast enough for acceptance.
-- DBHub follow-up confirmed the checked slow-looking rows did not take the 30s active-turn deferred-retry path. Redacted assistant automation detail rows are buffered without original event timestamps and receive their `at` value when persisted after the assistant pass, so they can exaggerate reply-start latency when used as the sole timing source.
+- Production database follow-up confirmed the checked slow-looking rows did not take the 30s active-turn deferred-retry path. Redacted assistant automation detail rows are buffered without original event timestamps and receive their `at` value when persisted after the assistant pass, so they can exaggerate reply-start latency when used as the sole timing source.
 
 Done:
 - Created the task goal.
@@ -57,7 +57,7 @@ Done:
 - Required `pnpm typecheck` passed after the maintenance-level fix. Required `pnpm test` is still blocked before this package by the pre-existing contracts scheduled-log assertion mismatch.
 - Required completion audits passed after the maintenance-level fix: security/privacy found no findings, coverage-write made no changes, and final review confirmed the previous unbounded replay-scan finding is closed.
 - Preferred diff verification passed: `pnpm test:diff packages/assistant-runtime/src/hosted-runtime/maintenance.ts packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`.
-- Sent local iMessage cold, hot, and multi-message probes after the latest deploy. DBHub confirmed no `input.reply-skipped`/30s deferred active-turn retry path for the checked probes; the visible reply path is currently fast.
+- Sent local iMessage cold, hot, and multi-message probes after the latest deploy. Production database inspection confirmed no `input.reply-skipped`/30s deferred active-turn retry path for the checked probes; the visible reply path is currently fast.
 - Confirmed redacted automation detail runtime logs are persisted from buffered entries without event-time fields, so DB row timestamps for detail labels such as reply-start can reflect post-pass log-write time.
 
 Now:

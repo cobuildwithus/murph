@@ -4190,7 +4190,7 @@ All notable changes to `@murphai/murph` will be documented in this file.
 - Fix PR 213 ReviewGPT findings
 - Tighten import schema runtime contract
 - add annotated images for crunch and stretch repairs
-- guard dbhub timestamp rendering
+- guard database inspection timestamp rendering
 - add annotated images for conditioning movements
 - Fix contaminant import review issues
 - Fix import payload retry and timestamp contracts
@@ -5131,7 +5131,7 @@ All notable changes to `@murphai/murph` will be documented in this file.
 - Fix stale hosted wake recovery loop
 - Add pitch deck PDF export
 - Log hosted snapshot failure details
-- Restrict DBHub to production DB inspection
+- Restrict database inspection tooling to production DB inspection
 - Fix hosted device terminal queue gating
 - Fix hosted runtime stale wake loop
 - Harden hosted snapshot direct R2 uploads

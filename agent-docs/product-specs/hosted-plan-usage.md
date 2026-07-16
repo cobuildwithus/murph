@@ -1,6 +1,6 @@
 # Hosted Plan Usage Visibility
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Goal
 
@@ -132,6 +132,11 @@ fallback is valid for an accepted group conversation.
 This feature adds no schema, second usage ledger, Stripe read, persisted
 forecast, queue, cron, automatic nudge, group balance, top-up flow, or billing
 mutation tool.
+
+The separately proposed target-state extension lives in
+`agent-docs/product-specs/hosted-usage-topups.md`. That specification treats
+usage-limit blocking as existing product behavior and records the checked-out
+source discrepancy that must be reconciled before implementation.
 
 ## Deployment
 

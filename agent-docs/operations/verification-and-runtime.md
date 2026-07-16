@@ -177,18 +177,18 @@ the advisory budget.
 
 ## Runtime Status
 
-- DBHub MCP is read-only production inspection, not a local database debugging
-  path. It also serializes PostgreSQL `timestamp without time zone` values
-  through a client layer that may apply the MCP process timezone and then emit a
-  misleading `Z` timestamp. Do not use DBHub's raw JSON rendering as evidence
-  for those columns. Most hosted Prisma `DateTime` columns are `TIMESTAMP(3)`
-  / `timestamp without time zone`; Murph treats them as UTC-naive instants
-  unless a migration explicitly uses `TIMESTAMPTZ`. When inspecting timestamp
-  rows through DBHub, project the stored value as text with `to_char(column,
-  'YYYY-MM-DD HH24:MI:SS.MS')`, include `pg_typeof(column)::text` when the
-  column type matters, and only use `column AT TIME ZONE 'UTC'` when the
-  query is intentionally converting a UTC-naive value into a PostgreSQL
-  `timestamptz`.
+- For local database inspection and debugging in the main checkout, use
+  repo-local PostgreSQL/Prisma tooling with
+  `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync`.
+  Use `murph_test` only in test/E2E lanes that explicitly select it; secondary
+  worktrees must use their isolated `murph_dev_<slug>` database. Most hosted
+  Prisma `DateTime` columns are `TIMESTAMP(3)` / `timestamp without time zone`;
+  Murph treats them as UTC-naive instants unless a migration explicitly uses
+  `TIMESTAMPTZ`. When inspecting those columns, project the stored value as text
+  with `to_char(column, 'YYYY-MM-DD HH24:MI:SS.MS')`, include
+  `pg_typeof(column)::text` when the column type matters, and only use
+  `column AT TIME ZONE 'UTC'` when the query is intentionally converting a
+  UTC-naive value into a PostgreSQL `timestamptz`.
 - The root `render.yaml` defines the hosted Temporal orchestration worker as a
   Render Background Worker. It builds
   `packages/hosted-orchestrator-temporal` and starts the built worker process;
