@@ -49,7 +49,7 @@ export function RouteTabs({
               {isActive ? (
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-x-0 -bottom-px h-[2px] bg-primary [view-transition-name:route-tabs-indicator]"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-primary [view-transition-name:route-tabs-indicator]"
                 />
               ) : null}
             </Link>

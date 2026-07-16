@@ -72,7 +72,7 @@ export function ResultsTab({
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           Private experiment
         </span>
-        <h2 className="font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+        <h2 className="font-serif text-2xl/8 font-semibold text-foreground">
           Your results
         </h2>
         <p className="text-sm/6 text-muted-foreground sm:text-base/7">
