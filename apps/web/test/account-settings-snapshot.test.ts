@@ -4,14 +4,24 @@ import { createHostedEmailUserReplyAliasRoute } from "@murphai/hosted-execution/
 const mocks = vi.hoisted(() => ({
   findUniqueHostedMember: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedMemberAssistantModelPreference: vi.fn(),
-  readHostedMemberSnapshot: vi.fn(),
+  projectHostedMemberAssistantPreferences: vi.fn(),
+  projectHostedMemberEmailAuthorizationState: vi.fn(),
+  readHostedMemberBillingPrivateState: vi.fn(),
+  readHostedMemberIdentityPhoneNumber: vi.fn(),
+  readHostedMemberRoutingPrivateState: vi.fn(),
+  resolveHostedMemberAssistantModel: vi.fn(),
+  runWithHostedDomainRootUnwrapCache: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
+  runWithHostedDomainRootUnwrapCache:
+    mocks.runWithHostedDomainRootUnwrapCache,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -21,14 +31,50 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
-    readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
+    projectHostedMemberEmailAuthorizationState:
+      mocks.projectHostedMemberEmailAuthorizationState,
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
-  readHostedMemberAssistantModelPreference:
-    mocks.readHostedMemberAssistantModelPreference,
-}));
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
+  >("@/src/lib/hosted-onboarding/assistant-model-preference");
+
+  return {
+    ...actual,
+    resolveHostedMemberAssistantModel:
+      mocks.resolveHostedMemberAssistantModel,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-preferences", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-preferences")
+  >("@/src/lib/hosted-onboarding/member-preferences");
+
+  return {
+    ...actual,
+    projectHostedMemberAssistantPreferences:
+      mocks.projectHostedMemberAssistantPreferences,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-private-codecs")
+  >("@/src/lib/hosted-onboarding/member-private-codecs");
+
+  return {
+    ...actual,
+    readHostedMemberBillingPrivateState:
+      mocks.readHostedMemberBillingPrivateState,
+    readHostedMemberIdentityPhoneNumber:
+      mocks.readHostedMemberIdentityPhoneNumber,
+    readHostedMemberRoutingPrivateState:
+      mocks.readHostedMemberRoutingPrivateState,
+  };
+});
 
 import { getPrisma } from "@/src/lib/prisma";
 import {
@@ -49,12 +95,45 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_LOCAL_PART = "murph";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.findUniqueHostedMember.mockResolvedValue(null);
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
+      personality: {
+        detail: null,
+        humor: null,
+        push: null,
+      },
+      tone: null,
+      voice: null,
+    });
+    mocks.projectHostedMemberEmailAuthorizationState.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+      verifiedEmail: null,
+    });
+    mocks.readHostedMemberBillingPrivateState.mockResolvedValue({
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      stripeSubscriptionScheduleId: null,
+    });
+    mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
+    mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
+      async (run: () => Promise<unknown>) => run(),
+    );
     mocks.getPrisma.mockReturnValue({
       hostedMember: {
         findUnique: mocks.findUniqueHostedMember,
@@ -70,18 +149,24 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("prefills settings from the unverified Stripe checkout email when no verified email exists", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
       emailAuthorization: {
-        directPublicSender: null,
         memberId: "member_123",
-        stripeCheckoutEmail: {
-          address: "payer@example.com",
-          collectedAt: new Date("2026-05-01T00:00:00.000Z"),
-        },
-        verifiedEmail: null,
+        stripeCheckoutEmailAddressEncrypted: "encrypted-checkout-email",
+        stripeCheckoutEmailCollectedAt: new Date("2026-05-01T00:00:00.000Z"),
+        verifiedEmailAddressEncrypted: null,
+        verifiedEmailLookupKey: null,
+        verifiedEmailVerifiedAt: null,
       },
-      identity: null,
-      routing: null,
+    }));
+    mocks.projectHostedMemberEmailAuthorizationState.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: {
+        address: "payer@example.com",
+        collectedAt: new Date("2026-05-01T00:00:00.000Z"),
+      },
+      verifiedEmail: null,
     });
 
     await expect(readHostedAccountSettingsSnapshot({
@@ -93,38 +178,60 @@ describe("hosted account settings snapshot", () => {
         verifiedAt: null,
       },
     });
+    expect(mocks.projectHostedMemberEmailAuthorizationState).toHaveBeenCalledWith({
+      directPublicSenderAddressEncrypted: null,
+      directPublicSenderAuthorizedAt: null,
+      directPublicSenderLookupKey: null,
+      memberId: "member_123",
+      stripeCheckoutEmailAddressEncrypted: "encrypted-checkout-email",
+      stripeCheckoutEmailCollectedAt: new Date("2026-05-01T00:00:00.000Z"),
+      verifiedEmailAddressEncrypted: null,
+      verifiedEmailLookupKey: null,
+      verifiedEmailVerifiedAt: null,
+    }, expect.any(Object));
   });
 
   it("reuses the member aggregate for the Settings page billing and routing slices", async () => {
-    const billingRef = {
+    const billingRecord = {
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+      stripeCustomerIdEncrypted: "encrypted-customer",
+      stripeSubscriptionIdEncrypted: "encrypted-subscription",
     };
-    const routing = {
-      linqRecipientPhone: "+15550100001",
+    const routingRecord = {
+      linqRecipientPhoneEncrypted: "encrypted-home-line",
       memberId: "member_123",
-      pendingLinqRecipientPhone: null,
-      telegramUserId: "456",
+      pendingLinqRecipientPhoneEncrypted: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: "encrypted-telegram",
     };
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      billingRef,
-      core: {
-        billingStatus: "active",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      emailAuthorization: null,
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
+      billingRef: billingRecord,
       identity: {
         memberId: "member_123",
-        phoneLookupKey: "phone_lookup",
-        phoneNumber: "+15550100002",
+        phoneNumberEncrypted: "encrypted-phone",
         phoneNumberVerifiedAt: new Date("2026-07-15T12:00:00.000Z"),
-        privyUserId: "did:privy:user_123",
       },
-      routing,
+      routing: routingRecord,
+    }));
+    mocks.readHostedMemberBillingPrivateState.mockResolvedValue({
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      stripeSubscriptionScheduleId: null,
+    });
+    mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue("+15550100002");
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: "+15550100001",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
     });
     const prisma = getPrisma();
     mocks.getPrisma.mockClear();
@@ -134,8 +241,20 @@ describe("hosted account settings snapshot", () => {
       prisma,
     });
 
-    expect(result.billingRef).toBe(billingRef);
-    expect(result.routing).toBe(routing);
+    expect(result.billingRef).toEqual({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    expect(result.routing).toEqual({
+      linqRecipientPhone: "+15550100001",
+      pendingLinqRecipientPhone: null,
+    });
     expect(result.account).toMatchObject({
       assistant: {
         model: "gpt-5.6-terra",
@@ -148,21 +267,63 @@ describe("hosted account settings snapshot", () => {
         telegramUserId: "456",
       },
     });
-    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-    });
-    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-    });
     expect(mocks.findUniqueHostedMember).toHaveBeenCalledTimes(1);
+    const query = mocks.findUniqueHostedMember.mock.calls[0]?.[0];
+    expect(query).toEqual({
+      select: expect.any(Object),
+      where: { id: "member_123" },
+    });
+    expect(query.select.identity.select).toEqual({
+      memberId: true,
+      phoneNumberEncrypted: true,
+      phoneNumberVerifiedAt: true,
+    });
+    expect(query.select.routing.select).toEqual({
+      linqRecipientPhoneEncrypted: true,
+      memberId: true,
+      pendingLinqRecipientPhoneEncrypted: true,
+      replyAliasLookupKey: true,
+      telegramUserIdEncrypted: true,
+    });
+    expect(query.select.emailAuthorization.select).toEqual({
+      memberId: true,
+      stripeCheckoutEmailAddressEncrypted: true,
+      stripeCheckoutEmailCollectedAt: true,
+      verifiedEmailAddressEncrypted: true,
+      verifiedEmailLookupKey: true,
+      verifiedEmailVerifiedAt: true,
+    });
+    expect(query.select.billingRef.select).toEqual({
+      currentBillingPhase: true,
+      currentBillingPlanCode: true,
+      currentCheckoutOffer: true,
+      currentPeriodEnd: true,
+      memberId: true,
+      scheduledBillingEffectiveAt: true,
+      scheduledBillingPlanCode: true,
+      stripeCustomerIdEncrypted: true,
+      stripeSubscriptionIdEncrypted: true,
+    });
+    expect(mocks.runWithHostedDomainRootUnwrapCache).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberBillingPrivateState).toHaveBeenCalledWith(
+      billingRecord,
+      prisma,
+    );
+    expect(mocks.readHostedMemberIdentityPhoneNumber).toHaveBeenCalledWith({
+      memberId: "member_123",
+      phoneNumberEncrypted: "encrypted-phone",
+      phoneNumberVerifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+    }, prisma);
+    expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledWith({
+      ...routingRecord,
+      linqChatIdEncrypted: null,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqParticipantContactEncrypted: null,
+    }, prisma);
     expect(mocks.getPrisma).not.toHaveBeenCalled();
   });
 
   it("returns explicit null Settings slices when the member aggregate is absent", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue(null);
     const prisma = getPrisma();
     mocks.getPrisma.mockClear();
 
@@ -192,11 +353,12 @@ describe("hosted account settings snapshot", () => {
       billingRef: null,
       routing: null,
     });
-    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledOnce();
-    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
-      memberId: "member_missing",
-      prisma,
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledOnce();
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: { id: "member_missing" },
     });
+    expect(mocks.runWithHostedDomainRootUnwrapCache).not.toHaveBeenCalled();
     expect(mocks.getPrisma).not.toHaveBeenCalled();
   });
 
@@ -207,23 +369,34 @@ describe("hosted account settings snapshot", () => {
       signingSecret: "test-email-signing-secret",
       userId: "member_123",
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
       emailAuthorization: {
-        directPublicSender: null,
         memberId: "member_123",
-        stripeCheckoutEmail: {
-          address: "payer@example.com",
-          collectedAt: new Date("2026-05-01T00:00:00.000Z"),
-        },
-        verifiedEmail: {
-          address: "verified@example.com",
-          lookupKey: "lookup_verified",
-          verifiedAt: new Date("2026-05-02T00:00:00.000Z"),
-        },
+        stripeCheckoutEmailAddressEncrypted: "encrypted-checkout-email",
+        stripeCheckoutEmailCollectedAt: new Date("2026-05-01T00:00:00.000Z"),
+        verifiedEmailAddressEncrypted: "encrypted-verified-email",
+        verifiedEmailLookupKey: "lookup_verified",
+        verifiedEmailVerifiedAt: new Date("2026-05-02T00:00:00.000Z"),
       },
-      identity: null,
       routing: {
+        linqRecipientPhoneEncrypted: null,
+        memberId: "member_123",
+        pendingLinqRecipientPhoneEncrypted: null,
         replyAliasLookupKey: replyAlias.aliasKey,
+        telegramUserIdEncrypted: null,
+      },
+    }));
+    mocks.projectHostedMemberEmailAuthorizationState.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: {
+        address: "payer@example.com",
+        collectedAt: new Date("2026-05-01T00:00:00.000Z"),
+      },
+      verifiedEmail: {
+        address: "verified@example.com",
+        lookupKey: "lookup_verified",
+        verifiedAt: new Date("2026-05-02T00:00:00.000Z"),
       },
     });
 
@@ -239,18 +412,15 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("normalizes assistant preferences for settings display", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      core: null,
-      emailAuthorization: null,
-      identity: null,
-      routing: null,
-    });
-    mocks.findUniqueHostedMember.mockResolvedValue({
-      assistantDetail: 8,
-      assistantHumor: 7,
-      assistantPush: 6,
-      assistantTone: "casual",
-      assistantVoice: "warm",
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
+    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
+      personality: {
+        detail: 8,
+        humor: 7,
+        push: 6,
+      },
+      tone: "casual",
+      voice: "warm",
     });
 
     await expect(readHostedAccountSettingsSnapshot({
@@ -273,12 +443,14 @@ describe("hosted account settings snapshot", () => {
 
     // Roster ids can be retired, so stored values that no longer resolve fall
     // back to the defaults instead of leaking a stale id into the settings UI.
-    mocks.findUniqueHostedMember.mockResolvedValue({
-      assistantDetail: 12,
-      assistantHumor: -1,
-      assistantPush: 2.5,
-      assistantTone: "stale-tone",
-      assistantVoice: "stale-voice",
+    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
+      personality: {
+        detail: null,
+        humor: null,
+        push: null,
+      },
+      tone: null,
+      voice: null,
     });
 
     await expect(readHostedAccountSettingsSnapshot({
@@ -299,14 +471,6 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("returns empty assistant preferences when the member row is missing", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      core: null,
-      emailAuthorization: null,
-      identity: null,
-      routing: null,
-    });
-    mocks.findUniqueHostedMember.mockResolvedValue(null);
-
     await expect(readHostedAccountSettingsSnapshot({
       memberId: "member_123",
     })).resolves.toMatchObject({
@@ -325,13 +489,8 @@ describe("hosted account settings snapshot", () => {
   });
 
   it("includes the canonical effective model and Sol availability", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      core: null,
-      emailAuthorization: null,
-      identity: null,
-      routing: null,
-    });
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
+    mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
@@ -349,20 +508,14 @@ describe("hosted account settings snapshot", () => {
         solAvailable: true,
       },
     });
-    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: expect.objectContaining({ readonly: true }),
-    });
+    expect(mocks.resolveHostedMemberAssistantModel).toHaveBeenCalledWith(
+      expect.objectContaining({ billingStatus: "active" }),
+    );
   });
 
   it("includes canonical configuration availability and dormant Sol state", async () => {
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      core: null,
-      emailAuthorization: null,
-      identity: null,
-      routing: null,
-    });
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
+    mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: true,
       model: "gpt-5.6-terra",
@@ -451,6 +604,29 @@ describe("hosted account settings snapshot", () => {
     });
   });
 });
+
+function makeSettingsMemberRecord(
+  input: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    accountGroupMemberships: [],
+    assistantDetail: null,
+    assistantHumor: null,
+    assistantModelPreference: null,
+    assistantPush: null,
+    assistantReasoningEffortPreference: null,
+    assistantTone: null,
+    assistantVoice: null,
+    billingRef: null,
+    billingStatus: "active",
+    emailAuthorization: null,
+    identity: null,
+    routing: null,
+    suspendedAt: null,
+    threadContainer: null,
+    ...input,
+  };
+}
 
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {

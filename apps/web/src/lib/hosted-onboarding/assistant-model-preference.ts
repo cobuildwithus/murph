@@ -31,7 +31,7 @@ import {
   lockHostedMemberSponsoredAccessRows,
 } from "./shared";
 
-const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
+export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
   accountGroupMemberships: {
     select: {
       group: {
@@ -281,7 +281,7 @@ async function readHostedMemberAssistantModelState(input: {
   });
 }
 
-function resolveHostedMemberAssistantModel(
+export function resolveHostedMemberAssistantModel(
   member: HostedMemberAssistantModelState | null,
 ): HostedMemberAssistantModelResolution {
   if (!member) {
