@@ -532,15 +532,16 @@ in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 Hosted Linq typing events are verified and ignored. The Temporal mailbox
 signal remains the only durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, web first verifies the checkpoint owner
-and canonical participant-aware live access, then starts the unconditional
-Temporal pointer signal and one best-effort direct `ensure-processing` request
-to Cloudflare concurrently (Vercel OIDC, fire and forget, no retries). Access
-denial or expiry starts neither wake. The direct request exists only to cut wake
-latency and may be dropped at any time with no correctness impact: accepted Linq
-delivery stamps the exact mailbox item with `consumedAt`, so a later Temporal
-ensure imports an already-answered item as context-only, while the Durable
-Object write fence coalesces runners that overlap in the same invocation. There
-is no other web-to-Cloudflare prewarm or nudge path.
+and canonical participant-aware live access as part of the unconditional
+Temporal pointer signal. Only after Temporal accepts that durable signal does
+web start one best-effort direct `ensure-processing` request to Cloudflare
+(Vercel OIDC, fire and forget, no retries). Access denial, expiry, or Temporal
+acceptance failure starts no direct wake. The direct request exists only to cut
+wake latency and may be dropped at any time with no correctness impact:
+accepted Linq reply delivery stamps the exact mailbox item with `consumedAt`, so
+a later ensure imports an already-answered item as context-only, while the
+Durable Object write fence coalesces runners that overlap in the same invocation.
+There is no other web-to-Cloudflare prewarm or nudge path.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not runtime work. A unique participant addition may set one nullable

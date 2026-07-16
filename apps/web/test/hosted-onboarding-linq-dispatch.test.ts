@@ -131,12 +131,10 @@ const mocks = vi.hoisted(() => {
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
-    prepareHostedMailboxAppendRuntimeSignal: vi.fn(),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
-    signalHostedUserRuntimeWorkflow: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -276,10 +274,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
 });
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  prepareHostedMailboxAppendRuntimeSignal:
-    mocks.prepareHostedMailboxAppendRuntimeSignal,
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-  signalHostedUserRuntimeWorkflow: mocks.signalHostedUserRuntimeWorkflow,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq-client", async () => {
