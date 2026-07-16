@@ -50,16 +50,17 @@ Cloudflare transports and validates the strict result but owns no billing or
 usage truth and has no billing mutation authority. The current runner opts into
 `subscriptionActionQuote`, which is current terms for an explicit member
 request rather than a recommendation or consent. The usage-thresholded
-`recommendedAction` remains separate.
+`recommendedAction` remains separate and may carry the exact first-party
+`add_usage` Settings handoff.
 `murph.subscription` uses the same write-fenced, allowlisted callback boundary
 for one input-bound subscription action. Cloudflare validates and transports the
 strict result but owns no plan facts, action claim, payment URL, or billing
 mutation logic. Web durably claims the first action on the accepted input's
 existing mailbox row.
-Apply the additive Web migration and deploy Web before the Cloudflare runner
-that requests the quote and advertises the optional subscription port. Older
-runners keep sending the empty request; new Web omits the optional quote field
-and preserves their strict response shape. Roll back Cloudflare before Web.
+The established optional quote remains compatible with older runners that send
+the empty request. The `add_usage` recommendation is a new strict union member:
+deploy the Cloudflare parser that accepts it before Web can emit it. Roll back
+the Web producer before rolling Cloudflare below that consumer version.
 The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
