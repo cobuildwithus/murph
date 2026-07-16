@@ -80,6 +80,7 @@ import {
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeLogEntry,
+  parseHostedRuntimeRedactedJson,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
@@ -2027,6 +2028,19 @@ describe("hosted runtime control contracts", () => {
         overflowCount: 1,
       },
     })).toThrow(/at most 96 fields/u);
+  });
+
+  it("exports the structural redacted JSON parser with privacy guards intact", () => {
+    expect(parseHostedRuntimeRedactedJson(
+      { importedCount: 2 },
+      "Hosted runtime redacted JSON",
+    )).toEqual({ importedCount: 2 });
+    expect(() => parseHostedRuntimeRedactedJson({
+      source: "Provider failed at https://provider.example.test/private",
+    }, "Hosted runtime redacted JSON")).toThrow(/URL/u);
+    expect(() => parseHostedRuntimeRedactedJson({
+      source: "retrying hosted-user-runtime:opaque-test",
+    }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
   });
 
   it("keeps runtime logs structured and privacy-bounded", () => {
