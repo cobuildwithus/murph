@@ -1893,7 +1893,7 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('WHOOP: More > App Settings')
-    expect(prompt).not.toContain('ground yourself in what the user has actually done today')
+    expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant action window')
   })
 
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
@@ -1955,12 +1955,12 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain('Default to staying silent.')
 
-    // Canonical task capability + ground in what the user actually did today.
+    // Canonical task capability + ground in the relevant action window.
     expect(prompt).toContain(
       'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
     )
     expect(prompt).toContain(
-      'ground yourself in what the user has actually done today',
+      'ground yourself in what the user has actually done in the relevant action window',
     )
 
     // Retrieval budget as a stopping rule, plus the deterministic skip signal.
@@ -1974,7 +1974,7 @@ describe('assistant notification decision guidance', () => {
 
     // Consolidated skip / send conditions (no per-type triplication).
     expect(prompt).toContain(
-      'Skip when the run is inactive, reminders were declined or moved, the day\'s session or log is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
+      'Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
     )
     expect(prompt).toContain(
       'Send only when the reminder\'s purpose still holds: the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
@@ -1996,6 +1996,15 @@ describe('assistant notification decision guidance', () => {
       'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message`;',
     )
     expect(prompt).toContain(
+      'normal cue, explicitly authorized accountability check-in, or repair question/proposal',
+    )
+    expect(prompt).toContain(
+      'Completion or an already reported outcome means skip.',
+    )
+    expect(prompt).toContain(
+      'Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question.',
+    )
+    expect(prompt).toContain(
       'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
     )
     expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
@@ -2005,7 +2014,7 @@ describe('assistant notification decision guidance', () => {
 
     // The two true invariants from the incident.
     expect(prompt).toContain(
-      'Never send a reminder that contradicts what the user already did today',
+      'Never send a reminder that contradicts what the user already did in the relevant action window',
     )
     expect(prompt).toContain(
       'ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself',

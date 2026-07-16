@@ -147,7 +147,10 @@ describe('experiment onboarding skill guidance', () => {
       'Skip sending if the experiment is inactive, the user declined or cancelled reminders',
     )
     expect(raw).toContain(
-      'For behavior-support automations, the scheduled instructions must include enough compact support context to decide whether to skip, send a normal cue, or send a repair question/proposal without rereading this skill.',
+      'For behavior-support automations, the scheduled instructions must include enough compact support context to choose `skip` or `send_message`',
+    )
+    expect(raw).toContain(
+      'follow the occurrence\'s role: normal cue, explicitly authorized accountability check-in, or repair question/proposal.',
     )
     expect(raw).toContain(
       'Do not embed fixed reminder copy; embed the support policy.',
@@ -162,7 +165,7 @@ describe('experiment onboarding skill guidance', () => {
       'Planned-session support automation instructions should state that this is bounded experiment-session support',
     )
     expect(raw).toContain(
-      'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome where `send_message` can be a normal cue or repair question/proposal',
+      'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome where `send_message` follows the occurrence\'s role: normal cue, explicitly authorized accountability check-in, or repair question/proposal',
     )
     expect(raw).toContain(
       'do not leave related future session-support automations blindly active',
@@ -181,7 +184,7 @@ describe('experiment onboarding skill guidance', () => {
       'Baked automation instructions should carry the reminder\'s purpose and when to skip, not a fixed list of surfaces to read',
     )
     expect(raw).toContain(
-      'check current state — including what the user already logged today — before sending',
+      'check current state — including what the user already logged for the relevant session or action window — before sending',
     )
     expect(raw).toContain(
       'The scheduled assistant verifies current state with full vault access; do not enumerate the surfaces it must read',
