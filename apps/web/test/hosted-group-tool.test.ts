@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
@@ -96,6 +97,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx: mocks.leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
+  readHostedGroupIdByRuntimeMemberId: mocks.readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
@@ -226,6 +228,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue("hgrp_123");
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -581,6 +584,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
       memberId: "member_owner",
     }));
+    expect(mocks.readHostedGroupIdByRuntimeMemberId).toHaveBeenCalledWith({
+      runtimeMemberId: "member_group_runtime",
+    });
+    expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
     expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
       displayName: "Weekly Health Crew",
@@ -625,7 +632,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(null);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",

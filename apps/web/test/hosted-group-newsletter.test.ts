@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
-  readHostedMemberEmailAuthorization: vi.fn(),
-  readHostedMemberIdentity: vi.fn(),
+  readHostedMemberVerifiedEmailSnapshots: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -29,11 +28,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => (
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+  readHostedMemberVerifiedEmailSnapshots:
+    mocks.readHostedMemberVerifiedEmailSnapshots,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -62,22 +58,24 @@ describe("hosted group newsletter participants", () => {
     mocks.readActiveHostedMemberAccess.mockImplementation(async (input: { memberId: string }) =>
       input.memberId !== "member_suspended"
     );
-    mocks.readHostedMemberIdentity.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
       input.memberId === "member_active_missing_email" ? createTelegramRoutingState() : null
     );
-    mocks.readHostedMemberEmailAuthorization.mockImplementation(async (input: { memberId: string }) => {
-      if (input.memberId === "member_active_missing_email") {
-        return null;
-      }
-
-      return {
-        verifiedEmail: verifiedEmailFact(`${input.memberId}@example.com`),
-      };
-    });
+    mocks.readHostedMemberVerifiedEmailSnapshots.mockImplementation(
+      async (input: { memberIds: readonly string[] }) =>
+        input.memberIds.map((memberId) => ({
+          memberId,
+          verifiedEmail: memberId === "member_active_missing_email"
+            ? null
+            : verifiedEmailFact(`${memberId}@example.com`),
+        })),
+    );
   });
 
   it("excludes inactive granted members from newsletter preparation and email recipients", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+
     const participants = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
@@ -136,14 +134,51 @@ describe("hosted group newsletter participants", () => {
       expectedUserId: "member_active_missing_email",
       mailboxItemId: "mailbox_item_email_needed",
     });
-    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
-      memberId: "member_suspended",
-      prisma: expect.any(Object),
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledTimes(3);
+    for (const [input] of mocks.readHostedMemberVerifiedEmailSnapshots.mock.calls) {
+      expect(input.memberIds).toEqual([
+        "member_active_with_email",
+        "member_active_missing_email",
+      ]);
+    }
+    expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(3);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(4);
+    expect(prisma.$transaction.mock.calls.filter((call: [
+      unknown,
+      { isolationLevel?: string }?,
+    ]) =>
+      call[1]?.isolationLevel === "RepeatableRead"
+    )).toHaveLength(3);
+  });
+
+  it("keeps participant-backed thread-container members eligible in the batched access read", async () => {
+    const prisma = createPrismaMock({
+      newsletterParticipantBackedMemberIds: ["member_active_with_email"],
     });
-    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalledWith({
-      memberId: "member_suspended",
-      prisma: expect.any(Object),
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const participants = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
     });
+
+    if (participants.status !== "ok") {
+      throw new Error("Expected newsletter preparation.");
+    }
+    expect(participants.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        hasEmail: true,
+        memberId: "member_active_with_email",
+      }),
+    ]));
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledWith({
+      memberIds: [
+        "member_active_with_email",
+        "member_active_missing_email",
+      ],
+      prisma,
+    });
+    expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(2);
   });
 
   it("returns current address-free data grant ids only for email-authorized active members", async () => {
@@ -249,9 +284,13 @@ describe("hosted group newsletter participants", () => {
       .mockResolvedValueOnce(initialGrants)
       .mockResolvedValueOnce(finalGrants);
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      verifiedEmail: verifiedEmailFact("member@example.test"),
-    });
+    mocks.readHostedMemberVerifiedEmailSnapshots.mockImplementation(
+      async (input: { memberIds: readonly string[] }) =>
+        input.memberIds.map((memberId) => ({
+          memberId,
+          verifiedEmail: verifiedEmailFact("member@example.test"),
+        })),
+    );
 
     const result = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
@@ -390,17 +429,17 @@ describe("hosted group newsletter participants", () => {
       throw new Error("Expected newsletter preparation.");
     }
 
-    mocks.readHostedMemberEmailAuthorization.mockImplementation(async (input: { memberId: string }) => {
-      if (input.memberId === "member_active_missing_email") {
-        return null;
-      }
-
-      return {
-        verifiedEmail: verifiedEmailFact(`${input.memberId}@example.com`, {
-          lookupKey: "rotated-verified-email-lookup",
-        }),
-      };
-    });
+    mocks.readHostedMemberVerifiedEmailSnapshots.mockImplementation(
+      async (input: { memberIds: readonly string[] }) =>
+        input.memberIds.map((memberId) => ({
+          memberId,
+          verifiedEmail: memberId === "member_active_missing_email"
+            ? null
+            : verifiedEmailFact(`${memberId}@example.com`, {
+              lookupKey: "rotated-verified-email-lookup",
+            }),
+        })),
+    );
     mocks.getPrisma.mockReturnValue(createPrismaMock({
       newsletterEmailLookupKeyByMember: {
         member_active_with_email: "rotated-verified-email-lookup",
@@ -448,11 +487,6 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("does not spend the private email nudge key for a phone-lookup-only member", async () => {
-    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
-      input.memberId === "member_active_missing_email"
-        ? { phoneLookupKey: "phone_lookup_key_only" }
-        : null
-    );
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 
     await prepareHostedGroupNewsletterParticipants({
@@ -465,11 +499,6 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("enqueues one private email nudge for an established Linq direct thread", async () => {
-    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
-      input.memberId === "member_active_missing_email"
-        ? { phoneLookupKey: "phone_lookup_with_thread" }
-        : null
-    );
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
       input.memberId === "member_active_missing_email" ? createLinqHomeRoutingState() : null
     );
@@ -493,7 +522,6 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("enqueues one private email nudge for a Telegram-only member", async () => {
-    mocks.readHostedMemberIdentity.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
       input.memberId === "member_active_missing_email" ? createTelegramRoutingState() : null
     );
@@ -517,7 +545,6 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("does not enqueue a private email nudge for a Telegram settings sync without a direct thread", async () => {
-    mocks.readHostedMemberIdentity.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
       input.memberId === "member_active_missing_email"
         ? createTelegramSettingsOnlyRoutingState()
@@ -535,11 +562,6 @@ describe("hosted group newsletter participants", () => {
 
   it("does not consume the once-ever nudge until a missing-email participant has a direct route", async () => {
     let memberHasDirectRoute = false;
-    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
-      input.memberId === "member_active_missing_email"
-        ? { phoneLookupKey: "phone_lookup_pending_only" }
-        : null
-    );
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) => {
       if (input.memberId !== "member_active_missing_email") {
         return null;
@@ -595,9 +617,13 @@ describe("hosted group newsletter participants", () => {
     mocks.getPrisma.mockReturnValue(createPrismaMock({
       newsletterMissingEmailMemberIds: [],
     }));
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      verifiedEmail: verifiedEmailFact("member@example.test"),
-    });
+    mocks.readHostedMemberVerifiedEmailSnapshots.mockImplementation(
+      async (input: { memberIds: readonly string[] }) =>
+        input.memberIds.map((memberId) => ({
+          memberId,
+          verifiedEmail: verifiedEmailFact("member@example.test"),
+        })),
+    );
 
     const participants = await prepareHostedGroupNewsletterParticipants({
       groupId: "hgrp_123",
@@ -685,23 +711,18 @@ describe("hosted group newsletter participants", () => {
   it("still enqueues the joining-member nudge when Stripe supplied only an unverified email hint", async () => {
     const prisma = createPrismaMock();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
+    mocks.readHostedMemberVerifiedEmailSnapshots.mockResolvedValue([{
       memberId: "member_active_missing_email",
-      stripeCheckoutEmail: {
-        address: "checkout-hint@example.test",
-        collectedAt: new Date("2026-07-12T12:00:00.000Z"),
-      },
       verifiedEmail: null,
-    });
+    }]);
 
     await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
       groupId: "hgrp_123",
       memberId: "member_active_missing_email",
     });
 
-    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
-      memberId: "member_active_missing_email",
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledWith({
+      memberIds: ["member_active_missing_email"],
       prisma,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -727,7 +748,7 @@ describe("hosted group newsletter participants", () => {
       memberId: "member_active_missing_email",
     });
 
-    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
@@ -773,16 +794,26 @@ function verifiedEmailFact(address: string, input?: {
 
 function newsletterMemberAccessState(input: {
   memberId: string;
+  participantBacked?: boolean;
   suspended: boolean;
 }) {
   return {
     accountGroupMemberships: [],
-    billingStatus: "active" as const,
+    billingStatus: input.participantBacked ? "not_started" as const : "active" as const,
     id: input.memberId,
     suspendedAt: input.suspended
       ? new Date("2026-07-13T12:00:00.000Z")
       : null,
-    threadContainer: null,
+    threadContainer: input.participantBacked
+      ? {
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "not_started" as const,
+            suspendedAt: null,
+          },
+          participants: [{ participantMemberId: "member_active_participant" }],
+        }
+      : null,
   };
 }
 
@@ -791,6 +822,7 @@ function createPrismaMock(input?: {
   groupRuntimeMemberId?: string | null;
   newsletterEmailLookupKeyByMember?: Readonly<Record<string, string | null>>;
   newsletterMissingEmailMemberIds?: readonly string[];
+  newsletterParticipantBackedMemberIds?: readonly string[];
   newsletterSuspendedMemberIds?: readonly string[];
 }) {
   const prisma = {
@@ -818,6 +850,9 @@ function createPrismaMock(input?: {
           const missingEmailMemberIds = new Set(
             input?.newsletterMissingEmailMemberIds ?? ["member_active_missing_email"],
           );
+          const participantBackedMemberIds = new Set(
+            input?.newsletterParticipantBackedMemberIds ?? [],
+          );
           const memberIds = [
             "member_active_with_email",
             "member_suspended",
@@ -830,6 +865,7 @@ function createPrismaMock(input?: {
               member: {
                 ...newsletterMemberAccessState({
                   memberId,
+                  participantBacked: participantBackedMemberIds.has(memberId),
                   suspended: suspendedMemberIds.has(memberId),
                 }),
                 emailAuthorization: missingEmailMemberIds.has(memberId)
@@ -862,6 +898,25 @@ function createPrismaMock(input?: {
             { memberId: "member_active_missing_email" },
           ],
         };
+      }),
+    },
+    hostedMember: {
+      findMany: vi.fn(async () => {
+        const suspendedMemberIds = new Set(
+          input?.newsletterSuspendedMemberIds ?? ["member_suspended"],
+        );
+        const participantBackedMemberIds = new Set(
+          input?.newsletterParticipantBackedMemberIds ?? [],
+        );
+        return [
+          "member_active_with_email",
+          "member_suspended",
+          "member_active_missing_email",
+        ].map((memberId) => newsletterMemberAccessState({
+          memberId,
+          participantBacked: participantBackedMemberIds.has(memberId),
+          suspended: suspendedMemberIds.has(memberId),
+        }));
       }),
     },
     hostedVaultShare: {
