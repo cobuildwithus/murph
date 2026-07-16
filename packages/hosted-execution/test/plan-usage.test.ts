@@ -24,6 +24,10 @@ describe("hosted plan usage contract", () => {
         label: "Upgrade to Edge",
         url: "https://example.test/settings#subscription",
       },
+      subscriptionActionQuote: {
+        action: "upgrade_edge",
+        label: "Upgrade to Edge ($20/month)",
+      },
       remainingPercent: 25,
       status: "active",
       usedPercent: 75,
@@ -45,12 +49,19 @@ describe("hosted plan usage contract", () => {
       planCode: "launch_monthly",
       planName: "Pulse Trial",
       recommendedAction: null,
+      subscriptionActionQuote: {
+        action: "start_pulse_now",
+        label: "Start Pulse now ($8/month)",
+      },
       remainingPercent: 75,
       status: "active",
       usedPercent: 25,
     })).toMatchObject({
       accessKind: "trial",
       planName: "Pulse Trial",
+      subscriptionActionQuote: {
+        action: "start_pulse_now",
+      },
     });
   });
 
@@ -59,16 +70,25 @@ describe("hosted plan usage contract", () => {
       generatedAt: "2026-07-03T12:00:00.000Z",
       reason: "group_not_supported",
       recommendedAction: null,
+      subscriptionActionQuote: null,
       status: "unavailable",
     })).toEqual({
       generatedAt: "2026-07-03T12:00:00.000Z",
       reason: "group_not_supported",
       recommendedAction: null,
+      subscriptionActionQuote: null,
       status: "unavailable",
     });
   });
 
   it("rejects extra request and response fields", () => {
+    expect(parseHostedPlanUsageToolRequest({})).toEqual({});
+    expect(parseHostedPlanUsageToolRequest({
+      includeSubscriptionActionQuote: true,
+    })).toEqual({ includeSubscriptionActionQuote: true });
+    expect(() => parseHostedPlanUsageToolRequest({
+      includeSubscriptionActionQuote: false,
+    })).toThrow();
     expect(() => parseHostedPlanUsageToolRequest({ memberId: "not-allowed" }))
       .toThrow();
     expect(() => parseHostedPlanUsageStatus({

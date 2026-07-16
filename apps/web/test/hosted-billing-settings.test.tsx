@@ -586,10 +586,10 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("redirects to Stripe Billing Portal when the upgrade needs payment confirmation", async () => {
+  test("redirects to Stripe when the upgrade needs payment confirmation", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       billingPlanCode: "launch_monthly",
-      billingPortalUrl: "https://stripe.example.test/portal/session_123",
+      paymentUrl: "https://stripe.example.test/portal/session_123",
       status: "pending_payment",
     });
 
