@@ -132,31 +132,25 @@ delivery, where Web may resolve or validate the concrete target before media
 work. Anchored replies, reactions, and voice memos do not make that redundant
 round trip.
 
-The original provider-claim rollout used this order:
+Every engagement request must state `authorityCheckOnly` explicitly. `true`
+performs only the bounded preflight and never claims provider dispatch. `false`
+is the final provider boundary, requires an explicit idempotency key, and must
+return the additive `providerDispatchClaimed` marker before the runner enters
+the provider. Web no longer derives authority or provider-dispatch identity
+from the retired `currentInbound` request proof.
 
-1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
-   keeps treating that legacy call as its provider-start claim for the bounded
-   rollout window.
-2. Deploy the Cloudflare Worker and runner bundle with
-   `container_rollout=immediate`, then require managed-container smoke to report
-   the new runner-bundle fingerprint.
-3. After convergence, send one Linq group-thread test turn and confirm the
-   thread container owns both model execution and provider delivery.
+The Cloudflare Worker and runner rollback floor for this protocol is #627 or
+newer. Do not deploy or restore an older runner after the Web hard cut; there is
+no supported old-runner/new-Web compatibility window. Immediate rollout is not
+required for ordinary later deploys because current runners already use this
+shape and per-invocation fingerprint admission replaces stale warm shells.
+After deployment, smoke one authority-only current-home resolution, one final
+provider claim, and one Linq group-thread turn, then confirm the thread
+container owns model execution and provider delivery.
 
-A new runner requires the additive `providerDispatchClaimed` response marker at
-its final provider boundary, so it fails closed against an old Web deployment.
-Do not roll Web back while that runner protocol is active. To roll the pair
-back, first roll the runner bundle back with an immediate rollout and confirm
-the old fingerprint, then roll Web back. The old-runner/new-Web interval is
-supported only during the Web-first rollout: old runners ignore the additive
-response marker and retain their existing early-claim behavior.
-
-After that rollout has converged, removing obsolete runner authority hints from
-the engagement and post-send outcome payloads is independently deployable: Web
-ignores unknown legacy JSON fields, and both old and new runners use the same
-final provider claim. New runners may send an optional `lineLookupKey` solely
-for post-send line-health attribution; old Web ignores it, and new Web retains
-its existing fallback when an old runner omits it.
+New runners may send an optional `lineLookupKey` solely for post-send
+line-health attribution; old Web ignores it, and new Web retains its existing
+fallback when an older supported runner omits it.
 
 ## Thread Usage Crossing Notice Rollout
 

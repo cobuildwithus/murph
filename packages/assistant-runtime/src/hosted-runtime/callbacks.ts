@@ -2543,6 +2543,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
                       input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
+                    authorityCheckOnly: false,
                     directRecipientPhoneNumber:
                       deliveryContext?.directRecipientPhoneNumber ?? null,
                     effectsPort: input.effectsPort,
@@ -3049,6 +3050,7 @@ function createHostedAssistantLinqSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
+            authorityCheckOnly: false,
             directRecipientPhoneNumber,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber,
@@ -3334,6 +3336,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
+            authorityCheckOnly: false,
             directRecipientPhoneNumber:
               deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort ?? null,
@@ -3650,7 +3653,7 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
@@ -3678,7 +3681,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       ...(input.answeredMailboxItemIds?.length
         ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
         : {}),
-      authorityCheckOnly: input.authorityCheckOnly === true,
+      authorityCheckOnly: input.authorityCheckOnly,
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
