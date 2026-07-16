@@ -6,11 +6,15 @@ import type {
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import type { HostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
+import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { readHostedMemberAssistantModelPreference } from "./assistant-model-preference";
 import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
+import {
+  readHostedMemberSnapshot,
+  type HostedMemberSnapshot,
+} from "./hosted-member-store";
 import { readHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
@@ -50,10 +54,23 @@ export interface HostedAccountSettingsSnapshot {
   };
 }
 
+export interface HostedAccountSettingsPageSnapshot {
+  account: HostedAccountSettingsSnapshot;
+  billingRef: HostedMemberSnapshot["billingRef"];
+  routing: HostedMemberSnapshot["routing"];
+}
+
 export async function readHostedAccountSettingsSnapshot(input: {
   memberId: string;
 }): Promise<HostedAccountSettingsSnapshot> {
-  const prisma = getPrisma();
+  return (await readHostedAccountSettingsPageSnapshot(input)).account;
+}
+
+export async function readHostedAccountSettingsPageSnapshot(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedAccountSettingsPageSnapshot> {
+  const prisma = input.prisma ?? getPrisma();
   const [snapshot, assistantPreferences, assistantModel] = await Promise.all([
     readHostedMemberSnapshot({
       memberId: input.memberId,
@@ -77,27 +94,31 @@ export async function readHostedAccountSettingsSnapshot(input: {
   const telegramUserId = snapshot?.routing?.telegramUserId ?? null;
 
   return {
-    assistant: {
-      configurationAvailable: assistantModel.configurationAvailable,
-      dormantSolPreference: assistantModel.dormantSolPreference,
-      model: assistantModel.model,
-      solAvailable: assistantModel.solAvailable,
-      ...assistantPreferences,
+    account: {
+      assistant: {
+        configurationAvailable: assistantModel.configurationAvailable,
+        dormantSolPreference: assistantModel.dormantSolPreference,
+        model: assistantModel.model,
+        solAvailable: assistantModel.solAvailable,
+        ...assistantPreferences,
+      },
+      email: {
+        address: verifiedEmail?.address
+          ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address
+          ?? null,
+        murphEmailAddress: murphEmailRoute?.address ?? null,
+        verifiedAt: verifiedEmail?.verifiedAt.toISOString() ?? null,
+      },
+      phone: {
+        number: snapshot?.identity?.phoneNumber ?? null,
+        verifiedAt: snapshot?.identity?.phoneNumberVerifiedAt?.toISOString() ?? null,
+      },
+      telegram: {
+        telegramUserId,
+      },
     },
-    email: {
-      address: verifiedEmail?.address
-        ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address
-        ?? null,
-      murphEmailAddress: murphEmailRoute?.address ?? null,
-      verifiedAt: verifiedEmail?.verifiedAt.toISOString() ?? null,
-    },
-    phone: {
-      number: snapshot?.identity?.phoneNumber ?? null,
-      verifiedAt: snapshot?.identity?.phoneNumberVerifiedAt?.toISOString() ?? null,
-    },
-    telegram: {
-      telegramUserId,
-    },
+    billingRef: snapshot?.billingRef ?? null,
+    routing: snapshot?.routing ?? null,
   };
 }
 
