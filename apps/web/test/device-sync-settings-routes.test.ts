@@ -502,6 +502,48 @@ describe("device sync settings routes", () => {
     });
   });
 
+  it("batches full settings source reads across multiple connections", async () => {
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      buildDeviceConnectionRecord({
+        id: "dsc_oura_123",
+        provider: "oura",
+      }),
+      buildDeviceConnectionRecord({
+        id: "dsc_oura_456",
+        provider: "oura",
+        updatedAt: new Date("2026-04-01T08:06:00.000Z"),
+      }),
+    ]);
+
+    const response = await settingsDeviceSyncRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        connectionId: {
+          in: ["dsc_oura_123", "dsc_oura_456"],
+        },
+      },
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      sources: [
+        {
+          connectionId: expect.stringMatching(/^dspc_/),
+          provider: "oura",
+        },
+        {
+          connectionId: expect.stringMatching(/^dspc_/),
+          provider: "oura",
+        },
+      ],
+    });
+  });
+
   it("does not mark settings sources configured when authoritative provider config is invalid", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
@@ -578,11 +620,98 @@ describe("device sync settings routes", () => {
         userId: "member_123",
       },
     }));
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        connectionId: {
+          in: ["dsc_oura_123"],
+        },
+      },
+    }));
+    expect(mocks.findManyDeviceConnections.mock.calls[0]?.[0]?.select).toEqual({
+      connectedAt: true,
+      createdAt: true,
+      id: true,
+      lastErrorCode: true,
+      lastSyncCompletedAt: true,
+      lastSyncErrorAt: true,
+      lastSyncStartedAt: true,
+      lastWebhookAt: true,
+      nextReconcileAt: true,
+      provider: true,
+      setupExpiresAt: true,
+      setupPhase: true,
+      status: true,
+      updatedAt: true,
+    });
+    expect(mocks.findManyDeviceConnections.mock.calls[0]?.[0]?.select).not.toHaveProperty(
+      "externalAccountIdEncrypted",
+    );
+    expect(mocks.findManyDeviceConnections.mock.calls[0]?.[0]?.select).not.toHaveProperty(
+      "accessTokenEncrypted",
+    );
+    expect(mocks.findManyDeviceConnections.mock.calls[0]?.[0]?.select).not.toHaveProperty(
+      "refreshTokenEncrypted",
+    );
     await expect(response.json()).resolves.toEqual({
       generatedAt: "2026-04-03T12:00:00.000Z",
       ok: true,
       status: {
         message: "Oura connected",
+        tone: "connected",
+      },
+    });
+  });
+
+  it("uses only the connection query when the sidebar member has no connections", async () => {
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([]);
+
+    const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      generatedAt: "2026-04-03T12:00:00.000Z",
+      ok: true,
+      status: null,
+    });
+  });
+
+  it("keeps sidebar database reads constant for multiple connections", async () => {
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      buildDeviceConnectionRecord({
+        id: "dsc_oura_123",
+        provider: "oura",
+      }),
+      buildDeviceConnectionRecord({
+        id: "dsc_oura_456",
+        provider: "oura",
+        updatedAt: new Date("2026-04-01T08:06:00.000Z"),
+      }),
+    ]);
+
+    const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.findManyDeviceConnectionSources).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        connectionId: {
+          in: ["dsc_oura_123", "dsc_oura_456"],
+        },
+      },
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      status: {
+        message: "2 wearables connected",
         tone: "connected",
       },
     });

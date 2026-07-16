@@ -30,11 +30,11 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveHostedMurphContactOption: vi.fn(async () => ({
+  resolveMurphContactOptions: vi.fn(() => [{
     href: "sms:+15550100001?body=voice%20test",
     kind: "text",
     label: "Messages",
-  })),
+  }]),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
@@ -159,8 +159,8 @@ vi.mock("@/src/components/settings/customize-murph-settings", () => ({
   CustomizeMurphSettings: mocks.CustomizeMurphSettings,
 }));
 
-vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
-  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+vi.mock("@/src/lib/murph-contact-routing", () => ({
+  resolveMurphContactOptions: mocks.resolveMurphContactOptions,
 }));
 
 vi.mock("@/src/components/settings/hosted-assistant-model-settings", () => ({
@@ -485,11 +485,19 @@ test("SettingsPage reads the app session and persisted account settings into the
         label: "Messages",
       },
     }), undefined);
-    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledWith({
+      contactChannels: {
+        email: false,
+        telegram: true,
+        text: true,
+      },
       message: {
         body: "just picked a new voice for you! send me a voice memo so I can hear it",
       },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
       preferredKind: "text",
+      userEmailAddress: "verified@example.com",
     });
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
@@ -651,11 +659,11 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
       },
     },
   });
-  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+  mocks.resolveMurphContactOptions.mockReturnValueOnce([{
     href: "mailto:murph@mail.withmurph.ai?body=test",
     kind: "email",
     label: "Email",
-  });
+  }]);
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 

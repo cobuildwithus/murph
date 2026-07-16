@@ -2,6 +2,43 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.2.3] - 2026-07-16
+
+### Fixed
+- bound release coverage heap
+- batch Linq reply authority reads (#732)
+- upload canonical artifacts concurrently (#735)
+
+### Changed
+- scope release heap guard
+- document database load and fanout invariant
+- Optimize device sidebar database reads (#727)
+- narrow dashboard contact reads (#731)
+- reduce settings database read fanout (#730)
+- batch hosted group member reads (#729)
+- Deduplicate fresh Privy auth database reads (#728)
+- Add private-to-group Assistant Ask (#725)
+- fix native message bold parsing
+- Document Murph core strategy
+
+## [1.2.2] - 2026-07-16
+
+### Added
+- extend new Pulse trials to 14 days (#726)
+
+### Fixed
+- resolve release coverage concurrency once
+- register Prisma pool lifecycle (#715)
+
+### Changed
+- make clinical preemption resume deterministic
+- Converge conversational personality settings with dashboard (#716)
+- Apply hosted model changes on the same Codex thread (#697)
+- require complete provider results (#703)
+- Restore hosted live turn steering (#705)
+- Delete usage-notice compatibility fence (#698)
+- Stop appending computer handoff links (#688)
+
 ## [1.2.1] - 2026-07-16
 
 ### Added

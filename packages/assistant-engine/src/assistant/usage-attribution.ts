@@ -74,7 +74,10 @@ export function createAssistantUsageReportingUserId(input: {
 
 export function resolveAssistantUsageFeatureKey(input: {
   deliverResponse?: boolean | null
-  promptProfile: 'conversation' | 'notification-decision'
+  promptProfile:
+    | 'assistant-ask-continuation'
+    | 'conversation'
+    | 'notification-decision'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {
   if (input.promptProfile === 'notification-decision') {

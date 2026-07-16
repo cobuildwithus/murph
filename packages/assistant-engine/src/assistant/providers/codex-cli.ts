@@ -203,6 +203,7 @@ export async function executeCodexAssistantTurnAttempt(
     approvalPolicy,
     developerInstructions,
     dynamicTools: input.dynamicTools,
+    environments: input.environments ?? undefined,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides:
@@ -392,10 +393,8 @@ export async function executeCodexAssistantTurnAttempt(
       transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
       reactions: result.reactions,
-      precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
-        ...(typeof segment.deliveryContextOrdinal === 'number'
-          ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
-          : {}),
+      precedingResponseSegments: result.precedingAgentMessageSegments.map((segment) => ({
+        deliveryContextOrdinal: segment.deliveryContextOrdinal,
         media: segment.media,
         response: segment.response,
       })),

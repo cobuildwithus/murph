@@ -190,7 +190,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it("returns unchanged without sending a direct mutation for an existing target", async () => {
+  it("confirms an unchanged target through the input-bound update", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -209,11 +209,16 @@ describe("assistant configuration tool", () => {
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       reasoningEffort: "low",
     });
+    const unchangedSaved = {
+      ...savedForNextTurn,
+      appliesAt: "next_turn" as const,
+      requiredPlan: null,
+      status: "unchanged" as const,
+    };
     const assistantConfigurationTool = {
-      request: vi.fn(async () => ({
-        action: "read" as const,
-        result: savedForNextTurn,
-      })),
+      request: vi.fn()
+        .mockResolvedValueOnce({ action: "read", result: savedForNextTurn })
+        .mockResolvedValueOnce({ action: "update", result: unchangedSaved }),
     };
 
     const result = await executeMurphDynamicToolRequest({
@@ -230,21 +235,20 @@ describe("assistant configuration tool", () => {
       request,
     });
 
-    expect(assistantConfigurationTool.request).toHaveBeenCalledOnce();
-    expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(1, {
       action: "read",
+    });
+    expect(assistantConfigurationTool.request).toHaveBeenNthCalledWith(2, {
+      action: "update",
+      assistantInputId: `ain_${"d".repeat(32)}`,
+      reasoningEffort: "low",
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
         model: HOSTED_ASSISTANT_TERRA_MODEL,
         reasoningEffort: "low",
       },
-      savedForNextTurn: {
-        ...savedForNextTurn,
-        appliesAt: "next_turn",
-        requiredPlan: null,
-        status: "unchanged",
-      },
+      savedForNextTurn: unchangedSaved,
     });
   });
 

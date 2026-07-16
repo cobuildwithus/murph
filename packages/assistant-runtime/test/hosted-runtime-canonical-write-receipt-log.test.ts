@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { test } from "vitest";
-import type { HostedCanonicalWriteReceipt } from "@murphai/core";
+import type {
+  HostedCanonicalWritePayload,
+  HostedCanonicalWriteReceipt,
+} from "@murphai/core";
 
 import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
@@ -27,6 +30,7 @@ test("hosted canonical receipt log accepts the final bounded entry", async () =>
 
   const update = await appendHostedCanonicalWriteReceiptToArtifactLog({
     artifactStore,
+    payloads: [],
     previousStatus: createReceiptLogStatus(seeded),
     receipt: createReceipt(),
   });
@@ -45,14 +49,11 @@ test("hosted canonical receipt log rejects an additional pending entry before up
   const { artifactStore, putCalls } = createHostedRuntimeArtifactStoreStub({
     [seeded.sha256]: seeded.bytes,
   });
-  let beforeReceiptUploadCalls = 0;
 
   await assert.rejects(
     appendHostedCanonicalWriteReceiptToArtifactLog({
       artifactStore,
-      beforeReceiptUpload: async () => {
-        beforeReceiptUploadCalls += 1;
-      },
+      payloads: [createPayload(0)],
       previousStatus: createReceiptLogStatus(seeded),
       receipt: createReceipt(),
     }),
@@ -61,7 +62,133 @@ test("hosted canonical receipt log rejects an additional pending entry before up
       && error.message === "Hosted canonical write receipt log reached its pending entry limit."
     ),
   );
-  assert.equal(beforeReceiptUploadCalls, 0);
+  assert.equal(putCalls.length, 0);
+});
+
+test("hosted canonical receipt log starts a five-object artifact set concurrently", async () => {
+  const payloads = [createPayload(0), createPayload(1), createPayload(2)];
+  const putCalls: string[] = [];
+  let releaseUploads!: () => void;
+  const uploadsReleased = new Promise<void>((resolve) => {
+    releaseUploads = resolve;
+  });
+
+  const append = appendHostedCanonicalWriteReceiptToArtifactLog({
+    artifactStore: {
+      async get() {
+        return null;
+      },
+      async put(artifact) {
+        putCalls.push(artifact.sha256);
+        await uploadsReleased;
+      },
+    },
+    payloads,
+    previousStatus: null,
+    receipt: createReceipt(payloads),
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(putCalls.length, 5);
+  releaseUploads();
+  await append;
+});
+
+test("hosted canonical receipt log limits artifact upload fanout to eight", async () => {
+  const payloads = Array.from({ length: 7 }, (_, index) => createPayload(index));
+  const putCalls: string[] = [];
+  let releaseFirstWave!: () => void;
+  let releaseSecondWave!: () => void;
+  const firstWaveReleased = new Promise<void>((resolve) => {
+    releaseFirstWave = resolve;
+  });
+  const secondWaveReleased = new Promise<void>((resolve) => {
+    releaseSecondWave = resolve;
+  });
+
+  const append = appendHostedCanonicalWriteReceiptToArtifactLog({
+    artifactStore: {
+      async get() {
+        return null;
+      },
+      async put(artifact) {
+        putCalls.push(artifact.sha256);
+        await (putCalls.length <= 8 ? firstWaveReleased : secondWaveReleased);
+      },
+    },
+    payloads,
+    previousStatus: null,
+    receipt: createReceipt(payloads),
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(putCalls.length, 8);
+  releaseFirstWave();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(putCalls.length, 9);
+  releaseSecondWave();
+  await append;
+});
+
+test("hosted canonical receipt log drains a failed wave without scheduling the next wave", async () => {
+  const payloads = Array.from({ length: 7 }, (_, index) => createPayload(index));
+  const putCalls: string[] = [];
+  let releaseSuccessfulUploads!: () => void;
+  const successfulUploadsReleased = new Promise<void>((resolve) => {
+    releaseSuccessfulUploads = resolve;
+  });
+  let settled = false;
+
+  const completion = appendHostedCanonicalWriteReceiptToArtifactLog({
+    artifactStore: {
+      async get() {
+        return null;
+      },
+      async put(artifact) {
+        putCalls.push(artifact.sha256);
+        if (putCalls.length === 1) {
+          throw new Error("Synthetic canonical artifact upload failure.");
+        }
+        await successfulUploadsReleased;
+      },
+    },
+    payloads,
+    previousStatus: null,
+    receipt: createReceipt(payloads),
+  }).then(
+    () => {
+      settled = true;
+      return null;
+    },
+    (error: unknown) => {
+      settled = true;
+      return error;
+    },
+  );
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(putCalls.length, 8);
+  assert.equal(settled, false);
+  releaseSuccessfulUploads();
+  const error = await completion;
+  assert.ok(error instanceof Error);
+  assert.equal(error.message, "Synthetic canonical artifact upload failure.");
+  assert.equal(putCalls.length, 8);
+});
+
+test("hosted canonical receipt log validates every payload before upload", async () => {
+  const payload = createPayload(0);
+  const { artifactStore, putCalls } = createHostedRuntimeArtifactStoreStub();
+
+  await assert.rejects(
+    appendHostedCanonicalWriteReceiptToArtifactLog({
+      artifactStore,
+      payloads: [{ ...payload, byteLength: payload.byteLength + 1 }],
+      previousStatus: null,
+      receipt: createReceipt([payload]),
+    }),
+    /payload length does not match its receipt/u,
+  );
   assert.equal(putCalls.length, 0);
 });
 
@@ -112,9 +239,21 @@ test("hosted canonical receipt recovery preserves and clears the prior wake mark
   assert.equal(omitHostedCanonicalWriteReceiptLogStatusFields(status), null);
 });
 
-function createReceipt(): HostedCanonicalWriteReceipt {
+function createReceipt(
+  payloads: readonly HostedCanonicalWritePayload[] = [],
+): HostedCanonicalWriteReceipt {
   return {
-    actions: [],
+    actions: payloads.map((payload, index) => ({
+      byteLength: payload.byteLength,
+      contentRef: {
+        byteSize: payload.byteLength,
+        sha256: payload.sha256,
+      },
+      effect: "create",
+      kind: "text_upsert",
+      sha256: payload.sha256,
+      targetRelativePath: `bank/bounded-receipt-log-${index}.md`,
+    })),
     committedAt: "2026-07-09T00:00:00.000Z",
     createdAt: "2026-07-09T00:00:00.000Z",
     occurredAt: "2026-07-09T00:00:00.000Z",
@@ -123,6 +262,15 @@ function createReceipt(): HostedCanonicalWriteReceipt {
     schema: "murph.hosted-canonical-write-receipt.v1",
     summary: "Exercise the bounded hosted receipt log.",
     updatedAt: "2026-07-09T00:00:00.000Z",
+  };
+}
+
+function createPayload(index: number): HostedCanonicalWritePayload {
+  const bytes = new TextEncoder().encode(`payload-${index}\n`);
+  return {
+    byteLength: bytes.byteLength,
+    bytes,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
   };
 }
 

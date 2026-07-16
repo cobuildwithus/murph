@@ -142,6 +142,80 @@ describe('assistant Codex turn planning', () => {
     })
   })
 
+  it('plans ask continuations as isolated output-only turns with committed private context', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'CLI bootstrap must stay unavailable.',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Private context: use the member\'s current mobility prescription.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-ask-continuation-plan-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'f'.repeat(64),
+        routeFingerprint: 'route-test',
+        threadId: 'stale-private-thread',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: 'Build this around my existing prescription.' },
+        { kind: 'assistant', text: 'I will check the joined group.' },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['Hosted tool guidance must stay unavailable.'],
+            memberId: 'member-ask-continuation',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: '<untrusted_group_answer>quoted data</untrusted_group_answer>',
+          vault,
+        },
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.environments).toEqual([])
+      expect(plan.assistantCliContract).toBeNull()
+      expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Build this around my existing prescription.', role: 'user' },
+        { content: 'I will check the joined group.', role: 'assistant' },
+      ])
+      expect(plan.systemPrompt).toContain('output-only turn')
+      expect(plan.systemPrompt).not.toContain('CLI bootstrap')
+      expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
+      expect(plan.turnContextPrompt).toContain('current mobility prescription')
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
@@ -477,15 +551,15 @@ describe('assistant Codex turn planning', () => {
     )
     for (const privateStyleText of [
       'Assistant style settings:',
-      'Humor',
-      'Push',
-      'Detail',
       '/settings?voice=true',
       'vault-cli assistant style',
       'murph.assistant_style',
     ]) {
       expect(plan.developerInstructions).not.toContain(privateStyleText)
     }
+    expect(plan.developerInstructions).toContain(
+      '`read_own_assistant_style` and `update_own_assistant_style`',
+    )
     expect(plan.developerInstructions).not.toContain('`assistant style show`')
     expect(plan.assistantCliContract).toBeNull()
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
@@ -2318,6 +2392,77 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('accepts a legacy contract fingerprint during a compatible model switch', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const initialRoute = createRoute({
+      routeFingerprint: 'route-before-model-switch',
+      threadCompatibilityFingerprint: 'thread-compatible-route',
+    })
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: initialRoute,
+      session: createSession(),
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    const legacyContractFingerprint = buildAssistantCodexContractFingerprint({
+      developerInstructions: initialPlan.developerInstructions,
+      dynamicTools: initialPlan.dynamicTools,
+      routeFingerprint: 'route-before-model-switch',
+    })
+    const switchedRoute = createRoute({
+      routeFingerprint: 'route-after-model-switch',
+      threadCompatibilityFingerprint: 'thread-compatible-route',
+    })
+
+    const switchedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: switchedRoute,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint: legacyContractFingerprint,
+          routeFingerprint: 'route-before-model-switch',
+          threadCompatibilityFingerprint: 'thread-compatible-route',
+          threadId: 'thread-resume',
+        },
+      }),
+      sharedPlan: createPrivateSharedPlan(),
+    })
+
+    expect(switchedPlan.assistantContractFingerprint).not.toBe(
+      legacyContractFingerprint,
+    )
+    expect(switchedPlan.resume?.codexThreadId).toBe('thread-resume')
+    expect(switchedPlan.conversationHistoryMessages).toBeUndefined()
+  })
+
   it('does not replay committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -2616,7 +2761,11 @@ function createMessageInput(): AssistantMessageInput {
   }
 }
 
-function createRoute(): CodexThreadIdentity {
+function createRoute(input?: {
+  routeFingerprint?: string
+  threadCompatibilityFingerprint?: string
+}): CodexThreadIdentity {
+  const routeFingerprint = input?.routeFingerprint ?? 'route-test'
   return {
     codexCommand: null,
     label: 'Primary',
@@ -2626,8 +2775,11 @@ function createRoute(): CodexThreadIdentity {
         provider: 'codex-cli',
       }),
     ),
-    routeFingerprint: 'route-test',
-    routeId: 'route-test',
+    routeFingerprint,
+    routeId: routeFingerprint,
+    ...(input?.threadCompatibilityFingerprint
+      ? { threadCompatibilityFingerprint: input.threadCompatibilityFingerprint }
+      : {}),
   }
 }
 

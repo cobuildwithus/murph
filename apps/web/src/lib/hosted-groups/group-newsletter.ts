@@ -13,7 +13,7 @@ import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
-  readHostedMemberEmailAuthorization,
+  readHostedMemberVerifiedEmailSnapshots,
 } from "../hosted-onboarding/hosted-member-store";
 import {
   readHostedMemberRoutingState,
@@ -140,12 +140,12 @@ export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEf
       return;
     }
 
-    const authorization = await readHostedMemberEmailAuthorization({
-      memberId: input.memberId,
+    const [emailSnapshot] = await readHostedMemberVerifiedEmailSnapshots({
+      memberIds: [input.memberId],
       prisma,
     });
     const address = normalizeHostedEmailAddress(
-      authorization?.verifiedEmail?.address ?? null,
+      emailSnapshot?.verifiedEmail?.address ?? null,
     );
     if (address) {
       return;
@@ -335,26 +335,44 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   }
 
   const memberIds = group.members.map((member) => member.memberId);
+  const accessRecords = await prisma.hostedMember.findMany({
+    where: {
+      id: {
+        in: memberIds,
+      },
+    },
+    select: hostedGroupNewsletterMemberAccessSelect,
+  });
+  const activeMemberIdSet = new Set(
+    accessRecords
+      .filter(hasHostedGroupNewsletterMemberActiveAccess)
+      .map((member) => member.id),
+  );
+  const activeMemberIds = memberIds.filter((memberId) =>
+    activeMemberIdSet.has(memberId)
+  );
+  const emailSnapshots = await readHostedMemberVerifiedEmailSnapshots({
+    memberIds: activeMemberIds,
+    prisma,
+  });
+  const verifiedEmailByMemberId = new Map(
+    emailSnapshots.map((snapshot) =>
+      [snapshot.memberId, snapshot.verifiedEmail] as const
+    ),
+  );
   const candidates = new Map<string, {
     address: string | null;
     verifiedEmailLookupKey: string | null;
     verifiedEmailVerifiedAt: Date | null;
   }>();
-  for (const memberId of memberIds) {
-    if (!await readActiveHostedMemberAccess({ memberId, prisma })) {
-      continue;
-    }
-
-    const authorization = await readHostedMemberEmailAuthorization({
-      memberId,
-      prisma,
-    });
+  for (const memberId of activeMemberIds) {
+    const verifiedEmail = verifiedEmailByMemberId.get(memberId) ?? null;
     candidates.set(memberId, {
       address: normalizeHostedEmailAddress(
-        authorization?.verifiedEmail?.address ?? null,
+        verifiedEmail?.address ?? null,
       ),
-      verifiedEmailLookupKey: authorization?.verifiedEmail?.lookupKey ?? null,
-      verifiedEmailVerifiedAt: authorization?.verifiedEmail?.verifiedAt ?? null,
+      verifiedEmailLookupKey: verifiedEmail?.lookupKey ?? null,
+      verifiedEmailVerifiedAt: verifiedEmail?.verifiedAt ?? null,
     });
   }
 
