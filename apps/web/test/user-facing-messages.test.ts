@@ -130,6 +130,19 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("describes the usage-saving model without unexplained model names", () => {
+    for (const key of [
+      "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.pulse_upgrade_edge",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).toMatch(/less capable|lower-usage|lighter(?:-model| model)/u);
+        expect(text).not.toMatch(/\b(?:Luna|Terra|Sol)\b/u);
+      }
+    }
+  });
+
   it("communicates every included-usage limit as a percentage without currency progress", () => {
     for (const key of [
       "linq.ai_usage.trial_limit_reached",

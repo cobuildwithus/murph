@@ -3,11 +3,12 @@ import { ASSISTANT_USAGE_SCHEMA } from "@murphai/hosted-execution/assistant-usag
 
 const mocks = vi.hoisted(() => ({
   recordHostedAiUsageRecordsAndSendLimitNotices: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
-  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest:
+    mocks.requireHostedCloudflareCallbackJsonRequest,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
@@ -30,7 +31,12 @@ describe("hosted execution usage record route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: await request.json(),
+        userId: "member_123",
+      }),
+    );
     mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mockResolvedValue({
       recordedIds: ["turn_123.attempt-1"],
     });
@@ -71,12 +77,9 @@ describe("hosted execution usage record route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
       expect.any(Request),
-      expect.objectContaining({
-        maxBodyBytes: 16_384,
-        payloadText: expect.any(String),
-      }),
+      { maxBodyBytes: 16_384 },
     );
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
       accountAllowance: true,

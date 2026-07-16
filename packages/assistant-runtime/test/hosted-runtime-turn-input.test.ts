@@ -22,7 +22,7 @@ import {
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   createHostedAssistantInputSource,
-  resolveHostedPersonalizationInputIdForAcceptedInputs,
+  resolveHostedCurrentInputIdForAcceptedInputs,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 
@@ -1081,7 +1081,7 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
-    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: inputIds,
       vaultRoot,
     })).resolves.toBeNull();
@@ -1360,7 +1360,7 @@ describe("selectHostedAssistantInputIds", () => {
 
 });
 
-describe("resolveHostedPersonalizationInputIdForAcceptedInputs", () => {
+describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
   it("uses the terminal input id of an exact-successor batch", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
@@ -1384,7 +1384,7 @@ describe("resolveHostedPersonalizationInputIdForAcceptedInputs", () => {
       }),
     });
 
-    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: [second.inputId, first.inputId],
       vaultRoot,
     })).resolves.toBe(second.inputId);
@@ -1413,7 +1413,7 @@ describe("resolveHostedPersonalizationInputIdForAcceptedInputs", () => {
       }),
     });
 
-    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: [first.inputId, afterGap.inputId],
       vaultRoot,
     })).resolves.toBeNull();
@@ -1422,7 +1422,7 @@ describe("resolveHostedPersonalizationInputIdForAcceptedInputs", () => {
   it("fails closed when an accepted input event is missing", async () => {
     const vaultRoot = await createTempVault();
 
-    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: ["ain_00000000000000000000000000000000"],
       vaultRoot,
     })).resolves.toBeNull();

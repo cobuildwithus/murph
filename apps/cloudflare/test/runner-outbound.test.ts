@@ -85,6 +85,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -177,6 +178,14 @@ const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      action: "upgrade_edge",
+      assistantInputId: `ain_${"a".repeat(32)}`,
+    },
+    name: "hosted subscription tool",
+    path: HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
+  },
   {
     body: {},
     name: "hosted plan usage tool",
