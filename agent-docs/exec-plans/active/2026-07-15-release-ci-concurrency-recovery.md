@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-15
-Updated: 2026-07-15
+Updated: 2026-07-16
 
 ## Goal
 
@@ -20,6 +20,11 @@ Updated: 2026-07-15
 - In CI, the `&&`/`||` chain used to derive `package_coverage_concurrency_default` emitted both `1` and `2` because Bash evaluates those operators with equal precedence from left to right.
 - The resulting `1\n2` value failed numeric comparisons inside the package-coverage refill loop, which then spun without launching work and produced an unbounded log.
 - The failed workflow was canceled before package packing, GitHub release creation, or npm publication; all public packages remained at `1.2.0`.
+- The follow-up `v1.2.2` trusted gate reached assistant-engine coverage but its
+  sole Vitest worker exhausted Node's default 4 GB heap. The regular
+  host-support coverage workflow already bounded that known suite at 6 GB, but
+  the release workflow omitted the same allowance. Packing and both publish
+  jobs remained blocked.
 
 ## Scope
 
@@ -27,7 +32,11 @@ Updated: 2026-07-15
 - Add focused regression coverage for all default-selection branches.
 - Make the existing Clinical Records resume test preempt deterministically after its first
   provider page is checkpointed; the official release gate exposed its call-count/timer race.
-- Leave the failed immutable `v1.2.1` tag as historical evidence and cut the corrected release as `v1.2.2`.
+- Give the serialized release-check step the same bounded 6 GB Node heap already
+  required by assistant-engine coverage in the regular trusted workflow, and
+  guard that release configuration with a focused test.
+- Leave the failed immutable `v1.2.1` and `v1.2.2` tags as historical evidence
+  and cut the corrected release as `v1.2.3`.
 
 ## Verification and completion
 

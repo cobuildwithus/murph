@@ -52,6 +52,8 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
     expect(workflow).toContain('- name: Run release checks')
+    expect(workflow).toContain('NODE_OPTIONS: --max-old-space-size=6144')
+    expect(workflow.match(/NODE_OPTIONS: --max-old-space-size=6144/gu) ?? []).toHaveLength(1)
     expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')
     expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
