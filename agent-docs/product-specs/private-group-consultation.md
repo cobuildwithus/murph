@@ -227,8 +227,8 @@ Trusted runtime owners still persist ordinary mailbox and process bookkeeping.
 
 If group Murph is already replying when an ask arrives:
 
-1. Its resident process keeps the active turn, provider session, route grant,
-   and outbox authority.
+1. Its resident process keeps the active root turn, provider session,
+   invocation-scoped tool authority, and outbox authority.
 2. The existing mailbox watcher imports the ask.
 3. A tiny detached controller starts a separate one-shot App Server process
    without awaiting it on the foreground path.
@@ -279,10 +279,11 @@ runtime and the exact `:workspace_roots`, no writes, explicit denial of
 `.runtime/**`, environment files and operational paths, no other workspace or
 operator-home access, no tool network, and approval policy `never`.
 
-The child receives no hosted dynamic tools, CLI bridge, route grant, signing
-material, memories, plugins, MCP servers, apps, web search, or multi-agent
-capability. Project config and instruction discovery are disabled, so a target
-workspace `.codex/config.toml`, hook, or skill cannot expand behavior. Set
+The child receives no hosted dynamic tools or invocation-scoped automation or
+device authority, signing material, memories, plugins, MCP servers, apps, web
+search, or multi-agent capability. Project config and instruction discovery are
+disabled, so a target workspace `.codex/config.toml`, hook, or skill cannot
+expand behavior. Set
 `shell_environment_policy.inherit = "none"` with only a tiny benign allowlist;
 model-run commands cannot inherit provider credentials. A trusted group
 context builder supplies the target system contract and committed transcript;
@@ -405,7 +406,8 @@ requests drain or expire for ten minutes, then rolls back consumers.
 6. Checkpoint, shutdown, fence loss, and workspace replacement cancel and
    requeue exact owned work before releasing its root.
 7. Intended committed group context is readable, while writes, `.runtime/**`,
-   other roots, secrets, route grants, and tool network are OS-denied.
+   other roots, secrets, and tool network are OS-denied; invocation-scoped
+   automation and device tools are absent.
 8. Prompt injection cannot gain instruction, write, network, delivery, or
    recursion authority.
 9. Duplicate callbacks/model runs yield one completion and private follow-up.

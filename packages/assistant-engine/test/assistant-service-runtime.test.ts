@@ -3322,7 +3322,7 @@ describe("assistant execution context normalization", () => {
   });
 
   it("normalizes hosted context and preserves callable helpers only", () => {
-    const issueDeviceConnectLink = vi.fn();
+    const deviceTool = { request: vi.fn() };
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.5",
@@ -3339,7 +3339,7 @@ describe("assistant execution context normalization", () => {
             { label: "duplicate", provider: "oura" },
             { label: "bad", provider: "not allowed!" },
           ],
-          issueDeviceConnectLink,
+          deviceTool,
           memberId: " member-1 ",
           resolveScheduledLinqRoute,
           userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
@@ -3351,7 +3351,9 @@ describe("assistant execution context normalization", () => {
         deviceConnectProviders: [
           { label: "Oura", provider: "oura" },
         ],
-        issueDeviceConnectLink,
+        deviceTool: {
+          request: expect.any(Function),
+        },
         memberId: "member-1",
         resolveScheduledLinqRoute,
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],

@@ -101,6 +101,7 @@ describe("hosted runtime checkpoint baseline", () => {
       }),
       runtime: {},
       vaultRoot,
+      waitForBackgroundAssistantWork: async () => {},
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput());

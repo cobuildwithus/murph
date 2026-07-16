@@ -14,9 +14,6 @@ import {
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
-import {
-  HOSTED_CLI_BRIDGE_ENV_NAMES,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -229,7 +226,6 @@ function stripReadOnlyAssistantAskCapabilityEnv(
 ): NodeJS.ProcessEnv {
   const nextEnv = { ...(env ?? process.env) }
   for (const name of [
-    ...HOSTED_CLI_BRIDGE_ENV_NAMES,
     ...HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
     MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
     MURPH_ASSISTANT_SKILLS_ROOT_ENV,

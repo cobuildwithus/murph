@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  buildAssistantProviderVaultCliCall,
+  buildAssistantProviderMurphToolCall,
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -83,7 +83,6 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       buildHostedAssistantAutomationSaveResponses({
         dueAtIso: scheduledReminderTimes.dueAtIso,
         text: setupReplyText,
-        threadId: buildTelegramThreadId(userId),
       }),
       { matchInputContains: setupRequestText },
     );
@@ -202,34 +201,17 @@ async function startTelegramScenario(): Promise<void> {
 function buildHostedAssistantAutomationSaveResponses(input: {
   dueAtIso: string;
   text: string;
-  threadId: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
-    buildAssistantProviderVaultCliCall([
-      "automation",
-      "save",
-      "Sleep reminder",
-      "--request-id",
-      `hosted-local-telegram-reminder-${userId}`,
-      "--instructions",
-      scheduledReminderInstructions,
-      "--summary",
-      "One-shot sleep reminder.",
-      "--tags",
-      "assistant",
-      "--tags",
-      "scheduled",
-      "--continuity-policy",
-      "fresh",
-      "--channel",
-      "telegram",
-      "--thread-id",
-      input.threadId,
-      "--schedule-kind",
-      "at",
-      "--schedule-at",
-      input.dueAtIso,
-    ]),
+    buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      continuityPolicy: "fresh",
+      instructions: scheduledReminderInstructions,
+      schedule: { at: input.dueAtIso, kind: "at" },
+      summary: "One-shot sleep reminder.",
+      tags: ["assistant", "scheduled"],
+      title: "Sleep reminder",
+    }),
     input.text,
   ];
 }

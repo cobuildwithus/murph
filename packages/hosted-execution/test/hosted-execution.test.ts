@@ -48,6 +48,10 @@ import {
   shouldScheduleBrowserVaultRefresh,
 } from "../src/browser-vault.ts";
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+  isHostedRuntimeProcessEnv,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -461,6 +465,21 @@ describe("hosted execution coverage gaps", () => {
     );
   });
 
+  it("exposes stable hosted runtime environment contracts", () => {
+    expect(HOSTED_RUNTIME_PROCESS_ENV).toBe("MURPH_HOSTED_RUNTIME_PROCESS");
+    expect(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV).toBe(
+      "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND",
+    );
+    expect(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV).toBe(
+      "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
+    );
+    expect(
+      isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
+    ).toBe(true);
+    expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
+    expect(isHostedRuntimeProcessEnv({})).toBe(false);
+  });
+
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
@@ -514,7 +533,6 @@ describe("hosted execution coverage gaps", () => {
       "./auth",
       "./browser-vault",
       "./bundles",
-      "./cli-runtime-bridge",
       "./clinical-records",
       "./clinical-records-boundary",
       "./computer-use",

@@ -7,7 +7,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
   HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
