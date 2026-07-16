@@ -47,12 +47,17 @@ interface AssistantCodexModelProviderRegistration {
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
 export const OPENAI_CODEX_MODEL_PROVIDER_ID = 'openai'
 export const HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID = 'hosted-openai'
+// The hosted runtime writes this internal provider into its generated Codex
+// config when local development uses ChatGPT subscription auth.
+export const HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID =
+  'hosted-chatgpt-openai'
 export const HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID = 'openai-local-test'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   'ollama',
   'lmstudio',
