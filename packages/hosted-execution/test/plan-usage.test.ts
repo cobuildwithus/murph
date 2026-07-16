@@ -65,6 +65,41 @@ describe("hosted plan usage contract", () => {
     });
   });
 
+  it("accepts add-usage actions only at the canonical Settings target", () => {
+    const status = {
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: "2026-07-03T12:00:00.000Z",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodKind: "monthly",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: {
+        kind: "add_usage",
+        label: "Add usage",
+        url: "/settings?addUsage=true#subscription",
+      },
+      remainingPercent: 15,
+      status: "active",
+      usedPercent: 85,
+    } as const;
+
+    expect(parseHostedPlanUsageStatus(status)).toMatchObject({
+      recommendedAction: {
+        kind: "add_usage",
+        url: "/settings?addUsage=true#subscription",
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      recommendedAction: {
+        ...status.recommendedAction,
+        url: "/settings#subscription",
+      },
+    })).toThrow();
+  });
+
   it("parses unavailable group status without personal billing details", () => {
     expect(parseHostedPlanUsageStatus({
       generatedAt: "2026-07-03T12:00:00.000Z",

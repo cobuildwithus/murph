@@ -24,12 +24,18 @@ export function formatMaskedPhoneNumber(phoneNumber: string): string {
 // Deep links like ?voice=true and ?addEmail=true open a dialog once; drop the
 // param so refresh and back navigation do not reopen it.
 export function stripSettingsQueryParam(queryKey: string): void {
+  stripSettingsQueryParams([queryKey]);
+}
+
+export function stripSettingsQueryParams(queryKeys: readonly string[]): void {
   if (typeof window === "undefined" || typeof window.location.href !== "string") {
     return;
   }
 
   const url = new URL(window.location.href);
-  url.searchParams.delete(queryKey);
+  for (const queryKey of queryKeys) {
+    url.searchParams.delete(queryKey);
+  }
   window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 

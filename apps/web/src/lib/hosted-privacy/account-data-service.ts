@@ -35,6 +35,10 @@ import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboa
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import {
+  assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
+  closeHostedUsageCreditPurchasesForAccountDeletion,
+} from "../hosted-onboarding/usage-credit-purchase-service";
+import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-execution/user-data-delete";
@@ -232,6 +236,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "AI usage allowance period rows",
     deletion: "live-delete",
     note: "Deletes member-scoped included-allowance spend aggregates used by the hosted AI usage gate.",
+  },
+  {
+    slug: "prisma.hosted_usage_credit_entry",
+    label: "Hosted usage-credit ledger entries",
+    deletion: "live-delete",
+    note: "Deletes member-scoped usage-credit ledger entries before their purchase and member owners. The deletion result reports row counts; browser-vault export omits semantic source keys, usage references, and allocation history.",
+  },
+  {
+    slug: "prisma.hosted_usage_credit_purchase",
+    label: "Hosted usage-credit purchases",
+    deletion: "live-delete",
+    note: "Deletes local purchase state and encrypted Stripe references after ledger entries. The deletion result reports row counts; browser-vault export omits Checkout URLs, payment identifiers, request fingerprints, and provider metadata while Stripe retains records it is legally required to keep.",
   },
   {
     slug: "prisma.hosted_product_feedback",
@@ -636,6 +652,11 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     stripeSubscriptionId,
   });
+  await closeHostedUsageCreditPurchasesForAccountDeletion({
+    memberIds: deletionMemberIds,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
   for (const memberId of deletionMemberIds) {
     await deleteHostedComputerUseExternalStateForAccountDeletion({
       memberId,
@@ -660,6 +681,10 @@ export async function deleteHostedAccountData(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
     await assertHostedPhoneCallsReadyForAccountDeletionTx({
@@ -905,6 +930,29 @@ function buildStringInFilter(values: readonly string[]): string | { in: string[]
     return uniqueValues[0]!;
   }
   return { in: uniqueValues };
+}
+
+function buildHostedUsageCreditEntryDeletionWhere(
+  memberIdFilter: string | { in: string[] },
+): Prisma.HostedUsageCreditEntryWhereInput {
+  return {
+    OR: [
+      { beneficiaryMemberId: memberIdFilter },
+      { purchase: { beneficiaryMemberId: memberIdFilter } },
+      { purchase: { payerMemberId: memberIdFilter } },
+    ],
+  };
+}
+
+function buildHostedUsageCreditPurchaseDeletionWhere(
+  memberIdFilter: string | { in: string[] },
+): Prisma.HostedUsageCreditPurchaseWhereInput {
+  return {
+    OR: [
+      { beneficiaryMemberId: memberIdFilter },
+      { payerMemberId: memberIdFilter },
+    ],
+  };
 }
 
 function buildHostedLinqInviteSignupDeliveryWhere(
@@ -1198,6 +1246,8 @@ async function countHostedAccountData(input: {
     hostedThreadRoute,
     hostedAiUsage,
     hostedAiUsagePeriod,
+    hostedUsageCreditEntry,
+    hostedUsageCreditPurchase,
     hostedProductFeedback,
     hostedLinqDailyState,
     hostedLinqInviteDelivery,
@@ -1310,6 +1360,12 @@ async function countHostedAccountData(input: {
     }),
     input.prisma.hostedAiUsage.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedUsageCreditEntry.count({
+      where: buildHostedUsageCreditEntryDeletionWhere(memberIdFilter),
+    }),
+    input.prisma.hostedUsageCreditPurchase.count({
+      where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
+    }),
     input.prisma.hostedProductFeedback.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedLinqDelivery.count({
@@ -1346,6 +1402,8 @@ async function countHostedAccountData(input: {
     "prisma.clinical_record_retrieval_request": clinicalRecordRetrievalRequest,
     "prisma.hosted_ai_usage": hostedAiUsage,
     "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
+    "prisma.hosted_usage_credit_entry": hostedUsageCreditEntry,
+    "prisma.hosted_usage_credit_purchase": hostedUsageCreditPurchase,
     "prisma.hosted_product_feedback": hostedProductFeedback,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
@@ -1413,6 +1471,12 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, input.memberIds));
   record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, input.memberIds));
+  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
+    where: buildHostedUsageCreditEntryDeletionWhere(memberIdFilter),
+  }));
+  record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
+    where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
+  }));
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));

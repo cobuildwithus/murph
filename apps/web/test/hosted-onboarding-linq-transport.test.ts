@@ -107,7 +107,11 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice-claim", async () => {
   >("@/src/lib/hosted-onboarding/linq-delivery-store");
   return {
     startAuthorizedHostedAiUsageLimitNoticeDispatchTx: vi.fn(
-      async (input: { memberId: string; periodStart: Date }) => ({
+      async (input: {
+        memberId: string;
+        periodStart: Date;
+        usageCreditLedgerVersion: bigint;
+      }) => ({
         idempotencyKey: actual.buildHostedAiUsageGateNoticeIdempotencyKey(input),
         status: "claimed" as const,
       }),
@@ -160,6 +164,9 @@ const usagePrisma = {
   $transaction: vi.fn(async (
     operation: (prisma: typeof usageTransactionPrisma) => Promise<unknown>,
   ) => operation(usageTransactionPrisma)),
+  hostedLinqDelivery: {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  },
 };
 
 describe("hosted Linq webhook transport", () => {
@@ -726,6 +733,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -738,6 +746,7 @@ describe("hosted Linq webhook transport", () => {
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
+      usageCreditLedgerVersion: 0n,
     });
 
     expect(effect.effectId).toBe(expectedIdempotencyKey);
@@ -774,8 +783,9 @@ describe("hosted Linq webhook transport", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma: usagePrisma,
       source: "hosted_webhook_side_effect",
-      sourceRef: expectedIdempotencyKey,
+      sourceRef: "event-ai-usage",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     }));
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     const [configValidationOrder] = vi.mocked(requireHostedOnboardingLinqConfig)
@@ -799,12 +809,81 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
   });
 
+  it("consumes legacy persisted AI usage claims without a ledger version as epoch zero", async () => {
+    const effect = {
+      effectId: buildHostedAiUsageGateNoticeIdempotencyKey({
+        memberId: "member-1",
+        periodStart: "2026-03-01T00:00:00.000Z",
+        usageCreditLedgerVersion: 0n,
+      }),
+      payload: {
+        chatId: "chat-1",
+        claimToken: {
+          periodStart: "2026-03-01T00:00:00.000Z",
+          sentAt: "2026-03-26T12:00:01.000Z",
+        },
+        memberId: "member-1",
+        message: "usage-limit",
+        noticeCode: "pulse_upgrade_edge" as const,
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        replyToMessageId: "message-1",
+        sourceEventId: "event-ai-usage-legacy",
+        template: "ai_usage_quota" as const,
+      },
+    };
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: usagePrisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceRef: "event-ai-usage-legacy",
+        usageCreditLedgerVersion: 0n,
+      }),
+    );
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("rejects malformed present ledger versions in persisted AI usage claims", async () => {
+    const effect = {
+      effectId: "ai-usage-gate:legacy-persisted-effect",
+      payload: {
+        chatId: "chat-1",
+        claimToken: {
+          periodStart: "2026-03-01T00:00:00.000Z",
+          sentAt: "2026-03-26T12:00:01.000Z",
+          usageCreditLedgerVersion: "01",
+        },
+        memberId: "member-1",
+        message: "usage-limit",
+        noticeCode: "pulse_upgrade_edge" as const,
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        replyToMessageId: "message-1",
+        sourceEventId: "event-ai-usage-malformed",
+        template: "ai_usage_quota" as const,
+      },
+    };
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: usagePrisma as never,
+      sideEffects: [effect],
+    })).rejects.toThrow(
+      "Hosted AI usage-limit claim ledger version must be a non-negative integer.",
+    );
+
+    expect(startHostedAiUsageLimitNoticeDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("validates route authority before starting an AI usage quota dispatch", async () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -839,6 +918,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:16:00.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -868,6 +948,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -880,6 +961,7 @@ describe("hosted Linq webhook transport", () => {
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
+      usageCreditLedgerVersion: 0n,
     });
 
     try {
@@ -918,6 +1000,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -948,6 +1031,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -989,6 +1073,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1030,6 +1115,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1067,6 +1153,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1093,12 +1180,13 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
   });
 
-  it("keeps claimed AI usage quota replies period-scoped across source events and notice codes", () => {
+  it("keys AI usage quota replies by capacity epoch across crossing and gate retries", () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1113,6 +1201,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:30:01.000Z",
+        usageCreditLedgerVersion: "2",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1122,15 +1211,41 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-ai-usage-2",
       template: "ai_usage_quota",
     });
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+    const firstIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      usageCreditLedgerVersion: 0n,
+    });
+    const firstRetryEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:01:01.000Z",
+        usageCreditLedgerVersion: "0",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:01:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-gate-retry",
+      template: "ai_usage_quota",
+    });
+    const secondIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      usageCreditLedgerVersion: 2n,
     });
 
-    expect(firstEffect.effectId).toBe(expectedIdempotencyKey);
-    expect(secondEffect.effectId).toBe(expectedIdempotencyKey);
+    expect(firstEffect.effectId).toBe(firstIdempotencyKey);
+    expect(firstRetryEffect.effectId).toBe(firstIdempotencyKey);
+    expect(secondEffect.effectId).toBe(secondIdempotencyKey);
+    expect(secondEffect.effectId).not.toBe(firstEffect.effectId);
     expect(firstEffect.payload).toMatchObject({
       sourceEventId: "event-ai-usage-1",
+    });
+    expect(firstRetryEffect.payload).toMatchObject({
+      sourceEventId: "event-ai-usage-gate-retry",
     });
     expect(secondEffect.payload).toMatchObject({
       sourceEventId: "event-ai-usage-2",
@@ -1239,6 +1354,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1257,6 +1373,12 @@ describe("hosted Linq webhook transport", () => {
     ).rejects.toThrow("send failed");
 
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
+      expectedAttemptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      failureCode: "linq_usage_limit_dispatch_retryable",
+      idempotencyKey: effect.effectId,
+      prisma: usagePrisma,
+    });
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
@@ -1345,6 +1467,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
@@ -1577,6 +1700,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: {
         periodStart: "2026-03-01T00:00:00.000Z",
         sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
       },
       memberId: "member-1",
       message: "usage-limit",
