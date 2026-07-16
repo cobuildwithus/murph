@@ -219,7 +219,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         context.options.assistantPreset ??
         null
       if ('assistantOss' in wizardResult) {
-        selectedAssistantOss = wizardResult.assistantOss ?? false
+        selectedAssistantOss = wizardResult.assistantOss ?? undefined
       }
       if ('assistantModelProvider' in wizardResult) {
         selectedAssistantModelProvider = wizardResult.assistantModelProvider ?? null
