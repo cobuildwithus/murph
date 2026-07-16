@@ -151,7 +151,7 @@ describe('experiment onboarding skill guidance', () => {
       'target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point',
     )
     expect(raw).toContain(
-      'always set a finite `--active-until <ISO timestamp>` no later than the accepted support window\'s end',
+      'always set `activeUntil: "<ISO timestamp>"` no later than the accepted support window\'s end',
     )
     expect(raw).toContain(
       'Do not create open-ended recurring reminders for planned-session support.',
@@ -205,7 +205,7 @@ describe('experiment onboarding skill guidance', () => {
       'For a `reminder`, `send_message` is a normal cue only; reminder-only acceptance does not authorize a repair or accountability question.',
     )
     expect(raw).toContain(
-      'persist that exact purpose as `--support-kind check_in` or `--support-kind review`',
+      'persist that exact purpose as `supportKind: "check_in"` or `supportKind: "review"`',
     )
     expect(raw).toContain(
       'do not leave related future session-support automations blindly active',
@@ -280,7 +280,10 @@ describe('experiment onboarding skill guidance', () => {
 
     expect(raw).toContain('### 3. Capture the reason')
     expect(raw).toContain(
-      "For a new goal or behavior, get the user's reason in their own words by default.",
+      "For a new goal or behavior, get the user's reason in their own words.",
+    )
+    expect(raw).toContain(
+      'already clear from visible or saved user evidence, use it without asking.',
     )
     expect(raw).toContain(
       'The reason shapes the plan, the support style, and later reminders; save it into the loop.',
@@ -319,31 +322,31 @@ describe('experiment onboarding skill guidance', () => {
   it('uses the dedicated support-series option and keeps ordinary tags separate', async () => {
     const raw = await readExperimentOnboardingSkill()
 
-    expect(raw).toContain('--support-series-id experiment:<experimentId>')
-    expect(raw).toContain('--support-kind review')
+    expect(raw).toContain('supportSeriesId: "experiment:<experimentId>"')
+    expect(raw).toContain('supportKind: "reminder"')
     expect(raw).toContain(
       'A bounded review uses `review`, never `weekly_digest`',
     )
     expect(raw).toContain(
-      'never pass a raw `system:support-series:*` value through `--tag`',
+      'Never pass a raw `system:support-series:*` tag',
     )
     expect(raw).toContain(
       'never assign the engine-managed `experiment-lifecycle:<experimentId>` series id',
     )
     expect(raw).toContain(
-      'Use repeated `--tag` only for ordinary descriptive tags.',
+      'Use `tags` only for ordinary descriptive tags.',
     )
     expect(raw).toContain(
-      'vault-cli automation reconcile-support-series experiment:<experimentId> --desired-automation-id <id>',
+      '`murph.automation` action `reconcile`',
     )
     expect(raw).toContain(
-      'on pause, stop, or completion, omit all `--desired-automation-id` flags to archive the series',
+      'An empty desired-id list archives the series on pause, stop, or completion',
     )
     expect(raw).toContain(
-      'Use repeated `--tag` only for ordinary generic tags such as `assistant`, `scheduled`, `experiment`, and `first-session-prep`.',
+      'ordinary `tags: ["assistant", "scheduled", "experiment", "first-session-prep"]`',
     )
     expect(raw).toContain(
-      'use repeated `--tag` only for ordinary generic tags such as `assistant`, `scheduled`, `experiment`, and `session-support`.',
+      'ordinary `tags: ["assistant", "scheduled", "experiment", "session-support"]`',
     )
   })
 
@@ -392,15 +395,15 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'Device sensing changes what happens after a session, not before it.',
     )
-    expect(raw).toContain('--trigger-kind deviceActivity')
+    expect(raw).toContain('`schedule: { "kind": "deviceActivity", "after": "<current ISO timestamp>", "activityKind": "<activity-kind>" }`')
     expect(raw).toContain(
-      'If `progress.adherence.evidence.activityKind` is present, pass `--activity-kind <progress.adherence.evidence.activityKind>`',
+      'Use `progress.adherence.evidence.activityKind` when present',
     )
     expect(raw).toContain(
-      'If it is absent for a generic any-activity target, pass `--activity-kind activity`',
+      'for a generic any-activity target use `activity`',
     )
-    expect(raw).toContain('the deviceActivity scanner treats `activity` as any workout session')
-    expect(raw).toContain('Do not pass `--device-source`')
+    expect(raw).toContain('which the deviceActivity scanner treats as any workout session')
+    expect(raw).toContain('Omit `source`; the trigger is provider-agnostic')
     expect(raw).toContain('experiment-activity-nudge-<experiment-slug>')
     expect(raw).toContain('activity_nudge_automation_slug')
     expect(raw).toContain(

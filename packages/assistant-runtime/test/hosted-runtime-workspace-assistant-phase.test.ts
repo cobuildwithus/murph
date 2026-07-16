@@ -23,7 +23,7 @@ import type {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -197,6 +197,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 
 import {
   initializeVault,
+  showAutomation,
   upsertAutomation,
 } from "@murphai/core";
 import {
@@ -3369,6 +3370,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.afterCheckpoint).toBeUndefined();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    mocks.readAssistantInputEvent
+      .mockReset()
+      .mockResolvedValueOnce(routedEvent)
+      .mockResolvedValueOnce(routeLessReplyEvent);
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+    await operationScope.runAutoReplyGroup({
+      executionContext: laneInput.executionContext,
+      inputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+      ],
+      operation: async (executionContext) => {
+        expect(executionContext.hosted?.automationTool).toBeUndefined();
+      },
+      turnEnvironment: null,
+    });
   });
 
   it("fails closed for mixed fresh hosted inputs when any reply target is null", async () => {
@@ -3419,7 +3442,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
-  it("restores route and group mutation authority from each durable accepted input", async () => {
+  it("scopes automation and group mutation authority to each durable accepted input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
+    const vaultRoot = path.join(parentRoot, "vault");
     const emailInputId = "ain_00000000000000000000000000000001";
     const linqInputId = "ain_00000000000000000000000000000002";
     const groupRequestMock = vi.fn(async () => ({
@@ -3433,139 +3458,295 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const groupRequest: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = groupRequestMock;
-    const activeRoutes: unknown[] = [];
-    const routeGrants: string[] = [];
-    const routeScope = {
-      async run<T>(
-        route: unknown,
-        operation: (routeGrant: string) => Promise<T>,
-      ): Promise<T> {
-        activeRoutes.push(route);
-        const routeGrant = `route-grant-${routeGrants.length + 1}`;
-        routeGrants.push(routeGrant);
-        return await operation(routeGrant);
-      },
-    };
-    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
-      inputId === emailInputId
-        ? {
-            conversation: {
-              accountId: "email_identity",
-              actorId: null,
-              actorIsSelf: false,
-              source: "email",
-              threadId: "email_thread",
-              threadIsDirect: false,
-            },
-            replyTarget: {
-              channel: "email",
-              messageId: "email_message",
-              threadId: "email_delivery_thread",
-            },
-          }
-        : {
-            conversation: {
-              accountId: "linq_identity",
-              actorId: "linq_participant",
-              actorIsSelf: false,
-              source: "linq",
-              threadId: "linq_thread",
-              threadIsDirect: false,
-            },
-            replyTarget: {
-              channel: "linq",
-              messageId: "linq_message",
-              threadId: "linq_group_chat",
-            },
-            sourceMetadata: {
-              externalThreadRouteAuthorityPresent: true,
-              kind: "linq",
-              partCount: 0,
-              reactionEligible: false,
-              replyToMessageId: null,
-              senderHandle: "+15555550123",
-              service: "imessage",
-            },
-          }
-    );
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
+        inputId === emailInputId
+          ? {
+              conversation: {
+                accountId: "email_identity",
+                actorId: null,
+                actorIsSelf: false,
+                source: "email",
+                threadId: "email_thread",
+                threadIsDirect: false,
+              },
+              replyTarget: {
+                channel: "email",
+                messageId: "email_message",
+                threadId: "email_delivery_thread",
+              },
+            }
+          : {
+              conversation: {
+                accountId: "linq_identity",
+                actorId: "linq_participant",
+                actorIsSelf: false,
+                source: "linq",
+                threadId: "linq_thread",
+                threadIsDirect: false,
+              },
+              replyTarget: {
+                channel: "linq",
+                messageId: "linq_message",
+                threadId: "linq_group_chat",
+              },
+              sourceMetadata: {
+                externalThreadRouteAuthorityPresent: true,
+                kind: "linq",
+                partCount: 0,
+                reactionEligible: false,
+                replyToMessageId: null,
+                senderHandle: "+15555550123",
+                service: "imessage",
+              },
+            }
+      );
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      assistantInputIds: [emailInputId, linqInputId],
-      currentDeliveryRouteScope: routeScope,
-      importedCount: 2,
-      runtimeGroupToolPort: { request: groupRequest },
-    }));
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [emailInputId, linqInputId],
+        importedCount: 2,
+        runtimeGroupToolPort: { request: groupRequest },
+        vaultRoot,
+      }));
 
-    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    const operationScope = laneInput?.operationScope as
-      | AssistantAutomationOperationScope
-      | undefined;
-    if (!laneInput?.executionContext || !operationScope) {
-      throw new Error("Expected hosted automation operation scope.");
-    }
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
 
-    const emailResult = await operationScope.runAutoReplyGroup({
-      executionContext: laneInput.executionContext,
-      inputIds: [emailInputId],
-      operation: async (executionContext, turnEnvironment) => {
-        expect(turnEnvironment?.env?.MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT)
-          .toBe("route-grant-1");
-        return await executionContext.hosted?.groupTool?.request({
-          action: "update_display_name",
-          updateDisplayName: { displayName: "Email cannot rename" },
-        });
-      },
-      turnEnvironment: { env: { BASE_ENV: "preserved" } },
-    });
-    expect(emailResult).toEqual({
-      action: "update_display_name",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "authenticated_sender_required",
-      },
-    });
-    expect(groupRequestMock).not.toHaveBeenCalled();
-
-    await operationScope.runAutoReplyGroup({
-      executionContext: laneInput.executionContext,
-      inputIds: [linqInputId],
-      operation: async (executionContext, turnEnvironment) => {
-        expect(turnEnvironment?.env).toMatchObject({
-          BASE_ENV: "preserved",
-          MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT: "route-grant-2",
-        });
-        return await executionContext.hosted?.groupTool?.request({
-          action: "update_display_name",
-          updateDisplayName: { displayName: "Linq can rename" },
-        });
-      },
-      turnEnvironment: { env: { BASE_ENV: "preserved" } },
-    });
-    expect(groupRequestMock).toHaveBeenCalledWith({
-      action: "update_display_name",
-      updateDisplayName: { displayName: "Linq can rename" },
-      linqThread: {
-        authority: {
-          channel: "linq",
-          containerMemberId: "member_synthetic_phase",
-          threadId: "linq_group_chat",
+      const emailResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [emailInputId],
+        operation: async (executionContext, turnEnvironment) => {
+          expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
+          expect(executionContext.hosted?.automationTool).toBeUndefined();
+          return await executionContext.hosted?.groupTool?.request({
+            action: "update_display_name",
+            updateDisplayName: { displayName: "Email cannot rename" },
+          });
         },
-        chatId: "linq_group_chat",
-      },
-    });
-    expect(activeRoutes).toEqual([
-      expect.objectContaining({
-        channel: "email",
-        deliveryTarget: "email_delivery_thread",
-        threadIsDirect: false,
-      }),
-      expect.objectContaining({
-        channel: "linq",
-        deliveryTarget: "linq_group_chat",
-        threadIsDirect: false,
-      }),
-    ]);
+        turnEnvironment: { env: { BASE_ENV: "preserved" } },
+      });
+      expect(emailResult).toEqual({
+        action: "update_display_name",
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "authenticated_sender_required",
+        },
+      });
+      expect(groupRequestMock).not.toHaveBeenCalled();
+
+      const linqResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext, turnEnvironment) => {
+          expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
+          const saved = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2099-08-01T00:00:00.000Z",
+            instructions: "Ask for one lightweight group check-in.",
+            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            slug: "group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
+            title: "Group check-in",
+          });
+          if (!saved || saved.action !== "save") {
+            throw new Error("Expected saved automation.");
+          }
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "reconcile",
+            desiredAutomationIds: [saved.automationId],
+            supportSeriesId: "habit:group-check-in",
+          })).resolves.toEqual({
+            action: "reconcile",
+            archivedCount: 0,
+            matchedCount: 1,
+            missingDesiredAutomationIds: [],
+            supportSeriesId: "habit:group-check-in",
+            unchangedCount: 1,
+          });
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "This request must fail before persistence.",
+            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            tags: ["system:support-series:habit:model-controlled"],
+            title: "Invalid support tag",
+          })).rejects.toThrow(
+            "Reserved automation support tags must be set through supportSeriesId.",
+          );
+          await executionContext.hosted?.groupTool?.request({
+            action: "update_display_name",
+            updateDisplayName: { displayName: "Linq can rename" },
+          });
+          return saved;
+        },
+        turnEnvironment: { env: { BASE_ENV: "preserved" } },
+      });
+      expect(linqResult).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+        lookupId: "group-check-in",
+        routeBinding: "current_conversation",
+        status: "active",
+      }));
+      expect(groupRequestMock).toHaveBeenCalledWith({
+        action: "update_display_name",
+        updateDisplayName: { displayName: "Linq can rename" },
+        linqThread: {
+          authority: {
+            channel: "linq",
+            containerMemberId: "member_synthetic_phase",
+            threadId: "linq_group_chat",
+          },
+          chatId: "linq_group_chat",
+        },
+      });
+      await expect(showAutomation({
+        slug: "group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        activeUntil: "2099-08-01T00:00:00.000Z",
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_group_chat",
+          threadIsDirect: false,
+        }),
+        supportKind: "check_in",
+        tags: expect.arrayContaining([
+          "system:support-series:habit:group-check-in",
+        ]),
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves an automation route unless the accepted current conversation explicitly retargets it", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-retarget-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_11111111111111111111111111111111";
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        assistantTargetOverride: {
+          model: "gpt-5.5",
+          reasoningEffort: "medium",
+        },
+        continuityPolicy: "preserve",
+        instructions: "Send the existing reminder.",
+        route: {
+          channel: "telegram",
+          deliveryTarget: "telegram_existing_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "telegram_existing_chat",
+          threadIsDirect: true,
+        },
+        schedule: { kind: "dailyLocal", localTime: "09:00" },
+        slug: "existing-reminder",
+        status: "active",
+        title: "Existing reminder",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_current",
+          actorId: "linq_participant_current",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_current",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_current",
+          threadId: "linq_chat_current",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const patchThroughScope = async (retargetToCurrentConversation: boolean) =>
+        await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            return await automationTool.request({
+              action: "patch",
+              lookup: "existing-reminder",
+              retargetToCurrentConversation,
+              title: retargetToCurrentConversation
+                ? "Retargeted reminder"
+                : "Preserved reminder",
+            });
+          },
+          turnEnvironment: null,
+        });
+
+      await expect(patchThroughScope(false)).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        routeBinding: "preserved",
+        status: "active",
+      }));
+      await expect(showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        assistantTargetOverride: {
+          model: "gpt-5.5",
+          reasoningEffort: "medium",
+        },
+        route: expect.objectContaining({
+          channel: "telegram",
+          deliveryTarget: "telegram_existing_chat",
+        }),
+      }));
+
+      await expect(patchThroughScope(true)).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        routeBinding: "current_conversation",
+        status: "active",
+      }));
+      await expect(showAutomation({
+        slug: "existing-reminder",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_chat_current",
+          threadIsDirect: true,
+        }),
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
   });
 
   it("skips system mailbox maintenance after foreground input arrives during the run", async () => {
@@ -5071,8 +5252,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("exposes hosted device connect providers and link helper from the platform port", async () => {
+  it("exposes safe hosted device list, connect, and reconcile actions from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
+    const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+    const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -5093,16 +5276,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           providerLabel: "WHOOP",
         };
       },
-      async fetchSnapshot() {
+      async fetchSnapshot(request) {
+        fetchSnapshotRequests.push(request);
         return {
-          connections: [],
+          connections: [{
+            connection: {
+              accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
+              connectedAt: "2026-04-28T00:00:00.000Z",
+              createdAt: "2026-04-28T00:00:00.000Z",
+              displayName: "Training wearable",
+              externalAccountId: "external-account-not-for-assistant",
+              id: "conn_synthetic_whoop",
+              metadata: { privateProviderDetail: "not-for-assistant" },
+              provider: "whoop",
+              scopes: ["read:recovery"],
+              status: "active" as const,
+            },
+            credential: {
+              credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
+              kind: "none" as const,
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
+              lastWebhookAt: "2026-04-28T23:58:00.000Z",
+              nextReconcileAt: null,
+            },
+          }],
           generatedAt: "2026-04-29T00:00:00.000Z",
           userId: "member_synthetic_phase",
+        };
+      },
+      async reconcileAccount(request) {
+        reconcileRequests.push(request);
+        return {
+          connectionId: request.connectionId,
+          occurredAt: "2026-04-29T00:01:00.000Z",
+          status: "queued" as const,
         };
       },
     } satisfies RuntimeDeviceSyncPort;
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      deviceSyncMessagingReturnTarget: "telegram",
       logRequests,
       resolvedDeviceSync: {
         providerConfigs: {
@@ -5129,25 +5348,74 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
         ],
-        issueDeviceConnectLink: expect.any(Function),
+        deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
       }),
     });
+    const deviceTool = hydratedContext?.hosted?.deviceTool;
+    if (!deviceTool) {
+      throw new Error("Expected hosted device tool.");
+    }
+    const abortController = new AbortController();
+    await expect(deviceTool.request({
+      action: "list_accounts",
+      provider: " whoop ",
+      sourceProvider: " whoop_v2 ",
+    }, { signal: abortController.signal })).resolves.toEqual({
+      accounts: [{
+        accountId: "conn_synthetic_whoop",
+        displayName: "Training wearable",
+        lastErrorCode: null,
+        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+        provider: "whoop",
+        status: "active",
+      }],
+      action: "list_accounts",
+      provider: "whoop",
+      sourceProvider: "whoop_v2",
+    });
+    expect(fetchSnapshotRequests).toEqual([{
+      includeCredentialMaterial: false,
+      provider: "whoop",
+      signal: abortController.signal,
+      sourceProviderSlug: "whoop_v2",
+    }]);
     await expect(
-      hydratedContext?.hosted?.issueDeviceConnectLink?.({
-        messagingReturnTarget: "telegram",
+      deviceTool.request({
+        action: "connect",
         provider: "whoop",
       }),
     ).resolves.toEqual({
-      authorizationUrl: "https://connect.example.test/whoop",
-      connectUrl: "https://connect.example.test/whoop",
-      expiresAt: "2026-04-29T00:05:00.000Z",
-      provider: "whoop",
-      providerLabel: "WHOOP",
+      action: "connect",
+      link: {
+        authorizationUrl: "https://connect.example.test/whoop",
+        connectUrl: "https://connect.example.test/whoop",
+        expiresAt: "2026-04-29T00:05:00.000Z",
+        provider: "whoop",
+        providerLabel: "WHOOP",
+      },
     });
     expect(connectLinkRequests).toEqual([
       { connectTarget: "whoop", messagingReturnTarget: "telegram" },
     ]);
+    await expect(deviceTool.request({
+      accountId: "conn_synthetic_whoop",
+      action: "reconcile",
+    }, { signal: abortController.signal })).resolves.toEqual({
+      accountId: "conn_synthetic_whoop",
+      action: "reconcile",
+      occurredAt: "2026-04-29T00:01:00.000Z",
+      status: "queued",
+    });
+    expect(reconcileRequests).toEqual([{
+      connectionId: "conn_synthetic_whoop",
+      signal: abortController.signal,
+    }]);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "unconfigured-provider",
+    })).rejects.toThrow("not available to connect");
+    expect(connectLinkRequests).toHaveLength(1);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -5177,6 +5445,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
+    expect(JSON.stringify(await deviceTool.request({ action: "list_accounts" })))
+      .not.toContain("not-for-assistant");
   });
 
   it("injects active hosted device connection status as dynamic context for due cron lanes", async () => {
@@ -5278,6 +5548,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     expect(fetchSnapshotRequests).toEqual([]);
+    expect(assistantLaneCall?.executionContext.hosted?.automationTool).toBeUndefined();
+    expect(assistantLaneCall?.executionContext.hosted?.groupTool).toBeUndefined();
+    expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
+      expect.objectContaining({ request: expect.any(Function) }),
+    );
     const dynamicContextPrompt =
       await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
@@ -5618,6 +5893,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     } satisfies RuntimeDeviceSyncPort;
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      deviceSyncMessagingReturnTarget: "telegram",
       logRequests,
       resolvedDeviceSync: {
         providerConfigs: {
@@ -5634,8 +5910,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
     await expect(
-      hydratedContext?.hosted?.issueDeviceConnectLink?.({
-        messagingReturnTarget: "telegram",
+      hydratedContext?.hosted?.deviceTool?.request({
+        action: "connect",
         provider: "whoop",
       }),
     ).rejects.toThrow("Connect link failed");
@@ -12957,7 +13233,8 @@ function createPhaseInput(input: {
   conversationImportedCount?: number;
   currentAssistantInputId?:
     HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
-  currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
+  deviceSyncMessagingReturnTarget?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncMessagingReturnTarget"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
@@ -13005,6 +13282,7 @@ function createPhaseInput(input: {
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
     currentAssistantInputId: input.currentAssistantInputId,
+    deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
@@ -13159,7 +13437,6 @@ function createPhaseInput(input: {
       },
       userEnv: input.runtimeUserEnv ?? {},
     },
-    currentDeliveryRouteScope: input.currentDeliveryRouteScope,
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,

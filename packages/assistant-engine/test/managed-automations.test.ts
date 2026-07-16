@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   HOSTED_RUNTIME_PROCESS_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import { AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG } from '@murphai/contracts'
 
 type StoredAutomationRecord = {

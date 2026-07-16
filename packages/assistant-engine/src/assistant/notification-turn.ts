@@ -285,11 +285,10 @@ export async function sendAssistantNotificationLocal(
             }
           : result
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
-      if (
-        resolveAssistantConversationScope(
-          sharedPlan.conversationPolicy.audience,
-        ) === 'unverified-external'
-      ) {
+      const conversationScope = resolveAssistantConversationScope(
+        sharedPlan.conversationPolicy.audience,
+      )
+      if (conversationScope === 'unverified-external') {
         throw new VaultCliError(
           'ASSISTANT_AUDIENCE_UNVERIFIED',
           'Notification audience could not be verified as direct or group.',
@@ -336,9 +335,15 @@ export async function sendAssistantNotificationLocal(
 
       const turnId = createAssistantTurnId()
       const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const hostedDeviceTool =
+        !isAssistantNotificationMaintenanceExactSkip(input) &&
+        conversationScope === 'direct'
+          ? executionContext?.hosted?.deviceTool ?? null
+          : null
       const hostedToolContext =
-        hostedNewsletterTool
+        hostedNewsletterTool || hostedDeviceTool
           ? createAssistantHostedToolContext({
+              deviceTool: hostedDeviceTool,
               newsletterTool: hostedNewsletterTool,
               messageInput,
               newsletterOutbox: {

@@ -70,6 +70,8 @@ import type {
   HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.ts";
 
+const waitForBackgroundAssistantWork = async (_signal: AbortSignal | null): Promise<void> => {};
+
 describe("runHostedWorkspaceInvocation", () => {
   afterEach(async () => {
     vi.clearAllMocks();
@@ -195,6 +197,7 @@ describe("runHostedWorkspaceInvocation", () => {
         NODE_ENV: "production",
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
       },
+      waitForBackgroundAssistantWork,
     })).resolves.toEqual(runtimeResult);
 
     const expectedVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
@@ -215,6 +218,9 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(capturedInput.snapshotArchiveBuilder).toBeTruthy();
     expect(capturedInput.runtimeWakeSignal).toBeTruthy();
     expect(capturedInput.signal).toBe(abortController.signal);
+    expect(capturedInput.waitForBackgroundAssistantWork).toBe(
+      waitForBackgroundAssistantWork,
+    );
     expect(onRuntimeWakeReady).toHaveBeenCalledTimes(1);
     expect(wakeResultsDuringInvocation).toEqual([true]);
     expect(onRuntimeWakeReady.mock.calls[0]?.[0]()).toBe(false);
@@ -332,6 +338,7 @@ describe("runHostedWorkspaceInvocation", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         NODE_ENV: "production",
       },
+      waitForBackgroundAssistantWork,
     })).rejects.toThrow("direct invocation cancelled");
 
     expect(mocks.clearHostedBrowserVaultWarmSourceStateHash).not.toHaveBeenCalled();
@@ -379,6 +386,7 @@ describe("runHostedWorkspaceInvocation", () => {
       },
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
       supervisorEnv,
+      waitForBackgroundAssistantWork,
     });
     expect(capturedInvocationInputs[0]?.latencyMilestones).toEqual({
       phaseBreakdown: {
@@ -407,6 +415,7 @@ describe("runHostedWorkspaceInvocation", () => {
       },
       nodeStartupMs: null,
       supervisorEnv,
+      waitForBackgroundAssistantWork,
     });
     expect(capturedInvocationInputs[1]?.latencyMilestones).toEqual({
       phaseBreakdown: {
@@ -422,6 +431,7 @@ describe("runHostedWorkspaceInvocation", () => {
       nodeStartupMs: null,
       orchestration: {},
       supervisorEnv,
+      waitForBackgroundAssistantWork,
     });
     const bareInput = capturedInvocationInputs[2];
     if (!bareInput) {
@@ -459,6 +469,7 @@ describe("runHostedWorkspaceInvocation", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         NODE_ENV: "production",
       },
+      waitForBackgroundAssistantWork,
     });
 
     const vaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
@@ -529,6 +540,7 @@ describe("runHostedWorkspaceInvocation", () => {
             HOSTED_ASSISTANT_PROVIDER: "openai",
             NODE_ENV: "production",
           },
+          waitForBackgroundAssistantWork,
         });
 
         await assertRealPrivateDirectory(symlinkedPath);
@@ -587,6 +599,7 @@ describe("runHostedWorkspaceInvocation", () => {
           HOSTED_ASSISTANT_PROVIDER: "openai",
           NODE_ENV: "production",
         },
+        waitForBackgroundAssistantWork,
       });
 
       await assertRealPrivateDirectory(residuePath);

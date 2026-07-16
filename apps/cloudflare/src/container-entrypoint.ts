@@ -31,14 +31,13 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  consumeHostedCliRuntimeBridgeOffInvocationViolation,
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
   stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
@@ -154,7 +153,6 @@ interface HostedContainerStartupConfig {
 }
 
 interface HostedContainerRuntimeOptions {
-  consumeCliBridgeOffInvocationViolation?: () => Promise<boolean>;
   exitScheduler?: () => void;
   loadRuntimeContracts?:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -174,12 +172,11 @@ interface HostedContainerRuntimeOptions {
   runLiveModelTurnSmoke?: (
     options: { model: string; signal: AbortSignal },
   ) => Promise<HostedContainerLiveModelTurnSmokeResult>;
-  stopCliRuntimeBridge?: (reason: string) => Promise<void>;
   stopWarmCodex?: (reason: string) => Promise<void>;
+  waitForBackgroundAssistantWork?: (signal: AbortSignal | null) => Promise<void>;
 }
 
 interface HostedContainerRuntimeDependencies {
-  consumeCliBridgeOffInvocationViolation: () => Promise<boolean>;
   exitScheduler: () => void;
   loadRuntimeContracts:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -197,8 +194,8 @@ interface HostedContainerRuntimeDependencies {
     (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
   runLiveModelTurnSmoke:
     (options: { model: string; signal: AbortSignal }) => Promise<HostedContainerLiveModelTurnSmokeResult>;
-  stopCliRuntimeBridge: (reason: string) => Promise<void>;
   stopWarmCodex: (reason: string) => Promise<void>;
+  waitForBackgroundAssistantWork: (signal: AbortSignal | null) => Promise<void>;
 }
 
 interface HostedContainerCodexShellSmokeResult {
@@ -285,10 +282,6 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
   }
 }
 
-type HostedWarmCodexStopReason =
-  | "cli-bridge-off-invocation-request"
-  | "container-server-close";
-
 interface HostedContainerRuntimeWakeRequest {
   attemptId: string;
   leaseGeneration: string;
@@ -311,7 +304,6 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.startupConfig.runnerBundleManifestPath,
   );
   let activeHostedRunnerJobCount = 0;
-  let hostedContainerPoisoned = false;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -370,14 +362,14 @@ export async function startHostedContainerEntrypoint(input: {
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           ok: true,
-          poisoned: hostedContainerPoisoned || hostedContainerProcessFatalObserved,
+          poisoned: hostedContainerProcessFatalObserved,
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
         return;
       }
 
-      if (hostedContainerPoisoned || hostedContainerProcessFatalObserved) {
+      if (hostedContainerProcessFatalObserved) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -849,10 +841,7 @@ export async function startHostedContainerEntrypoint(input: {
         processApi: runtime.processApi,
       });
 
-      const result = await runHostedWorkspaceInvocationWithWarmCodexCleanup(job, runtime, {
-        onCleanupFailed() {
-          hostedContainerPoisoned = true;
-        },
+      const result = await runtime.runWorkspaceInvocation(job, {
         onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
@@ -897,6 +886,8 @@ export async function startHostedContainerEntrypoint(input: {
         runnerJobAcceptedAt,
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
+        supervisorEnv: runtime.startupConfig.supervisorEnv,
+        waitForBackgroundAssistantWork: runtime.waitForBackgroundAssistantWork,
       });
 
       if (requestAbort.signal.aborted || response.destroyed) {
@@ -935,6 +926,18 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       stopActiveJobDiagnostics?.();
+      if (claimedRunnerSlot && invocationAbort.signal.aborted) {
+        try {
+          await stopWarmCodexWithLifecycleLog(runtime, {
+            failureMessage:
+              "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
+            reason: "workspace-invocation-abort",
+          });
+        } catch {
+          hostedContainerProcessFatalObserved = true;
+          runtime.exitScheduler();
+        }
+      }
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
@@ -967,16 +970,6 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   server.once("close", () => {
-    void runtime.stopCliRuntimeBridge("container-server-close").catch((error) => {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildHostedContainerRunnerJobErrorMetadata(error),
-        level: "warn",
-        message: "Hosted container entrypoint failed to stop CLI runtime bridge on server close.",
-        phase: "failed",
-        userId: null,
-      });
-    });
     void stopWarmCodexWithLifecycleLog(runtime, {
       failureMessage: "Hosted container entrypoint failed to stop warm Codex on server close.",
       reason: "container-server-close",
@@ -1479,9 +1472,6 @@ function resolveHostedContainerRuntimeDependencies(
 ): HostedContainerRuntimeDependencies {
   const startupConfig = createHostedContainerStartupConfig();
   return {
-    consumeCliBridgeOffInvocationViolation:
-      runtime?.consumeCliBridgeOffInvocationViolation
-      ?? consumeHostedCliRuntimeBridgeOffInvocationViolation,
     loadRuntimeContracts: createCachedHostedContainerLoader(
       runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
     ),
@@ -1500,10 +1490,11 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
     runLiveModelTurnSmoke:
       runtime?.runLiveModelTurnSmoke ?? runHostedContainerLiveModelTurnSmoke,
-    stopCliRuntimeBridge:
-      runtime?.stopCliRuntimeBridge ?? stopHostedCliRuntimeBridge,
     stopWarmCodex:
       runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
+    waitForBackgroundAssistantWork:
+      runtime?.waitForBackgroundAssistantWork
+      ?? ((signal) => waitForWarmCodexBackgroundWork({ signal })),
   };
 }
 
@@ -2692,45 +2683,11 @@ async function readHostedRunnerBundleManifestSummary(
   };
 }
 
-async function runHostedWorkspaceInvocationWithWarmCodexCleanup(
-  input: HostedExecutionRunnerJobInput,
-  runtime: HostedContainerRuntimeDependencies,
-  options?: {
-    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
-    nodeStartupMs?: number | null;
-    onCleanupFailed?: () => void;
-    onRuntimeWakeReady?: (
-      sendWake: (notification?: HostedContainerRuntimeWakeNotification) => boolean
-    ) => void;
-    orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
-    runnerJobAcceptedAt?: string | null;
-    shutdownSignal?: AbortSignal | null;
-    signal?: AbortSignal;
-  },
-): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
-  await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
-
-  try {
-    return await runtime.runWorkspaceInvocation(input, {
-      dispatch: options?.dispatch ?? null,
-      nodeStartupMs: options?.nodeStartupMs ?? null,
-      onRuntimeWakeReady: options?.onRuntimeWakeReady,
-      orchestration: options?.orchestration ?? null,
-      runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
-      shutdownSignal: options?.shutdownSignal ?? null,
-      signal: options?.signal,
-      supervisorEnv: runtime.startupConfig.supervisorEnv,
-    });
-  } finally {
-    await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
-  }
-}
-
 async function stopWarmCodexWithLifecycleLog(
   runtime: HostedContainerRuntimeDependencies,
   input: {
     failureMessage?: string;
-    reason: HostedWarmCodexStopReason;
+    reason: "container-server-close" | "workspace-invocation-abort";
   },
 ): Promise<void> {
   try {
@@ -2759,29 +2716,6 @@ async function stopWarmCodexWithLifecycleLog(
       phase: "failed",
       userId: null,
     });
-    throw error;
-  }
-}
-
-async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
-  runtime: HostedContainerRuntimeDependencies,
-  options?: {
-    onCleanupFailed?: () => void;
-  },
-): Promise<void> {
-  const violationPending = await runtime.consumeCliBridgeOffInvocationViolation();
-  if (!violationPending) {
-    return;
-  }
-
-  try {
-    await stopWarmCodexWithLifecycleLog(runtime, {
-      failureMessage:
-        "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
-      reason: "cli-bridge-off-invocation-request",
-    });
-  } catch (error) {
-    options?.onCleanupFailed?.();
     throw error;
   }
 }

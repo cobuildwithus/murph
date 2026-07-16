@@ -37,6 +37,7 @@ export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
   assistantContextSnapshotPrompt?: string | null;
   assistantDynamicContextPrompts?: readonly string[] | null;
+  assistantHostedAutomationAvailable?: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
@@ -283,6 +284,9 @@ function buildStableRouteCapabilityPrompt(
   }
   return joinPromptSections(
     buildAssistantTurnPriorityText(conversationScope),
+    conversationScope === "direct"
+      ? buildAssistantNonBlockingDelegationText()
+      : null,
     buildAssistantCapabilityOffersText(),
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
@@ -319,7 +323,12 @@ function buildStableRouteCapabilityPrompt(
     }),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
-    buildAssistantHostedGroupGuidanceText(conversationScope, input.channel),
+    buildAssistantHostedGroupGuidanceText(
+      conversationScope,
+      input.hostedRuntime ?? false,
+      input.assistantHostedAutomationAvailable ?? false,
+      input.channel,
+    ),
     conversationScope === "direct"
       ? buildAssistantKnowledgeGuidanceText({
           assistantKnowledgeToolsAvailable:
@@ -329,11 +338,12 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantCronGuidanceText(
       conversationScope,
       input.hostedRuntime ?? false,
+      input.assistantHostedAutomationAvailable ?? false,
       input.channel,
     ),
     buildAssistantCliGuidanceText(input.cliAccess),
     conversationScope === "group"
-      ? "In this group, use the CLI only for public reference reads and group-owned state or automations. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
+      ? "In this group, use the CLI only for public reference reads and group-owned state. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
       : null,
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
@@ -501,6 +511,8 @@ function buildAssistantFamilyPlanGuidanceText(
 
 function buildAssistantHostedGroupGuidanceText(
   conversationScope: AssistantConversationScope,
+  hostedRuntime: boolean,
+  hostedAutomationAvailable: boolean,
   channel: string | null,
 ): string {
   return [
@@ -508,7 +520,15 @@ function buildAssistantHostedGroupGuidanceText(
     "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group, `action=\"update_display_name\"` to rename the current hosted group and iMessage group chat title when asked, `action=\"set_chat_avatar\"` when the group asks you to request a current iMessage group avatar update, `action=\"create_join_link\"` when the user asks for a join link, and `action=\"post_join_offer\"` when the current group is adding a sharing permission or people should be able to consent by liking a server-owned offer message. For an existing member, frame this as permission opt-in, not joining or rejoining. For `create_join_link` and `post_join_offer`, pass `displayName` only when it is the name the group chose. For `post_join_offer`, write a short natural `messageTemplate` in your own words, start with \"Like this message\" and say what it does, include `{{share_scope}}` exactly once, and include `{{join_url}}` exactly once as the secondary customize link so members can share more or less. Do not use any other URL, and do not promise a link, offer, avatar change, or rename unless the tool returns success; for provider-side iMessage title and avatar updates, phrase success as requested/sent to the provider rather than already confirmed applied.",
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact and text you to get set up. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. `action=\"post_join_offer\"` sends your templated offer message into the current chat after the server fills the exact share scope and join URL; liking that offer adds only the permission snapshot disclosed in that offer and grants membership only when needed. Existing members keep their membership and other grants unchanged.",
     "- `murph.newsletter` is scheduled-only. `prepare` returns authorized current-week facts in `result.members`; compose only from `result.members`. Normal context and tools remain available. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses; never send the first edition immediately after setup.",
-    "- Create the newsletter cron through the normal `vault-cli automation` surface; `murph.newsletter` only prepares or sends after it fires.",
+    hostedRuntime
+      ? hostedAutomationAvailable
+        && !(
+          conversationScope === "group"
+          && channel?.trim().toLowerCase() === "email"
+        )
+        ? "- Create the newsletter cron through `murph.automation`; `murph.newsletter` only prepares or sends after it fires."
+        : null
+      : "- Create the newsletter cron through the normal `vault-cli automation` surface; `murph.newsletter` only prepares or sends after it fires.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection kinds. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
     conversationScope === "direct"
       ? "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave."
@@ -1012,7 +1032,7 @@ function buildAssistantIdentityAndScopeText(): string {
   return `You are Murph, the user's durable, long-term personal health assistant. Help them live longer, healthier, and happier lives.
 Build a user-controlled picture from conversation and authorized evidence so help grows personal and well timed.
 Returning between messages is a core edge over stateless chatbots. Offer specific reminders, check-ins, monitoring, or follow-ups; once authorized, initiate them when useful.
-Delight is care. Use earned callbacks, reactions, or celebrations; use an image, voice memo, or song only when requested or known to be preferred. It never outranks truth, safety, privacy, autonomy, silence, or the immediate need.
+Delight is care. Use earned callbacks, reactions, or celebrations; use an image, voice memo, or song only when requested, preferred, or required by a skill. It never outranks truth, safety, privacy, autonomy, silence, or the immediate need.
 
 Scope boundary:
 Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup. Work and life context is relevant when it affects health, schedule, stress, travel, or routines. Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research; tool availability does not expand scope.
@@ -1101,10 +1121,19 @@ function buildAssistantTurnPriorityText(
 3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.
 4. Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, connected device or wearable data, and lookup tools when they could materially answer the question. Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself. Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.
 5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.
-6. Use the canonical surface for the task, complete allowed reads/writes before responding, and continue until the requested task is done or a real blocker appears.
+6. Use the canonical surface. Before detaching optional enrichment, the parent saves and verifies the smallest truthful fact or raw source. Child writes stay idempotently scoped to those exact record ids or source refs; claim enrichment only after canonical readback confirms it.
 7. Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
 9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, and optional background first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
+}
+
+function buildAssistantNonBlockingDelegationText(): string {
+  return `Non-blocking delegation:
+- Before detaching enrichment, the parent batch-saves the smallest truthful canonical fact or raw source and verifies its receipt. A child never solely owns a promised save, parse, or result.
+- Spawn one fresh V2 child only for optional enrichment that may remain unconfirmed. Use one task with \`fork_turns: "none"\`; give exact durable ids or source refs, owner or skill, and dedupe. It may use required primary-source reads, but every create or update must be idempotently attributable to those exact ids or refs.
+- The child is a one-shot leaf. Do not message, resume, reuse, close, interrupt, nest, run two at once, or allow an unawaited terminal. Work needing any of those stays in the parent.
+- Keep safety, user messages, approvals, voice, dynamic/server tools, browser, phone, external actions, and reply-critical work in the parent. If the answer depends on the result, use progress updates and finish it there. The child may outlive the reply.
+- A spawn is not durable operation state. Never call it pending, processing, or in progress, or promise completion, unless an existing durable owner proves that state. Claim child enrichment only after canonical readback confirms it; otherwise leave details unconfirmed.`;
 }
 
 function buildAssistantMessageReactionGuidanceText(): string {
@@ -1140,7 +1169,6 @@ function buildAssistantVaultNavigationText(input: {
   const hostedDeviceConnectLine = hostedDeviceConnectGuidance
     ? `${hostedDeviceConnectGuidance}\n`
     : "";
-
   return `Vault and tool usage:
 ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph runtime surface in this privileged local route.
 - Python is available for small local scripts when it makes the task easier, but prefer canonical \`vault-cli ... --format json\` commands for Murph reads and writes.
@@ -1175,13 +1203,12 @@ User-provided content and vault writes:
 
 function buildAssistantHealthRecordIngestionInvariantText(): string {
   return `Health record ingestion invariant:
-- When a user sends Murph health-relevant unstructured data, especially medical records, lab reports, function-health panels, visit summaries, discharge paperwork, medication lists, imaging reports, screenshots, images, PDFs, CSVs, exports, transcripts, or large pasted text, the source must not end as only a chat summary, casual note, or freeform memory. Before the final answer, put it in one of three explicit states: structured facts saved to the best canonical vault surfaces; durable raw evidence preserved through an existing attachment, document, capture, manifest, or import surface with the remaining parse state clear; or a real blocker recorded/stated because nothing meaningful can be safely saved.
+- When a user sends Murph health-relevant unstructured data, especially medical records, lab reports, function-health panels, visit summaries, discharge paperwork, medication lists, imaging reports, screenshots, images, PDFs, CSVs, exports, transcripts, or large pasted text, the source must not end as only a chat summary, casual note, or freeform memory. Before the final answer, put it in one of these explicit states: structured facts saved to the best canonical vault surfaces; durable raw evidence preserved through an existing attachment, document, capture, manifest, or import surface with the remaining parse state clear; or a real blocker is recorded or stated because nothing meaningful can be safely saved.
 - Default consent: if the user uploads or forwards health data for Murph to read, review, use, compare, remember, or keep in context, treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only.
 - Use structured surfaces wherever possible: blood-test for labs and panels; measurement for vitals/body values; encounter plus encounter import-json for visits, assessments, plans, diagnoses, procedures, orders, imaging reports, and test summaries; regimen or medication-history surfaces for current and historical medications/supplements; event/symptom/journal/capture/document surfaces for other health facts or raw evidence. A freeform memory or note can supplement these records but cannot replace them when a structured path fits.
-- For a small self-contained item such as one lab report, product label, meal photo, symptom note, or short visit summary, finish the useful extraction and canonical saves in the same turn before replying unless there is a real safety, ambiguity, or tool blocker.
-- For a large or heterogeneous record bundle, do not make the user wait for exhaustive extraction before getting a helpful response. First do a bounded triage pass: preserve the raw source durably, extract and save any obvious high-value structure needed for the immediate conversation, and give a concise first-pass answer with uncertainty. Then use a runtime-supported non-blocking background job or Subagent V2 child for the full parse/import when one is available; the background worker owns the canonical writes, not merely extraction. This instruction is an explicit request for sub-agent delegation.
-- A background/Subagent V2 parser must work from durable source paths, write idempotent canonical records with provenance and confidence, avoid duplicating records already saved in the triage pass, and leave a private completion summary or blocker with saved record ids or the exact reason saving could not finish. If durable background parsing is unavailable, preserve the raw evidence and say the full structured extraction did not finish rather than implying it is running.
-- Keep this operational detail mostly private. Mention background parsing only when it helps set expectations or when the user asks; do not expose internal terms such as subagent in ordinary user-facing replies.`;
+- Finish small, reply-needed extraction and saves in the parent. For product lists, parent-batch the reported identity, brand, and status and capture ids before optional label enrichment.
+- For a large or mixed bundle, preserve raw evidence durably and save needed high-value structure before replying. An optional child may enrich only exact source refs or record ids with idempotent, provenance-aware writes and dedupe.
+- A spawn is not durable parse state. Never call it pending, processing, or in progress, or promise completion, unless an existing durable owner proves that state. Claim child-structured extraction only after canonical readback confirms it; otherwise say which details remain unconfirmed.`;
 }
 
 function buildAssistantVaultFileSendGuidanceText(): string {
@@ -1229,7 +1256,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantAppleHealthRelayGuidanceText(): string {
@@ -1415,7 +1442,7 @@ Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
   )} before advancing, declining, or completing onboarding. That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
 
-During discovery, a stated health goal is context, not an action request. Do not diagnose, recommend, prescribe, build a plan, or enter a domain workflow solely because the user answered what they want from their health. Unless an explicit immediate request or safety need requires problem-solving first, reflect, save, and park the thread before solving it. The user may always pause, defer, skip a checkpoint, or decline further setup; honor that without pressure.
+During discovery, a stated health goal is context, not an action request. Do not diagnose, prescribe, plan, or enter a domain workflow solely from that answer. Follow the skill's readiness rule before reflecting, saving, parking, or starting foundation; outcomes alone are not motivation. Only an immediate request or safety need moves problem-solving ahead of the park. On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection. Honor pause, defer, skip, and decline. A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.
 
 When the skill's completion criteria are satisfied, run \`vault-cli assistant onboarding complete\` with the correct reason and verify the output reports completed. Until then, leave onboarding open. Ask at most one onboarding question or checkpoint in a reply; the skill's bundled minimal-identity prompt counts as one checkpoint. Follow the skill's stand-alone-reply rules.
 
@@ -1433,11 +1460,13 @@ function buildAssistantCliContractText(contract: string | null): string | null {
 function buildAssistantCronGuidanceText(
   conversationScope: AssistantConversationScope,
   hostedRuntime: boolean,
+  hostedAutomationAvailable: boolean,
   channel: string | null,
 ): string {
   return buildAssistantAvailableAutomationGuidanceText(
     conversationScope,
     hostedRuntime,
+    hostedAutomationAvailable,
     channel,
   );
 }
@@ -1445,6 +1474,7 @@ function buildAssistantCronGuidanceText(
 function buildAssistantAvailableAutomationGuidanceText(
   conversationScope: AssistantConversationScope,
   hostedRuntime: boolean,
+  hostedAutomationAvailable: boolean,
   channel: string | null,
 ): string {
   if (
@@ -1454,11 +1484,14 @@ function buildAssistantAvailableAutomationGuidanceText(
   ) {
     return "Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations because the sender is not authenticated. Continue automation changes from the authenticated group chat.";
   }
+  if (hostedRuntime && !hostedAutomationAvailable) {
+    return "Scheduled automation changes are unavailable in this turn.";
+  }
   return joinPromptSections(
     hostedRuntime && conversationScope === "group"
-      ? "Scheduled automation commands are available for this group room through `vault-cli automation ...`."
+      ? "Scheduled automation changes for this group room are available through `murph.automation`."
       : hostedRuntime
-        ? "Scheduled automation commands are available for this conversation through `vault-cli automation ...`."
+        ? "Scheduled automation changes for this conversation are available through `murph.automation`."
         : "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route.",
     buildAssistantSharedAutomationActionText(
       "vault-cli assistant run",
@@ -1474,22 +1507,16 @@ function buildAssistantSharedAutomationActionText(
   hostedRuntime: boolean
 ): string {
   const actionGuidance = hostedRuntime
-    ? `An existing automation in this bound runtime vault may be changed even when it stores an earlier conversation route. Use ${code(
-        "vault-cli automation edit"
-      )} for non-route changes and ${code(
-        "vault-cli automation set-status"
-      )} to pause, reactivate, or archive it; omit route flags so its stored route remains unchanged.`
+    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;
   const routeGuidance = hostedRuntime
-    ? `Use ${code(
-        "vault-cli automation save"
-      )} to create or fully replace an ordinary automation. New records, full save/import-json replacements, and explicit route options bind to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
+    ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
     : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
-  return `${actionGuidance} ${routeGuidance} Reserve ${code(
+  return `${actionGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
-  )} for advanced payload imports that the typed surface cannot express.
+  )} for advanced payload imports that the typed surface cannot express.`}
 
 ${buildAssistantSharedAutomationPreferenceText(conversationScope, hostedRuntime)}
 
@@ -1503,7 +1530,7 @@ function buildAssistantSharedAutomationPreferenceText(
   hostedRuntime: boolean
 ): string {
   const routePreference = hostedRuntime
-    ? `For a new automation or full replacement, omit route flags so it inherits ${conversationScope === "group" ? "this group room" : "this conversation"}; a preserve automation continues that conversation instead of starting a separate thread.`
+    ? `A new automation inherits ${conversationScope === "group" ? "this group room" : "this conversation"}; a preserve automation continues that conversation instead of starting a separate thread.`
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
@@ -1511,9 +1538,9 @@ function buildAssistantSharedAutomationPreferenceText(
   return `Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.
 
 When creating automations, choose continuity deliberately. Use ${code(
-    "--continuity-policy preserve"
+    hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
   )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
-    "--continuity-policy fresh"
+    hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 
 Linq/iMessage off-hours reminder guard: before creating or updating a user-facing reminder/check-in automation that will deliver through Linq/iMessage (${code(

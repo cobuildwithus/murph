@@ -5,7 +5,7 @@ import path from 'node:path'
 
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 

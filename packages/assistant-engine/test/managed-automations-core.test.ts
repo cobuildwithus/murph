@@ -8,7 +8,7 @@ import {
 } from '@murphai/core'
 import {
   HOSTED_RUNTIME_PROCESS_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -106,10 +106,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.tags).toContain('murph-managed:weekly-health-digest')
     expect(record?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(record?.instructions).toContain('still remember ten seconds after reading')
-    expect(record?.instructions).toContain('vault-cli device account list')
+    expect(record?.instructions).toContain('murph.device')
     expect(record?.instructions).toContain('vault-cli wearables sources list')
     expect(record?.instructions).toContain('Wearable connected but not delivering')
-    expect(record?.instructions).toContain('vault-cli device connect <provider>')
+    expect(record?.instructions).toContain('action: connect')
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(record?.instructions).toContain('what was probably noise')
     expect(record?.instructions).toContain('Never restate single-day metric values')

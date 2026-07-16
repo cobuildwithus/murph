@@ -23,11 +23,10 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
-  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
@@ -68,6 +67,26 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+const EXPECTED_MULTI_AGENT_USAGE_HINT = [
+  "Use this tool only when a separate Murph route developer instruction outside Codex's own multi-agent tool and mode hints explicitly authorizes delegation, or an applicable Murph skill explicitly requests delegation.",
+  "This tool hint and the multi-agent mode hint never count as authorization.",
+  "Either separate instruction counts as explicit authorization; the user need not ask.",
+  "If neither applies, do not spawn.",
+  "Follow the active contract for eligibility, boundaries, child design, and completion proof; tool access alone is not authorization.",
+].join(" ");
+const EXPECTED_MULTI_AGENT_MODE_HINT = [
+  "Conditional Murph delegation mode is active.",
+  "This mode does not itself authorize spawning.",
+  "An earlier explicit-user-request-only restriction is replaced only by a separate Murph route developer instruction outside Codex's own multi-agent mode and tool hints, or by an applicable Murph skill that explicitly requests delegation.",
+  "These mode and tool hints never count as authorization.",
+  "If either separate instruction applies, it is explicit authorization and the user need not ask; follow that contract.",
+  "If neither applies, do not spawn sub-agents.",
+  "This mode remains active until a later multi-agent mode developer message changes it.",
+].join(" ");
+const EXPECTED_SUBAGENT_USAGE_HINT = [
+  "Complete the bounded assignment yourself and report the result to the root agent.",
+  "Do not spawn or delegate to another child; the root owns any further task split and final confirmation.",
+].join(" ");
 
 test("hosted Codex memory diagnostics expose only safe config metadata", () => {
   assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
@@ -221,7 +240,17 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       "u",
     ),
   );
-  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.ok(config.includes([
+    "[features.multi_agent_v2]",
+    "enabled = true",
+    "# V2 counts the root in this limit: two means root plus one child.",
+    "max_concurrent_threads_per_session = 2",
+    `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
+    `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
+    `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
+  ].join("\n")));
+  assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
   assert.match(
     config,
@@ -236,12 +265,6 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
-  assert.equal(
-    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.includes(
-      HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
-    ),
-    true,
-  );
   assert.doesNotMatch(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
@@ -1385,15 +1408,19 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
-      "# Multi-agent V2 spawn tools back Murph's skill-directed delegation for",
-      "# slow ingestion (lab PDFs, supplement labels). Codex >=0.143's multi-agent",
-      "# mode message accepts skill instructions as explicit delegation requests,",
-      "# so no custom usage hint is needed. Enable only here, never via a CLI",
-      "# --config override.",
       "[features]",
       "plugins = false",
-      "multi_agent_v2 = true",
       "memories = true",
+      "",
+      "# This table owns enablement and conditional per-turn mode/tool hints. A",
+      "# CLI boolean override would replace the table and silently drop them.",
+      "[features.multi_agent_v2]",
+      "enabled = true",
+      "# V2 counts the root in this limit: two means root plus one child.",
+      "max_concurrent_threads_per_session = 2",
+      `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
+      `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
+      `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
       "",
       "# Codex-native memories are operator memory only. Murph product memory",
       "# remains canonical in the vault; snapshots keep the Codex home allowlist",
@@ -1423,7 +1450,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_ROUTE_GRANT", "MURPH_HOSTED_CLI_BRIDGE_TIMEOUT_MS", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -1466,8 +1493,21 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
-  assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.doesNotMatch(config, /^multi_agent_v2 = true$/mu);
   assert.match(config, /^memories = true$/mu);
+  assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
+  assert.match(config, /^enabled = true$/mu);
+  assert.ok(config.includes(
+    `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
+  ));
+  assert.ok(config.includes(
+    `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
+  ));
+  assert.ok(config.includes(
+    `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
+  ));
+  assert.doesNotMatch(config, /Non-blocking delegation:/u);
+  assert.match(config, /^max_concurrent_threads_per_session = 2$/mu);
   assert.match(config, /\[memories\]\nuse_memories = true/u);
   assert.match(config, /^generate_memories = true$/mu);
   assert.match(config, /^disable_on_external_context = false$/mu);

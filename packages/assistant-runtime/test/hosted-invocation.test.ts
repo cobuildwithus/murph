@@ -86,6 +86,7 @@ describe("runHostedWorkspaceInvocation", () => {
     const decodeMailboxPayload = createMailboxPayloadDecoder();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const platform = createRuntimePlatform();
+    const waitForBackgroundAssistantWork = vi.fn(async () => undefined);
 
     await expect(runHostedWorkspaceInvocation({
       job,
@@ -103,6 +104,7 @@ describe("runHostedWorkspaceInvocation", () => {
       snapshotArchiveBuilder,
       snapshotDiagnosticsHashSecret: "f".repeat(64),
       vaultRoot,
+      waitForBackgroundAssistantWork,
     })).resolves.toBe(result);
 
     expect(capturedRuntimeCalls).toHaveLength(1);
@@ -128,6 +130,7 @@ describe("runHostedWorkspaceInvocation", () => {
     const checkpointResult = await captured?.options.createCheckpointSnapshot({
       reason: "idle_shutdown",
     });
+    expect(waitForBackgroundAssistantWork).toHaveBeenCalledExactlyOnceWith(null);
     expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         dataKey: "data-key-base64",
@@ -159,6 +162,7 @@ describe("runHostedWorkspaceInvocation", () => {
       runtimeWakeSignal: createTestRuntimeWakeSignal(),
       snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
       vaultRoot,
+      waitForBackgroundAssistantWork: async () => undefined,
     };
 
     // @ts-expect-error Intentionally verifies the JavaScript boundary fails closed.
@@ -191,6 +195,7 @@ describe("runHostedWorkspaceInvocation", () => {
       runtimeWakeSignal: null,
       snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
       vaultRoot,
+      waitForBackgroundAssistantWork: async () => undefined,
     })).rejects.toThrow("runHostedWorkspaceInvocation requires runtimeWakeSignal.");
     expect(mocks.runHostedWorkspaceRuntimeJobInProcess).not.toHaveBeenCalled();
   });

@@ -1,10 +1,6 @@
 import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
-  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
@@ -21,10 +17,6 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   "CURL_CA_BUNDLE",
   "FORCE_COLOR",
   "HOME",
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
-  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   // Health Commons owns this env-name contract from @murphai/health-commons/runtime.

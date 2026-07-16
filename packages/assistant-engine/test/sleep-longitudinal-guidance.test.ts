@@ -186,8 +186,8 @@ describe('longitudinal sleep guidance', () => {
     expect(acceptedChange).toContain(
       'A reminder to take the supplement and a later review/check-in are separate choices',
     )
-    expect(acceptedChange).toContain('--support-series-id supplement:<regimenId>')
-    expect(acceptedChange).toContain('finite `--active-until`')
+    expect(acceptedChange).toContain('supportSeriesId: "supplement:<regimenId>"')
+    expect(acceptedChange).toContain('finite `activeUntil`')
     expect(acceptedChange).toContain('archive it when the supplement is stopped')
   })
 
@@ -288,22 +288,22 @@ describe('plan ownership and closeout guidance', () => {
     const automation = readSection(skill, 'Support and automation policy')
     const closeout = readSection(skill, 'Non-Experiment Closeout')
 
-    expect(automation).toContain('--support-series-id habit:<regimenId>')
+    expect(automation).toContain('supportSeriesId: "habit:<regimenId>"')
     expect(automation).toContain(
-      'never pass a raw `system:support-series:*` value through `--tag`',
+      'Never pass a raw `system:support-series:*` tag',
     )
     expect(automation).toContain(
-      'Use repeated `--tag` only for ordinary descriptive tags.',
+      '`tags` are only for ordinary descriptive values.',
     )
-    expect(automation).toContain('finite `--active-until <ISO timestamp>`')
+    expect(automation).toContain('set `activeUntil: "<ISO timestamp>"`')
     expect(automation).toContain(
-      'vault-cli automation reconcile-support-series habit:<regimenId> --desired-automation-id <id>',
+      '`murph.automation` action `reconcile`',
     )
     expect(automation).toContain(
       'vault-cli automation list --support-series-id habit:<regimenId>',
     )
     expect(closeout).toContain(
-      'run `vault-cli automation reconcile-support-series habit:<regimenId>` with no `--desired-automation-id` flags to archive the whole series',
+      'reconcile it with an empty desired-id list to archive the whole series',
     )
     expect(automation).toContain('Never create open-ended nag loops.')
     expect(automation).toContain('continuing beyond that window requires fresh consent')
@@ -359,25 +359,25 @@ describe('experiment start and support mechanics', () => {
     expect(active).toContain('use the stable id from `protocol.sessionFieldIds`')
     expect(active).toContain('repeat `--field <id>=<value>` for each value')
     expect(active).toContain('Never bury declared session fields in notes or confounders')
-    expect(active).toContain('--support-series-id experiment:<experimentId>')
+    expect(active).toContain('supportSeriesId: "experiment:<experimentId>"')
     expect(active).toContain(
-      'never pass a raw `system:support-series:*` value through `--tag`',
+      'Never pass a raw `system:support-series:*` tag',
     )
     expect(active).toContain(
       'never assign the engine-managed `experiment-lifecycle:<experimentId>` series id',
     )
     expect(active).toContain(
-      'Use repeated `--tag` only for ordinary descriptive tags.',
+      'Use `tags` only for ordinary descriptive tags.',
     )
     expect(active).toContain(
-      'vault-cli automation reconcile-support-series experiment:<experimentId> --desired-automation-id <id>',
+      '`murph.automation` action `reconcile`',
     )
     expect(support).toContain('Agreement to the experiment is not agreement to reminders or check-ins.')
     expect(support).toContain('only after the user explicitly accepts that support')
     expect(support).toContain('Prefer bounded one-shot reminders')
-    expect(support).toContain('always set a finite `--active-until <ISO timestamp>`')
+    expect(support).toContain('always set `activeUntil: "<ISO timestamp>"`')
     expect(skill).toContain(
-      'a finite `--active-until <ISO timestamp>` at the accepted support window\'s end',
+      'finite `activeUntil: "<ISO timestamp>"` at the accepted support window\'s end',
     )
     expect(skill).not.toContain('planned-session support is default-on')
     expect(skill).not.toContain('Create one default-on activity nudge automation')

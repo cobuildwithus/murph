@@ -2370,6 +2370,60 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal exposes device authority only to direct non-maintenance turns', async () => {
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+  })
+  const deviceTool = {
+    request: vi.fn(async () => ({
+      accounts: [],
+      action: 'list_accounts' as const,
+      provider: null,
+      sourceProvider: null,
+    })),
+  }
+  const observedHostedToolContexts: Array<
+    NotificationTurnProviderInput['hostedToolContext']
+  > = []
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      observedHostedToolContexts.push(providerInput.hostedToolContext)
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    turnId: 'turn-notification-device-scope',
+  })
+  const executionContext = {
+    hosted: {
+      deviceTool,
+      memberId: 'member-notification-device-scope',
+      userEnvKeys: [],
+    },
+  }
+
+  await sendAssistantNotificationLocal({
+    executionContext,
+    instructions: 'Check the weekly wearable digest.',
+    vault: '/vaults/notification-device-scope',
+  })
+  await sendAssistantNotificationLocal({
+    executionContext,
+    instructions: 'Run private maintenance.',
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      privateSummary: 'No notification required.',
+    },
+    vault: '/vaults/notification-device-scope',
+  })
+
+  expect(observedHostedToolContexts).toHaveLength(2)
+  expect(observedHostedToolContexts[0]?.deviceTool).toBe(deviceTool)
+  expect(observedHostedToolContexts[1]).toBeNull()
+})
+
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({

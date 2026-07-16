@@ -233,7 +233,7 @@ describe("redactHostedLocalDiagnosticText", () => {
   it("redacts hosted-local provider credentials and local paths in common diagnostic formats", () => {
     const text = [
       'OPENAI_API_KEY="openai-secret"',
-      '"MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret"',
+      '"LINQ_API_TOKEN":"linq-secret"',
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: private-jwk",
       "Bearer provider-token",
       `${process.cwd()}/apps/cloudflare/.dev.vars`,
@@ -242,12 +242,12 @@ describe("redactHostedLocalDiagnosticText", () => {
     const redacted = redactHostedLocalDiagnosticText(text);
 
     expect(redacted).toContain("OPENAI_API_KEY=<redacted>");
-    expect(redacted).toContain('"MURPH_HOSTED_CLI_BRIDGE_TOKEN":<redacted>');
+    expect(redacted).toContain('"LINQ_API_TOKEN":<redacted>');
     expect(redacted).toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: <redacted>");
     expect(redacted).toContain("Bearer <redacted>");
     expect(redacted).toContain("<redacted-path>");
     expect(redacted).not.toContain("openai-secret");
-    expect(redacted).not.toContain("bridge-secret");
+    expect(redacted).not.toContain("linq-secret");
     expect(redacted).not.toContain("private-jwk");
     expect(redacted).not.toContain("provider-token");
     expect(redacted).not.toContain(process.cwd());

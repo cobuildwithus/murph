@@ -14,13 +14,18 @@ describe('assistant prompt capability availability', () => {
         deviceConnectProviders: [
           { label: 'WHOOP', provider: 'whoop' },
         ],
-        issueDeviceConnectLink: async ({ provider }) => ({
-          authorizationUrl: `https://connect.example.test/${provider}`,
-          connectUrl: `https://connect.example.test/${provider}`,
-          expiresAt: '2026-04-30T00:05:00.000Z',
-          provider,
-          providerLabel: 'WHOOP',
-        }),
+        deviceTool: {
+          request: async () => ({
+            action: 'connect' as const,
+            link: {
+              authorizationUrl: 'https://connect.example.test/whoop',
+              connectUrl: 'https://connect.example.test/whoop',
+              expiresAt: '2026-04-30T00:05:00.000Z',
+              provider: 'whoop',
+              providerLabel: 'WHOOP',
+            },
+          }),
+        },
         memberId: 'member_synthetic',
         userEnvKeys: [],
       },
@@ -37,7 +42,7 @@ describe('assistant prompt capability availability', () => {
     })
   })
 
-  it('keeps hosted device-connect unavailable when providers are listed without a callable helper', () => {
+  it('keeps hosted device-connect unavailable when providers are listed without a device port', () => {
     const executionContext = normalizeAssistantExecutionContext({
       hosted: {
         deviceConnectProviders: [

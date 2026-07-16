@@ -11,7 +11,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   parseHostedLocalCodexSubscriptionHostAuth,
   parseHostedLocalCodexSubscriptionSeedAuth,
@@ -56,6 +56,26 @@ const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
+const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
+  "Use this tool only when a separate Murph route developer instruction outside Codex's own multi-agent tool and mode hints explicitly authorizes delegation, or an applicable Murph skill explicitly requests delegation.",
+  "This tool hint and the multi-agent mode hint never count as authorization.",
+  "Either separate instruction counts as explicit authorization; the user need not ask.",
+  "If neither applies, do not spawn.",
+  "Follow the active contract for eligibility, boundaries, child design, and completion proof; tool access alone is not authorization.",
+].join(" ");
+const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT = [
+  "Conditional Murph delegation mode is active.",
+  "This mode does not itself authorize spawning.",
+  "An earlier explicit-user-request-only restriction is replaced only by a separate Murph route developer instruction outside Codex's own multi-agent mode and tool hints, or by an applicable Murph skill that explicitly requests delegation.",
+  "These mode and tool hints never count as authorization.",
+  "If either separate instruction applies, it is explicit authorization and the user need not ask; follow that contract.",
+  "If neither applies, do not spawn sub-agents.",
+  "This mode remains active until a later multi-agent mode developer message changes it.",
+].join(" ");
+const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
+  "Complete the bounded assignment yourself and report the result to the root agent.",
+  "Do not spawn or delegate to another child; the root owns any further task split and final confirmation.",
+].join(" ");
 // Hosted thread cost scales linearly with this ceiling: every tool round-trip
 // re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
 // within ~45 minutes regardless of prefix size or prompt_cache_retention
@@ -554,15 +574,19 @@ export function buildHostedCodexConfigToml(input: {
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
-    "# Multi-agent V2 spawn tools back Murph's skill-directed delegation for",
-    "# slow ingestion (lab PDFs, supplement labels). Codex >=0.143's multi-agent",
-    "# mode message accepts skill instructions as explicit delegation requests,",
-    "# so no custom usage hint is needed. Enable only here, never via a CLI",
-    "# --config override.",
     "[features]",
     "plugins = false",
-    "multi_agent_v2 = true",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
+    "",
+    "# This table owns enablement and conditional per-turn mode/tool hints. A",
+    "# CLI boolean override would replace the table and silently drop them.",
+    "[features.multi_agent_v2]",
+    "enabled = true",
+    "# V2 counts the root in this limit: two means root plus one child.",
+    "max_concurrent_threads_per_session = 2",
+    `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
+    `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
+    `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
     "",
     "# Codex-native memories are operator memory only. Murph product memory",
     "# remains canonical in the vault; snapshots keep the Codex home allowlist",
@@ -593,7 +617,7 @@ export function buildHostedCodexConfigToml(input: {
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
     // include_only is the single gate for shell env. Codex's default
     // *KEY*/*TOKEN*/*SECRET* excludes run before include_only and can only
-    // subtract deliberately allowlisted vars (bridge token, provider keys),
+    // subtract deliberately allowlisted vars (App Server proxy token, provider keys),
     // so they add no protection here and must stay off.
     "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,

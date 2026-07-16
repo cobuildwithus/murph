@@ -9,7 +9,7 @@ import {
 } from '@murphai/core'
 import {
   isHostedRuntimeProcessEnv,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   MURPH_PRODUCT_ORIGIN,
@@ -186,13 +186,13 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled weekly run, decide whether to send a weekly health digest, send a short reconnect prompt, or suppress the run entirely. Assume the user already checks their wearable app daily and has seen their scores. Send only if the digest tells them something about their week they could not get by glancing at that app, and that they will still remember ten seconds after reading it. A recap with no takeaway is worse than no message at all.',
       '',
       'Substance check before composing:',
-      '- Read `vault-cli device account list` to see which wearable / device accounts exist and their auth status.',
+      '- When `murph.device` is available, use it with `action: list_accounts` to see which wearable / device accounts exist and their auth status. If it is unavailable, do not infer account or authorization state.',
       '- Read `vault-cli wearables sources list` to see per-provider freshness, `lastDate`, and `stalenessVsNewestDays`.',
       "- Skim recent user-logged substance since roughly the last digest: wearables (`vault-cli wearables latest`), and any manual logs the user typically keeps (samples, food, supplements, body, events, knowledge edits). Use the smallest CLI calls needed; do not exhaustively scan the vault.",
       '',
       'Branch on what you find:',
       '- Substance present: a week-vs-baseline shift worth knowing, a link between real-life context and a signal (for example two hard yardwork days lining up with a recovery dip), movement in an active experiment, or a scary-looking change that is probably just noise and worth defusing. New data alone is not substance. Produce the concise weekly health digest as described below.',
-      '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more. Instead of a digest, send one short, warm in-chat note acknowledging the gap and inviting the user to reconnect so Murph can keep seeing their data. Include a fresh reconnect link by calling `vault-cli device connect <provider> --format json` and using the `connectUrl` from the result. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
+      '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the gap and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
       '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the reconnect branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.',
       '',
       'Frame the digest as a compass, not a report: what changed, what stayed steady, what was probably noise, the likely real-life context behind the week, at most one thing worth keeping, and at most one thing not worth reacting to.',
@@ -311,7 +311,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Similar concrete, evidence-backed gaps in sleep, movement, nutrition, or recovery basics.',
       '',
       'Evidence gate. Every claim must survive all three checks before it can be offered:',
-      '- Capability: the metric must be positively captured by a connected, healthy source. Read `vault-cli device account list` and `vault-cli wearables sources list` first. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears in this user\'s data before judging it.',
+      '- Capability: the metric must be positively captured by a connected, healthy source. When `murph.device` is available, use it with `action: list_accounts`; always read `vault-cli wearables sources list`. If account health cannot be proved without the tool, suppress any candidate that depends on it. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears in this user\'s data before judging it.',
       '- Plausibility: treat exact zeros, sudden cliffs, or values wildly inconsistent with the rest of the data as pipeline or sync bugs, not behavior. If a reading looks broken, suppress; never tell the user they are inactive because a counter reads zero.',
       '- Sufficiency: require a real pattern window, roughly three or more weeks of reasonably continuous coverage for the metric, before calling anything consistent. One bad week is noise.',
       '- Sleep validity: consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own. Require reliable timing/opportunity or disruption evidence plus a meaningful independent signal such as next-day function or the user\'s stated concern. Do not diagnose a sleep disorder from device data.',

@@ -18,6 +18,7 @@ import type {
 } from './connected-apps-port.js'
 import type {
   AssistantHostedActionApprovalPort,
+  AssistantHostedAutomationTool,
   AssistantHostedFamilyPlanTool,
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedGroupTool,
@@ -25,6 +26,7 @@ import type {
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
   AssistantHostedSubscriptionTool,
+  AssistantHostedDeviceTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -70,9 +72,11 @@ export type AssistantHostedVaultFileSendResult =
 
 export interface AssistantHostedToolContext {
   readonly actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  readonly automationTool?: AssistantHostedAutomationTool | null
   readonly assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  readonly deviceTool?: AssistantHostedDeviceTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
@@ -107,9 +111,11 @@ type AssistantHostedToolDeliveryContext = {
 
 export function createAssistantHostedToolContext(input: {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  automationTool?: AssistantHostedAutomationTool | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  deviceTool?: AssistantHostedDeviceTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
@@ -173,9 +179,11 @@ export function createAssistantHostedToolContext(input: {
 
   return {
     actionApprovalPort: input.actionApprovalPort ?? null,
+    automationTool: input.automationTool ?? null,
     assistantConfigurationTool: input.assistantConfigurationTool ?? null,
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
+    deviceTool: input.deviceTool ?? null,
     groupTool: input.groupTool ?? null,
     newsletterTool,
     personalizationTool: input.personalizationTool ?? null,

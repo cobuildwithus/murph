@@ -92,6 +92,55 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('allows only optional enrichment after the parent creates durable state', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+    }))
+    const unverifiedPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'unverified-external',
+    }))
+
+    expect(prompt).toContain('Non-blocking delegation:')
+    expect(groupPrompt).not.toContain('Non-blocking delegation:')
+    expect(unverifiedPrompt).not.toContain('Non-blocking delegation:')
+    expect(prompt).toContain(
+      'Before detaching enrichment, the parent batch-saves the smallest truthful canonical fact or raw source and verifies its receipt.',
+    )
+    expect(prompt).toContain(
+      'Spawn one fresh V2 child only for optional enrichment that may remain unconfirmed.',
+    )
+    expect(prompt).toContain('`fork_turns: "none"`')
+    expect(prompt).toContain(
+      'Use one task with',
+    )
+    expect(prompt).toContain(
+      'Keep safety, user messages, approvals, voice, dynamic/server tools, browser, phone, external actions, and reply-critical work in the parent.',
+    )
+    expect(prompt).toContain(
+      'If the answer depends on the result, use progress updates and finish it there.',
+    )
+    expect(prompt).toContain(
+      'The child may outlive the reply.',
+    )
+    expect(prompt).toContain(
+      'Never call it pending, processing, or in progress',
+    )
+    expect(prompt).toContain(
+      'Claim child enrichment only after canonical readback confirms it',
+    )
+    expect(prompt).not.toContain('The child owns canonical writes')
+    expect(prompt).not.toContain('A spawn means pending, not complete.')
+    expect(prompt).toContain(
+      'required primary-source reads',
+    )
+    expect(prompt).toContain(
+      'Before detaching optional enrichment, the parent saves and verifies the smallest truthful fact or raw source.',
+    )
+    expect(prompt).not.toContain('Keep the root open until')
+    expect(prompt).not.toContain('No child outlives the final reply')
+  })
+
   it('keeps unrelated professional errands outside Murph scope', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -586,36 +635,45 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'For reply-critical long research, multiple substantive tool calls, long parsing/scans, or content inspection, send an update before slow work.',
     )
     expect(prompt).toContain(
-      'For work likely to finish in about a minute or less, send at most one progress update',
+      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
     )
     expect(prompt).toContain(
-      'never send a fourth',
+      'Background work does not delay the reply or trigger progress by itself.',
     )
     expect(prompt).toContain(
-      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
     )
     expect(prompt).toContain(
-      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
+      'For work likely to finish within about a minute, send at most one update.',
+    )
+    expect(prompt).toContain(
+      'never a fourth',
+    )
+    expect(prompt).toContain(
+      'If it runs unusually long, send up to two more at real milestones; never a fourth.',
+    )
+    expect(prompt).toContain(
+      'Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics.',
     )
     expect(prompt).toContain(
       '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
     )
     expect(
       prompt.match(
-        /If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth\./g,
+        /If it runs unusually long, send up to two more at real milestones; never a fourth\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq\/iMessage/g,
+        /Linq\/iMessage quota is not a reason to withhold a useful update\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn/g,
+        /Do not narrate individual tool loops, searches, reads, clicks, or status churn/g,
       ) ?? [],
     ).toHaveLength(1)
     expect(prompt).not.toContain(
@@ -628,10 +686,7 @@ describe('assistant execution prompt contract', () => {
       'Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.',
     )
     expect(prompt).toContain(
-      'avoid stiff plan-recitation wording like "I\'m going to..."',
-    )
-    expect(prompt).toContain(
-      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, straightforward one-shot logging/capture/memory saves, and automatically transcribed voice memo or audio content',
+      'Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.',
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
@@ -872,7 +927,7 @@ describe('assistant local PDF evidence guidance', () => {
       'If the user asks for a wearable/source other than Apple Health or WHOOP that is not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
-      'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
+      'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
     )
     expect(prompt).toContain(
       'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
@@ -950,6 +1005,7 @@ describe('assistant local PDF evidence guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
+      hostedRuntime: true,
       onboardingGuidance: false,
     }))
 
@@ -1505,7 +1561,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '47fdddb1886c2f567d1f23ba944b3db3b1deec61f385ac7a161a5289c75ca0b7',
+      'd00d4b4e5832258ae3c4eb7f984484b359696e9d20a60d354a61a1fcefbac33d',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1721,7 +1777,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('Delight is care.')
     expect(prompt).toContain(
-      'use an image, voice memo, or song only when requested or known to be preferred',
+      'use an image, voice memo, or song only when requested, preferred, or required by a skill',
     )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
@@ -2219,13 +2275,20 @@ describe('assistant Murph onboarding guidance', () => {
       'During discovery, a stated health goal is context, not an action request.',
     )
     expect(prompt).toContain(
-      'Do not diagnose, recommend, prescribe, build a plan, or enter a domain workflow solely because the user answered what they want from their health.',
+      'Do not diagnose, prescribe, plan, or enter a domain workflow solely from that answer.',
     )
     expect(prompt).toContain(
-      'Unless an explicit immediate request or safety need requires problem-solving first, reflect, save, and park the thread before solving it.',
+      'Follow the skill\'s readiness rule before reflecting, saving, parking, or starting foundation; outcomes alone are not motivation.',
     )
     expect(prompt).toContain(
-      'The user may always pause, defer, skip a checkpoint, or decline further setup; honor that without pressure.',
+      'Only an immediate request or safety need moves problem-solving ahead of the park.',
+    )
+    expect(prompt).toContain(
+      'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
+    )
+    expect(prompt).toContain('Honor pause, defer, skip, and decline.')
+    expect(prompt).toContain(
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
       'Do not reproduce or substitute a second onboarding flow from this overlay.',
@@ -2383,7 +2446,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('/settings?voice=true')
     expect(prompt).toContain('murph.assistant_style')
     expect(prompt).not.toContain('vault-cli assistant style set')
-    expect(prompt).toContain('vault-cli device connect')
+    expect(prompt).toContain('murph.device')
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')
     expect(prompt).toContain('action="start_checkout"')
@@ -2419,25 +2482,56 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
     expect(prompt).toContain("change this room's Murph style")
+    expect(prompt).not.toContain(
+      'Use `murph.automation` with `action: save`',
+    )
+    expect(prompt).not.toContain('vault-cli automation')
+    expect(prompt).not.toContain('Create the newsletter cron through `murph.automation`')
     expect(prompt).not.toContain('existing automation in this bound runtime vault')
     expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')
-    expect(prompt).not.toContain('Scheduled automation commands are available for this group room')
+    expect(prompt).not.toContain('Scheduled automation changes for this group room')
   })
 
   it('keeps hosted route writes current while permitting vault-owned record mutations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain(
+      'Scheduled automation changes for this conversation are available through `murph.automation`.',
+    )
+    expect(prompt).toContain(
+      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'Patch `status` to pause, reactivate, or archive an existing automation.',
+    )
+    expect(prompt).toContain('Ordinary patches preserve its stored route.')
+    expect(prompt).toContain('A save always binds to the trusted current conversation.')
+    expect(prompt).toContain(
+      'A patch retargets only when `retargetToCurrentConversation: true` is explicit.',
+    )
+    expect(prompt).toContain('The tool accepts no arbitrary route locator')
+    expect(prompt).toContain('do not target another route')
+    expect(prompt).not.toContain('vault-cli automation')
+    expect(prompt).not.toContain('inspect saved local self-targets')
+  })
+
+  it('does not advertise hosted automation when the turn lacks its typed tool', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',
       hostedRuntime: true,
     }))
 
-    expect(prompt).toContain('existing automation in this bound runtime vault')
-    expect(prompt).toContain('`vault-cli automation edit` for non-route changes')
-    expect(prompt).toContain('`vault-cli automation set-status`')
-    expect(prompt).toContain('stored route remains unchanged')
-    expect(prompt).toContain('bind to the trusted current conversation')
-    expect(prompt).toContain('do not target another route')
-    expect(prompt).not.toContain('inspect saved local self-targets')
+    expect(prompt).toContain('Scheduled automation changes are unavailable in this turn.')
+    expect(prompt).not.toContain(
+      'Scheduled automation changes for this conversation are available through `murph.automation`.',
+    )
+    expect(prompt).not.toContain('Use `murph.automation` with `action: save`')
+    expect(prompt).not.toContain('vault-cli automation')
   })
 
   it('fails closed without claiming that an unknown external audience is private or a group', () => {

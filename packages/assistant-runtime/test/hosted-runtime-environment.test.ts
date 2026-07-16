@@ -471,7 +471,7 @@ test("hosted runtime process env omits ambient proxy env unless platform transpo
   );
 });
 
-test("hosted runtime process env strips spoofed hosted CLI bridge and local daemon env", () => {
+test("hosted runtime process env strips local device daemon env", () => {
   const childEnv = projectHostedRuntimeProcessEnv({
     ambientEnv: {
       PATH: "/usr/bin:/bin",
@@ -481,8 +481,6 @@ test("hosted runtime process env strips spoofed hosted CLI bridge and local daem
       DEVICE_SYNC_CONTROL_TOKEN: "device-control-token",
       DEVICE_SYNC_SECRET: "device-secret",
       DEVICE_SYNC_STATE_DB_PATH: "/tmp/device-sync.sqlite",
-      MURPH_HOSTED_CLI_BRIDGE_TOKEN: "spoofed-bridge-token",
-      MURPH_HOSTED_CLI_BRIDGE_URL: "http://127.0.0.1:4444/",
       MURPH_HOSTED_RUNTIME_PROCESS: "1",
       NODE_ENV: "production",
       OPENAI_API_KEY: "worker-openai-secret",
