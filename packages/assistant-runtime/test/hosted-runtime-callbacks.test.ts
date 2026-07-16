@@ -288,7 +288,7 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
 }
 
 function buildClaimedLinqEngagementResult(request: {
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
 }) {
   return request.authorityCheckOnly === true
     ? {}
@@ -296,7 +296,7 @@ function buildClaimedLinqEngagementResult(request: {
 }
 
 async function assertLinqEngagementWithExistingProviderClaim(request: {
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
 }) {
   if (request.authorityCheckOnly === true) {
     return {};
@@ -8140,6 +8140,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
+        authorityCheckOnly: false,
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -9418,7 +9419,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(async (
-      request: { authorityCheckOnly?: boolean | null },
+      request: { authorityCheckOnly: boolean },
     ) => buildClaimedLinqEngagementResult(request));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",

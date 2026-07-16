@@ -30,7 +30,7 @@ const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
 type HostedPendingInputRefreshMode = "compact" | "none";
 
-export type HostedAssistantInputSelection =
+type HostedAssistantInputSelection =
   | {
       freshInputIds: string[];
       inputIds: string[];

@@ -45,7 +45,6 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
       summaryBackfillDays: "number",
       summaryResources: "string[]",
       timeseriesBackfillDays: "number",
-      timeseriesResources: "string[]",
       webhookTimestampToleranceMs: "number",
     },
     disallowedSerializableFields: {
@@ -54,6 +53,8 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
         "is a provider-owned API secret and is not supported in serialized runtime config.",
       clientUserIdSecret:
         "is a provider-owned HMAC secret and is not supported in serialized runtime config.",
+      timeseriesResources:
+        "is code-owned and is not supported in serialized runtime config.",
       webhookSecret:
         "is a provider-owned webhook secret and is not supported in serialized runtime config.",
     },

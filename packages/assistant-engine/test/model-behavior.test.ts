@@ -1622,25 +1622,10 @@ Execution context:
 })
 
 describe('assistant experiment onboarding guidance', () => {
-  it('omits the preloaded protocol index and keeps task-time discovery commands', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantSupportedExperimentProtocols: [
-        {
-          category: 'Recovery',
-          routeId: 'finnish-sauna',
-          title: 'Finnish Dry Sauna',
-        },
-        {
-          category: 'Exercise',
-          routeId: 'norwegian-4x4',
-          title: 'Norwegian 4x4',
-        },
-      ],
-    }))
+  it('keeps protocol discovery task-time instead of rendering a resident index', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).not.toContain('finnish-sauna | Finnish Dry Sauna')
-    expect(prompt).not.toContain('norwegian-4x4 | Norwegian 4x4')
     expect(prompt).toContain('Health Commons route surface:')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',

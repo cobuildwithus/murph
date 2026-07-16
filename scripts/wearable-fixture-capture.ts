@@ -287,7 +287,6 @@ export function buildCaptureDeviceSyncEnv(input: {
       ),
       JUNCTION_PROVIDER_FILTER: wearableCaptureJunctionProviderFilter.join(","),
       JUNCTION_SUMMARY_RESOURCES: wearableCaptureSummaryResources.join(","),
-      JUNCTION_TIMESERIES_RESOURCES: wearableCaptureTimeseriesResources.join(","),
     },
     captureConfig: {
       allowedReturnOrigins,

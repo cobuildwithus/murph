@@ -931,7 +931,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
-  membershipId: string | null;
+  membershipId: string;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -1121,10 +1121,7 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "unavailable"; unavailableReason: string };
     };
 
-export type HostedRuntimeNewsletterToolAction =
-  | "prepare"
-  | "read_stats"
-  | "send";
+export type HostedRuntimeNewsletterToolAction = "prepare" | "send";
 
 export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
@@ -1171,17 +1168,12 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 export interface HostedRuntimeNewsletterToolPrepareRequest {
   action: "prepare";
   groupId: string;
-  /** Required for successful preparation; older runners fail closed when they omit it. */
-  includeAuthorizationSnapshot?: true;
-  /** Required for successful preparation; keeps the proof private from model-facing output. */
-  includeAuthorizationProof?: true;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }
 
 export type HostedRuntimeNewsletterToolRequest =
   | HostedRuntimeNewsletterToolPrepareRequest
-  | { action: "read_stats"; groupId: string }
   | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
 
 export type HostedRuntimeNewsletterToolResponse =
@@ -1199,13 +1191,6 @@ export type HostedRuntimeNewsletterToolResponse =
             status: "unavailable";
             unavailableReason: string;
           };
-    }
-  | {
-      action: "read_stats";
-      result: {
-        status: "unavailable";
-        unavailableReason: string;
-      };
     }
   | {
       action: "send";

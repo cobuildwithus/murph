@@ -554,7 +554,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction stale dense timeseries config falls back to compact daily defaults", async () => {
+test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -6161,32 +6161,37 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
 });
 
-test("Junction compact timeseries resource jobs fetch the precise hinted window with ISO params", async () => {
+test("Junction code-owned compact defaults admit direct timeseries resource jobs", async () => {
   const requests: string[] = [];
-  const provider = createJunctionProvider(async (input) => {
-    const url = readUrl(input);
-    requests.push(url);
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
 
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
-    }
-    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
-      return createJsonResponse({
-        groups: {
-          garmin: [{
-            data: [{
-              start: "2026-04-02T14:30:00.000Z",
-              value: 97,
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                start: "2026-04-02T14:30:00.000Z",
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
             }],
-            source: { provider: "garmin", type: "watch" },
-          }],
-        },
-      });
-    }
+          },
+        });
+      }
 
-    throw new Error(`Unexpected request: ${url}`);
-  }, {
-    timeseriesResources: ["blood_oxygen"],
+      throw new Error(`Unexpected request: ${url}`);
+    },
   });
   const importedSnapshots: unknown[] = [];
 

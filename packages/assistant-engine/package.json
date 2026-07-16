@@ -115,7 +115,6 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
-    "@murphai/health-commons": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",

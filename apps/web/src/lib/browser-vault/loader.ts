@@ -141,9 +141,6 @@ export async function loadBrowserVaultReplica({
   }
 
   if (session.state === "not_modified") {
-    if (session.memberId === null) {
-      return { state: "identity_changed" };
-    }
     assertBrowserVaultReplicaRefsMatch({
       actual: session.replicaRef,
       expected: knownReplicaRef,
@@ -252,7 +249,7 @@ export type BrowserVaultSessionResponse =
       encryptedReplica: null;
       deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
-      memberId: string | null;
+      memberId: string;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: null;
@@ -264,7 +261,7 @@ export type BrowserVaultSessionResponse =
       encryptedReplica: null;
       deviceSyncImportPending: boolean;
       freshness: BrowserVaultFreshness;
-      memberId: string | null;
+      memberId: string;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: HostedBrowserVaultReplicaRef;
@@ -300,7 +297,7 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
         "deviceSyncImportPending",
       ),
       freshness: parseBrowserVaultFreshness(record.freshness, "stale"),
-      memberId: readLegacyCompatibleMemberId(
+      memberId: requireNonEmptyString(
         record.memberId,
         "Browser vault session response.memberId",
       ),
@@ -324,7 +321,7 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
         "deviceSyncImportPending",
       ),
       freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
-      memberId: readLegacyCompatibleMemberId(
+      memberId: requireNonEmptyString(
         record.memberId,
         "Browser vault session response.memberId",
       ),
@@ -535,15 +532,6 @@ function requireNonEmptyString(value: unknown, label: string): string {
   }
 
   return value;
-}
-
-function readLegacyCompatibleMemberId(
-  value: unknown,
-  label: string,
-): string | null {
-  // The pre-member-proof endpoint omitted this additive field. Missing proof
-  // can represent empty data, but it must never authorize cached private data.
-  return value === undefined ? null : requireNonEmptyString(value, label);
 }
 
 function createEmptyLoadResult(): Extract<BrowserVaultSessionLoadResult, { state: "empty" }> {
