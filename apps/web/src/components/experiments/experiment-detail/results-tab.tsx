@@ -68,10 +68,27 @@ export function ResultsTab({
 
   return (
     <div className="flex flex-col gap-10">
+      <header className="flex max-w-3xl flex-col gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Private experiment
+        </span>
+        <h2 className="font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+          Your results
+        </h2>
+        <p className="text-sm/6 text-muted-foreground sm:text-base/7">
+          Your progress, measurements, and conclusions for this protocol stay private in your vault.
+        </p>
+      </header>
+
       {!hasPrivateRun && privateRunStatus === "loading" && (
-        <div className="flex flex-col gap-4">
+        <div
+          aria-busy="true"
+          aria-live="polite"
+          className="flex flex-col gap-4"
+          role="status"
+        >
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Loading your private run
+            Loading your results
           </p>
           <ResultsSummarySkeleton />
         </div>
@@ -79,7 +96,8 @@ export function ResultsTab({
 
       {!hasPrivateRun && privateRunStatus === "error" && (
         <ResultsEmptyState
-          title="Your private results couldn't load"
+          alert
+          title="Your results couldn't load"
           body={privateRunError ?? "We couldn't unlock your private results right now. The protocol details are still available."}
           action={onPrivateRunRetry
             ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
@@ -89,8 +107,8 @@ export function ResultsTab({
 
       {!hasPrivateRun && (privateRunStatus === "ready" || privateRunStatus === "empty") && (
         <ResultsEmptyState
-          title="Run this on yourself"
-          body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private on this device."
+          title="No results for this protocol yet"
+          body="Start this experiment to create a private baseline and outcome summary in your vault."
           action={
             startAction ?? (
               <StartExperimentButton
@@ -106,33 +124,38 @@ export function ResultsTab({
 
       {hasPrivateRun && privateRunError && (
         <ResultsEmptyState
-          title="Your results loaded, but couldn't refresh"
-          body={privateRunError}
+          alert
+          title="Showing saved results"
+          body={`Refresh failed. ${privateRunError}`}
           action={onPrivateRunRetry
             ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
             : null}
         />
       )}
 
-      {hasPrivateRun && !hasPersonalOutcomeData && (
+      {hasPrivateRun && !hasPersonalOutcomeData && !isStopped && (
         <ResultsEmptyState
           title={isFinished
-            ? "No before-and-after comparison yet"
+            ? "Run complete, but there isn't enough data for a clear comparison"
             : isPaused
               ? "Your experiment is paused"
-              : isStopped
-                ? "Your experiment was stopped"
-                : "You're running this experiment"}
+              : "You're running this experiment"}
           body={isFinished
-            ? "Your run is saved privately on this device, but there isn't enough before-and-after biomarker data to compare yet."
+            ? "Your run is saved privately in your vault. The primary signal did not cover enough of the baseline and experiment windows for a dependable before-and-after read."
             : isPaused
-              ? "Your run is saved privately on this device. Resume it to keep following the protocol and see outcomes here later."
-              : isStopped
-                ? "This experiment was stopped before there was enough data to compare before and after."
-                : "Outcome cards will appear here once there's enough measured data to compare."}
+              ? "Your run is saved privately in your vault. Resume it to keep following the protocol and see outcomes here later."
+              : "Outcome cards will appear here once there's enough measured data to compare."}
         />
       )}
 
+      {hasPrivateRun && isStopped && (
+        <ResultsEmptyState
+          title="Your experiment was stopped"
+          body={hasPersonalOutcomeData
+            ? "This run ended before the full protocol window. Measurements below are partial context, not a completed before-and-after result."
+            : "This run stopped before there was enough data to compare."}
+        />
+      )}
 
       {isFinished && experiment.summary && (
         <div className="rounded-xl border border-border bg-card p-6">
@@ -178,7 +201,7 @@ export function ResultsTab({
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Early days — keep logging sessions and trend signals will start showing here.
+                Early days. Keep logging sessions and trend signals will start showing here.
               </p>
             )}
             <p className="text-[11px] text-muted-foreground/80">
@@ -239,7 +262,7 @@ function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) 
 
       {extraCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {extraCount} earlier {extraCount === 1 ? "note" : "notes"} saved privately on this device.
+          {extraCount} earlier {extraCount === 1 ? "note" : "notes"} saved privately in your vault.
         </p>
       )}
     </section>
@@ -300,15 +323,20 @@ function formatProtocolDays(durationDays: number, baselineDays: number): number 
 
 function ResultsEmptyState({
   action,
+  alert = false,
   title,
   body,
 }: {
   action?: ReactNode;
+  alert?: boolean;
   title: string;
   body: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-6">
+    <div
+      className="rounded-xl border border-border bg-card p-6"
+      role={alert ? "alert" : undefined}
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="font-serif text-xl font-semibold text-foreground">

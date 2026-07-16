@@ -1,6 +1,6 @@
 # Protocol Outcome Network
 
-Last verified: 2026-05-13
+Last verified: 2026-07-16
 
 ## Current State
 
@@ -27,6 +27,7 @@ The assistant is the interface into this loop, not the full category by itself.
 ## Implemented Now
 
 - Private browser-vault outcome analysis can summarize one user's run, biomarker deltas, confidence, and confounders.
+- Experiment detail keeps a stable **Your results** route for the matching active run or newest completed run, including honest low-confidence and insufficient-data states.
 - CLI and web surfaces keep those results private by default.
 - Consent scopes reserve space for future Health Commons contribution, but there is not yet a shipped share/contribute/cohort pipeline.
 

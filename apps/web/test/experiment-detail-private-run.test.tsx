@@ -137,6 +137,45 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun).toBeNull();
   });
 
+  it("uses the newest completed matching run when no live run exists", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-30T08:00:00.000Z",
+        trackedExperiments: [
+          {
+            id: "exp_sauna_completed_old",
+            slug: "finnish-sauna",
+            startedOn: "2026-03-01",
+            status: "completed",
+            summary: "Older completed run.",
+            tags: ["sauna"],
+            title: "Older sauna run",
+          },
+          {
+            id: "exp_sauna_completed_new",
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "finished",
+            summary: "Newest completed run.",
+            tags: ["sauna"],
+            title: "Newest sauna run",
+          },
+        ],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      id: "exp_sauna_completed_new",
+      status: "finished",
+      title: "Newest sauna run",
+    }));
+  });
+
   it("uses the run time zone for active timeline reference dates near UTC boundaries", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -389,7 +428,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(loadingMarkup).toContain("Loading your private run");
+    expect(loadingMarkup).toContain("Loading your results");
     expect(loadingMarkup).not.toContain("No personal results yet");
 
     const emptyMarkup = renderToStaticMarkup(
@@ -400,7 +439,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(emptyMarkup).toContain("Run this on yourself");
+    expect(emptyMarkup).toContain("No results for this protocol yet");
 
     const finishedRun = resolveBrowserVaultExperimentRun({
       client: await createClient({
@@ -426,7 +465,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(finishedMarkup).toContain("No before-and-after comparison yet");
+    expect(finishedMarkup).toContain("Run complete, but there isn&#x27;t enough data for a clear comparison");
     expect(finishedMarkup).toContain("Private run recorded");
     expect(finishedMarkup).toContain("The run is finished, but a full before-and-after window");
 
@@ -458,7 +497,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(staleMarkup).toContain("but couldn&#x27;t refresh");
+    expect(staleMarkup).toContain("Showing saved results");
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
@@ -494,7 +533,7 @@ describe("experiment detail private-run composition", () => {
     expect(doneRun).toEqual(expect.objectContaining({
       status: "finished",
     }));
-    expect(doneMarkup).toContain("No before-and-after comparison yet");
+    expect(doneMarkup).toContain("Run complete, but there isn&#x27;t enough data for a clear comparison");
     expect(doneMarkup).toContain("Private run recorded");
     expect(doneMarkup).toContain("The run is finished, but a full before-and-after window");
   });
@@ -1531,6 +1570,79 @@ describe("experiment detail private-run composition", () => {
     expect(pausedMarkup).toContain("Paused on day 4");
     expect(pausedMarkup).toContain("Resume the protocol");
     expect(pausedMarkup).not.toContain("Continue the protocol");
+  });
+
+  it("renders stopped runs as saved but incomplete results", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 63],
+          ["2026-04-02", 62],
+          ["2026-04-03", 61],
+          ["2026-04-08", 60],
+          ["2026-04-09", 59],
+        ]),
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_stopped",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-14",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "stopped",
+            title: "Sauna protocol",
+          }),
+          id: "exp_sauna_stopped",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "stopped",
+          summary: "Stopped after the first sauna session.",
+          tags: ["sauna"],
+          title: "Sauna protocol",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      status: "stopped",
+      statusLabel: "Stopped",
+    }));
+    expect(stoppedRun?.signals).toEqual([
+      expect.objectContaining({
+        label: "Resting Heart Rate",
+        value: "59.5",
+      }),
+    ]);
+    expect(stoppedRun?.trends).toHaveLength(1);
+
+    const stoppedMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: stoppedRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(stoppedMarkup).toContain("Your experiment was stopped");
+    expect(stoppedMarkup).toContain(
+      "Measurements below are partial context, not a completed before-and-after result",
+    );
+    expect(stoppedMarkup).toContain("Resting Heart Rate");
+    expect(stoppedMarkup).not.toContain("Continue the protocol");
   });
 });
 

@@ -911,7 +911,7 @@ function buildRunNextStep(input: {
           ?? input.protocol.protocol[0]?.detail
           ?? "Resume the protocol when you're ready and keep the rest of the week ordinary.",
       context: inBaseline
-        ? "Your run is saved privately on this device; the protocol window hasn't started yet."
+        ? "Your run is saved privately in your vault; the protocol window hasn't started yet."
         : "Your run is saved, but the protocol is paused until you resume it.",
     };
   }
@@ -996,7 +996,7 @@ function buildPrivateRunTimeline(input: {
       date: formatShortDate(input.referenceDate),
       label: input.day ? `Day ${input.day}` : "Now",
       title: formatProgressPhase(input.phase),
-      description: "Results update automatically as new private data arrives on this device.",
+      description: "Results update automatically as new private data arrives in your vault.",
       variant: "default",
     });
 
