@@ -1090,6 +1090,7 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           kind: 'image',
@@ -1103,6 +1104,7 @@ describe('assistant codex runtime', () => {
       sessionId: threadId,
       stderr: 'Retrying after timeout',
       threadId,
+      transcriptMessage: 'Hello world',
       turnId: 'turn-1',
     })
 
@@ -1251,6 +1253,7 @@ describe('assistant codex runtime', () => {
   it('keeps Telegram voice memo media attached to an empty final response', async () => {
     await expect(runCodexTelegramVoiceMemoOnlyTurn()).resolves.toMatchObject({
       finalMessage: '',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
@@ -1267,6 +1270,7 @@ describe('assistant codex runtime', () => {
           },
         },
       ],
+      transcriptMessage: '',
     })
   })
 
@@ -2007,6 +2011,7 @@ describe('assistant codex runtime', () => {
       finalAction: null,
       finalMessage:
         'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      responseDeliveryContextOrdinal: 0,
       transcriptMessage:
         'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
     })
@@ -2189,6 +2194,7 @@ describe('assistant codex runtime', () => {
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
       finalMessage: scenario.expectedFinalMessage,
+      responseDeliveryContextOrdinal: 0,
       transcriptMessage: scenario.expectedTranscriptMessage,
     })
     for (const exactApprovalUrl of exactApprovalUrls) {
@@ -15936,6 +15942,8 @@ describe('steered final segments', () => {
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.transcriptMessage).toBeNull()
   })
 
   it('keeps a pre-steer final when only commentary follows the steer', async () => {
@@ -16020,6 +16028,7 @@ describe('steered final segments', () => {
 
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer two.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([
       {
         deliveryContextOrdinal: 0,
@@ -16064,6 +16073,7 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer three.')
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
     expect(result.precedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,

@@ -4362,10 +4362,14 @@ function createProviderResult(input?: {
     ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
+    responseDeliveryContextOrdinal: 0,
     route: input?.route ?? createRoute(),
     session,
     stderr: "",
     stdout: "",
+    transcriptResponse: input?.finalAction?.kind === "none"
+      ? null
+      : input?.response ?? "provider response",
     usage:
       input?.usage === undefined
         ? defaultUsage

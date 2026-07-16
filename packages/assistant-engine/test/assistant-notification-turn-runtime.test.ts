@@ -3894,11 +3894,13 @@ function createProviderResult(input?: {
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',
+    responseDeliveryContextOrdinal: 0,
     responseMedia: input?.responseMedia ?? [],
     route: input?.route ?? createRoute(),
     session,
     stderr: '',
     stdout: '',
+    transcriptResponse: input?.response ?? 'provider response',
     usage:
       input?.usage === undefined
         ? defaultUsage
