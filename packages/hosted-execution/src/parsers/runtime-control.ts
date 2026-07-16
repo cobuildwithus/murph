@@ -4954,7 +4954,7 @@ function readNullableNonNegativeBigIntString(value: unknown, label: string): str
   return requireNonNegativeBigIntString(value, label);
 }
 
-function parseHostedRuntimeRedactedJson(
+export function parseHostedRuntimeRedactedJson(
   value: unknown,
   label: string,
   reservedKeys?: ReadonlySet<string>,
