@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  claimSubscriptionAction: vi.fn(),
   continuePulse: vi.fn(),
   getPrisma: vi.fn(),
-  readInputAuthority: vi.fn(),
   startPulse: vi.fn(),
   upgradePlan: vi.fn(),
 }));
@@ -15,8 +15,8 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
-    mocks.readInputAuthority,
+  claimHostedMailboxConversationSubscriptionAction:
+    mocks.claimSubscriptionAction,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
@@ -50,11 +50,11 @@ describe("hosted subscription tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ label: "prisma" });
-    mocks.readInputAuthority.mockResolvedValue({ causalSeq: "42" });
+    mocks.claimSubscriptionAction.mockResolvedValue("claimed");
   });
 
   it("rejects an action without live member-bound conversation authority before billing", async () => {
-    mocks.readInputAuthority.mockResolvedValue(null);
+    mocks.claimSubscriptionAction.mockResolvedValue(null);
 
     await expect(handleHostedSubscriptionTool({
       memberId: "member_123",
@@ -67,7 +67,8 @@ describe("hosted subscription tool", () => {
       httpStatus: 403,
     });
 
-    expect(mocks.readInputAuthority).toHaveBeenCalledWith({
+    expect(mocks.claimSubscriptionAction).toHaveBeenCalledWith({
+      action: "start_pulse_now",
       assistantInputId: ASSISTANT_INPUT_ID,
       memberId: "member_123",
       prisma: { label: "prisma" },
@@ -75,6 +76,53 @@ describe("hosted subscription tool", () => {
     expect(mocks.continuePulse).not.toHaveBeenCalled();
     expect(mocks.startPulse).not.toHaveBeenCalled();
     expect(mocks.upgradePlan).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different action already claimed by the same input before billing", async () => {
+    mocks.claimSubscriptionAction.mockResolvedValue("conflict");
+
+    await expect(handleHostedSubscriptionTool({
+      memberId: "member_123",
+      request: {
+        action: "upgrade_edge",
+        assistantInputId: ASSISTANT_INPUT_ID,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_SUBSCRIPTION_INPUT_ACTION_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(mocks.claimSubscriptionAction).toHaveBeenCalledWith({
+      action: "upgrade_edge",
+      assistantInputId: ASSISTANT_INPUT_ID,
+      memberId: "member_123",
+      prisma: { label: "prisma" },
+    });
+    expect(mocks.continuePulse).not.toHaveBeenCalled();
+    expect(mocks.startPulse).not.toHaveBeenCalled();
+    expect(mocks.upgradePlan).not.toHaveBeenCalled();
+  });
+
+  it("allows an idempotent replay of the action claimed by the same input", async () => {
+    mocks.claimSubscriptionAction.mockResolvedValue("replayed");
+    mocks.startPulse.mockResolvedValue({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    await expect(handleHostedSubscriptionTool({
+      memberId: "member_123",
+      request: {
+        action: "start_pulse_now",
+        assistantInputId: ASSISTANT_INPUT_ID,
+      },
+    })).resolves.toEqual({
+      action: "start_pulse_now",
+      plan: PULSE_PLAN,
+      status: "completed",
+    });
+
+    expect(mocks.startPulse).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a card-backed Pulse trial unchanged and returns no payment handoff", async () => {
@@ -99,7 +147,7 @@ describe("hosted subscription tool", () => {
       memberId: "member_123",
       prisma: { label: "prisma" },
     });
-    expect(mocks.readInputAuthority.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.claimSubscriptionAction.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.continuePulse.mock.invocationCallOrder[0]!,
     );
   });
@@ -172,10 +220,10 @@ describe("hosted subscription tool", () => {
     });
   });
 
-  it("returns the Edge invoice or Portal URL while payment is pending", async () => {
+  it("returns the Edge Billing Portal URL while payment is pending", async () => {
     mocks.upgradePlan.mockResolvedValue({
       billingPlanCode: "launch_monthly",
-      paymentUrl: "https://invoice.stripe.com/i/acct_123/test_123",
+      paymentUrl: "https://billing.stripe.com/p/session_123",
       status: "pending_payment",
     });
 
@@ -187,7 +235,7 @@ describe("hosted subscription tool", () => {
       },
     })).resolves.toEqual({
       action: "upgrade_edge",
-      paymentUrl: "https://invoice.stripe.com/i/acct_123/test_123",
+      paymentUrl: "https://billing.stripe.com/p/session_123",
       plan: EDGE_PLAN,
       status: "payment_required",
     });

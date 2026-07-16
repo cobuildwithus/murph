@@ -179,7 +179,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   configured lookup-key candidates from the callback id and uses the matching
   database projection to bind
   personalization writes to a live member-owned conversation row; it does not
-  change the mailbox wire, `sourceRef`, or event id.
+  change the mailbox wire, `sourceRef`, or event id. The same row may hold one
+  nullable subscription-action claim as operational metadata. Web claims the
+  first action atomically, permits an exact retry, and rejects a conflicting
+  action; the claim leaves with the row under existing mailbox retention.
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events
@@ -511,8 +514,8 @@ Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. The allowance is an advisory product and billing signal, not a runtime gate for an otherwise active member.
-- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast, performs no Stripe read, and returns only bounded percentages, period facts, an optional conservative forecast, and a server-selected action.
-- Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, re-derives current eligibility, and delegates to the existing billing services. It returns a Stripe-hosted invoice or Customer Portal URL only when payment is required; no custom checkout or new billing state is introduced.
+- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` remains a thresholded suggestion. An opted-in `subscriptionActionQuote` instead returns current terms for an explicit request, even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Model-work admission reads the hosted member-access owner; runtime usage is recorded through the hosted platform after it exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.

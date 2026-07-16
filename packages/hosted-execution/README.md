@@ -26,8 +26,11 @@ contracts live in `@murphai/hosted-execution/orchestration-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
-Use `@murphai/hosted-execution/plan-usage` for the strict empty request and
-member plan-usage status codec.
+Use `@murphai/hosted-execution/plan-usage` for the strict request and member
+plan-usage status codec. The empty request preserves the original response
+shape; a caller may opt into the optional nullable `subscriptionActionQuote`
+for current explicit-request terms. The thresholded `recommendedAction` stays
+separate, and neither field is consent.
 Use `@murphai/hosted-execution/subscription` for the input-bound conversational
 subscription-action request and response codecs. The response carries current
 server-owned plan terms and exposes a payment URL only when payment is required.

@@ -47,12 +47,19 @@ The runner container sends runtime internal Worker requests to normal virtual ho
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
-usage truth and has no billing mutation authority.
+usage truth and has no billing mutation authority. The current runner opts into
+`subscriptionActionQuote`, which is current terms for an explicit member
+request rather than a recommendation or consent. The usage-thresholded
+`recommendedAction` remains separate.
 `murph.subscription` uses the same write-fenced, allowlisted callback boundary
 for one input-bound subscription action. Cloudflare validates and transports the
-strict result but owns no plan facts, payment URL, or billing mutation logic.
-Deploy the Web route before the Cloudflare runner that advertises this optional
-port. Older runners simply omit the tool, so that Web-first order is compatible.
+strict result but owns no plan facts, action claim, payment URL, or billing
+mutation logic. Web durably claims the first action on the accepted input's
+existing mailbox row.
+Apply the additive Web migration and deploy Web before the Cloudflare runner
+that requests the quote and advertises the optional subscription port. Older
+runners keep sending the empty request; new Web omits the optional quote field
+and preserves their strict response shape. Roll back Cloudflare before Web.
 The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the

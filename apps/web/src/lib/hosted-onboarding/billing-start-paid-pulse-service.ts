@@ -166,6 +166,10 @@ async function transitionHostedPulseTrialPaidPlan(
   const canStart =
     parseHostedBillingPhase(billingRef?.currentBillingPhase) === "trial";
 
+  if (input.timing === "at_trial_end" && !canStart) {
+    throw buildHostedPulseTrialStartPaidUnsupportedError();
+  }
+
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
   const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
 

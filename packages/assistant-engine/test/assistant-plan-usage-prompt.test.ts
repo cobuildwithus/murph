@@ -4,6 +4,7 @@ import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SUBSCRIPTION_TOOL,
 } from "../src/assistant-codex/dynamic-tools.js";
 
 describe("assistant plan usage guidance", () => {
@@ -17,10 +18,18 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain("never expose, infer, or format internal currency amounts as usage progress");
     expect(guidance).toContain("invent no estimate, precision, scarcity, or urgency");
     expect(guidance).toContain("Never plead, imply Murph will die, use existential guilt");
+    expect(guidance).toContain("any thresholded recommendation");
+    expect(guidance).toContain("an optional explicit-request subscription quote");
     expect(guidance).toContain("only when recommendedAction is non-null");
     expect(guidance).toContain("and relevant to the member's request");
     expect(guidance).toContain(
-      "state the exact current label and terms returned by recommendedAction",
+      "subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent",
+    );
+    expect(guidance).toContain(
+      "require a subscriptionActionQuote whose action exactly matches",
+    );
+    expect(guidance).toContain(
+      "If that quote is absent or null, do not invoke the action",
     );
     expect(guidance).toContain(
       "one short reply-oriented question and include no URL",
@@ -54,6 +63,27 @@ describe("assistant plan usage guidance", () => {
       "Do not provide that private account-management link for group_not_supported or hosted_access_inactive",
     );
     expect(guidance).toContain("not a group balance or top-up surface");
+  });
+
+  it("requires current matching terms and exact consent before a subscription action", () => {
+    const guidance = MURPH_SUBSCRIPTION_TOOL.description;
+
+    expect(guidance).toContain(
+      "require a current murph.plan_usage subscriptionActionQuote whose action exactly matches",
+    );
+    expect(guidance).toContain("A quote is not a recommendation or consent");
+    expect(guidance).toContain(
+      "receive an explicit current-turn confirmation of that exact action",
+    );
+    expect(guidance).toContain("should we part ways?");
+    expect(guidance).toContain(
+      "a less capable model that uses less of your included usage",
+    );
+    expect(guidance).toContain("Do not assume the member knows Luna, Terra, or Sol");
+    expect(guidance).toContain("For no_action_required, stay silent");
+    expect(guidance).toContain(
+      "when directly acknowledging continue_pulse, keep it brief and include no explanation or link",
+    );
   });
 
   it("routes unsupported Family mutations through the private management handoff", () => {

@@ -16,7 +16,12 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  parseHostedPlanUsageToolRequest(payload);
+  const toolRequest = parseHostedPlanUsageToolRequest(payload);
 
-  return jsonOk(await readHostedPersonalAiUsageStatus({ memberId }));
+  return jsonOk(await readHostedPersonalAiUsageStatus({
+    ...(toolRequest.includeSubscriptionActionQuote
+      ? { includeSubscriptionActionQuote: true }
+      : {}),
+    memberId,
+  }));
 });

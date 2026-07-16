@@ -177,8 +177,9 @@ describe("assistant subscription tool", () => {
     expect(guidance).toContain("current user made in the current turn");
     expect(guidance).toContain("explicitly and unambiguously chose");
     expect(guidance).toContain(
-      "state the current server-authorized action label and terms returned by murph.plan_usage",
+      "require a current murph.plan_usage subscriptionActionQuote whose action exactly matches",
     );
+    expect(guidance).toContain("A quote is not a recommendation or consent");
     expect(guidance).toContain("Never use post-action response facts as the first disclosure");
     expect(guidance).toContain("bare “yes” is not consent");
     expect(guidance).toContain(

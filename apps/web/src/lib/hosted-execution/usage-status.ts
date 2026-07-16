@@ -3,6 +3,7 @@ import type {
   HostedPlanUsageAvailableStatus,
   HostedPlanUsageRecommendedAction,
   HostedPlanUsageStatus,
+  HostedPlanUsageSubscriptionActionQuote,
 } from "@murphai/hosted-execution/plan-usage";
 
 import { getPrisma } from "../prisma";
@@ -27,6 +28,7 @@ const USAGE_ACTION_THRESHOLD_PERCENT = 80;
 type HostedPlanUsageClient = PrismaClient | Prisma.TransactionClient;
 
 export async function readHostedPersonalAiUsageStatus(input: {
+  includeSubscriptionActionQuote?: boolean;
   memberId: string;
   now?: Date | string;
   prisma?: HostedPlanUsageClient;
@@ -42,6 +44,8 @@ export async function readHostedPersonalAiUsageStatus(input: {
 
   return projectHostedPersonalAiUsageStatus({
     decision,
+    includeSubscriptionActionQuote:
+      input.includeSubscriptionActionQuote === true,
     memberId: input.memberId,
     now,
     prisma,
@@ -51,6 +55,7 @@ export async function readHostedPersonalAiUsageStatus(input: {
 
 export async function projectHostedPersonalAiUsageStatus(input: {
   decision: HostedAiUsageGateDecisionWithSource;
+  includeSubscriptionActionQuote?: boolean;
   memberId: string;
   now?: Date | string;
   prisma?: HostedPlanUsageClient;
@@ -60,6 +65,8 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   const prisma = input.prisma ?? getPrisma();
   const generatedAt = now.toISOString();
   const decision = input.decision;
+  const includeSubscriptionActionQuote =
+    input.includeSubscriptionActionQuote === true;
   const actionUrl = buildUsageActionUrl(
     input.publicBaseUrl === undefined
       ? resolveHostedPublicBaseUrl()
@@ -71,6 +78,10 @@ export async function projectHostedPersonalAiUsageStatus(input: {
       generatedAt,
       reason: "group_not_supported",
       recommendedAction: null,
+      ...projectSubscriptionActionQuoteExpansion({
+        include: includeSubscriptionActionQuote,
+        quote: null,
+      }),
       status: "unavailable",
     };
   }
@@ -78,20 +89,28 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   if (!decision.allowed) {
     const trialConversionPending =
       decision.reason === "trial_expired_pending_billing";
+    const shouldResolveAvailableAction = trialConversionPending
+      && (includeSubscriptionActionQuote || actionUrl !== null);
+    const availableAction = shouldResolveAvailableAction
+      ? await resolveAvailableSubscriptionAction({
+          accessKind: "trial",
+          memberId: input.memberId,
+          planCode: decision.billingPlanCode,
+          prisma,
+        })
+      : null;
     return {
       generatedAt,
       reason: trialConversionPending
         ? "trial_conversion_pending"
         : "hosted_access_inactive",
       recommendedAction: trialConversionPending
-        ? await resolveRecommendedAction({
-            accessKind: "trial",
-            actionUrl,
-            memberId: input.memberId,
-            planCode: decision.billingPlanCode,
-            prisma,
-          })
+        ? buildRecommendedAction({ action: availableAction, actionUrl })
         : null,
+      ...projectSubscriptionActionQuoteExpansion({
+        include: includeSubscriptionActionQuote,
+        quote: availableAction,
+      }),
       status: "unavailable",
     };
   }
@@ -101,6 +120,10 @@ export async function projectHostedPersonalAiUsageStatus(input: {
       generatedAt,
       reason: "hosted_access_inactive",
       recommendedAction: null,
+      ...projectSubscriptionActionQuoteExpansion({
+        include: includeSubscriptionActionQuote,
+        quote: null,
+      }),
       status: "unavailable",
     };
   }
@@ -137,6 +160,16 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   const shouldRecommendAction = exhausted
     || forecast !== null
     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
+  const shouldResolveAvailableAction = includeSubscriptionActionQuote
+    || (shouldRecommendAction && actionUrl !== null);
+  const availableAction = shouldResolveAvailableAction
+    ? await resolveAvailableSubscriptionAction({
+        accessKind,
+        memberId: input.memberId,
+        planCode: decision.billingPlanCode,
+        prisma,
+      })
+    : null;
 
   return {
     accessKind,
@@ -148,14 +181,12 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     planCode: decision.billingPlanCode,
     planName,
     recommendedAction: shouldRecommendAction
-      ? await resolveRecommendedAction({
-          accessKind,
-          actionUrl,
-          memberId: input.memberId,
-          planCode: decision.billingPlanCode,
-          prisma,
-        })
+      ? buildRecommendedAction({ action: availableAction, actionUrl })
       : null,
+    ...projectSubscriptionActionQuoteExpansion({
+      include: includeSubscriptionActionQuote,
+      quote: availableAction,
+    }),
     remainingPercent: 100 - usedPercent,
     status: exhausted ? "exhausted" : "active",
     usedPercent,
@@ -242,16 +273,14 @@ async function buildUsageForecast(input: {
   };
 }
 
-async function resolveRecommendedAction(input: {
+async function resolveAvailableSubscriptionAction(input: {
   accessKind: HostedPlanUsageAvailableStatus["accessKind"];
-  actionUrl: string | null;
   memberId: string;
   planCode: HostedPlanUsageAvailableStatus["planCode"];
   prisma: HostedPlanUsageClient;
-}): Promise<HostedPlanUsageRecommendedAction | null> {
+}): Promise<HostedPlanUsageSubscriptionActionQuote | null> {
   if (
-    !input.actionUrl
-    || input.accessKind === "family_sponsored"
+    input.accessKind === "family_sponsored"
     || input.planCode === "launch_edge_monthly"
   ) {
     return null;
@@ -296,7 +325,7 @@ async function resolveRecommendedAction(input: {
       hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
       suspendedAt: member.suspendedAt,
     })
-      ? buildRecommendedAction("start_pulse", input.actionUrl)
+      ? buildSubscriptionActionQuote("start_pulse_now")
       : null;
   }
 
@@ -310,36 +339,56 @@ async function resolveRecommendedAction(input: {
       currentCheckoutOffer: billingState.currentCheckoutOffer,
     })
   ) {
-    return buildRecommendedAction("upgrade_edge", input.actionUrl);
+    return buildSubscriptionActionQuote("upgrade_edge");
   }
   return null;
 }
 
-function buildRecommendedAction(
-  kind: HostedPlanUsageRecommendedAction["kind"],
-  actionUrl: string | null,
-): HostedPlanUsageRecommendedAction | null {
-  if (!actionUrl) {
-    return null;
-  }
+function buildSubscriptionActionQuote(
+  action: HostedPlanUsageSubscriptionActionQuote["action"],
+): HostedPlanUsageSubscriptionActionQuote {
   const billingPlan = getHostedBillingPlanDefinition(
-    kind === "start_pulse" ? "launch_monthly" : "launch_edge_monthly",
+    action === "start_pulse_now" ? "launch_monthly" : "launch_edge_monthly",
   );
   const recurringAmount = `$${billingPlan.recurringAmountUsdCents / 100}`;
-  return kind === "start_pulse"
-    ? {
-        kind,
-        label: `Start Pulse now (${recurringAmount}/month)`,
-        url: actionUrl,
-      }
-    : {
-        kind,
-        label: `Upgrade to Edge (${recurringAmount}/month)`,
-        url: actionUrl,
-      };
+  return {
+    action,
+    label: action === "start_pulse_now"
+      ? `Start Pulse now (${recurringAmount}/month)`
+      : `Upgrade to Edge (${recurringAmount}/month)`,
+  };
 }
 
-function buildUsageActionUrl(publicBaseUrl: string | null): string | null {
+function buildRecommendedAction(input: {
+  action: HostedPlanUsageSubscriptionActionQuote | null;
+  actionUrl: string | null;
+}): HostedPlanUsageRecommendedAction | null {
+  if (!input.action || !input.actionUrl) {
+    return null;
+  }
+  return {
+    kind: input.action.action === "start_pulse_now"
+      ? "start_pulse"
+      : "upgrade_edge",
+    label: input.action.label,
+    url: input.actionUrl,
+  };
+}
+
+function projectSubscriptionActionQuoteExpansion(input: {
+  include: boolean;
+  quote: HostedPlanUsageSubscriptionActionQuote | null;
+}): {
+  subscriptionActionQuote?: HostedPlanUsageSubscriptionActionQuote | null;
+} {
+  return input.include
+    ? { subscriptionActionQuote: input.quote }
+    : {};
+}
+
+function buildUsageActionUrl(
+  publicBaseUrl: string | null,
+): string | null {
   if (!publicBaseUrl) {
     return null;
   }

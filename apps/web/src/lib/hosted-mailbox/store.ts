@@ -29,6 +29,9 @@ import type {
   HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedRuntimeSubscriptionAction,
+} from "@murphai/hosted-execution/subscription";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
@@ -1671,6 +1674,112 @@ export async function findHostedMailboxItemByDedupeKeyTx(input: {
 
 export interface HostedMailboxConversationInputAuthority {
   causalSeq: string;
+}
+
+export type HostedMailboxSubscriptionActionClaimResult =
+  | "claimed"
+  | "conflict"
+  | "replayed";
+
+export async function claimHostedMailboxConversationSubscriptionAction(input: {
+  action: HostedRuntimeSubscriptionAction;
+  assistantInputId: string;
+  memberId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedMailboxSubscriptionActionClaimResult | null> {
+  const prisma = input.prisma ?? getPrisma();
+
+  if (isHostedMailboxRootClient(prisma)) {
+    return prisma.$transaction((tx) =>
+      claimHostedMailboxConversationSubscriptionActionTx({
+        ...input,
+        tx,
+      })
+    );
+  }
+
+  return claimHostedMailboxConversationSubscriptionActionTx({
+    ...input,
+    tx: prisma,
+  });
+}
+
+async function claimHostedMailboxConversationSubscriptionActionTx(input: {
+  action: HostedRuntimeSubscriptionAction;
+  assistantInputId: string;
+  memberId: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<HostedMailboxSubscriptionActionClaimResult | null> {
+  const assistantInputId = normalizeNullableString(input.assistantInputId);
+  const memberId = normalizeNullableString(input.memberId);
+  const assistantInputLookupKeys = assistantInputId
+    ? createHostedAssistantInputLookupKeyReadCandidates(assistantInputId)
+    : [];
+
+  if (assistantInputLookupKeys.length === 0 || !memberId) {
+    return null;
+  }
+
+  const now = new Date();
+  const authorityWhere = {
+    assistantInputLookupKey: {
+      in: assistantInputLookupKeys,
+    },
+    causalSeq: {
+      not: null,
+    },
+    kind: "conversation.message",
+    lane: "conversation",
+    ...buildHostedMailboxLiveItemWhere(now),
+    userId: memberId,
+  } as const;
+  const rows = await input.tx.hostedMailboxItem.findMany({
+    select: {
+      id: true,
+      subscriptionActionClaim: true,
+    },
+    take: 2,
+    where: authorityWhere,
+  });
+
+  const row = rows[0];
+  if (!row || rows.length !== 1) {
+    return null;
+  }
+  if (row.subscriptionActionClaim === input.action) {
+    return "replayed";
+  }
+  if (row.subscriptionActionClaim !== null) {
+    return "conflict";
+  }
+
+  const claimed = await input.tx.hostedMailboxItem.updateMany({
+    data: {
+      subscriptionActionClaim: input.action,
+    },
+    where: {
+      ...authorityWhere,
+      id: row.id,
+      subscriptionActionClaim: null,
+    },
+  });
+  if (claimed.count === 1) {
+    return "claimed";
+  }
+
+  const raced = await input.tx.hostedMailboxItem.findFirst({
+    select: {
+      subscriptionActionClaim: true,
+    },
+    where: {
+      ...authorityWhere,
+      id: row.id,
+    },
+  });
+  if (raced?.subscriptionActionClaim === input.action) {
+    return "replayed";
+  }
+  return raced?.subscriptionActionClaim ? "conflict" : null;
 }
 
 export async function readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input: {

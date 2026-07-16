@@ -7,7 +7,7 @@ import type {
 } from "@murphai/hosted-execution/subscription";
 
 import {
-  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
+  claimHostedMailboxConversationSubscriptionAction,
 } from "../hosted-mailbox/store";
 import {
   upgradeHostedBillingPlan,
@@ -30,18 +30,26 @@ export async function handleHostedSubscriptionTool(input: {
   request: HostedRuntimeSubscriptionControlRequest;
 }): Promise<HostedRuntimeSubscriptionToolResponse> {
   const prisma = getPrisma();
-  const authority =
-    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
+  const actionClaim =
+    await claimHostedMailboxConversationSubscriptionAction({
+      action: input.request.action,
       assistantInputId: input.request.assistantInputId,
       memberId: input.memberId,
       prisma,
     });
 
-  if (authority === null) {
+  if (actionClaim === null) {
     throw hostedOnboardingError({
       code: "HOSTED_SUBSCRIPTION_INPUT_AUTHORITY_INVALID",
       httpStatus: 403,
       message: "Subscription changes are unavailable for this turn.",
+    });
+  }
+  if (actionClaim === "conflict") {
+    throw hostedOnboardingError({
+      code: "HOSTED_SUBSCRIPTION_INPUT_ACTION_CONFLICT",
+      httpStatus: 409,
+      message: "Reply again before choosing a different subscription action.",
     });
   }
 
