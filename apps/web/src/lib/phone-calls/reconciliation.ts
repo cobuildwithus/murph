@@ -8,7 +8,11 @@ import {
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
-import type { PhoneCallRuntime } from "./types";
+import type {
+  HostedPhoneCallProviderUsage,
+  PhoneCallRuntime,
+} from "./types";
+import { recordRetellPhoneCallProviderUsage } from "./usage";
 
 export interface HostedPhoneCallReconciliationStore {
   markCleanupEnded(input: {
@@ -37,6 +41,10 @@ export interface HostedPhoneCallReconciliationStore {
       };
     }): Promise<{ count: number }>;
   };
+  recordTerminalUsage?(input: {
+    call: HostedPhoneCall;
+    usage: HostedPhoneCallProviderUsage;
+  }): Promise<void>;
 }
 
 export async function processHostedPhoneCallRecoveryById(input: {
@@ -47,7 +55,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
 }): Promise<"complete" | "missing" | "pending"> {
   const store = input.prisma ?? resolveHostedPhoneCallReconciliationStore();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
-  const call = await waitForAbortableOperation(input.signal, () =>
+  let call = await waitForAbortableOperation(input.signal, () =>
     store.hostedPhoneCall.findUnique({
       where: { id: input.phoneCallId },
     }));
@@ -55,7 +63,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
     return "missing";
   }
   if (isHostedPhoneCallProviderCleanupPending(call) && call.providerCallId) {
-    return await stopHostedPhoneCallCleanupAuthority({
+    const stopped = await stopHostedPhoneCallCleanupAuthority({
       call: {
         id: call.id,
         providerCallId: call.providerCallId,
@@ -63,34 +71,37 @@ export async function processHostedPhoneCallRecoveryById(input: {
       runtime,
       signal: input.signal,
       store,
-    }) ? "complete" : "pending";
+    });
+    if (!stopped) {
+      return "pending";
+    }
   }
-  if (hasPhoneCallAdvancedBeyondStart(call)) {
-    return "complete";
-  }
-  if (!isHostedPhoneCallReadyForProviderReconciliation(call)) {
-    return "pending";
-  }
-  const result = await reconcileHostedPhoneCallProviderAuthority({
-    call,
-    runtime,
-    signal: input.signal,
-    store,
-  });
-  if (result.status === "starting") {
-    return "pending";
-  }
-  if (result.status === "failed") {
+
+  if (isHostedPhoneCallReadyForProviderReconciliation(call)) {
+    const result = await reconcileHostedPhoneCallProviderAuthority({
+      call,
+      runtime,
+      signal: input.signal,
+      store,
+    });
+    if (result.status === "starting") {
+      return "pending";
+    }
+
     const current = await waitForAbortableOperation(input.signal, () =>
       store.hostedPhoneCall.findUnique({
         where: { id: input.phoneCallId },
       }));
+    if (!current) {
+      return "missing";
+    }
+    call = current;
     if (
-      current
+      result.status === "failed"
       && isHostedPhoneCallProviderCleanupPending(current)
       && current.providerCallId
     ) {
-      return await stopHostedPhoneCallCleanupAuthority({
+      const stopped = await stopHostedPhoneCallCleanupAuthority({
         call: {
           id: current.id,
           providerCallId: current.providerCallId,
@@ -98,10 +109,44 @@ export async function processHostedPhoneCallRecoveryById(input: {
         runtime,
         signal: input.signal,
         store,
-      }) ? "complete" : "pending";
+      });
+      if (!stopped) {
+        return "pending";
+      }
     }
   }
-  return "complete";
+
+  const providerCallId = call.providerCallId;
+  const resolveTerminalUsage = runtime.resolveTerminalUsage;
+  const recordTerminalUsage = store.recordTerminalUsage;
+  if (providerCallId && resolveTerminalUsage && recordTerminalUsage) {
+    let resolution;
+    try {
+      resolution = await waitForAbortableOperation(input.signal, () =>
+        resolveTerminalUsage.call(runtime, providerCallId, {
+          signal: input.signal,
+        }));
+    } catch {
+      input.signal.throwIfAborted();
+      return "pending";
+    }
+    if (resolution.state === "pending") {
+      return "pending";
+    }
+    try {
+      await waitForAbortableOperation(input.signal, () =>
+        recordTerminalUsage({
+          call,
+          usage: resolution.usage,
+        }));
+    } catch {
+      input.signal.throwIfAborted();
+      return "pending";
+    }
+    return "complete";
+  }
+
+  return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
 }
 
 export async function stopHostedPhoneCallCleanupAuthority(input: {
@@ -251,5 +296,11 @@ function resolveHostedPhoneCallReconciliationStore(): HostedPhoneCallReconciliat
       findUniqueOrThrow: async (input) => prisma.hostedPhoneCall.findUniqueOrThrow(input),
       updateMany: async (input) => prisma.hostedPhoneCall.updateMany(input),
     },
+    recordTerminalUsage: async ({ call, usage }) =>
+      recordRetellPhoneCallProviderUsage({
+        call,
+        prisma,
+        usage,
+      }),
   };
 }
