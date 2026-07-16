@@ -1,6 +1,6 @@
 # PR 709 conflict resolution
 
-Status: active
+Status: completed
 Created: 2026-07-16
 Updated: 2026-07-16
 
@@ -36,3 +36,4 @@ Updated: 2026-07-16
 - `pnpm test:diff apps/web/test/hosted-assistant-personalization-route.test.ts`.
 - `git diff --check` and a clean mergeability proof against current `origin/main`.
 - ReviewGPT correction-verification round and required GitHub checks on the exact pushed head.
+Completed: 2026-07-16
