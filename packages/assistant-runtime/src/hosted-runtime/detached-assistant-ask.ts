@@ -2,16 +2,27 @@ import {
   executeConsentedReadOnlyAssistantAsk,
   executeReadOnlyAssistantAsk,
   type ConsentedReadOnlyAssistantAskInput,
+  type ReadOnlyAssistantAskProviderUsageEvent,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  createAssistantUsageId,
+  parseAssistantUsageRecord,
+  resolveAssistantUsageCredentialSource,
+} from "@murphai/hosted-execution/assistant-usage";
 import type {
   HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
 import type {
   HostedRuntimeAssistantAskPort,
+  HostedRuntimeUsageRecordPort,
 } from "./platform.ts";
+import type {
+  HostedWorkspaceDurableCheckpointEffect,
+} from "./workspace-runner.ts";
 import {
   claimHostedSystemMailboxItem,
   requeueClaimedHostedSystemMailboxItem,
@@ -45,8 +56,16 @@ export interface HostedDetachedAssistantAskControllerInput {
   executeConsentedAsk?: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
+  deferUsageUntilAfterDurableCheckpoint?: (
+    effect: HostedWorkspaceDurableCheckpointEffect,
+  ) => void;
+  memberId?: string;
+  model?: string | null;
+  modelProvider?: string | null;
   now?: () => string;
   onStateMutation(): void;
+  usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  userEnvKeys?: readonly string[];
   vaultRoot: string;
 }
 
@@ -84,8 +103,15 @@ export function createHostedDetachedAssistantAskController(
       env: input.env,
       executeAsk,
       executeConsentedAsk,
+      deferUsageUntilAfterDurableCheckpoint:
+        input.deferUsageUntilAfterDurableCheckpoint ?? null,
+      memberId: input.memberId ?? null,
+      model: input.model ?? null,
+      modelProvider: input.modelProvider ?? null,
       now,
       onStateMutation: input.onStateMutation,
+      usageRecordPort: input.usageRecordPort ?? null,
+      userEnvKeys: input.userEnvKeys ?? [],
       vaultRoot: input.vaultRoot,
     });
     activeAbortController = abortController;
@@ -174,11 +200,20 @@ async function runOneHostedDetachedAssistantAsk(input: {
   executeConsentedAsk: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
+  deferUsageUntilAfterDurableCheckpoint: ((
+    effect: HostedWorkspaceDurableCheckpointEffect,
+  ) => void) | null;
+  memberId: string | null;
+  model: string | null;
+  modelProvider: string | null;
   now: () => string;
   onStateMutation(): void;
+  usageRecordPort: HostedRuntimeUsageRecordPort | null;
+  userEnvKeys: readonly string[];
   vaultRoot: string;
 }): Promise<HostedDetachedAssistantAskRunResult> {
   let claimed: HostedSystemMailboxPendingItem | null = null;
+  const providerUsages: ReadOnlyAssistantAskProviderUsageEvent[] = [];
   try {
     claimed = await claimHostedSystemMailboxItem({
       allowedRouteActions: HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS,
@@ -225,7 +260,16 @@ async function runOneHostedDetachedAssistantAsk(input: {
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
       env: { ...input.env },
+      model: input.model,
+      modelProvider: input.modelProvider,
       now: new Date(input.now()),
+      ...(input.usageRecordPort && input.deferUsageUntilAfterDurableCheckpoint
+        ? {
+            onProviderUsage(event: ReadOnlyAssistantAskProviderUsageEvent) {
+              providerUsages.push(event);
+            },
+          }
+        : {}),
       question: prepared.question,
       workspaceRoot: input.vaultRoot,
     };
@@ -278,7 +322,113 @@ async function runOneHostedDetachedAssistantAsk(input: {
           ).toISOString(),
     });
     return "settled";
+  } finally {
+    if (
+      claimed
+      && input.usageRecordPort
+      && input.deferUsageUntilAfterDurableCheckpoint
+      && providerUsages.length > 0
+    ) {
+      const deferredUsageInput = {
+        attemptCount: claimed.attemptCount,
+        effectiveEnv: { ...input.env },
+        memberId: input.memberId ?? claimed.wake.userId,
+        occurredAt: claimed.lastAttemptAt ?? claimed.occurredAt,
+        providerUsages: [...providerUsages],
+        requestId: claimed.wake.eventId,
+        usageRecordPort: input.usageRecordPort,
+        userEnvKeys: [...input.userEnvKeys],
+      };
+      try {
+        input.deferUsageUntilAfterDurableCheckpoint(async () => {
+          await recordHostedDetachedAssistantAskUsageBestEffort(
+            deferredUsageInput,
+          );
+        });
+      } catch (error) {
+        warnHostedDetachedAssistantAskUsageFailure(error);
+      }
+    }
   }
+}
+
+async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
+  attemptCount: number;
+  effectiveEnv: Readonly<Record<string, string>>;
+  memberId: string;
+  occurredAt: string;
+  providerUsages: readonly ReadOnlyAssistantAskProviderUsageEvent[];
+  requestId: string;
+  usageRecordPort: HostedRuntimeUsageRecordPort;
+  userEnvKeys: readonly string[];
+}): Promise<void> {
+  for (const event of input.providerUsages) {
+    try {
+      const usage = event.usage.usage;
+      const turnId = `turn_assistant_ask_${input.requestId}.stage-${event.stage}`;
+      const credentialSource = resolveAssistantUsageCredentialSource({
+        apiKeyEnv: usage.apiKeyEnv,
+        effectiveEnv: input.effectiveEnv,
+        provider: event.usage.provider,
+        userEnvKeys: input.userEnvKeys,
+      });
+      const record = parseAssistantUsageRecord({
+        apiKeyEnv: usage.apiKeyEnv,
+        attemptCount: input.attemptCount,
+        baseUrl: usage.baseUrl,
+        cacheWriteTokens: usage.cacheWriteTokens,
+        cachedInputTokens: usage.cachedInputTokens,
+        credentialSource,
+        featureKey: "assistant_read_only_ask",
+        gatewayTags: [],
+        inputTokens: usage.inputTokens,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
+        outputTokens: usage.outputTokens,
+        provider: event.usage.provider,
+        providerName: usage.providerName,
+        providerRequestId: usage.providerRequestId,
+        providerRequestOrdinal: event.usage.providerRequestOrdinal,
+        providerRequestOutcome:
+          event.usage.providerRequestOutcome ?? "succeeded",
+        rawUsageJson: usage.rawUsageJson,
+        rawUsageJsonHash: usage.rawUsageJsonHash,
+        reasoningTokens: usage.reasoningTokens,
+        reportingUserId: null,
+        requestedModel: usage.requestedModel,
+        routeId: null,
+        schema: ASSISTANT_USAGE_SCHEMA,
+        servedModel: usage.servedModel,
+        sessionId: input.requestId,
+        stripeMeterSource: "murph",
+        surface: "hosted-runtime",
+        tokenPricingBasis: usage.tokenPricingBasis,
+        totalTokens: usage.totalTokens,
+        triggerKind: "assistant-ask",
+        turnId,
+        turnProfileJson: usage.turnProfileJson,
+        usageId: createAssistantUsageId({
+          attemptCount: input.attemptCount,
+          providerRequestOrdinal: event.usage.providerRequestOrdinal,
+          turnId,
+        }),
+        usageExtractionSourcePath: usage.usageExtractionSourcePath,
+        usageExtractionVersion: usage.usageExtractionVersion,
+      });
+      await input.usageRecordPort.recordUsage(record);
+    } catch (error) {
+      warnHostedDetachedAssistantAskUsageFailure(error);
+    }
+  }
+}
+
+function warnHostedDetachedAssistantAskUsageFailure(error: unknown): void {
+  console.warn(
+    "Detached Assistant Ask usage recording failed; continuing without retry.",
+    {
+      errorName: error instanceof Error ? error.name : typeof error,
+    },
+  );
 }
 
 async function removeHostedDetachedAssistantAsk(input: {
@@ -318,7 +468,7 @@ function normalizeHostedDetachedAssistantAskResult(
     return result;
   }
   return {
-    answer: null,
+    answer: result.answer ?? null,
     outcome: "cannot_answer",
   };
 }

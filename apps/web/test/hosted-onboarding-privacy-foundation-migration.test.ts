@@ -1058,12 +1058,15 @@ describe("hosted Prisma baseline migration", () => {
     );
     for (const sql of [
       'CREATE TABLE "hosted_group_disclosure_permission"',
-      '"permission_text" TEXT NOT NULL',
+      '"permission_text_encrypted" TEXT NOT NULL',
       'CREATE TABLE "hosted_group_disclosure_grant"',
       'WHERE "revoked_at" IS NULL',
       'REFERENCES "hosted_group"("id") ON DELETE CASCADE',
       'REFERENCES "hosted_group_member"("id") ON DELETE CASCADE',
     ]) expect(hostedGroupDisclosurePermissionMigrationSql).toContain(sql);
+    expect(hostedGroupDisclosurePermissionMigrationSql).not.toContain(
+      '"permission_text" TEXT',
+    );
     expect(hostedGroupDisclosurePermissionMigrationSql).not.toMatch(
       /"(?:question|answer|candidate|response|vault)[^"]*"/iu,
     );

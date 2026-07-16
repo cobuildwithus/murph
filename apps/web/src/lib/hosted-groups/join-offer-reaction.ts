@@ -217,7 +217,8 @@ function isExactHostedGroupDisclosureLikeReaction(
   event: ParsedHostedLinqProviderEvent,
 ): boolean {
   return event.eventType === "reaction.added"
-    && event.reactionType?.trim().toLowerCase() === "like";
+    && event.reactionType === "like"
+    && event.reactionCustomEmoji === null;
 }
 
 async function signalMailboxAppendRuntimesBestEffort(input: {

@@ -27,7 +27,10 @@ import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import { createDefaultLocalAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
-import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionAssistantAskCompletedWake,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+} from "@murphai/hosted-execution";
 
 import {
   HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
@@ -47,6 +50,22 @@ afterEach(() => {
 });
 
 describe("hosted assistant ask completion", () => {
+  it("delegates reviewed delivery keys to the shared protocol without colliding with legacy", () => {
+    const eventId = "aask_done_shared_delivery_protocol";
+    const reviewed = buildHostedAssistantAskCompletionDeliveryKey({
+      deliveryMode: "reviewed_exact",
+      eventId,
+    });
+    const legacy = buildHostedAssistantAskCompletionDeliveryKey({ eventId });
+
+    expect(reviewed).toBe(
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(eventId),
+    );
+    expect(reviewed).not.toBe(legacy);
+    expect(reviewed).toMatch(/^reviewed-assistant-ask-completion:/u);
+    expect(legacy).toMatch(/^assistant-ask-completion:/u);
+  });
+
   it("quotes the correlated group question and answer as structurally bounded untrusted data", () => {
     const instructions = buildHostedAssistantAskContinuationInstructions({
       question: "Which exercises are assigned today?",
@@ -188,15 +207,30 @@ describe("hosted assistant ask completion", () => {
 
     try {
       const answer = "Reviewed answer.";
-      const { eventId, origin, session, wake } =
+      const { eventId, origin, session: originSession, wake } =
         await createReviewedExactCompletion({
           answer,
           expiresAt: "2099-07-15T12:10:00.000Z",
           suffix: "reviewed-exact",
           vault,
         });
+      const currentSession = await resolveAssistantSession({
+        actorId: "actor-current-speaker",
+        bindingDeliveryTarget: "conversation-reviewed-exact",
+        channel: "linq",
+        createIfMissing: false,
+        identityId: "identity-reviewed-exact",
+        target: createDefaultLocalAssistantModelTarget(),
+        threadId: "conversation-reviewed-exact",
+        threadIsDirect: false,
+        vault,
+      });
+      expect(currentSession.session.sessionId).toBe(originSession.sessionId);
+      expect(currentSession.session.binding.actorId).toBe("actor-current-speaker");
       completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
-      completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
+      completionMocks.readAssistantAskOriginSession.mockResolvedValue(
+        currentSession.session,
+      );
       completionMocks.sendAssistantNotification.mockImplementation(async (input) => {
         await input.beforeCommit?.({
           decision: {
@@ -211,6 +245,7 @@ describe("hosted assistant ask completion", () => {
 
       await executeHostedAssistantAskCompletedWake({
         executionContext: { hosted: null },
+        sourceMailboxItemId: eventId,
         vaultRoot: vault,
         wake,
       });
@@ -220,23 +255,34 @@ describe("hosted assistant ask completion", () => {
       const notificationInput =
         completionMocks.sendAssistantNotification.mock.calls[0]?.[0];
       expect(notificationInput).toMatchObject({
+        answeredMailboxItemIds: [eventId],
         beforeCommit: expect.any(Function),
         deferCommitUntilDeliveryAccepted: true,
         deliveryDedupeToken: buildHostedAssistantAskCompletionDeliveryKey({
+          deliveryMode: "reviewed_exact",
           eventId,
         }),
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
+          deliveryMode: "reviewed_exact",
           eventId,
         }),
+        bindingDeliveryTarget: "conversation-reviewed-exact",
+        channel: "linq",
+        deliveryReplyToMessageId: "message-reviewed-exact",
+        deliveryTarget: "conversation-reviewed-exact",
+        identityId: "identity-reviewed-exact",
         responsePolicy: {
           kind: "require_send_exact_text",
           text: answer,
         },
-        sessionId: session.sessionId,
+        sessionId: originSession.sessionId,
         threadId: "conversation-reviewed-exact",
         threadIsDirect: false,
       });
+      expect(notificationInput).not.toHaveProperty("actorId");
+      expect(notificationInput).not.toHaveProperty("conversation");
+      expect(notificationInput).not.toHaveProperty("participantId");
     } finally {
       await rm(vault, { force: true, recursive: true });
     }
@@ -348,26 +394,29 @@ describe("hosted assistant ask completion", () => {
 });
 
 async function createCompletionOriginSession(input: {
+  channel?: "linq" | "telegram";
   suffix: string;
   threadIsDirect: boolean;
   vault: string;
 }) {
   const actorId = `actor-${input.suffix}`;
+  const channel = input.channel ?? "telegram";
+  const identityId = channel === "linq" ? `identity-${input.suffix}` : null;
   const threadId = `conversation-${input.suffix}`;
   const origin = await upsertAssistantInputEvent({
     event: {
       content: { text: "Ask for consented information." },
       conversation: {
-        accountId: null,
+        accountId: identityId,
         actorId,
         actorIsSelf: false,
-        source: "telegram",
+        source: channel,
         threadId,
         threadIsDirect: input.threadIsDirect,
       },
       occurredAt: "2026-07-15T11:00:00.000Z",
       replyTarget: {
-        channel: "telegram",
+        channel,
         messageId: `message-${input.suffix}`,
         threadId,
       },
@@ -390,7 +439,8 @@ async function createCompletionOriginSession(input: {
   const resolved = await resolveAssistantSession({
     actorId,
     bindingDeliveryTarget: threadId,
-    channel: "telegram",
+    channel,
+    ...(identityId ? { identityId } : {}),
     target: createDefaultLocalAssistantModelTarget(),
     threadId,
     threadIsDirect: input.threadIsDirect,
@@ -409,6 +459,7 @@ async function createReviewedExactCompletion(input: {
   vault: string;
 }) {
   const { origin, session } = await createCompletionOriginSession({
+    channel: "linq",
     suffix: input.suffix,
     threadIsDirect: false,
     vault: input.vault,

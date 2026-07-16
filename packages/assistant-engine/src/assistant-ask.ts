@@ -20,11 +20,16 @@ import {
 import {
   HOSTED_CLI_BRIDGE_ENV_NAMES,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
+  normalizeAssistantProviderConfig,
+  type AssistantProviderConfig,
+} from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   executeCodexAppServerTurn,
+  readCodexAppServerTurnFailureContext,
   type CodexAppServerTurnInput,
 } from './assistant-codex.js'
 import {
@@ -36,6 +41,14 @@ import {
 } from './assistant/maintenance-evidence.js'
 import type {
   AssistantProviderServiceTier,
+  AssistantProviderUsageDraft,
+} from './assistant/providers/types.js'
+import {
+  extractCodexAssistantProviderUsage,
+} from './assistant/providers/helpers.js'
+
+export type {
+  AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
 
 const READ_ONLY_ASSISTANT_ASK_MAX_QUESTION_CODE_POINTS = 1_200
@@ -122,6 +135,7 @@ const CONSENTED_READ_ONLY_ASSISTANT_ASK_ANSWER_INSTRUCTIONS = [
   'Do not write or modify anything, contact anyone, use the network, request broader permissions, or ask a follow-up question.',
   'The exact quoted immutable sharing permission context is the only disclosure boundary for the proposed answer.',
   'Do not infer broader permission from group membership, trust, the question, or the workspace contents.',
+  'Compare every piece of information the proposed answer would disclose against the exact permission context; if any piece is outside that permission or ambiguous, return outcome "cannot_answer" with answer null.',
   'Return outcome "cannot_answer" with answer null when the authorized evidence is insufficient or the permission context does not clearly allow the requested information.',
 ].join('\n')
 
@@ -146,6 +160,7 @@ export interface ReadOnlyAssistantAskInput {
   model?: string | null
   modelProvider?: string | null
   now?: Date
+  onProviderUsage?: ((event: ReadOnlyAssistantAskProviderUsageEvent) => void) | null
   question: string
   reasoningEffort?: string | null
   serviceTier?: AssistantProviderServiceTier | null
@@ -170,11 +185,17 @@ export type ReadOnlyAssistantAskResult =
       outcome: 'cannot_answer'
     }
 
+export interface ReadOnlyAssistantAskProviderUsageEvent {
+  stage: 'answer' | 'review'
+  usage: AssistantProviderUsageDraft
+}
+
 interface ConfinedReadOnlyAssistantAskTurn {
   baseInstructions: string
   developerInstructions: string | null
   outputSchema: NonNullable<CodexAppServerTurnInput['outputSchema']>
   prompt: string
+  usageStage: ReadOnlyAssistantAskProviderUsageEvent['stage']
   workspaceRoot?: string
 }
 
@@ -237,24 +258,28 @@ async function executeReadOnlyAssistantAskChild(
       now: input.now ?? new Date(),
       vault: workspaceRoot,
     })
-  const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(input, {
-    baseInstructions: [
-      permissionText
-        ? CONSENTED_READ_ONLY_ASSISTANT_ASK_ANSWER_INSTRUCTIONS
-        : READ_ONLY_ASSISTANT_ASK_BASE_INSTRUCTIONS,
-      normalizeNullableString(input.baseInstructions),
-    ].filter((part): part is string => part !== null).join('\n\n'),
-    developerInstructions: normalizeNullableString(
-      input.developerInstructions,
-    ),
-    outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
-    prompt: buildReadOnlyAssistantAskPrompt({
-      conversationEvidence,
-      permissionText,
-      question,
-    }),
-    workspaceRoot,
-  })
+  const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(
+    input,
+    {
+      baseInstructions: [
+        permissionText
+          ? CONSENTED_READ_ONLY_ASSISTANT_ASK_ANSWER_INSTRUCTIONS
+          : READ_ONLY_ASSISTANT_ASK_BASE_INSTRUCTIONS,
+        normalizeNullableString(input.baseInstructions),
+      ].filter((part): part is string => part !== null).join('\n\n'),
+      developerInstructions: normalizeNullableString(
+        input.developerInstructions,
+      ),
+      outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
+      prompt: buildReadOnlyAssistantAskPrompt({
+        conversationEvidence,
+        permissionText,
+        question,
+      }),
+      usageStage: 'answer',
+      workspaceRoot,
+    },
+  )
 
   return parseReadOnlyAssistantAskResult(finalMessage)
 }
@@ -265,12 +290,16 @@ async function reviewConsentedReadOnlyAssistantAskAnswer(
     proposedAnswer: string
   },
 ): Promise<'allow' | 'deny'> {
-  const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(input, {
-    baseInstructions: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_INSTRUCTIONS,
-    developerInstructions: null,
-    outputSchema: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_OUTPUT_SCHEMA,
-    prompt: buildConsentedReadOnlyAssistantAskReviewPrompt(input),
-  })
+  const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(
+    input,
+    {
+      baseInstructions: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_INSTRUCTIONS,
+      developerInstructions: null,
+      outputSchema: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_OUTPUT_SCHEMA,
+      prompt: buildConsentedReadOnlyAssistantAskReviewPrompt(input),
+      usageStage: 'review',
+    },
+  )
 
   return parseConsentedReadOnlyAssistantAskReviewDecision(finalMessage)
 }
@@ -285,38 +314,169 @@ async function executeConfinedReadOnlyAssistantAskTurn(
   await chmod(workingDirectory, 0o700)
 
   try {
-    const result = await executeCodexAppServerTurn({
-      abortSignal: input.abortSignal,
-      allowFinishWithoutReply: false,
-      allowMessageReactions: false,
+    const providerConfig = normalizeAssistantProviderConfig({
       approvalPolicy: 'never',
-      baseInstructions: turn.baseInstructions,
       codexCommand: input.codexCommand,
       codexHome: input.codexHome,
-      developerInstructions: turn.developerInstructions,
-      dynamicTools: [],
-      env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
-      ephemeral: true,
       model: input.model,
       modelProvider: input.modelProvider,
-      outputSchema: turn.outputSchema,
-      permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
-      processLifetime: 'one-shot',
-      prompt: turn.prompt,
+      provider: 'codex-cli',
       reasoningEffort: input.reasoningEffort,
-      runtimeWorkspaceRoots: [turn.workspaceRoot ?? workingDirectory],
-      serviceTier: input.serviceTier,
-      threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
-      workingDirectory,
     })
+    try {
+      const result = await executeCodexAppServerTurn({
+        abortSignal: input.abortSignal,
+        allowFinishWithoutReply: false,
+        allowMessageReactions: false,
+        approvalPolicy: 'never',
+        baseInstructions: turn.baseInstructions,
+        codexCommand: input.codexCommand,
+        codexHome: input.codexHome,
+        developerInstructions: turn.developerInstructions,
+        dynamicTools: [],
+        env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
+        ephemeral: true,
+        model: input.model,
+        modelProvider: input.modelProvider,
+        outputSchema: turn.outputSchema,
+        permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
+        processLifetime: 'one-shot',
+        prompt: turn.prompt,
+        providerRequestOrdinal: 0,
+        reasoningEffort: input.reasoningEffort,
+        runtimeWorkspaceRoots: [turn.workspaceRoot ?? workingDirectory],
+        serviceTier: input.serviceTier,
+        threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
+        workingDirectory,
+      })
 
-    return result.finalMessage
+      captureReadOnlyAssistantAskCodexUsageBestEffort({
+        additionalUsages: result.additionalUsages,
+        primaryUsageOutcome: 'succeeded',
+        providerConfig,
+        rawEvents: result.jsonEvents,
+        serviceTier: input.serviceTier ?? null,
+        onProviderUsage: input.onProviderUsage ?? null,
+        stage: turn.usageStage,
+      })
+      return result.finalMessage
+    } catch (error) {
+      const failureContext = readCodexAppServerTurnFailureContext(error)
+      captureReadOnlyAssistantAskCodexUsageBestEffort({
+        additionalUsages: failureContext?.additionalUsages ?? [],
+        includePrimaryUsage:
+          failureContext !== null && failureContext.jsonEvents.length > 0,
+        primaryUsageOutcome: input.abortSignal?.aborted === true
+          ? 'aborted'
+          : 'failed',
+        providerConfig,
+        rawEvents: failureContext?.jsonEvents ?? [],
+        requirePrimaryTokenUsage: true,
+        serviceTier: input.serviceTier ?? null,
+        onProviderUsage: input.onProviderUsage ?? null,
+        stage: turn.usageStage,
+      })
+      throw error
+    }
   } finally {
     await rm(workingDirectory, {
       force: true,
       recursive: true,
     })
   }
+}
+
+function captureReadOnlyAssistantAskCodexUsageBestEffort(input: {
+  additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
+  includePrimaryUsage?: boolean
+  onProviderUsage: ReadOnlyAssistantAskInput['onProviderUsage']
+  primaryUsageOutcome: NonNullable<AssistantProviderUsageDraft['providerRequestOutcome']>
+  providerConfig: AssistantProviderConfig
+  rawEvents: readonly unknown[]
+  requirePrimaryTokenUsage?: boolean
+  serviceTier: AssistantProviderServiceTier | null
+  stage: ReadOnlyAssistantAskProviderUsageEvent['stage']
+}): void {
+  if (!input.onProviderUsage) {
+    return
+  }
+
+  let primaryUsage: AssistantProviderUsageDraft['usage'] | null = null
+  if (input.includePrimaryUsage !== false) {
+    try {
+      primaryUsage = extractCodexAssistantProviderUsage({
+        providerConfig: input.providerConfig,
+        rawEvents: input.rawEvents,
+        serviceTier: input.serviceTier,
+      })
+    } catch (error) {
+      warnReadOnlyAssistantAskUsageCaptureFailure(error)
+    }
+  }
+  captureReadOnlyAssistantAskProviderUsageBestEffort({
+    additionalUsages: input.additionalUsages,
+    onProviderUsage: input.onProviderUsage,
+    primaryUsage:
+      input.requirePrimaryTokenUsage === true &&
+        !hasReadOnlyAssistantAskProviderTokenUsage(primaryUsage)
+        ? null
+        : primaryUsage,
+    primaryUsageOutcome: input.primaryUsageOutcome,
+    stage: input.stage,
+  })
+}
+
+function captureReadOnlyAssistantAskProviderUsageBestEffort(input: {
+  additionalUsages: readonly AssistantProviderUsageDraft[] | null | undefined
+  onProviderUsage: NonNullable<ReadOnlyAssistantAskInput['onProviderUsage']>
+  primaryUsage: AssistantProviderUsageDraft['usage'] | null
+  primaryUsageOutcome: NonNullable<AssistantProviderUsageDraft['providerRequestOutcome']>
+  stage: ReadOnlyAssistantAskProviderUsageEvent['stage']
+}): void {
+  const drafts: readonly AssistantProviderUsageDraft[] = [
+    ...(input.primaryUsage
+      ? [{
+          provider: 'codex-cli',
+          providerRequestOrdinal: 0,
+          providerRequestOutcome: input.primaryUsageOutcome,
+          usage: input.primaryUsage,
+        }]
+      : []),
+    ...(input.additionalUsages ?? []),
+  ]
+
+  for (const usage of drafts) {
+    try {
+      input.onProviderUsage({
+        stage: input.stage,
+        usage,
+      })
+    } catch (error) {
+      warnReadOnlyAssistantAskUsageCaptureFailure(error)
+    }
+  }
+}
+
+function hasReadOnlyAssistantAskProviderTokenUsage(
+  usage: AssistantProviderUsageDraft['usage'] | null,
+): boolean {
+  return usage !== null && (
+    usage.cacheWriteTokens !== null ||
+    usage.cachedInputTokens !== null ||
+    usage.inputTokens !== null ||
+    usage.outputTokens !== null ||
+    usage.reasoningTokens !== null ||
+    usage.totalTokens !== null
+  )
+}
+
+function warnReadOnlyAssistantAskUsageCaptureFailure(error: unknown): void {
+  console.warn(
+    'Read-only Assistant Ask usage capture failed; continuing without retry.',
+    {
+      errorName: error instanceof Error ? error.name : typeof error,
+    },
+  )
 }
 
 function assertReadOnlyAssistantAskQuestion(value: string): string {

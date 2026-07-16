@@ -12,8 +12,9 @@ import {
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import type { AssistantSession } from "@murphai/operator-config/assistant-cli-contracts";
-import type {
-  HostedExecutionAssistantAskCompletedWake,
+import {
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  type HostedExecutionAssistantAskCompletedWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -95,16 +96,13 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     timeoutMs: null,
   });
   const deliveryKey = buildHostedAssistantAskCompletionDeliveryKey({
+    deliveryMode: reviewedExact ? "reviewed_exact" : "legacy",
     eventId: input.wake.eventId,
   });
   const deliveryInput = {
     abortSignal: cancellation.signal ?? undefined,
-    actorId: route.participantId,
     bindingDeliveryTarget: route.deliveryTarget,
     channel: route.channel,
-    conversation: conversationRefFromAssistantInputConversation(
-      origin.conversation!,
-    ),
     deliveryIdempotencyKey: deliveryKey,
     deliveryReplyToMessageId:
       normalizeHostedAssistantAskCompletionRouteValue(
@@ -113,7 +111,6 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     deliveryTarget: route.deliveryTarget,
     executionContext: input.executionContext,
     identityId: route.identityId,
-    participantId: route.participantId,
     sessionId: session.sessionId,
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
@@ -128,6 +125,9 @@ export async function executeHostedAssistantAskCompletedWake(input: {
       await sendAssistantNotification({
         ...deliveryInput,
         approvalPolicy: "never",
+        answeredMailboxItemIds: [
+          input.sourceMailboxItemId ?? input.wake.eventId,
+        ],
         beforeCommit: () => {
           if (canCommit()) {
             return;
@@ -153,13 +153,18 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     } else {
       await sendAssistantAskContinuation({
         ...deliveryInput,
+        actorId: route.participantId,
         canCommit,
+        conversation: conversationRefFromAssistantInputConversation(
+          origin.conversation!,
+        ),
         instructions: buildHostedAssistantAskContinuationInstructions({
           question: input.wake.ask.question,
           result: input.wake.ask.result,
           targetLabel: input.wake.ask.targetLabel,
         }),
         originAssistantInputId: input.wake.ask.originAssistantInputId,
+        participantId: route.participantId,
         requestId: input.wake.ask.requestId,
       });
     }
@@ -240,8 +245,11 @@ export function isAuthorizedHostedAssistantAskCompletionOrigin(input: {
       === input.route.channel
     && normalizeHostedAssistantAskCompletionRouteValue(binding.identityId)
       === input.route.identityId
-    && normalizeHostedAssistantAskCompletionRouteValue(binding.actorId)
-      === input.route.participantId
+    && (
+      !expectedThreadIsDirect
+      || normalizeHostedAssistantAskCompletionRouteValue(binding.actorId)
+        === input.route.participantId
+    )
     && normalizeHostedAssistantAskCompletionRouteValue(binding.threadId)
       === input.route.threadId
     && normalizeHostedAssistantAskCompletionRouteValue(binding.delivery?.target)
@@ -257,8 +265,14 @@ export function isHostedAssistantAskCompletionExpired(
 }
 
 export function buildHostedAssistantAskCompletionDeliveryKey(input: {
+  deliveryMode?: "legacy" | "reviewed_exact";
   eventId: string;
 }): string {
+  if (input.deliveryMode === "reviewed_exact") {
+    return createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      input.eventId,
+    );
+  }
   const digest = createHash("sha256")
     .update(input.eventId)
     .digest("hex")

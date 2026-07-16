@@ -3,11 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx: vi.fn(),
   getPrisma: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   readHostedMemberRoutingPrivateState: vi.fn(),
   runWithHostedDomainRootUnwrapCache: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx:
+    mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
@@ -55,12 +61,16 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
 describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
+    mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx.mockResolvedValue(
+      undefined,
+    );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
       async (run: () => Promise<unknown>) => run(),
@@ -929,6 +939,182 @@ describe("hosted Linq egress authority", () => {
       })],
       skipDuplicates: true,
     });
+  });
+
+  it("revalidates Assistant Ask authority before claiming provider dispatch", async () => {
+    const observedOrder: string[] = [];
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
+    mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx
+      .mockImplementationOnce(async () => {
+        observedOrder.push("assistant-ask-authority");
+      });
+    prisma.hostedLinqDelivery.createMany.mockImplementationOnce(async () => {
+      observedOrder.push("provider-dispatch");
+      return { count: 1 };
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    const completionId = "aask_done_authorized";
+    const idempotencyKey = "reviewed-assistant-ask-completion:authorized";
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          answeredMailboxItemIds: [completionId],
+          authorityCheckOnly: false,
+          idempotencyKey,
+          target: "chat-authorized-group",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+      threadIsDirect: false,
+    });
+    expect(
+      mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
+    ).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [completionId],
+      boundRuntimeMemberId: "member-1",
+      idempotencyKey,
+      tx: expect.objectContaining({
+        hostedLinqDelivery: prisma.hostedLinqDelivery,
+      }),
+    });
+    expect(observedOrder).toEqual([
+      "assistant-ask-authority",
+      "provider-dispatch",
+    ]);
+  });
+
+  it("keeps legacy Assistant Ask Linq egress compatible without an anchor", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-ask-completion:legacy",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+      threadIsDirect: true,
+    });
+    expect(
+      mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
+    ).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
+      boundRuntimeMemberId: "member-1",
+      idempotencyKey: "assistant-ask-completion:legacy",
+      tx: expect.objectContaining({
+        hostedLinqDelivery: prisma.hostedLinqDelivery,
+      }),
+    });
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["revoked", "expired"])(
+    "does not claim provider dispatch when Assistant Ask authority is %s",
+    async () => {
+      const prisma = createPrismaStub({
+        threadRouteContainerMemberId: "member-1",
+      });
+      mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx
+        .mockRejectedValueOnce(hostedOnboardingError({
+          code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+          httpStatus: 403,
+          message: "Hosted Assistant Ask delivery authority is no longer valid.",
+          retryable: false,
+        }));
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            answeredMailboxItemIds: ["aask_done_stale"],
+            authorityCheckOnly: false,
+            idempotencyKey: "reviewed-assistant-ask-completion:stale",
+            target: "chat-authorized-group",
+            targetKind: "thread",
+          }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+          retryable: false,
+        },
+      });
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not claim provider dispatch when the completion anchor is missing", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
+    mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted Assistant Ask delivery authority is no longer valid.",
+        retryable: false,
+      }));
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          answeredMailboxItemIds: [],
+          authorityCheckOnly: false,
+          idempotencyKey: "reviewed-assistant-ask-completion:missing-anchor",
+          target: "chat-authorized-group",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+        retryable: false,
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
   it("checks route authority without claiming provider dispatch", async () => {

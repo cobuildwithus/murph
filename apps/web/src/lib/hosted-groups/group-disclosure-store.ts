@@ -9,11 +9,20 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  createHostedGroupDisclosurePermissionLookupKey,
+  createHostedGroupDisclosurePermissionLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
+import {
+  openHostedUserSecureBoxString,
+  openHostedUserSecureBoxStrings,
+  sealHostedUserSecureBoxString,
+} from "../hosted-crypto/secure-box";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
+import { lockHostedGroupRow } from "./group-store";
 
 export const HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_LENGTH =
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS;
@@ -22,8 +31,14 @@ const HOSTED_GROUP_DISCLOSURE_PERMISSION_DIGEST_DOMAIN =
   "murph.hosted-group-disclosure.permission.v1";
 const HOSTED_GROUP_DISCLOSURE_PERMISSION_REQUEST_DOMAIN =
   "murph.hosted-group-disclosure.permission-request.v1";
+const HOSTED_GROUP_DISCLOSURE_PERMISSION_PROVIDER_IDEMPOTENCY_DOMAIN =
+  "murph.hosted-group-disclosure.permission-provider-idempotency.v1";
 const HOSTED_GROUP_DISCLOSURE_GRANT_REACTION_DOMAIN =
   "murph.hosted-group-disclosure.grant-reaction.v1";
+const HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_FIELD =
+  "permission_text_encrypted";
+const HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_SCOPE =
+  "hosted-group-disclosure-permission:permission-text:v1";
 const HOSTED_GROUP_DISCLOSURE_LOOKUP_CANDIDATE_MAX = 4;
 const HOSTED_GROUP_DISCLOSURE_FORBIDDEN_PERMISSION_TEXT =
   /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u;
@@ -78,28 +93,65 @@ export function canonicalizeHostedGroupDisclosurePermissionText(value: unknown):
   return canonical;
 }
 
-export function digestHostedGroupDisclosurePermissionText(value: unknown): string {
-  const permissionText = canonicalizeHostedGroupDisclosurePermissionText(value);
-  return digestCanonicalHostedGroupDisclosurePermissionText(permissionText);
+export function digestHostedGroupDisclosurePermissionText(input: {
+  groupId: string;
+  permissionText: unknown;
+}): string {
+  const groupId = input.groupId.trim();
+  if (!groupId) {
+    throw new TypeError("Disclosure permission digest group authority is required.");
+  }
+  const permissionText = canonicalizeHostedGroupDisclosurePermissionText(
+    input.permissionText,
+  );
+  return digestCanonicalHostedGroupDisclosurePermissionText({
+    groupId,
+    permissionText,
+  });
 }
 
 export function createHostedGroupDisclosurePermissionRequestId(input: {
   groupId: string;
   originAssistantInputId: string;
-  permissionDigest: string;
 }): string {
   const groupId = input.groupId.trim();
   const originAssistantInputId = input.originAssistantInputId.trim();
-  const permissionDigest = input.permissionDigest.trim();
-  if (!groupId || !originAssistantInputId || !permissionDigest) {
+  if (!groupId || !originAssistantInputId) {
     throw new TypeError("Disclosure permission request authority is required.");
   }
   const digest = createHash("sha256")
     .update(HOSTED_GROUP_DISCLOSURE_PERMISSION_REQUEST_DOMAIN, "utf8")
     .update("\0", "utf8")
-    .update(JSON.stringify([groupId, originAssistantInputId, permissionDigest]), "utf8")
+    .update(JSON.stringify([groupId, originAssistantInputId]), "utf8")
     .digest("hex");
   return `hgrpdp_${digest}`;
+}
+
+export function createHostedGroupDisclosurePermissionProviderIdempotencyKey(input: {
+  consentMessage: string;
+  groupId: string;
+  originAssistantInputId: string;
+}): string {
+  const consentMessage = input.consentMessage;
+  const groupId = input.groupId.trim();
+  const originAssistantInputId = input.originAssistantInputId.trim();
+  if (!consentMessage.trim() || !groupId || !originAssistantInputId) {
+    throw new TypeError(
+      "Disclosure permission provider idempotency input is required.",
+    );
+  }
+  const digest = createHash("sha256")
+    .update(
+      HOSTED_GROUP_DISCLOSURE_PERMISSION_PROVIDER_IDEMPOTENCY_DOMAIN,
+      "utf8",
+    )
+    .update("\0", "utf8")
+    .update(
+      JSON.stringify([groupId, originAssistantInputId, consentMessage]),
+      "utf8",
+    )
+    .digest("hex");
+  return `group-disclosure:${digest}`;
 }
 
 export async function recordHostedGroupDisclosurePermissionTx(input: {
@@ -111,11 +163,13 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const permissionText = canonicalizeHostedGroupDisclosurePermissionText(input.permissionText);
-  const permissionDigest = digestCanonicalHostedGroupDisclosurePermissionText(permissionText);
+  const permissionDigest = digestCanonicalHostedGroupDisclosurePermissionText({
+    groupId: input.groupId,
+    permissionText,
+  });
   const permissionId = createHostedGroupDisclosurePermissionRequestId({
     groupId: input.groupId,
     originAssistantInputId: input.originAssistantInputId,
-    permissionDigest,
   });
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyReadCandidates =
@@ -129,7 +183,7 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
     });
   }
 
-  await lockHostedGroupDisclosureGroupRow(input.tx, input.groupId);
+  await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
     select: { runtimeMemberId: true },
@@ -149,17 +203,25 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
       groupId: true,
       messageLookupKey: true,
       permissionDigest: true,
-      permissionText: true,
+      permissionTextEncrypted: true,
     },
   });
   if (existing) {
     if (
       existing.groupId === input.groupId
       && messageLookupKeyReadCandidates.includes(existing.messageLookupKey)
-      && existing.permissionDigest === permissionDigest
-      && existing.permissionText === permissionText
     ) {
-      return;
+      const existingPermissionText = await openHostedGroupDisclosurePermissionText({
+        groupId: input.groupId,
+        permissionDigest: existing.permissionDigest,
+        permissionId,
+        permissionTextEncrypted: existing.permissionTextEncrypted,
+        prisma: input.tx,
+        runtimeMemberId: group.runtimeMemberId,
+      });
+      if (existingPermissionText === permissionText) {
+        return;
+      }
     }
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_DISCLOSURE_PERMISSION_REQUEST_CONFLICT",
@@ -168,13 +230,19 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
       retryable: false,
     });
   }
+  const permissionTextEncrypted = await sealHostedGroupDisclosurePermissionText({
+    permissionId,
+    permissionText,
+    prisma: input.tx,
+    runtimeMemberId: group.runtimeMemberId,
+  });
   await input.tx.hostedGroupDisclosurePermission.create({
     data: {
       groupId: input.groupId,
       id: permissionId,
       messageLookupKey,
       permissionDigest,
-      permissionText,
+      permissionTextEncrypted,
       postedAt: input.postedAt,
     },
   });
@@ -215,8 +283,8 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
   }
 
   const permissionLookup = permissionLookups[0];
-  await lockHostedGroupDisclosureGroupRow(input.tx, permissionLookup.groupId);
-  await lockHostedGroupDisclosureMemberRow(input.tx, input.memberId);
+  await lockHostedGroupRow(input.tx, permissionLookup.groupId);
+  await lockHostedMemberRow(input.tx, input.memberId);
   const permission = await input.tx.hostedGroupDisclosurePermission.findUnique({
     where: { id: permissionLookup.id },
     select: {
@@ -234,13 +302,12 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
       id: true,
       messageLookupKey: true,
       permissionDigest: true,
-      permissionText: true,
+      permissionTextEncrypted: true,
     },
   });
   if (
     !permission
     || !messageLookupKeyReadCandidates.includes(permission.messageLookupKey)
-    || !hasValidHostedGroupDisclosurePermissionTextAndDigest(permission)
   ) {
     return { kind: "not_found" };
   }
@@ -269,6 +336,18 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "not_group_member" };
   }
 
+  const permissionText = await openHostedGroupDisclosurePermissionText({
+    groupId: permission.group.id,
+    permissionDigest: permission.permissionDigest,
+    permissionId: permission.id,
+    permissionTextEncrypted: permission.permissionTextEncrypted,
+    prisma: input.tx,
+    runtimeMemberId: groupRuntimeMemberId,
+  });
+  if (!permissionText) {
+    return { kind: "not_found" };
+  }
+
   const grantId = createHostedGroupDisclosureReactionGrantId(
     input.reactionEventId,
   );
@@ -283,15 +362,18 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
       : { kind: "not_found" };
   }
 
-  const existingGrant = await input.tx.hostedGroupDisclosureGrant.findFirst({
+  const existingOrSupersedingGrant = await input.tx.hostedGroupDisclosureGrant.findFirst({
     where: {
       membershipId: membership.id,
       permissionId: permission.id,
-      revokedAt: null,
+      OR: [
+        { revokedAt: null },
+        { revokedAt: { gte: input.now } },
+      ],
     },
     select: { id: true },
   });
-  if (existingGrant) {
+  if (existingOrSupersedingGrant) {
     return { kind: "accepted" };
   }
 
@@ -343,7 +425,7 @@ export async function readActiveHostedGroupDisclosureGrantsForGroup(input: {
     select: hostedGroupDisclosureGrantSummarySelect,
     take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   });
-  return rows.flatMap(projectHostedGroupDisclosureGrantSummary);
+  return projectHostedGroupDisclosureGrantSummaries({ prisma, rows });
 }
 
 export async function readActiveHostedGroupDisclosureGrantsForMember(input: {
@@ -360,7 +442,7 @@ export async function readActiveHostedGroupDisclosureGrantsForMember(input: {
     select: hostedGroupDisclosureGrantSummarySelect,
     take: HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
   });
-  return rows.flatMap(projectHostedGroupDisclosureGrantSummary);
+  return projectHostedGroupDisclosureGrantSummaries({ prisma, rows });
 }
 
 export async function revokeHostedGroupDisclosureGrantForMemberTx(input: {
@@ -380,8 +462,8 @@ export async function revokeHostedGroupDisclosureGrantForMemberTx(input: {
     return { kind: "not_found" };
   }
 
-  await lockHostedGroupDisclosureGroupRow(input.tx, lookup.membership.groupId);
-  await lockHostedGroupDisclosureMemberRow(input.tx, input.memberId);
+  await lockHostedGroupRow(input.tx, lookup.membership.groupId);
+  await lockHostedMemberRow(input.tx, input.memberId);
   if (lookup.revokedAt) {
     return { kind: "already_revoked" };
   }
@@ -416,8 +498,8 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
     return null;
   }
 
-  await lockHostedGroupDisclosureGroupRow(input.tx, lookup.permission.groupId);
-  await lockHostedGroupDisclosureMemberRow(input.tx, lookup.membership.memberId);
+  await lockHostedGroupRow(input.tx, lookup.permission.groupId);
+  await lockHostedMemberRow(input.tx, lookup.membership.memberId);
 
   const grant = await input.tx.hostedGroupDisclosureGrant.findUnique({
     where: { id: input.grantId },
@@ -431,8 +513,9 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
           group: {
             select: { id: true, runtimeMemberId: true },
           },
+          id: true,
           permissionDigest: true,
-          permissionText: true,
+          permissionTextEncrypted: true,
         },
       },
       revokedAt: true,
@@ -452,7 +535,6 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
       input.permissionDigest != null
       && grant.permission.permissionDigest !== input.permissionDigest
     )
-    || !hasValidHostedGroupDisclosurePermissionTextAndDigest(grant.permission)
   ) {
     return null;
   }
@@ -473,12 +555,24 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
     return null;
   }
 
+  const permissionText = await openHostedGroupDisclosurePermissionText({
+    groupId: grant.permission.group.id,
+    permissionDigest: grant.permission.permissionDigest,
+    permissionId: grant.permission.id,
+    permissionTextEncrypted: grant.permission.permissionTextEncrypted,
+    prisma: input.tx,
+    runtimeMemberId: groupRuntimeMemberId,
+  });
+  if (!permissionText) {
+    return null;
+  }
+
   return {
     grantId: grant.id,
     groupRuntimeMemberId,
     membershipId: grant.membership.id,
     permissionDigest: grant.permission.permissionDigest,
-    permissionText: grant.permission.permissionText,
+    permissionText,
     targetMemberId,
   };
 }
@@ -490,9 +584,10 @@ const hostedGroupDisclosureGrantSummarySelect = {
   },
   permission: {
     select: {
-      group: { select: { displayName: true, id: true } },
+      group: { select: { displayName: true, id: true, runtimeMemberId: true } },
+      id: true,
       permissionDigest: true,
-      permissionText: true,
+      permissionTextEncrypted: true,
     },
   },
 } as const satisfies Prisma.HostedGroupDisclosureGrantSelect;
@@ -501,29 +596,69 @@ type HostedGroupDisclosureGrantSummaryRow = Prisma.HostedGroupDisclosureGrantGet
   select: typeof hostedGroupDisclosureGrantSummarySelect;
 }>;
 
-function projectHostedGroupDisclosureGrantSummary(
-  row: HostedGroupDisclosureGrantSummaryRow,
-): HostedGroupDisclosureGrantSummary[] {
-  if (
-    row.membership.groupId !== row.permission.group.id
-    || !hasValidHostedGroupDisclosurePermissionTextAndDigest(row.permission)
-  ) {
+async function projectHostedGroupDisclosureGrantSummaries(input: {
+  prisma: HostedGroupDisclosureReadClient;
+  rows: HostedGroupDisclosureGrantSummaryRow[];
+}): Promise<HostedGroupDisclosureGrantSummary[]> {
+  const structurallyAuthorizedRows = input.rows.flatMap((row) => {
+    const runtimeMemberId = row.permission.group.runtimeMemberId;
+    if (
+      row.membership.groupId !== row.permission.group.id
+      || !runtimeMemberId
+    ) {
+      return [];
+    }
+    return [{ row, runtimeMemberId }];
+  });
+  if (structurallyAuthorizedRows.length === 0) {
     return [];
   }
-  return [{
-    grantId: row.id,
-    groupLabel: hostedGroupDisclosureGroupLabel(row.permission.group.displayName),
-    memberId: row.membership.memberId,
-    permissionText: row.permission.permissionText,
-  }];
+  const permissionTexts = await openHostedUserSecureBoxStrings({
+    entries: structurallyAuthorizedRows.map(({ row, runtimeMemberId }) => ({
+      aad: buildHostedGroupDisclosurePermissionTextAad(row.permission.id),
+      scope: HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_SCOPE,
+      userId: runtimeMemberId,
+      value: row.permission.permissionTextEncrypted,
+    })),
+    lane: "hosted-member-private-field",
+    prisma: input.prisma,
+  });
+  return structurallyAuthorizedRows.flatMap(({ row }, index) => {
+    const permissionText = permissionTexts[index];
+    if (
+      !permissionText
+      || !hasValidHostedGroupDisclosurePermissionTextAndDigest({
+        groupId: row.permission.group.id,
+        permissionDigest: row.permission.permissionDigest,
+        permissionText,
+      })
+    ) {
+      return [];
+    }
+    return [{
+      grantId: row.id,
+      groupLabel: hostedGroupDisclosureGroupLabel(row.permission.group.displayName),
+      memberId: row.membership.memberId,
+      permissionText,
+    }];
+  });
 }
 
-function digestCanonicalHostedGroupDisclosurePermissionText(permissionText: string): string {
-  return createHash("sha256")
-    .update(HOSTED_GROUP_DISCLOSURE_PERMISSION_DIGEST_DOMAIN, "utf8")
-    .update("\0", "utf8")
-    .update(permissionText, "utf8")
-    .digest("hex");
+function digestCanonicalHostedGroupDisclosurePermissionText(input: {
+  groupId: string;
+  permissionText: string;
+}): string {
+  const permissionDigest = createHostedGroupDisclosurePermissionLookupKey(
+    JSON.stringify([
+      HOSTED_GROUP_DISCLOSURE_PERMISSION_DIGEST_DOMAIN,
+      input.groupId,
+      input.permissionText,
+    ]),
+  );
+  if (!permissionDigest) {
+    throw new TypeError("Disclosure permission digest input is required.");
+  }
+  return permissionDigest;
 }
 
 function createHostedGroupDisclosureReactionGrantId(
@@ -538,16 +673,81 @@ function createHostedGroupDisclosureReactionGrantId(
 }
 
 function hasValidHostedGroupDisclosurePermissionTextAndDigest(input: {
+  groupId: string;
   permissionDigest: string;
   permissionText: string;
 }): boolean {
   try {
     const canonical = canonicalizeHostedGroupDisclosurePermissionText(input.permissionText);
     return canonical === input.permissionText
-      && digestCanonicalHostedGroupDisclosurePermissionText(canonical) === input.permissionDigest;
+      && createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
+        JSON.stringify([
+          HOSTED_GROUP_DISCLOSURE_PERMISSION_DIGEST_DOMAIN,
+          input.groupId,
+          canonical,
+        ]),
+      ).includes(input.permissionDigest);
   } catch {
     return false;
   }
+}
+
+async function sealHostedGroupDisclosurePermissionText(input: {
+  permissionId: string;
+  permissionText: string;
+  prisma: HostedGroupDisclosureReadClient;
+  runtimeMemberId: string;
+}): Promise<string> {
+  const encrypted = await sealHostedUserSecureBoxString({
+    aad: buildHostedGroupDisclosurePermissionTextAad(input.permissionId),
+    lane: "hosted-member-private-field",
+    prisma: input.prisma,
+    scope: HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_SCOPE,
+    userId: input.runtimeMemberId,
+    value: input.permissionText,
+  });
+  if (!encrypted) {
+    throw new Error("Hosted group disclosure permission encryption returned no value.");
+  }
+  return encrypted;
+}
+
+async function openHostedGroupDisclosurePermissionText(input: {
+  groupId: string;
+  permissionDigest: string;
+  permissionId: string;
+  permissionTextEncrypted: string;
+  prisma: HostedGroupDisclosureReadClient;
+  runtimeMemberId: string;
+}): Promise<string | null> {
+  const permissionText = await openHostedUserSecureBoxString({
+    aad: buildHostedGroupDisclosurePermissionTextAad(input.permissionId),
+    lane: "hosted-member-private-field",
+    prisma: input.prisma,
+    scope: HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_SCOPE,
+    userId: input.runtimeMemberId,
+    value: input.permissionTextEncrypted,
+  });
+  if (
+    !permissionText
+    || !hasValidHostedGroupDisclosurePermissionTextAndDigest({
+      groupId: input.groupId,
+      permissionDigest: input.permissionDigest,
+      permissionText,
+    })
+  ) {
+    return null;
+  }
+  return permissionText;
+}
+
+function buildHostedGroupDisclosurePermissionTextAad(permissionId: string) {
+  return {
+    field: HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_FIELD,
+    purpose: "hosted-group-disclosure-permission-private-content",
+    rowId: permissionId,
+    table: "hosted_group_disclosure_permission",
+  } as const;
 }
 
 function containsForbiddenHostedGroupDisclosurePermissionCodePoint(value: string): boolean {
@@ -579,18 +779,4 @@ function normalizeHostedGroupDisclosureLookupCandidates(
 function hostedGroupDisclosureGroupLabel(displayName: string | null): string {
   const normalized = displayName?.trim() ?? "";
   return normalized || "Group";
-}
-
-async function lockHostedGroupDisclosureGroupRow(
-  tx: Prisma.TransactionClient,
-  groupId: string,
-): Promise<void> {
-  await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
-}
-
-async function lockHostedGroupDisclosureMemberRow(
-  tx: Prisma.TransactionClient,
-  memberId: string,
-): Promise<void> {
-  await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }

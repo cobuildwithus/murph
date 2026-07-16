@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createHostedAssistantInputLookupKey,
   createHostedAssistantInputLookupKeyReadCandidates,
+  createHostedGroupDisclosurePermissionLookupKey,
+  createHostedGroupDisclosurePermissionLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -45,6 +47,10 @@ describe("hosted member lookup keys", () => {
       "ain_0123456789abcdef0123456789abcdef",
     );
     const linq = createHostedLinqChatLookupKey("chat_123");
+    const groupDisclosurePermission =
+      createHostedGroupDisclosurePermissionLookupKey(
+        "Recent sleep timing and duration",
+      );
     const customer = createHostedStripeCustomerLookupKey("cus_123");
     const subscription = createHostedStripeSubscriptionLookupKey("sub_123");
     const subscriptionSchedule = createHostedStripeSubscriptionScheduleLookupKey("sched_123");
@@ -54,6 +60,9 @@ describe("hosted member lookup keys", () => {
     expect(privy).toMatch(/^hbidx:privy-user:v1:/u);
     expect(assistantInput).toMatch(/^hbidx:assistant-input:v1:/u);
     expect(linq).toMatch(/^hbidx:linq-chat:v1:/u);
+    expect(groupDisclosurePermission).toMatch(
+      /^hbidx:group-disclosure-permission:v1:/u,
+    );
     expect(customer).toMatch(/^hbidx:stripe-customer:v1:/u);
     expect(subscription).toMatch(/^hbidx:stripe-subscription:v1:/u);
     expect(subscriptionSchedule).toMatch(/^hbidx:stripe-subscription-schedule:v1:/u);
@@ -65,6 +74,9 @@ describe("hosted member lookup keys", () => {
       "ain_0123456789abcdef0123456789abcdef",
     );
     expect(linq).not.toContain("chat_123");
+    expect(groupDisclosurePermission).not.toContain(
+      "Recent sleep timing and duration",
+    );
     expect(customer).not.toContain("cus_123");
     expect(subscription).not.toContain("sub_123");
     expect(subscriptionSchedule).not.toContain("sched_123");
@@ -96,12 +108,23 @@ describe("hosted member lookup keys", () => {
         createHostedAssistantInputLookupKeyReadCandidates(
           "ain_0123456789abcdef0123456789abcdef",
         );
+      const groupDisclosurePermissionCandidates =
+        createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
+          "Recent sleep timing and duration",
+        );
 
       expect(readHostedContactPrivacyCurrentVersion()).toBe("v2");
       expect(candidates).toHaveLength(2);
       expect(assistantInputCandidates).toHaveLength(2);
+      expect(groupDisclosurePermissionCandidates).toHaveLength(2);
       expect(parseHostedBlindIndex(assistantInputCandidates[0])?.version).toBe("v2");
       expect(parseHostedBlindIndex(assistantInputCandidates[1])?.version).toBe("v1");
+      expect(
+        parseHostedBlindIndex(groupDisclosurePermissionCandidates[0])?.version,
+      ).toBe("v2");
+      expect(
+        parseHostedBlindIndex(groupDisclosurePermissionCandidates[1])?.version,
+      ).toBe("v1");
       expect(parseHostedBlindIndex(candidates[0])?.version).toBe("v2");
       expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
     } finally {

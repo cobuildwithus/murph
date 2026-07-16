@@ -21,18 +21,28 @@ answer remains untrusted data when the private runtime composes its follow-up.
 
 The reverse `consented_member` adapter lets an authenticated group Murph ask
 one current member's private Murph under a separate exact grant. Web/Postgres
-owns an immutable, group-visible natural-language permission plus an append-only
-per-membership grant generation. A current member creates that grant only by
-adding the exact Like reaction to the exact server-authored consent message;
+owns an immutable, group-visible natural-language permission encrypted with the
+existing hosted member private-field secure-box under the synthetic group
+runtime, plus an append-only per-membership grant generation. The permission row
+id and encrypted field are bound into AAD; plaintext is opened only after the
+exact group or member authority has been established. A current member creates
+that grant only by adding the exact Like reaction to the exact server-authored
+consent message;
 membership never implies the grant, and the Like cannot create membership. The
 group model may select only a current opaque `grantId` returned beside that
 member and permission by `read_current`. Web binds every hidden identity and
 revalidates the group, personal runtime, membership generation, grant
 generation, permission digest, origin, expiry, and runtime fence at admission,
-before the personal read, and before disclosure completion. Leave/rejoin and
-revoke/regrant therefore invalidate old work. One accepted group input owns at
-most one consented-member request; exact replay reuses it, while a different
-grant, question, or origin session requires a fresh accepted input.
+before the personal read, before disclosure completion, and again in the
+existing Linq egress transaction that claims provider dispatch. Reviewed exact
+delivery carries the completion mailbox id as its causal anchor, so a revoked,
+expired, mismatched, or unanchored queued answer is terminal before provider
+entry. Leave/rejoin and revoke/regrant therefore invalidate old work. One
+accepted group input owns at most one consented-member request; exact replay
+reuses it, while a different grant, question, or origin session requires a fresh
+accepted input. Candidate and reviewer provider usage flows through the existing
+hosted usage ledger with deterministic request, attempt, stage, and provider
+ordinal identity; usage recording is best-effort and never controls disclosure.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most

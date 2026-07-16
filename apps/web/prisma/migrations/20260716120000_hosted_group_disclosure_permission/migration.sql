@@ -1,7 +1,7 @@
 CREATE TABLE "hosted_group_disclosure_permission" (
     "id" TEXT NOT NULL,
     "group_id" TEXT NOT NULL,
-    "permission_text" TEXT NOT NULL,
+    "permission_text_encrypted" TEXT NOT NULL,
     "permission_digest" TEXT NOT NULL,
     "message_lookup_key" TEXT NOT NULL,
     "posted_at" TIMESTAMP(3) NOT NULL,

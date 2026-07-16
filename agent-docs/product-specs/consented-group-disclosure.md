@@ -30,10 +30,16 @@ review the candidate disclosure inside that boundary.
 1. During an authenticated group-chat turn, group Murph calls
    `murph.group(action="post_disclosure_request")` with one concise
    `permissionText`.
-2. Web canonicalizes and stores that exact text, binds it to the current group,
-   and posts a server-owned consent message. A stable request id and provider
-   idempotency key bind the current group, trusted accepted input, and exact
-   permission digest. The model does not write the consent copy.
+2. Web canonicalizes that exact text and posts a server-owned consent message;
+   after Linq returns its provider message id, Web stores and binds the
+   permission to the current group and exact provider message. A stable request
+   id binds the current group and trusted accepted input without private text. A
+   separate domain-separated provider idempotency key hashes the group id, trusted
+   accepted-input id, and exact public consent-message bytes, so exact retries
+   dedupe while changed text cannot inherit an earlier provider message id. The
+   stored encrypted text plus its group-scoped, server-keyed, versioned blind
+   index then bind that request to the exact provider message. The model does
+   not write the consent copy.
 3. An already-current member grants the permission only by adding the exact
    Like reaction to that exact Murph-authored message. Web derives the actor
    from the verified route and live roster, then creates a new per-membership
@@ -74,21 +80,38 @@ group.
   callback, or return-route id. It may use only a current server-issued
   `grantId` from the live group read.
 - One immutable permission record owns the canonical text and digest. One
-  append-only grant generation binds that permission to one membership.
+  append-only grant generation binds that permission to one membership. The
+  exact text is encrypted through the existing hosted member private-field
+  secure-box under the synthetic group runtime, with AAD bound to the permission
+  row and encrypted field. It is decrypted only after the exact group or member
+  structure authorizing the read has been established. The digest remains
+  bounded operational integrity and replay metadata.
   Materially different permission text requires a new request and Like.
 - Permission-post replay succeeds only when the stored group, provider-message
   lookup, text, and digest all match. Each verified provider reaction event
   derives one grant id, so duplicate delivery is idempotent and cannot recreate
   a revoked grant.
+- If a provider accepts consent message A but Web cannot bind its row, a changed
+  retry B uses another provider idempotency key and may become the sole bound
+  permission. The unbound A message is an inert orphan: without a permission row
+  its reactions cannot create a grant. This availability/UX residual is
+  preferred to adding a pending reservation or second reconciliation lifecycle.
 - Permission canonicalization is deterministic: CRLF becomes LF, Unicode is
   NFC, outer whitespace is trimmed, and the result is limited to 1,000 Unicode
   code points. Every Unicode control, format, surrogate, private-use, or
-  unassigned code point except LF is rejected before posting. A domain-separated
-  v1 SHA-256 digest binds that exact displayed text through request completion.
+  unassigned code point except LF is rejected before posting. A
+  domain-separated, group-scoped, server-keyed, versioned blind index binds
+  that exact displayed text through request completion without making common
+  permission scopes offline-dictionary-testable or cross-group comparable from
+  a database snapshot.
 - Web revalidates the exact group, personal runtime, membership generation,
   grant generation, permission digest, origin, expiry, and runtime fence at
   admission, immediately before the personal read, and immediately before
-  completion disclosure.
+  completion append. Reviewed exact delivery carries that completion mailbox id
+  into the existing outbox, and the final Linq egress transaction repeats the
+  paired request and grant authority check before claiming provider dispatch.
+  Missing anchors and revoked, expired, stale, or mismatched authority are
+  terminal before provider entry.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
 - One accepted group input owns at most one request targeting one grant and one
@@ -98,12 +121,27 @@ group.
 - The existing ten-minute Assistant Ask lifetime, deterministic request and
   completion ids, encrypted mailbox retry, and first-committed-completion rule
   own durability. Retried work cannot select a new target or permission.
+- Candidate and reviewer provider usage uses the existing hosted usage ledger.
+  Request, claimed attempt, answer/review stage, and provider ordinal form the
+  deterministic identity; usage recording is best-effort and cannot change or
+  retry the disclosure outcome.
 
 The permission and grant rows are queryable product truth owned by
 `apps/web`/Postgres. The paired `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items remain the only durable operation
 state. The personal vault, group vault, runner, and assistant session do not
 gain another permission store.
+
+Permission text is bounded to 1,000 code points before encryption, and live
+group/member projections return at most 25 active grants. Authority and replay
+use the existing indexed permission id, provider-message lookup, membership,
+and permission/grant relations; immutable history is not copied into hosted
+workspace snapshots or mailbox payloads. Permission and grant rows are retained
+for the owning group's lifetime and cascade with group/account deletion. Total
+historical permission and revoke/regrant cardinality is nevertheless currently
+unbounded within that lifetime. A numeric history cap or equally explicit
+bounded-retention rule must land before the producer flag is enabled; this PR
+does not invent a retention scheduler.
 
 ## Disclosure review
 
@@ -152,8 +190,9 @@ Deploy consumers first. Cloudflare/runner and Web must tolerate the new
 `consented_member` request target, prepare disclosure context, and optional
 `deliveryMode: "reviewed_exact"` completion before Web may emit new work.
 Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
-deployment and the runner fingerprint/confinement smoke. Enable exact `1` only
-after both planes have converged.
+deployment and the runner fingerprint/confinement smoke. Do not enable exact
+`1` until both planes have converged and the declared historical-cardinality
+blocker above has been resolved.
 
 Rollback disables and redeploys the Web producer first. Keep compatible
 consumers deployed until every consented request and reviewed-exact completion

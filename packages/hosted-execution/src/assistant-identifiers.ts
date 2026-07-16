@@ -13,11 +13,23 @@ import {
 
 const HOSTED_ASSISTANT_IDENTIFIER_BLIND_NAMESPACE =
   "murph.hosted-assistant-input.identifier-blind.v1";
+export const HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
+  "reviewed-assistant-ask-completion:";
 
 export type HostedMailboxAssistantInputLane = "conversation" | "system";
 
 export interface HostedAssistantConversationIdentifierBlind {
   key: string;
+}
+
+export function createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+  completionId: string,
+): string {
+  const digest = createHash("sha256")
+    .update(completionId)
+    .digest("hex")
+    .slice(0, 48);
+  return `${HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX}${digest}`;
 }
 
 export function createHostedAssistantConversationIdentifierBlind(input: {

@@ -164,7 +164,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("instead of claiming that an external workspace-linking step is required");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("When an existing group adds a projection permission, default to post_join_offer");
+      .toContain("When an existing group adds a permission, default to post_join_offer");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("do not tell members to join again or make the link the primary action");
     expect(MURPH_GROUP_TOOL.description)

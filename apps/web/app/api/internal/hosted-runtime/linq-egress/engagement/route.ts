@@ -2,6 +2,9 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx,
+} from "@/src/lib/hosted-groups/group-assistant-ask";
+import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
@@ -100,6 +103,13 @@ export const POST = withJsonError(async (request: Request) => {
         targetKind: providerTargetKind,
       });
     }
+
+    await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds,
+      boundRuntimeMemberId: userId,
+      idempotencyKey,
+      tx,
+    });
 
     let providerDispatchClaimed: boolean | null = null;
     if (!authorityCheckOnly) {

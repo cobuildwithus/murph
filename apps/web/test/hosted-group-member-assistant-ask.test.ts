@@ -37,6 +37,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 import {
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx,
   createHostedAssistantAskCompletionId,
   createHostedGroupMemberAssistantAskRequestId,
   handleHostedRuntimeAssistantAskControl,
@@ -46,6 +47,7 @@ import {
 import {
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
@@ -136,6 +138,26 @@ function disclosureRequestWake() {
     },
     eventId: requestId,
     memberId: TARGET_MEMBER_ID,
+    occurredAt: NOW.toISOString(),
+  });
+}
+
+function reviewedCompletionWake(
+  requestWake: ReturnType<typeof disclosureRequestWake>,
+) {
+  return buildHostedExecutionAssistantAskCompletedWake({
+    ask: {
+      deliveryMode: "reviewed_exact",
+      expiresAt: requestWake.ask.expiresAt,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      originSessionId: ORIGIN_SESSION_ID,
+      question: QUESTION,
+      requestId: requestWake.eventId,
+      result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
+      targetLabel: null,
+    },
+    eventId: createHostedAssistantAskCompletionId(requestWake.eventId),
+    memberId: GROUP_RUNTIME_MEMBER_ID,
     occurredAt: NOW.toISOString(),
   });
 }
@@ -541,6 +563,200 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       itemId: completionId,
       tx: expect.any(Object),
     });
+  });
+
+  it("revalidates the exact live grant at provider dispatch entry", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : input.mailboxItemId === requestWake.eventId
+        ? mailboxItemForWake(requestWake)
+        : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? completionWake
+      : input.mailboxItemId === requestWake.eventId
+        ? requestWake
+        : null);
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: NOW,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).toHaveBeenCalledWith({
+      expectedTargetMemberId: TARGET_MEMBER_ID,
+      grantId: GRANT_ID,
+      membershipId: MEMBERSHIP_ID,
+      permissionDigest: PERMISSION_DIGEST,
+      tx: expect.any(Object),
+    });
+  });
+
+  it("rejects provider dispatch when the exact grant was revoked after completion", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : input.mailboxItemId === requestWake.eventId
+        ? mailboxItemForWake(requestWake)
+        : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? completionWake
+      : input.mailboxItemId === requestWake.eventId
+        ? requestWake
+        : null);
+    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: NOW,
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
+    });
+  });
+
+  it("rejects provider dispatch when the request expired after completion", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : input.mailboxItemId === requestWake.eventId
+        ? mailboxItemForWake(requestWake)
+        : null);
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: new Date(requestWake.ask.expiresAt),
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
+    });
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the reviewed completion has no paired request", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId ? completionWake : null);
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: NOW,
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
+    });
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "extra", "mismatched key"] as const)(
+    "rejects a %s reviewed completion mailbox anchor before reading payloads",
+    async (variant) => {
+    const requestWake = disclosureRequestWake();
+    const completionId = createHostedAssistantAskCompletionId(
+      requestWake.eventId,
+    );
+    const { tx } = createPrisma();
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: variant === "missing"
+        ? []
+        : variant === "extra"
+          ? [completionId, "aask_done_unrelated"]
+          : [completionId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey: variant === "mismatched key"
+        ? createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+            "aask_done_unrelated",
+          )
+        : createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+            completionId,
+          ),
+      now: NOW,
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
+    });
+    expect(mocks.readHostedMailboxItemById).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves legacy Assistant Ask continuation delivery unchanged", async () => {
+    const { tx } = createPrisma();
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [],
+      boundRuntimeMemberId: TARGET_MEMBER_ID,
+      idempotencyKey: "assistant-ask-completion:legacy",
+      now: NOW,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedMailboxItemById).not.toHaveBeenCalled();
+  });
+
+  it("does not reinterpret non-reviewed answered mailbox anchors", async () => {
+    const { tx } = createPrisma();
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: ["aask_done_unrelated"],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey: "assistant-outbox:ordinary",
+      now: NOW,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedMailboxItemById).not.toHaveBeenCalled();
   });
 
   it("does not accept a legacy completion as a replay of reviewed disclosure", async () => {

@@ -206,6 +206,36 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["case-folded Like", { reactionType: "Like" }],
+    ["uppercase Like", { reactionType: "LIKE" }],
+    ["Like with a custom emoji", { customEmoji: "👍", reactionType: "like" }],
+  ])("does not treat %s as exact disclosure consent", async (_label, reaction) => {
+    const prisma = createPrismaStub();
+
+    await handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent(reaction),
+      prisma,
+    });
+
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
+
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
   it("does not turn a nonmember's disclosure Like into a join", async () => {
     mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
       kind: "not_group_member",
@@ -477,6 +507,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
 function parseReactionEvent(input: {
   customEmoji?: string | null;
+  eventType?: "reaction.added" | "reaction.removed";
   isFromMe?: boolean;
   reactionType: string;
 }) {
@@ -495,7 +526,7 @@ function parseReactionEvent(input: {
         reaction_type: input.reactionType,
       },
       event_id: "evt_reaction_123",
-      event_type: "reaction.added",
+      event_type: input.eventType ?? "reaction.added",
       trace_id: "trace_1234567890",
       webhook_version: "2026-02-03",
     } as HostedLinqWebhookEvent,

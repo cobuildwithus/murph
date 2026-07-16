@@ -1506,7 +1506,10 @@ async function assertHostedGroupVaultShareGrantLimitTx(
   }
 }
 
-async function lockHostedGroupRow(tx: Prisma.TransactionClient, groupId: string): Promise<void> {
+export async function lockHostedGroupRow(
+  tx: Prisma.TransactionClient,
+  groupId: string,
+): Promise<void> {
   await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
 }
 

@@ -992,6 +992,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   mocks.markAssistantFirstContactSeen.mockClear()
 
   const result = await sendAssistantNotificationLocal({
+    answeredMailboxItemIds: ['aask_done_exact'],
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
@@ -1009,6 +1010,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
+      answeredMailboxItemIds: ['aask_done_exact'],
       dispatchMode: 'queue-only',
       message: 'Fixed welcome text',
     }),

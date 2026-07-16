@@ -1310,14 +1310,14 @@ model HostedGroupMember {
 }
 
 model HostedGroupDisclosurePermission {
-  id               String                           @id
-  groupId          String                           @map("group_id")
-  permissionText   String                           @map("permission_text")
-  permissionDigest String                           @map("permission_digest")
-  messageLookupKey String                           @unique @map("message_lookup_key")
-  postedAt         DateTime                         @map("posted_at")
-  group            HostedGroup                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  grants           HostedGroupDisclosureGrant[]
+  id                      String                           @id
+  groupId                 String                           @map("group_id")
+  permissionTextEncrypted String                           @map("permission_text_encrypted")
+  permissionDigest        String                           @map("permission_digest")
+  messageLookupKey        String                           @unique @map("message_lookup_key")
+  postedAt                DateTime                         @map("posted_at")
+  group                   HostedGroup                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  grants                  HostedGroupDisclosureGrant[]
 
   @@index([groupId])
   @@map("hosted_group_disclosure_permission")

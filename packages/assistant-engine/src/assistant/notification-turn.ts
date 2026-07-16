@@ -177,6 +177,7 @@ export interface AssistantNotificationInput
     Pick<
       AssistantMessageInput,
       | 'abortSignal'
+      | 'answeredMailboxItemIds'
       | 'codexCommand'
       | 'deliveryDispatchMode'
       | 'deliveryIdempotencyKey'
@@ -1175,6 +1176,7 @@ function buildAssistantNotificationMessageInput(
     actorId: input.actorId,
     alias: input.alias,
     allowBindingRebind: input.allowBindingRebind,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     approvalPolicy: input.approvalPolicy,
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
@@ -1267,6 +1269,7 @@ async function deliverAssistantNotificationMessage(input: {
     media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({
+    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     turnId: input.turnId,
     message: input.message,
     dedupeToken: input.dedupeToken,

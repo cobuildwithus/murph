@@ -9,6 +9,8 @@ import type {
 import {
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -36,7 +38,10 @@ import {
   requireHostedRuntimeActiveAccess,
   requireHostedRuntimeActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
 import {
@@ -54,6 +59,7 @@ const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-member-assistant-ask.request.v1";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_NAMESPACE =
   "murph.hosted-assistant-ask.completion.v1";
+const HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX = "aask_done_";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE =
   "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
@@ -582,6 +588,95 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       response: { action: "complete", status: "completed" },
     };
   });
+}
+
+export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
+  input: {
+    answeredMailboxItemIds: readonly string[];
+    boundRuntimeMemberId: string;
+    idempotencyKey: string | null;
+    now?: Date;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  const isCompletionDelivery = input.idempotencyKey?.startsWith(
+    HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  ) === true;
+  if (!isCompletionDelivery) {
+    return;
+  }
+
+  const completionId = input.answeredMailboxItemIds[0] ?? null;
+  if (
+    !completionId
+    || input.answeredMailboxItemIds.length !== 1
+    || !completionId.startsWith(HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX)
+    || createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      completionId,
+    ) !== input.idempotencyKey
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+
+  const now = input.now ?? new Date();
+  const completionItem = await readHostedMailboxItemById({
+    mailboxItemId: completionId,
+    prisma: input.tx,
+  });
+  if (
+    !completionItem
+    || isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
+    || completionItem.dedupeKey !== completionId
+    || completionItem.kind !== "assistant.ask.completed"
+    || completionItem.userId !== input.boundRuntimeMemberId
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+
+  const completionWake = await readHostedMailboxWakeByItemId({
+    availableAt: now,
+    mailboxItemId: completionId,
+    prisma: input.tx,
+  });
+  if (
+    !completionWake
+    || !isHostedExecutionAssistantAskCompletedWake(completionWake)
+    || completionWake.eventId !== completionId
+    || completionWake.userId !== input.boundRuntimeMemberId
+    || completionWake.ask.deliveryMode !== "reviewed_exact"
+    || completionWake.ask.expiresAt !== completionItem.expiresAt
+    || createHostedAssistantAskCompletionId(completionWake.ask.requestId)
+      !== completionId
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+
+  const requestItem = await readHostedMailboxItemById({
+    mailboxItemId: completionWake.ask.requestId,
+    prisma: input.tx,
+  });
+  if (!requestItem) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+  const requestRead = await readHostedAssistantAskAuthorityTx({
+    boundRuntimeMemberId: requestItem.userId,
+    now,
+    requestId: completionWake.ask.requestId,
+    tx: input.tx,
+  });
+  const authority = requestRead.authority;
+  if (
+    !authority
+    || authority.deliveryMode !== "reviewed_exact"
+    || authority.originMemberId !== input.boundRuntimeMemberId
+    || authority.expiresAt !== completionWake.ask.expiresAt
+    || authority.originAssistantInputId
+      !== completionWake.ask.originAssistantInputId
+    || authority.originSessionId !== completionWake.ask.originSessionId
+    || authority.question !== completionWake.ask.question
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
 }
 
 async function replayHostedGroupAssistantAskTx(input: {
@@ -1306,6 +1401,15 @@ function isHostedAssistantAskExpired(
   }
   const expiresAtMs = Date.parse(expiresAt);
   return !Number.isFinite(expiresAtMs) || expiresAtMs <= now.getTime();
+}
+
+function throwHostedAssistantAskDeliveryAuthorityMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Hosted Assistant Ask delivery authority is no longer valid.",
+    retryable: false,
+  });
 }
 
 async function acquireHostedAssistantAskLockTx(

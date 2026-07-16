@@ -416,9 +416,11 @@ consumers that tolerate `consented_member`, prepare disclosure context, and the
 optional `reviewed_exact` completion while
 `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
 immediate runner fleet converge and confinement/fingerprint smoke passes,
-enable exact `1`. Rollback turns that gate off first and keeps compatible
-consumers until new requests and completions have drained or expired from both
-Web mailboxes and imported runtime state.
+keep the gate disabled until historical permission and revoke/regrant
+cardinality has a numeric cap or an equally explicit bounded-retention rule.
+Enable exact `1` only after both prerequisites hold. Rollback turns that gate
+off first and keeps compatible consumers until new requests and completions
+have drained or expired from both Web mailboxes and imported runtime state.
 
 ### Deploy Compatibility Rule
 

@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type {
+  AssistantProviderUsageDraft,
   ConsentedReadOnlyAssistantAskInput,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
+import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import { describe, test, vi } from "vitest";
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -31,6 +33,9 @@ import {
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+import type {
+  HostedWorkspaceDurableCheckpointEffect,
+} from "../src/hosted-runtime/workspace-runner.ts";
 
 const TEST_NOW = "2026-07-15T12:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_detached_ask";
@@ -155,16 +160,83 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
+  test("preserves a legacy joined-group cannot-answer explanation on completion", async () => {
+    const vaultRoot = await createVaultRoot();
+    let completedResult: unknown;
+    const explanation = "The authorized group evidence does not answer that question.";
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_legacy", itemId: "item_legacy" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                question: "What did the group decide?",
+                status: "ready",
+                targetLabel: "100 Club",
+              };
+            }
+            completedResult = request.result;
+            return { action: "complete", status: "completed" };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(async (): Promise<ReadOnlyAssistantAskResult> => ({
+          answer: explanation,
+          outcome: "cannot_answer",
+        })),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+
+      assert.deepEqual(completedResult, {
+        answer: explanation,
+        outcome: "cannot_answer",
+      });
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
   test("routes disclosure requests only through the consented executor before completion", async () => {
     const vaultRoot = await createVaultRoot();
     const executeAsk = vi.fn();
     let completedResult: unknown;
+    const deferredUsageEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const usageRecords: AssistantUsageRecord[] = [];
     const executeConsentedAsk = vi.fn(async (
-      _input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ReadOnlyAssistantAskResult> => ({
-      answer: "draft text that must not escape",
-      outcome: "cannot_answer",
-    }));
+      input: ConsentedReadOnlyAssistantAskInput,
+    ): Promise<ReadOnlyAssistantAskResult> => {
+      input.onProviderUsage?.({
+        stage: "answer",
+        usage: createTestUsageDraft({
+          inputTokens: 25,
+          outputTokens: 5,
+          providerRequestOrdinal: 0,
+        }),
+      });
+      input.onProviderUsage?.({
+        stage: "review",
+        usage: createTestUsageDraft({
+          inputTokens: 10,
+          outputTokens: 1,
+          providerRequestOrdinal: 0,
+        }),
+      });
+      return { outcome: "cannot_answer" };
+    });
 
     try {
       await writePending(vaultRoot, [
@@ -193,11 +265,25 @@ describe("hosted detached assistant ask controller", () => {
           },
         },
         codexHome: "/codex-home",
-        env: { LANG: "en_US.UTF-8" },
+        deferUsageUntilAfterDurableCheckpoint(effect) {
+          deferredUsageEffects.push(effect);
+        },
+        env: {
+          LANG: "en_US.UTF-8",
+          OPENAI_API_KEY: "member-provider-key",
+        },
         executeAsk,
         executeConsentedAsk,
+        memberId: TEST_USER_ID,
         now: () => TEST_NOW,
         onStateMutation() {},
+        usageRecordPort: {
+          async recordUsage(record) {
+            usageRecords.push(record);
+            return { recorded: true, usageId: record.usageId };
+          },
+        },
+        userEnvKeys: ["OPENAI_API_KEY"],
         vaultRoot,
       });
 
@@ -217,6 +303,230 @@ describe("hosted detached assistant ask controller", () => {
       assert.equal(consentedInput.question, "Are you free Tuesday afternoon?");
       assert.equal(consentedInput.workspaceRoot, vaultRoot);
       assert.deepEqual(completedResult, { answer: null, outcome: "cannot_answer" });
+      assert.equal(usageRecords.length, 0);
+      assert.equal(deferredUsageEffects.length, 1);
+      await deferredUsageEffects[0]?.();
+      assert.deepEqual(usageRecords.map((record) => ({
+        attemptCount: record.attemptCount,
+        credentialSource: record.credentialSource,
+        memberId: record.memberId,
+        providerRequestOrdinal: record.providerRequestOrdinal,
+        sessionId: record.sessionId,
+        turnId: record.turnId,
+        usageId: record.usageId,
+      })), [
+        {
+          attemptCount: 1,
+          credentialSource: "member",
+          memberId: TEST_USER_ID,
+          providerRequestOrdinal: 0,
+          sessionId: "ask_event_disclosure",
+          turnId: "turn_assistant_ask_ask_event_disclosure.stage-answer",
+          usageId:
+            "turn_assistant_ask_ask_event_disclosure.stage-answer.attempt-1",
+        },
+        {
+          attemptCount: 1,
+          credentialSource: "member",
+          memberId: TEST_USER_ID,
+          providerRequestOrdinal: 0,
+          sessionId: "ask_event_disclosure",
+          turnId: "turn_assistant_ask_ask_event_disclosure.stage-review",
+          usageId:
+            "turn_assistant_ask_ask_event_disclosure.stage-review.attempt-1",
+        },
+      ]);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("keeps usage-record failures isolated from ask completion", async () => {
+    const vaultRoot = await createVaultRoot();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const deferredUsageEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    let completionCalls = 0;
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_usage_failure", itemId: "item_usage_failure" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                question: "What happened?",
+                status: "ready",
+                targetLabel: "100 Club",
+              };
+            }
+            completionCalls += 1;
+            return { action: "complete", status: "completed" };
+          },
+        },
+        codexHome: null,
+        deferUsageUntilAfterDurableCheckpoint(effect) {
+          deferredUsageEffects.push(effect);
+        },
+        env: {},
+        async executeAsk(input) {
+          input.onProviderUsage?.({
+            stage: "answer",
+            usage: createTestUsageDraft({
+              inputTokens: 7,
+              outputTokens: 2,
+              providerRequestOrdinal: 0,
+            }),
+          });
+          return { answer: "The group finished.", outcome: "answered" };
+        },
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        usageRecordPort: {
+          async recordUsage() {
+            throw new Error("usage control plane unavailable");
+          },
+        },
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(completionCalls, 1);
+      assert.equal(warn.mock.calls.length, 0);
+      assert.equal(deferredUsageEffects.length, 1);
+      await deferredUsageEffects[0]?.();
+      assert.equal(warn.mock.calls.length, 1);
+      assert.match(String(warn.mock.calls[0]?.[0]), /continuing without retry/u);
+    } finally {
+      warn.mockRestore();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("defers retry usage until checkpoint and keeps attempt identities replay-safe", async () => {
+    const vaultRoot = await createVaultRoot();
+    const deferredUsageEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const usageRecords: AssistantUsageRecord[] = [];
+    const usageRecordPort = {
+      async recordUsage(record: AssistantUsageRecord) {
+        usageRecords.push(record);
+        return { recorded: true, usageId: record.usageId };
+      },
+    };
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_retry_usage", itemId: "item_retry_usage" }),
+      ]);
+      const firstController = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            assert.equal(request.action, "prepare");
+            return {
+              action: "prepare",
+              question: "What happened?",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        deferUsageUntilAfterDurableCheckpoint(effect) {
+          deferredUsageEffects.push(effect);
+        },
+        env: {},
+        async executeAsk(input) {
+          input.onProviderUsage?.({
+            stage: "answer",
+            usage: createTestUsageDraft({
+              inputTokens: 9,
+              outputTokens: 3,
+              providerRequestOrdinal: 0,
+            }),
+          });
+          throw new Error("first provider attempt failed");
+        },
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        usageRecordPort,
+        vaultRoot,
+      });
+
+      firstController.kick();
+      await waitUntil(async () => {
+        const pending = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(pending?.attemptCount, 1);
+        assert.equal(pending?.status, "pending");
+      });
+      await firstController.closeAndRequeue();
+      assert.equal(usageRecords.length, 0);
+      assert.equal(deferredUsageEffects.length, 1);
+      const firstEffect = deferredUsageEffects[0];
+      assert.ok(firstEffect);
+      await firstEffect();
+
+      const secondController = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                question: "What happened?",
+                status: "ready",
+                targetLabel: "100 Club",
+              };
+            }
+            return { action: "complete", status: "completed" };
+          },
+        },
+        codexHome: null,
+        deferUsageUntilAfterDurableCheckpoint(effect) {
+          deferredUsageEffects.push(effect);
+        },
+        env: {},
+        async executeAsk(input) {
+          input.onProviderUsage?.({
+            stage: "answer",
+            usage: createTestUsageDraft({
+              inputTokens: 9,
+              outputTokens: 3,
+              providerRequestOrdinal: 0,
+            }),
+          });
+          return { answer: "The group finished.", outcome: "answered" };
+        },
+        now: () => "2026-07-15T12:01:00.000Z",
+        onStateMutation() {},
+        usageRecordPort,
+        vaultRoot,
+      });
+
+      secondController.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await secondController.closeAndRequeue();
+      assert.equal(usageRecords.length, 1);
+      assert.equal(deferredUsageEffects.length, 2);
+      const secondEffect = deferredUsageEffects[1];
+      assert.ok(secondEffect);
+      await secondEffect();
+
+      assert.deepEqual(usageRecords.map((record) => record.usageId), [
+        "turn_assistant_ask_ask_retry_usage.stage-answer.attempt-1",
+        "turn_assistant_ask_ask_retry_usage.stage-answer.attempt-2",
+      ]);
+      const firstRecord = usageRecords[0];
+      assert.ok(firstRecord);
+      await firstEffect();
+      assert.deepEqual(usageRecords[2], firstRecord);
     } finally {
       await removeVaultRoot(vaultRoot);
     }
@@ -612,4 +922,40 @@ async function waitUntil(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
+}
+
+function createTestUsageDraft(input: {
+  inputTokens: number;
+  outputTokens: number;
+  providerRequestOrdinal: number;
+}): AssistantProviderUsageDraft {
+  return {
+    provider: "codex-cli",
+    providerRequestOrdinal: input.providerRequestOrdinal,
+    providerRequestOutcome: "succeeded",
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      providerMetadataJson: null,
+      providerName: "hosted-openai",
+      providerRequestId: null,
+      rawUsageJson: {
+        input_tokens: input.inputTokens,
+        output_tokens: input.outputTokens,
+        total_tokens: input.inputTokens + input.outputTokens,
+      },
+      reasoningTokens: null,
+      requestedModel: "gpt-5.5",
+      servedModel: "gpt-5.5",
+      tokenPricingBasis: "standard",
+      totalTokens: input.inputTokens + input.outputTokens,
+      turnProfileJson: null,
+      usageExtractionSourcePath: "test.usage",
+      usageExtractionVersion: "test-v1",
+    },
+  };
 }
