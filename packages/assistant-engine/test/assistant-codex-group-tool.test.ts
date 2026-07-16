@@ -82,6 +82,8 @@ describe("murph.group dynamic tool", () => {
       "set_chat_avatar",
       "share_contact_card",
       "revoke_own_email_share",
+      "read_own_assistant_style",
+      "update_own_assistant_style",
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
@@ -160,10 +162,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("existing members keep their membership and other grants");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("When these actions are available for the current connected group-chat turn");
+      .toContain("When other group actions are available for the current connected group-chat turn");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("whether each participant already uses Murph");
-    expect(MURPH_GROUP_TOOL.description).not.toContain("their own Murph");
+    expect(MURPH_GROUP_TOOL.description).toContain("their own private Murph tone");
+    expect(MURPH_GROUP_TOOL.description).toContain("never accept a member id or handle");
+    expect(MURPH_GROUP_TOOL.description).toContain("not to the shared group room");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -206,6 +210,42 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: { action: "revoke_own_email_share" },
     });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_own_assistant_style",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_own_assistant_style" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_own_assistant_style",
+      detail: 8,
+      humor: 10,
+      push: null,
+      tone: "casual",
+      voice: "warm",
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "update_own_assistant_style",
+        style: {
+          personality: { detail: 8, humor: 10, push: null },
+          tone: "casual",
+          voice: "warm",
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_own_assistant_style",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_own_assistant_style",
+      humor: 10,
+      memberId: "member_hijack",
+    }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",

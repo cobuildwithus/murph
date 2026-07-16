@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
+  readHostedMemberAssistantPreferences: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
+  upsertHostedMemberAssistantPreferencesTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -50,6 +52,11 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
+  readHostedMemberAssistantPreferences: mocks.readHostedMemberAssistantPreferences,
+  upsertHostedMemberAssistantPreferencesTx: mocks.upsertHostedMemberAssistantPreferencesTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -220,6 +227,7 @@ function groupSummaryWithOwnerEmailGrant() {
 
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     vi.clearAllMocks();
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.leaveHostedGroupMemberTx.mockResolvedValue({
@@ -247,6 +255,18 @@ describe("handleHostedRuntimeGroupTool", () => {
         role: "member",
       }],
       truncated: false,
+    });
+    mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
+      personality: { detail: null, humor: 8, push: null },
+      tone: "casual",
+      voice: "warm",
+    });
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      assistantPersonality: { detail: 7, humor: 9, push: null },
+      assistantTone: "casual",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "hmi_preferences_1" },
+      updated: true,
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -284,6 +304,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
@@ -294,14 +318,16 @@ describe("handleHostedRuntimeGroupTool", () => {
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
+      read_own_assistant_style: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+      update_own_assistant_style: "participant_aware",
     });
   });
 
-  it("dispatches a personal ask and schedules only its committed mailbox wake", async () => {
+it("dispatches a personal ask and schedules only its committed mailbox wake", async () => {
     const scheduleMailboxWake = vi.fn();
     mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
       mailboxWake: {
@@ -339,6 +365,207 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+it("reads only the authenticated Linq sender's private assistant style", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+      },
+    })).resolves.toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "ok",
+        style: {
+          personality: {
+            detail: { source: "default", value: 5 },
+            humor: { source: "custom", value: 8 },
+            push: { source: "default", value: 3 },
+          },
+          tone: "casual",
+          voice: "warm",
+        },
+      },
+    });
+    expect(mocks.readHostedMemberAssistantPreferences).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_sender" }),
+    );
+  });
+
+  it("updates the authenticated Linq sender's private assistant style and wakes that member", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+        style: {
+          personality: { detail: 7, humor: 9 },
+          tone: "casual",
+          voice: "warm",
+        },
+      },
+    })).resolves.toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "saved",
+        style: {
+          personality: {
+            detail: { source: "custom", value: 7 },
+            humor: { source: "custom", value: 9 },
+            push: { source: "default", value: 3 },
+          },
+          tone: "casual",
+          voice: "warm",
+        },
+      },
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_sender",
+        preferences: {
+          personality: { detail: 7, humor: 9 },
+          tone: "casual",
+          voice: "warm",
+        },
+      }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "hmi_preferences_1",
+    });
+  });
+
+  it("fails closed when a group assistant-style action has no authenticated Linq sender", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_own_assistant_style",
+        currentSender: { senderHandle: "spoofed@example.test", source: "email" },
+      },
+    })).resolves.toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the authenticated group sender has no active Murph access", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+        style: { voice: "warm" },
+      },
+    })).resolves.toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("respects the personality rollout gate without disabling tone and voice updates", async () => {
+    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+        style: { personality: { humor: 9 } },
+      },
+    })).resolves.toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "personality_rollout_pending",
+      },
+    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_sender", suspendedAt: null },
+    });
+    await handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+        style: { tone: "casual", voice: "warm" },
+      },
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mailboxPayloadMode: "legacy_snapshot",
+        memberId: "member_sender",
+        preferences: { tone: "casual", voice: "warm" },
+      }),
+    );
+  });
+
+  it("fails personal style access closed for suspended or unresolved senders", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce({
+      core: {
+        id: "member_suspended",
+        suspendedAt: new Date("2026-07-15T12:00:00Z"),
+      },
+    }).mockResolvedValueOnce(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_own_assistant_style",
+        currentSender: { senderHandle: "+15550000001", source: "linq" },
+      },
+    })).resolves.toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_own_assistant_style",
+        currentSender: { senderHandle: "+15550000002", source: "linq" },
+      },
+    })).resolves.toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unresolved",
+      },
+    });
+    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
   it("lists the current member's group grants without exposing a member-held invite link", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_self",

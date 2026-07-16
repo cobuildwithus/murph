@@ -2128,7 +2128,7 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
-  it('keeps personal settings and authorization surfaces out of group prompts', () => {
+  it('allows only server-bound current-sender style settings in group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
         'vault-cli device connect <provider> --format json',
@@ -2172,6 +2172,11 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
+    expect(prompt).toContain('`read_own_assistant_style` and `update_own_assistant_style`')
+    expect(prompt).toContain("only the current sender's private tone, voice, Humor, Push, and Detail")
+    expect(prompt).toContain('never supply, infer, or ask for a member id or handle')
+    expect(prompt).toContain('not this shared room')
+    expect(prompt).toContain('do not fall back to a settings URL from the group')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
