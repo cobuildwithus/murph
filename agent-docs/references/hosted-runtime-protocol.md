@@ -293,9 +293,7 @@ proof owns the container lifecycle while it delivers the identity-checked abort.
 A stale result preserves the fence and retries. An accepted or queued result, or
 an ambiguous delivery failure, recycles the old shell fail-closed before the
 container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement. A deploy-skewed request-only
-`requested` result remains non-authoritative without inactive proof and
-preserves the fence for retry.
+clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
