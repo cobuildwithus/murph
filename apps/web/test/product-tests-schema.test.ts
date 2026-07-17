@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -159,6 +159,174 @@ describe("product test contaminant schema", () => {
       "duplicate reviewed serving grams overlay label",
     );
     expect(loadReviewedServingGramsOverlaySql).not.toContain("product_tests");
+  });
+
+  it("keeps only independently verified reviewed serving grams and CAS-retires stale estimates", async () => {
+    const reviewedServingGramsTsv = await readFile(
+      new URL("../sql/product-tests/reviewed-serving-grams.tsv", import.meta.url),
+      "utf8",
+    );
+    const retiredReviewedServingGramsTsv = await readFile(
+      new URL("../sql/product-tests/retired-reviewed-serving-grams.tsv", import.meta.url),
+      "utf8",
+    );
+    const backfillServingGramsSql = await readFile(
+      new URL("../sql/product-tests/backfill-serving-grams.sql", import.meta.url),
+      "utf8",
+    );
+    const backfillServingGramsScript = await readFile(
+      new URL("../sql/product-tests/backfill-serving-grams.sh", import.meta.url),
+      "utf8",
+    );
+
+    expect(reviewedServingGramsTsv.startsWith(
+      "entity_type\tlabel_id\tserving_grams\tevidence_url\tevidence_note\n",
+    )).toBe(true);
+    expect(reviewedServingGramsTsv).not.toContain("plasticlist.org");
+
+    const reviewedRows = reviewedServingGramsTsv.trimEnd().split("\n").slice(1).map((line) =>
+      line.split("\t"),
+    );
+    for (const row of reviewedRows) {
+      expect(row).toHaveLength(5);
+    }
+    expect(
+      reviewedRows.map(([entityType, labelId, servingGrams]) =>
+        `${entityType}|${labelId}|${servingGrams}`,
+      ).sort(),
+    ).toEqual([
+      "food|brand_site:driscolls-non-organic-strawberries|144",
+      "food|brand_site:o-organics-organic-eggs-large-brown|50",
+      "food|fdc:2198090|170",
+      "food|tj:072774|114",
+    ].sort());
+
+    expect(retiredReviewedServingGramsTsv.startsWith(
+      "entity_type\tlabel_id\tstale_serving_grams\tretirement_note\n",
+    )).toBe(true);
+    const retiredRows = retiredReviewedServingGramsTsv.trimEnd().split("\n").slice(1).map((line) =>
+      line.split("\t"),
+    );
+    for (const row of retiredRows) {
+      expect(row).toHaveLength(4);
+      expect(row[3]).toContain("PlasticList");
+    }
+    expect(
+      retiredRows.map(([entityType, labelId, servingGrams]) =>
+        `${entityType}|${labelId}|${servingGrams}`,
+      ).sort(),
+    ).toEqual([
+      "food|brand_site:good-farms-organic-strawberries|140",
+      "food|brand_site:nespresso-medium-roast-black-capsule-coffee|237",
+      "food|brand_site:rishi-english-breakfast-organic-black-tea|300",
+      "food|brand_site:tazo-awake-english-breakfast-black-tea|300",
+      "food|fdc:1086537|370",
+      "food|fdc:1168556|366",
+      "food|fdc:1301823|370",
+      "food|fdc:170700|450",
+      "food|fdc:1965636|450",
+      "food|fdc:2203038|370",
+      "food|fdc:2418882|370",
+      "food|fdc:2519549|370",
+      "food|fdc:2663953|450",
+      "food|fdc:2663955|450",
+      "food|fdc:2663962|450",
+      "food|fdc:2663963|450",
+      "food|fdc:2668980|450",
+      "food|kroger_site:0083514300104|370",
+      "food|safeway:960127068|240",
+      "food|safeway:960127250|240",
+      "food|wfm:b00iae9y5a|355",
+      "supplement|271503|370",
+      "supplement|280356|1.5",
+      "supplement|40351|370",
+      "supplement|40352|370",
+    ].sort());
+
+    const reviewedLabels = new Set(reviewedRows.map(([entityType, labelId]) =>
+      `${entityType}|${labelId}`,
+    ));
+    const retiredLabels = retiredRows.map(([entityType, labelId]) =>
+      `${entityType}|${labelId}`,
+    );
+    expect(retiredLabels.some((label) => reviewedLabels.has(label))).toBe(false);
+
+    expect(backfillServingGramsSql).toContain(
+      "\\copy serving_grams_retired_reviewed_import FROM __RETIRED_REVIEWED_SERVING_GRAMS_TSV__",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "serving grams label cannot be both reviewed and retired",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "retired reviewed serving grams food value diverged from guarded stale value",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "retired reviewed serving grams supplement value diverged from guarded stale value",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "foods.serving_grams = retired.stale_serving_grams",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "supplements.serving_grams = retired.stale_serving_grams",
+    );
+    expect(backfillServingGramsSql.indexOf("SET serving_grams = NULL")).toBeLessThan(
+      backfillServingGramsSql.indexOf("SET serving_grams = candidates.serving_grams"),
+    );
+    expect(backfillServingGramsScript).toContain(
+      "RETIRED_REVIEWED_SERVING_GRAMS_TSV_PATH",
+    );
+    expect(backfillServingGramsScript).toContain(
+      "retired-reviewed-serving-grams.tsv",
+    );
+    expect(backfillServingGramsScript).toContain(
+      "__RETIRED_REVIEWED_SERVING_GRAMS_TSV__",
+    );
+  });
+
+  it("keeps stale product-label cleanup exact, guarded, and dry-run by default", async () => {
+    const cleanupSql = await readFile(
+      new URL(
+        "../sql/foods/cleanup-stale-product-test-foods.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const cleanupScriptUrl = new URL(
+      "../sql/foods/cleanup-stale-product-test-foods.sh",
+      import.meta.url,
+    );
+    const cleanupScript = await readFile(cleanupScriptUrl, "utf8");
+    const cleanupScriptMode = (await stat(cleanupScriptUrl)).mode & 0o777;
+
+    expect(cleanupScriptMode).toBe(0o755);
+    expect(cleanupScript).toContain("apply=false");
+    expect(cleanupScript).toContain("--apply");
+    expect(cleanupScript).toContain('stale_food_cleanup_apply="$apply"');
+    expect(cleanupScript).toContain("labels-db-psql.sh");
+    expect(cleanupScript).not.toContain('echo "$MURPH_LABELS_DB_URL"');
+
+    expect(cleanupSql).toContain("murph:product_tests:mutation");
+    expect(cleanupSql).toContain("FOR UPDATE OF foods");
+    expect(cleanupSql).toContain(
+      "stale food cleanup requires zero product_tests links",
+    );
+    expect(cleanupSql).toContain(
+      "stale food cleanup found % divergent expected identity row(s)",
+    );
+    expect(cleanupSql).toContain(
+      "brand_site:kirkland-seasoned-rotisserie-chicken",
+    );
+    expect(cleanupSql).toContain("brand_site:nescafe-instant-coffee-powder");
+    expect(cleanupSql.match(/DELETE FROM foods/gu)).toHaveLength(1);
+    expect(cleanupSql).toMatch(
+      /DELETE FROM foods[\s\S]*foods\.data_origin_url = expected\.data_origin_url[\s\S]*foods\.label->>'source' = expected\.label_source[\s\S]*foods\.label->>'sourceType' = expected\.label_source_type[\s\S]*NOT EXISTS \([\s\S]*product_tests\.food_id = foods\.id/u,
+    );
+    expect(cleanupSql).toContain(
+      "stale food cleanup expected % exact deletion(s), deleted %",
+    );
+    expect(cleanupSql).toMatch(
+      /\\if :stale_food_cleanup_apply\s+COMMIT;\s+\\else\s+ROLLBACK;/u,
+    );
   });
 
   it("keeps serving gram imports strict and convergent", async () => {
@@ -338,23 +506,25 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("product_tests_source_only_link_check");
     expect(schemaSql).toContain("product_tests_source_only_idx");
     expect(schemaSql).toContain("match_method = 'source_only'");
-    expect(schemaSql).toContain("source_food.data_origin IN");
-    expect(schemaSql).toContain("source_supplement.data_origin IN");
+    expect(schemaSql).toContain(
+      "murph_product_test_legacy_source_backed_origin(\n            source_food.data_origin",
+    );
+    expect(schemaSql).toContain(
+      "murph_product_test_legacy_source_backed_origin(\n            source_supplement.data_origin",
+    );
     const sourceSupplementRepairSql = schemaSql.slice(
       schemaSql.indexOf("FROM supplements source_supplement"),
       schemaSql.indexOf("ALTER TABLE product_tests\n  DROP CONSTRAINT IF EXISTS product_tests_source_only_link_check"),
     );
-    expect(sourceSupplementRepairSql).toContain("'plasticlist_bay_area_2024'");
-    expect(sourceSupplementRepairSql).toContain("'nyc_dohmh_consumer_products'");
-    expect(sourceSupplementRepairSql).toContain("'king_county_consumer_products'");
-    expect(sourceSupplementRepairSql).toContain("'pure_earth_rms_2024'");
+    expect(sourceSupplementRepairSql).toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
     const supplementPlaceholderCleanupSql = schemaSql.slice(
       schemaSql.lastIndexOf("DELETE FROM supplements"),
     );
-    expect(supplementPlaceholderCleanupSql).toContain("'plasticlist_bay_area_2024'");
-    expect(supplementPlaceholderCleanupSql).toContain("'nyc_dohmh_consumer_products'");
-    expect(supplementPlaceholderCleanupSql).toContain("'king_county_consumer_products'");
-    expect(supplementPlaceholderCleanupSql).toContain("'pure_earth_rms_2024'");
+    expect(supplementPlaceholderCleanupSql).toContain(
+      "murph_product_test_legacy_source_backed_origin(supplements.data_origin)",
+    );
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
@@ -526,6 +696,20 @@ describe("product test contaminant schema", () => {
     const syncOpenProductSources = await readFile(
       new URL(
         "../sql/product-tests/sync-open-product-sources.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const productTestSourceAdapters = await readFile(
+      new URL(
+        "../sql/product-tests/product-test-source-adapters.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const productTestSourceRegistry = await readFile(
+      new URL(
+        "../sql/product-tests/product-test-source-registry.ts",
         import.meta.url,
       ),
       "utf8",
@@ -756,11 +940,24 @@ describe("product test contaminant schema", () => {
       /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
     );
     expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')");
+    expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_upc_raw IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc_raw, '')");
     expect(importSourceOnlyProductTestsBodySql).not.toContain("tests.tested_source_product_id IS NOT NULL");
     expect(importSourceOnlyProductTestsBodySql).not.toContain("explicit_match");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("food_id = CASE");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("supplement_id = CASE");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("match_method = CASE");
+    expect(importSourceOnlyProductTestsBodySql).toContain(
+      "CREATE TEMP TABLE source_only_product_test_group_links",
+    );
+    expect(importSourceOnlyProductTestsBodySql).toContain(
+      "existing.match_method <> 'source_only'",
+    );
+    expect(importSourceOnlyProductTestsBodySql).toMatch(
+      /food_id = CASE[\s\S]*product_tests\.match_method = 'source_only'[\s\S]*THEN EXCLUDED\.food_id[\s\S]*ELSE product_tests\.food_id/u,
+    );
+    expect(importSourceOnlyProductTestsBodySql).toMatch(
+      /supplement_id = CASE[\s\S]*product_tests\.match_method = 'source_only'[\s\S]*THEN EXCLUDED\.supplement_id[\s\S]*ELSE product_tests\.supplement_id/u,
+    );
+    expect(importSourceOnlyProductTestsBodySql).toMatch(
+      /match_method = CASE[\s\S]*product_tests\.match_method = 'source_only'[\s\S]*THEN EXCLUDED\.match_method[\s\S]*ELSE product_tests\.match_method/u,
+    );
     expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test rows must import as source_only with no product link");
     expect(importSourceOnlyProductTestsBodySql).toContain("pg_advisory_xact_lock");
     expect(importSourceOnlyProductTestsBodySql).toContain("murph:product_tests:mutation");
@@ -803,8 +1000,10 @@ describe("product test contaminant schema", () => {
     expect(importProductTestRemapsScript).toContain("PRODUCT_TEST_REMAPS_TSV_PATH is required");
     expect(importProductTestRemapsScript).toContain("PRODUCT_TEST_REMAPS_TSV_PATH must be repo-relative");
     expect(importProductTestRemapsScript).toContain("labels_db_psql_copy_literal \"$remaps_tsv_path\"");
-    expect(importProductTestRemapsScript).toContain("apps/web/sql/foods/schema.sql");
-    expect(importProductTestRemapsScript).toContain("apps/web/sql/supplements/schema.sql");
+    expect(importProductTestRemapsScript).not.toContain("apps/web/sql/foods/schema.sql");
+    expect(importProductTestRemapsScript).not.toContain("apps/web/sql/supplements/schema.sql");
+    expect(importProductTestRemapsScript).toContain("apply=false");
+    expect(importProductTestRemapsScript).toContain("--apply");
     expect(importProductTestRemapsScript).toContain("import-product-test-remaps.sql");
     expect(importProductTestRemapsScript).not.toContain("echo \"$labels_db_url\"");
     expect(exportProductTestMatchCandidatesScript).toContain("PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH is required");
@@ -899,6 +1098,7 @@ describe("product test contaminant schema", () => {
     expect(openProductSourcesReplaceDelete).not.toContain("tests.match_method <> 'source_only'");
     expect(importSourceOnlyProductTestsBodySql).toContain("NULLIF(current_import.tested_source_product_id, '')");
     expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
+    expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_upc_raw IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc_raw, '')");
     expect(importSourceOnlyProductTestsBodySql).toMatch(
       /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
     );
@@ -911,20 +1111,20 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).not.toContain("INSERT INTO supplements");
     expect(importSourceOnlyProductTestsBodySql).toContain("INSERT INTO product_tests");
     expect(importSourceOnlyProductTestsBodySql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("food_id = CASE");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("supplement_id = CASE");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("match_method = CASE");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.food_id");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.supplement_id");
-    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.match_method");
+    expect(importSourceOnlyProductTestsBodySql).toContain(
+      "source_only_product_test_group_link_candidates",
+    );
+    expect(importSourceOnlyProductTestsBodySql).toContain(
+      "inconsistent reviewed links for one source product identity",
+    );
     expect(importSourceOnlyProductTestsBodySql).not.toContain("FROM foods current_food");
     expect(importSourceOnlyProductTestsBodySql).not.toContain("FROM supplements current_supplement");
     const openProductSourcesConflictUpdate = importSourceOnlyProductTestsBodySql.match(
       /ON CONFLICT \(source_key, source_result_id, contaminant_key\)[\s\S]*?DO UPDATE SET(?<update>[\s\S]*?)DO \$\$/u,
     )?.groups?.update ?? "";
-    expect(openProductSourcesConflictUpdate).not.toContain("food_id =");
-    expect(openProductSourcesConflictUpdate).not.toContain("supplement_id =");
-    expect(openProductSourcesConflictUpdate).not.toContain("match_method =");
+    expect(openProductSourcesConflictUpdate).toContain("food_id = CASE");
+    expect(openProductSourcesConflictUpdate).toContain("supplement_id = CASE");
+    expect(openProductSourcesConflictUpdate).toContain("match_method = CASE");
     expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test row retained a product link");
     expect(importProductTestRemapsSql).toContain("CREATE TEMP TABLE product_test_remaps_import");
     expect(importProductTestRemapsSql).toContain("murph:product_tests:mutation");
@@ -934,64 +1134,85 @@ describe("product test contaminant schema", () => {
     expect(importProductTestRemapsSql).toContain("tested_product_brand TEXT");
     expect(importProductTestRemapsSql).toContain("tested_product_upc TEXT");
     expect(importProductTestRemapsSql).toContain("product test remap row must use source_only with no product link or a linked method with exactly one product link");
-    expect(importProductTestRemapsSql).toContain("product test remap row references missing or source-backed food_id");
-    expect(importProductTestRemapsSql).toContain("product test remap row references missing or source-backed supplement_id");
-    expect(importProductTestRemapsSql).toContain("foods.data_origin NOT IN");
-    expect(importProductTestRemapsSql).toContain("supplements.data_origin NOT IN");
+    expect(importProductTestRemapsSql).toContain("product test remap row references missing or source-backed target");
+    expect(importProductTestRemapsSql).toContain("murph_product_test_legacy_source_backed_origin(foods.data_origin)");
+    expect(importProductTestRemapsSql).toContain("murph_product_test_legacy_source_backed_origin(supplements.data_origin)");
+    expect(importProductTestRemapsSql).not.toContain("source_backing_tests.source_key = foods.data_origin");
+    expect(importProductTestRemapsSql).not.toContain("data_origin NOT IN");
     expect(importProductTestRemapsSql).toContain("product test remap row references missing source product tests");
     expect(importProductTestRemapsSql).toContain("product test remap row source identity does not match current source product tests");
-    expect(importProductTestRemapsSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')");
-    expect(importProductTestRemapsSql).toContain("tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')");
-    expect(importProductTestRemapsSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
+    expect(importProductTestRemapsSql).toContain("source_products.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')");
+    expect(importProductTestRemapsSql).toContain("source_products.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')");
+    expect(importProductTestRemapsSql).toContain("source_products.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
     expect(importProductTestRemapsSql).toContain("UPDATE product_tests tests");
-    expect(importProductTestRemapsSql).toContain("match_method = remaps.match_method");
+    expect(importProductTestRemapsSql).toContain("match_method = plan.after_match_method");
     expect(importProductTestRemapsSql).not.toContain("remapped_foods AS");
     expect(importProductTestRemapsSql).not.toContain("remapped_supplements AS");
     expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
     expect(importProductTestRemapsSql).not.toContain("serving_mass.serving_grams");
     expect(importProductTestRemapsSql).not.toContain("29.5735");
-    expect(importProductTestRemapsSql).toMatch(
-      /UPDATE product_tests tests[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_upc, ''\)/u,
-    );
+    expect(importProductTestRemapsSql).toContain("product_test_remap_mutation_rows");
+    expect(importProductTestRemapsSql).toContain("tests.source_result_id = plan.source_result_id");
+    expect(importProductTestRemapsSql).toContain("tests.contaminant_key = plan.contaminant_key");
     expect(exportProductTestMatchCandidatesSql).toContain("tests.match_method = 'source_only'");
     expect(exportProductTestMatchCandidatesSql).toContain(":'source_key_filter' = '' OR tests.source_key = :'source_key_filter'");
-    expect(exportProductTestMatchCandidatesSql).toContain("foods.upc = source_queries.normalized_source_upc");
-    expect(exportProductTestMatchCandidatesSql).toContain("supplements.upc = source_queries.normalized_source_upc");
+    expect(exportProductTestMatchCandidatesSql).toContain("murph_product_test_canonical_gtin(foods.upc) = source_queries.canonical_source_gtin");
+    expect(exportProductTestMatchCandidatesSql).toContain("murph_product_test_canonical_gtin(supplements.upc) = source_queries.canonical_source_gtin");
+    expect(exportProductTestMatchCandidatesSql).toContain("candidate_score_margin");
+    expect(exportProductTestMatchCandidatesSql).toContain("source_fingerprint");
+    expect(exportProductTestMatchCandidatesSql).toContain("target_fingerprint");
     expect(exportProductTestMatchCandidatesSql).toContain("strict_word_similarity");
     expect(exportProductTestMatchCandidatesSql).toContain("websearch_to_tsquery");
     expect(exportProductTestMatchCandidatesSql).toContain("'name_fts'::text AS candidate_reason");
     expect(exportProductTestMatchCandidatesSql).not.toContain("% source_queries.source_query");
     expect(exportProductTestMatchCandidatesSql).toContain("suggested_match_method");
     expect(exportProductTestMatchCandidatesSql).toContain("TO STDOUT");
-    expect(syncOpenProductSources).toContain("nyc_dohmh_consumer_products");
-    expect(syncOpenProductSources).toContain("king_county_consumer_products");
-    expect(syncOpenProductSources).toContain("pure_earth_rms_2024");
+    expect(syncOpenProductSources).toContain(
+      'from "./product-test-source-registry"',
+    );
+    expect(syncOpenProductSources).toContain("productTestCatalog(");
     expect(syncOpenProductSources).toContain("data.cityofnewyork.us/resource/da9u-wz3r.json");
     expect(syncOpenProductSources).toContain("data.kingcounty.gov/resource/i6sy-ckp7.json");
     expect(syncOpenProductSources).toContain("zenodo.org/records/10444602");
-    expect(syncOpenProductSources).toContain("Dietary Supplement/Medications/Remedy");
-    expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
-    expect(syncOpenProductSources).toContain("Pure Earth RMS eligible food row is missing Item ID");
-    expect(syncOpenProductSources).toContain("function pureEarthSourceRowId");
-    expect(syncOpenProductSources).toContain("createHash(\"sha256\")");
-    expect(syncOpenProductSources).not.toContain("__row_number");
-    expect(syncOpenProductSources).toContain("normalizedResultForUnit");
-    expect(syncOpenProductSources).toContain("hasNumericComparableResult");
-    expect(syncOpenProductSources).toContain("Number(value) / 1000");
+    expect(productTestSourceAdapters).toContain("Dietary Supplement/Medications/Remedy");
+    expect(productTestSourceAdapters).toContain(
+      'const PURE_EARTH_FOOD_CATEGORIES = new Set(["1", "7", "10", "11"])',
+    );
+    expect(productTestSourceAdapters).toContain(
+      "Pure Earth RMS eligible food row is missing Item ID",
+    );
+    expect(productTestSourceAdapters).toContain("function pureEarthSourceRowId");
+    expect(productTestSourceAdapters).toContain('createHash("sha256")');
+    expect(productTestSourceAdapters).not.toContain("__row_number");
+    expect(productTestSourceAdapters).toContain("normalizedResultForUnit");
+    expect(productTestSourceAdapters).toContain("hasNumericComparableResult");
+    expect(productTestSourceAdapters).toContain("Number(value) / 1000");
     expect(syncOpenProductSources).toContain(".product-tests-work/seed-data/open-product-sources/");
     expect(syncOpenProductSources).not.toContain("./open-data/");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
-    const openContaminantSourceKeys = new Set([
-      "plasticlist_bay_area_2024",
-      ...[...syncOpenProductSources.matchAll(/key: "([^"]+)"/gu)]
+    const enabledAdapterKeysBlock = productTestSourceRegistry.slice(
+      productTestSourceRegistry.indexOf(
+        "export const EXTERNALLY_MANAGED_PRODUCT_TEST_ADAPTER_KEYS",
+      ),
+      productTestSourceRegistry.indexOf("export function productTestCatalog"),
+    );
+    const openContaminantSourceKeys = new Set(
+      [...enabledAdapterKeysBlock.matchAll(/"([a-z0-9_]+)"/gu)]
         .map((match) => match[1] ?? ""),
-    ]);
+    );
     expect(openContaminantSourceKeys).toEqual(new Set([
       "plasticlist_bay_area_2024",
       "nyc_dohmh_consumer_products",
       "king_county_consumer_products",
       "pure_earth_rms_2024",
+      "fda_cinnamon_alert_2024_03",
+      "fda_cinnamon_alert_2024_07_25",
+      "fda_cinnamon_alert_2024_07",
+      "fda_wanabana_warning_letter_2024",
+      "fda_wanabana_investigation_2023",
+      "ny_ag_holle_baby_food_2022",
+      "fda_health_fraud_products",
     ]));
     expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
@@ -1038,7 +1259,7 @@ describe("product test contaminant schema", () => {
     expect(((0.2 * 70) / 52 / 1000).toFixed(12)).toBe("0.000269230769");
   });
 
-  it("builds a non-importable remap review queue from rank-one candidates", async () => {
+  it("builds a non-importable remap review queue retaining five ranked candidates", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-remap-review-"));
     const reviewQueueRoot = path.join(
       process.cwd(),
@@ -1166,7 +1387,8 @@ describe("product test contaminant schema", () => {
       expect(lines[0]).toContain("suggested_supplement_id");
       expect(lines).toHaveLength(3);
       expect(lines[1]).toContain("\t40352\tmanual_confirmed");
-      expect(lines[1]).not.toContain("17937");
+      expect(lines[0]).toContain("candidate_options_json");
+      expect(lines[1]).toContain("17937");
       expect(lines[2]).toContain("\tfdc:1757907\t\tmanual_confirmed");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -1251,7 +1473,7 @@ describe("product test contaminant schema", () => {
       ),
     );
 
-    expect(remapRecords).toHaveLength(71);
+    expect(remapRecords).toHaveLength(98);
 
     const identities = new Set<string>();
     for (const record of remapRecords) {
@@ -1278,7 +1500,9 @@ describe("product test contaminant schema", () => {
 
       if (foodId) {
         expect(
-          /^fdc:\d+$/u.test(foodId) || brandSiteFoodIds.has(foodId),
+          /^(?:fdc|kroger_site|safeway):\d+$/u.test(foodId)
+            || /^brand_site:[a-z0-9][a-z0-9-]+$/u.test(foodId)
+            || brandSiteFoodIds.has(foodId),
         ).toBe(true);
       }
       if (supplementId) {
@@ -1407,7 +1631,7 @@ describe("product test contaminant schema", () => {
       ),
     );
 
-    expect(remapRecords).toHaveLength(30);
+    expect(remapRecords).toHaveLength(32);
 
     const identities = new Set<string>();
     for (const record of remapRecords) {
@@ -1444,12 +1668,14 @@ describe("product test contaminant schema", () => {
       "nyc_dohmh_consumer_products:122",
       "nyc_dohmh_consumer_products:134",
       "nyc_dohmh_consumer_products:17",
-      "nyc_dohmh_consumer_products:316",
+      "nyc_dohmh_consumer_products:317",
       "nyc_dohmh_consumer_products:56",
       "nyc_dohmh_consumer_products:58",
       "nyc_dohmh_consumer_products:81",
       "nyc_dohmh_consumer_products:82",
-      "nyc_dohmh_consumer_products:931",
+      "nyc_dohmh_consumer_products:941",
+      "nyc_dohmh_consumer_products:942",
+      "nyc_dohmh_consumer_products:943",
     ]);
     for (const sourceOnlyId of sourceOnlyIds) {
       expect(
@@ -1475,12 +1701,18 @@ describe("product test contaminant schema", () => {
     expect(
       remapRecords.find((record) =>
         `${record.source_key}:${record.tested_source_product_id}`
-          === "nyc_dohmh_consumer_products:7579"
+          === "nyc_dohmh_consumer_products:7978"
       ),
     ).toMatchObject({
       food_id: "tj:072774",
       match_method: "manual_confirmed",
     });
+    expect(
+      remapRecords.some((record) =>
+        `${record.source_key}:${record.tested_source_product_id}`
+          === "nyc_dohmh_consumer_products:7579"
+      ),
+    ).toBe(false);
   });
 
   it("keeps reviewed serving grams import-ready", async () => {
@@ -1491,7 +1723,7 @@ describe("product test contaminant schema", () => {
       ),
     );
 
-    expect(records).toHaveLength(29);
+    expect(records).toHaveLength(4);
 
     const identities = new Set<string>();
     for (const record of records) {
@@ -1508,33 +1740,41 @@ describe("product test contaminant schema", () => {
       expect(servingGrams).toBeGreaterThan(0);
       expect(servingGrams).toBeLessThanOrEqual(2000);
       expect(record.evidence_url ?? "").toMatch(/^https:\/\//u);
+      expect(record.evidence_url ?? "").not.toContain("plasticlist.org");
       expect(record.evidence_note ?? "").not.toHaveLength(0);
     }
 
-    expect(records.find((record) => record.label_id === "fdc:1086537")).toMatchObject({
-      serving_grams: "370",
-      evidence_url: "https://www.plasticlist.org/product/78",
+    expect(records.find((record) =>
+      record.label_id === "brand_site:driscolls-non-organic-strawberries"
+    )).toMatchObject({
+      serving_grams: "144",
+      evidence_url: "https://www.driscolls.com/berries/strawberries/nutrition",
+    });
+    expect(records.find((record) =>
+      record.label_id === "brand_site:o-organics-organic-eggs-large-brown"
+    )).toMatchObject({
+      serving_grams: "50",
+      evidence_url: "https://fdc.nal.usda.gov/food-details/1541982/nutrients",
+    });
+    expect(records.find((record) => record.label_id === "fdc:2198090")).toMatchObject({
+      serving_grams: "170",
     });
     expect(records.find((record) => record.label_id === "tj:072774")).toMatchObject({
       serving_grams: "114",
       evidence_url: "https://www.eatthismuch.com/calories/steamed-peeled-baby-beets-1827039",
     });
-    expect(records.find((record) => record.label_id === "280356")).toMatchObject({
-      entity_type: "supplement",
-      serving_grams: "1.5",
-    });
+    expect(records.find((record) => record.label_id === "fdc:1086537")).toBeUndefined();
+    expect(records.find((record) => record.label_id === "280356")).toBeUndefined();
     expect(records.find((record) =>
       record.label_id === "brand_site:tazo-awake-english-breakfast-black-tea"
-    )).toMatchObject({
-      serving_grams: "300",
-    });
+    )).toBeUndefined();
   });
 
   it("keeps PlasticList brand-site label anchors import-ready", async () => {
     const foodRows = await readPlasticListBrandSiteFoodRows();
     const supplementRows = await readPlasticListBrandSiteSupplementRows();
 
-    expect(foodRows).toHaveLength(5);
+    expect(foodRows).toHaveLength(9);
     expect(supplementRows).toHaveLength(2);
     expect(
       await readFile(
@@ -1547,30 +1787,71 @@ describe("product test contaminant schema", () => {
     for (const row of foodRows) {
       expect(row.id).toMatch(/^[a-z][a-z0-9_-]*:\S+$/u);
       expect(row.dataOrigin).toBe("brand_site");
-      expect(row.dataOriginId).toBe(row.id);
+      expect(
+        row.dataOriginId === row.id
+          || `${row.dataOrigin}:${row.dataOriginId}` === row.id,
+      ).toBe(true);
       expect(row.dataOriginPriority).toBe(5);
       expect(row.name).not.toHaveLength(0);
       expect(row.searchText).not.toHaveLength(0);
       expect(row.searchText.length).toBeLessThanOrEqual(6000);
-      expect(row.fdcReleaseDate).toBe("2026-06-16");
+      expect(row.fdcReleaseDate).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
       expect(row.dataOriginUrl).toMatch(/^https:\/\//u);
       expect(foodIds.has(row.id)).toBe(false);
       foodIds.add(row.id);
       expect(row.label.schemaVersion).toBe(1);
-      expect(row.label.sourceFetchedAt).toBe("2026-06-16");
+      expect(row.label.sourceFetchedAt).toBe(row.fdcReleaseDate);
       expect(row.label.sourceUrl).toBe(row.dataOriginUrl);
       expect(row.label.ingredientRows.length).toBeGreaterThan(0);
-      expect(row.label.servingSizes.length).toBeGreaterThan(0);
+      if (row.id === "brand_site:fiji-water-1l-case-of-12") {
+        expect(row.label.servingSizes).toHaveLength(0);
+      } else {
+        expect(row.label.servingSizes.length).toBeGreaterThan(0);
+      }
       expectNoPublicContactText(row, ["name", "brand", "searchText"]);
     }
 
     expect(foodIds).toEqual(new Set([
+      "brand_site:fiji-water-1l-case-of-12",
+      "brand_site:nescafe-dark-roast-instant-coffee-35-oz-jar",
+      "brand_site:o-organics-organic-eggs-large-brown",
+      "brand_site:tazo-awake-english-breakfast-black-tea",
       "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
       "trader-joes:099032",
       "whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4",
       "whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
       "whole-foods-market:organic-spaghetti-16-ounce-b074h6g7gx",
     ]));
+    expect(foodIds.has("brand_site:kirkland-seasoned-rotisserie-chicken")).toBe(false);
+    expect(
+      foodRows.find((row) =>
+        row.id === "brand_site:o-organics-organic-eggs-large-brown"
+      ),
+    ).toMatchObject({
+      canonicalKey: "o organics|o organics large brown eggs",
+      dataOriginId: "o-organics-organic-eggs-large-brown",
+      upc: "079893401522",
+      label: {
+        servingSizes: [{ grams: 50 }],
+      },
+    });
+    expect(
+      foodRows.find((row) => row.id === "brand_site:fiji-water-1l-case-of-12"),
+    ).toMatchObject({
+      canonicalKey: "fiji|fiji water 1 l",
+      upc: null,
+      label: { servingSizes: [] },
+    });
+    expect(
+      foodRows.find((row) =>
+        row.id === "brand_site:nescafe-dark-roast-instant-coffee-35-oz-jar"
+      ),
+    ).toMatchObject({ upc: "028000469429" });
+    expect(
+      foodRows.find((row) =>
+        row.id === "brand_site:tazo-awake-english-breakfast-black-tea"
+      ),
+    ).toMatchObject({ upc: "794522200788", offMarket: true });
 
     const supplementIds = new Set<string>();
     for (const row of supplementRows) {
@@ -1710,6 +1991,22 @@ describe("product test contaminant schema", () => {
         )?.serving_grams,
       ).toBe("55");
       expect(preparedIds.has("trader-joes:099032")).toBe(true);
+      expect(
+        preparedRecords.find((row) =>
+          row.id === "brand_site:o-organics-organic-eggs-large-brown"
+        ),
+      ).toMatchObject({
+        data_origin_id: "o-organics-organic-eggs-large-brown",
+        serving_grams: "50",
+      });
+      for (const id of [
+        "brand_site:fiji-water-1l-case-of-12",
+        "brand_site:nescafe-dark-roast-instant-coffee-35-oz-jar",
+        "brand_site:tazo-awake-english-breakfast-black-tea",
+      ]) {
+        expect(preparedRecords.find((row) => row.id === id)?.serving_grams).toBe("");
+      }
+      expect(preparedIds.has("brand_site:kirkland-seasoned-rotisserie-chicken")).toBe(false);
       expect(preparedIds.has("whole-foods-market:organic-broccoli-b000p6l3k0")).toBe(false);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -2064,7 +2361,6 @@ describe("product test contaminant schema", () => {
           "",
         ].join("\n"),
       );
-
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
       await writeFile(
@@ -2131,6 +2427,15 @@ describe("product test contaminant schema", () => {
           "",
         ].join("\n"),
       );
+      const retiredTsvPath = path.join(tempReviewedDir, "retired O'Brien.tsv");
+      await writeFile(
+        retiredTsvPath,
+        [
+          "entity_type\tlabel_id\tstale_serving_grams\tretirement_note",
+          "food\tfdc:retired-example\t2\tretired test row",
+          "",
+        ].join("\n"),
+      );
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
@@ -2162,6 +2467,7 @@ describe("product test contaminant schema", () => {
           PSQL_FAKE_LOG: fakePsqlLogPath,
           RENDERED_SQL_LOG: renderedSqlLogPath,
           REVIEWED_SERVING_GRAMS_TSV_PATH: reviewedTsvPath,
+          RETIRED_REVIEWED_SERVING_GRAMS_TSV_PATH: retiredTsvPath,
         },
       });
 
@@ -2170,6 +2476,7 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("-v serving_grams_backfill_apply=false");
       expect(fakePsqlLog).not.toContain("postgres://");
       expect(fakePsqlLog).not.toContain(reviewedTsvPath);
+      expect(fakePsqlLog).not.toContain(retiredTsvPath);
 
       const renderedSql = await readFile(renderedSqlLogPath, "utf8");
       expect(renderedSql).toContain(
@@ -2177,6 +2484,11 @@ describe("product test contaminant schema", () => {
       );
       expect(renderedSql).toContain("reviewed O''Brien.tsv");
       expect(renderedSql).not.toContain("__REVIEWED_SERVING_GRAMS_TSV__");
+      expect(renderedSql).toContain(
+        "\\copy serving_grams_retired_reviewed_import FROM '",
+      );
+      expect(renderedSql).toContain("retired O''Brien.tsv");
+      expect(renderedSql).not.toContain("__RETIRED_REVIEWED_SERVING_GRAMS_TSV__");
       expect(renderedSql).toContain("WHERE foods.serving_grams IS NULL");
       expect(renderedSql).toContain("WHERE supplements.serving_grams IS NULL");
       expect(renderedSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
@@ -2302,6 +2614,14 @@ describe("product test contaminant schema", () => {
         [
           "id,food_id,supplement_id,source_key,source_result_id,source_name,source_url,source_report_title,report_date,tested_product_name,tested_product_brand,tested_product_upc,tested_source_product_id,match_method,contaminant_key,contaminant_name,result_operator,result_value,result_unit,result_basis,normalized_value,normalized_unit,normalized_basis,lab_name,test_method",
           "nyc_dohmh_consumer_products:example:lead,,,nyc_dohmh_consumer_products,example,NYC Department of Health and Mental Hygiene,https://data.cityofnewyork.us/Health/Metal-Content-of-Consumer-Products-Tested-by-the-N/da9u-wz3r,Metal Content of Consumer Products Tested by the NYC Health Department,2024-01-01,Example Food,,,example,source_only,lead,Lead,eq,1,ppm,product_mass,1,ppm,product_mass,,Laboratory",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(tempOpenDataDir, "open_product_sources_source_counts.tsv"),
+        [
+          "source_key\trow_count",
+          "nyc_dohmh_consumer_products\t1",
           "",
         ].join("\n"),
       );

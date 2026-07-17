@@ -15,22 +15,59 @@ CREATE TEMP TABLE source_only_product_tests_import (
   tested_product_name TEXT,
   tested_product_brand TEXT,
   tested_product_upc TEXT,
+  tested_product_upc_raw TEXT,
   tested_source_product_id TEXT,
+  evidence_type TEXT,
+  sampling_context TEXT,
+  source_sample_id TEXT,
+  source_sample_count TEXT,
+  tested_lot_code TEXT,
+  tested_best_by TEXT,
+  tested_package_size TEXT,
+  collected_on TEXT,
+  tested_on TEXT,
   match_method TEXT NOT NULL,
   contaminant_key TEXT NOT NULL,
   contaminant_name TEXT NOT NULL,
   result_operator TEXT NOT NULL,
   result_value TEXT,
+  result_upper_value TEXT,
   result_unit TEXT NOT NULL,
   result_basis TEXT NOT NULL,
   normalized_value TEXT,
+  normalized_upper_value TEXT,
   normalized_unit TEXT,
   normalized_basis TEXT,
+  result_qualifier TEXT,
+  detection_limit_value TEXT,
+  detection_limit_unit TEXT,
+  quantification_limit_value TEXT,
+  quantification_limit_unit TEXT,
+  reporting_limit_value TEXT,
+  reporting_limit_unit TEXT,
+  uncertainty_value TEXT,
+  uncertainty_unit TEXT,
   lab_name TEXT,
   test_method TEXT
 ) ON COMMIT DROP;
 
 \copy source_only_product_tests_import FROM __PRODUCT_TESTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
+
+\if :replace_source
+CREATE TEMP TABLE source_only_product_tests_import_require_source_counts (
+  required BOOLEAN NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO source_only_product_tests_import_require_source_counts (required)
+VALUES (true);
+
+CREATE TEMP TABLE source_only_product_tests_import_source_counts (
+  source_key TEXT NOT NULL,
+  row_count INTEGER NOT NULL
+) ON COMMIT DROP;
+
+\copy source_only_product_tests_import_source_counts FROM __SOURCE_COUNTS_TSV__ WITH (FORMAT csv, HEADER true, DELIMITER E'\t')
+\endif
 
 \i apps/web/sql/product-tests/import-source-only-product-tests-body.sql
 

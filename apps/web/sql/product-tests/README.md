@@ -7,6 +7,14 @@ by exact UPC, exact source id, or manual confirmation, or it remains
 summaries only for linked rows and never infer contaminants from names, brands,
 tags, categories, or fuzzy matches.
 
+The catalog registry in `product-test-source-registry.ts` is the source of
+truth for researched test catalogs and their rights, freshness, and
+matchability posture. A catalog can be enabled for quantitative or qualitative
+observations, retained as generic/event-only context, held behind permission,
+or explicitly excluded. Public visibility alone is not permission for bulk
+reuse, and a recall, certification, allegation, or anonymous survey is not
+silently converted into a product measurement.
+
 ## PlasticList
 
 PlasticList data is licensed under CC BY 4.0. You may freely share and adapt it
@@ -102,6 +110,9 @@ a different tested source product, the row is repaired back to `source_only`
 before the new source facts are applied. Any
 legacy contaminant-source-backed product link is also repaired back to
 `source_only` by the schema before source-backed placeholder cleanup runs.
+That cleanup uses the closed set of historical placeholder origins rather than
+the current catalog-key set: a future source key that happens to equal a real
+label origin must not hide or invalidate that label.
 `--replace-source` prunes PlasticList rows absent from the complete prepared
 source input, but it does not clear curated product links whose source identity
 still matches; identity drift still repairs those rows back to `source_only`.
@@ -265,14 +276,25 @@ data-level sources:
   weight
 - exact reviewed rows in
   `apps/web/sql/product-tests/reviewed-serving-grams.tsv`, used when the linked
-  contaminant-test source itself publishes a serving mass for the tested product
-  or when a reviewed public nutrition source gives a clear serving mass
+  label's independent official or public nutrition source gives a clear serving
+  mass
 
 It does not scan the full catalog and does not convert volume, count, or
 container servings automatically. Reviewed rows are exact label ids with source
 URLs and notes. Automatic parsed candidates update only rows where
 `serving_grams IS NULL`; exact reviewed rows update rows where the stored value
 differs from the reviewed value.
+
+Product-test study portions, comparison amounts, prepared-sample masses, and
+container weights are observation metadata, not label servings. Never copy them
+into `foods.serving_grams` or `supplements.serving_grams` without independent
+label evidence for that exact catalog row.
+
+`retired-reviewed-serving-grams.tsv` records exact stale values that an older
+review overlay wrote without independent label evidence. Dry-run reports those
+rows. Apply clears a value only when the current row still equals the recorded
+stale value; a divergent non-null value aborts the whole transaction for manual
+review.
 
 Routine direct FDC, DSLD, and DailyMed label refreshes overwrite source fields
 from the current source snapshot, then immediately reapply the exact reviewed
@@ -308,7 +330,8 @@ apps/web/sql/product-tests/backfill-serving-grams.sh
 ```
 
 The apply path never deletes label rows. It overwrites an existing serving mass
-only for an exact reviewed row that declares a different value.
+only for an exact reviewed row that declares a different value, and clears only
+an exact retired stale value through the guarded comparison above.
 
 ## Open Product Source Seeds
 
@@ -332,12 +355,28 @@ Source posture:
   if they are not misleading and do not imply DOHMH endorsement.
 - King County: public-domain open data.
 - Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
+- FDA ground-cinnamon alerts, WanaBana/Austrofood investigation records, and
+  recent Health Fraud Foods findings: normalized US-government facts only.
+- New York Attorney General Holle report: normalized factual sample fields from
+  the public enforcement record; the third-party report and scans are not
+  mirrored.
+
+The registry also records high-value catalogs that are not imported because
+their product identities are anonymous, they contain events rather than test
+results, or their reuse terms require permission. Add an adapter only after the
+registry disposition and rights scope support it.
 
 Refresh the local CSV with:
 
 ```sh
 pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
 ```
+
+The refresh requires `unzip` for the Pure Earth workbook and `pdftotext` for
+the NYAG report. Every sync-managed adapter must produce rows before the CSV is
+written, and source-specific parsers fail closed when a primary page or report
+changes shape. The command prints per-source counts and skipped-row diagnostics;
+review both before replacement import.
 
 Import a local CSV with:
 
@@ -351,10 +390,13 @@ For a generated complete source snapshot, use guarded replacement mode:
 
 ```sh
 OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
-OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=8147 \
+OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=8957 \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh --replace-source
 ```
+
+The example count is the July 16, 2026 snapshot; always replace it with the
+exact total printed by the refresh being imported.
 
 Apply schemas only with:
 
@@ -371,8 +413,33 @@ operator-local CSV are not pruned. With `--replace-source`, the importer require
 the expected complete CSV row count and deletes rows absent from the complete
 snapshot for the source keys present in the snapshot. Existing reviewed links
 are preserved only when the refreshed source row still names the same source
-product id, tested product name, tested brand, and tested UPC; source identity
-drift repairs the row back to `source_only` for review.
+product id, tested product name, tested brand, canonical UPC, raw reported UPC,
+and published package size; source identity drift repairs the row back to
+`source_only` for review.
+
+Canonical `tested_product_upc` values are checksum-valid GTIN-8/12/13/14 only.
+Formatting copied from a source, including invalid or incomplete identifiers,
+is retained separately as `tested_product_upc_raw` and is never exact-matched.
+Sample count, lot, best-by, package, collection/test dates, evidence and
+sampling context, bounded results, qualifiers, analytical limits, uncertainty,
+lab, and method are preserved when the source publishes them. Missing fields
+remain missing rather than being inferred from recall scope, product imagery,
+or related samples.
+
+## Integrity Audit
+
+Run the aggregate-only audit after schema, source, remap, or label cleanup:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/audit-product-tests.sh
+```
+
+The audit opens a read-only transaction and fails on orphan or dual links,
+source identity drift, mixed target state, non-exclusive exact UPC/source-id
+proof, contaminant-source-backed targets, malformed ranges or normalized
+tuples, and incomplete limit/uncertainty metadata. It reports source-level and
+overall counts without printing product rows.
 
 ## Threshold Seeds
 

@@ -31,12 +31,6 @@ const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   medium: 3,
   high: 4,
 };
-const PRODUCT_TEST_SOURCE_DATA_ORIGINS = [
-  "plasticlist_bay_area_2024",
-  "nyc_dohmh_consumer_products",
-  "king_county_consumer_products",
-  "pure_earth_rms_2024",
-] as const;
 const PRODUCT_CONTAMINANT_GRADING_POLICY = {
   id: "adult_one_serving_per_day_v1",
   bodyWeightKg: 70,
@@ -173,9 +167,46 @@ export type ProductContaminantResultOperator =
   | "lte"
   | "gt"
   | "gte"
+  | "range"
   | "not_detected"
   | "detected"
   | "trace";
+
+export type ProductContaminantEvidenceType =
+  | "laboratory_measurement"
+  | "regulatory_laboratory"
+  | "regulatory_finding"
+  | "xrf_screening"
+  | "manufacturer_coa";
+
+export type ProductContaminantMeasurementMetadata = {
+  value: number;
+  unit: string;
+};
+
+export type ProductContaminantSample = {
+  evidenceType: ProductContaminantEvidenceType;
+  samplingContext: string;
+  sourceSampleId: string | null;
+  sampleCount?: number | null;
+  reportedUpc?: string | null;
+  lotCode: string | null;
+  bestBy: string | null;
+  packageSize: string | null;
+  collectedOn: string | null;
+  testedOn: string | null;
+  labName: string | null;
+  testMethod: string | null;
+};
+
+type ProductContaminantResultMetadata = {
+  upperValue?: number | null;
+  qualifier?: string | null;
+  detectionLimit?: ProductContaminantMeasurementMetadata | null;
+  quantificationLimit?: ProductContaminantMeasurementMetadata | null;
+  reportingLimit?: ProductContaminantMeasurementMetadata | null;
+  uncertainty?: ProductContaminantMeasurementMetadata | null;
+};
 
 export type ProductContaminantAlert = {
   contaminantKey: string;
@@ -186,7 +217,7 @@ export type ProductContaminantAlert = {
     value: number;
     unit: string;
     basis: string;
-  };
+  } & ProductContaminantResultMetadata;
   threshold: {
     value: number;
     unit: string;
@@ -221,6 +252,7 @@ export type ProductContaminantAlert = {
     sourceProductId: string | null;
     matchMethod: ProductContaminantMatchMethod;
   };
+  sample?: ProductContaminantSample;
 };
 
 export type ProductContaminantObservation = {
@@ -231,14 +263,16 @@ export type ProductContaminantObservation = {
     value: number | null;
     unit: string;
     basis: string;
-  };
+  } & ProductContaminantResultMetadata;
   normalizedResult: {
     value: number;
+    upperValue?: number | null;
     unit: string;
     basis: string;
   } | null;
   source: ProductContaminantAlert["source"];
   testedProduct: ProductContaminantAlert["testedProduct"];
+  sample?: ProductContaminantSample;
 };
 
 export type ProductContaminantSummary = {
@@ -653,17 +687,40 @@ type ProductContaminantQueryRow = {
   testedProductName: string | null;
   testedProductBrand: string | null;
   testedProductUpc: string | null;
+  testedProductUpcRaw: string | null;
   testedSourceProductId: string | null;
+  evidenceType: ProductContaminantEvidenceType;
+  samplingContext: string;
+  sourceSampleId: string | null;
+  sourceSampleCount: number | null;
+  testedLotCode: string | null;
+  testedBestBy: string | null;
+  testedPackageSize: string | null;
+  collectedOn: string | null;
+  testedOn: string | null;
   matchMethod: ProductContaminantMatchMethod;
   contaminantKey: string;
   contaminantName: string;
   resultOperator: ProductContaminantResultOperator;
   resultValue: number | null;
+  resultUpperValue: number | null;
   resultUnit: string;
   resultBasis: string;
   normalizedValue: number | null;
+  normalizedUpperValue: number | null;
   normalizedUnit: string | null;
   normalizedBasis: string | null;
+  resultQualifier: string | null;
+  detectionLimitValue: number | null;
+  detectionLimitUnit: string | null;
+  quantificationLimitValue: number | null;
+  quantificationLimitUnit: string | null;
+  reportingLimitValue: number | null;
+  reportingLimitUnit: string | null;
+  uncertaintyValue: number | null;
+  uncertaintyUnit: string | null;
+  labName: string | null;
+  testMethod: string | null;
   thresholdId: string | null;
   thresholdValue: number | null;
   thresholdUnit: string | null;
@@ -711,6 +768,20 @@ function productContaminantThresholdLateralSql(
             WHEN threshold_rows.normalized_value IS NOT NULL
               AND threshold_rows.normalized_unit = product_tests.normalized_unit
               AND threshold_rows.normalized_basis = product_tests.normalized_basis
+              THEN product_tests.normalized_upper_value
+            WHEN threshold_rows.threshold_unit = 'ng/kg_bw/day'
+              AND threshold_rows.threshold_basis = 'oral_total_dietary_exposure'
+              AND product_tests.normalized_unit = 'ppm'
+              AND product_tests.normalized_basis = 'product_mass'
+              AND product_tests.normalized_upper_value IS NOT NULL
+              AND ${servingGramsSql} IS NOT NULL
+              THEN product_tests.normalized_upper_value * ${NANOGRAMS_PER_GRAM_PER_PPM} * ${servingGramsSql} * ${PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay} / ${PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg}
+            ELSE NULL
+          END AS comparison_upper_value,
+          CASE
+            WHEN threshold_rows.normalized_value IS NOT NULL
+              AND threshold_rows.normalized_unit = product_tests.normalized_unit
+              AND threshold_rows.normalized_basis = product_tests.normalized_basis
               THEN threshold_rows.normalized_value
             WHEN threshold_rows.threshold_unit = 'ng/kg_bw/day'
               AND threshold_rows.threshold_basis = 'oral_total_dietary_exposure'
@@ -723,7 +794,7 @@ function productContaminantThresholdLateralSql(
       ) scored_threshold
       WHERE threshold_rows.active = true
         AND threshold_rows.contaminant_key = product_tests.contaminant_key
-        AND product_tests.result_operator IN ('eq', 'gt', 'gte')
+        AND product_tests.result_operator IN ('eq', 'gt', 'gte', 'range')
         AND product_tests.normalized_value IS NOT NULL
         AND product_tests.normalized_unit IS NOT NULL
         AND product_tests.normalized_basis IS NOT NULL
@@ -739,6 +810,12 @@ function productContaminantThresholdLateralSql(
             THEN 1
           WHEN product_tests.result_operator = 'gte'
             AND scored_threshold.comparison_value > scored_threshold.comparison_threshold
+            THEN 1
+          WHEN product_tests.result_operator = 'range'
+            AND scored_threshold.comparison_value > scored_threshold.comparison_threshold
+            THEN 2
+          WHEN product_tests.result_operator = 'range'
+            AND scored_threshold.comparison_upper_value > scored_threshold.comparison_threshold
             THEN 1
           ELSE 0
         END DESC,
@@ -856,17 +933,40 @@ async function loadProductContaminantSummaries(
       product_tests.tested_product_name AS "testedProductName",
       product_tests.tested_product_brand AS "testedProductBrand",
       product_tests.tested_product_upc AS "testedProductUpc",
+      product_tests.tested_product_upc_raw AS "testedProductUpcRaw",
       product_tests.tested_source_product_id AS "testedSourceProductId",
+      product_tests.evidence_type AS "evidenceType",
+      product_tests.sampling_context AS "samplingContext",
+      product_tests.source_sample_id AS "sourceSampleId",
+      product_tests.source_sample_count AS "sourceSampleCount",
+      product_tests.tested_lot_code AS "testedLotCode",
+      product_tests.tested_best_by AS "testedBestBy",
+      product_tests.tested_package_size AS "testedPackageSize",
+      product_tests.collected_on::text AS "collectedOn",
+      product_tests.tested_on::text AS "testedOn",
       product_tests.match_method AS "matchMethod",
       product_tests.contaminant_key AS "contaminantKey",
       product_tests.contaminant_name AS "contaminantName",
       product_tests.result_operator AS "resultOperator",
       product_tests.result_value::double precision AS "resultValue",
+      product_tests.result_upper_value::double precision AS "resultUpperValue",
       product_tests.result_unit AS "resultUnit",
       product_tests.result_basis AS "resultBasis",
       product_tests.normalized_value::double precision AS "normalizedValue",
+      product_tests.normalized_upper_value::double precision AS "normalizedUpperValue",
       product_tests.normalized_unit AS "normalizedUnit",
       product_tests.normalized_basis AS "normalizedBasis",
+      product_tests.result_qualifier AS "resultQualifier",
+      product_tests.detection_limit_value::double precision AS "detectionLimitValue",
+      product_tests.detection_limit_unit AS "detectionLimitUnit",
+      product_tests.quantification_limit_value::double precision AS "quantificationLimitValue",
+      product_tests.quantification_limit_unit AS "quantificationLimitUnit",
+      product_tests.reporting_limit_value::double precision AS "reportingLimitValue",
+      product_tests.reporting_limit_unit AS "reportingLimitUnit",
+      product_tests.uncertainty_value::double precision AS "uncertaintyValue",
+      product_tests.uncertainty_unit AS "uncertaintyUnit",
+      product_tests.lab_name AS "labName",
+      product_tests.test_method AS "testMethod",
       thresholds.id AS "thresholdId",
       thresholds.threshold_value::double precision AS "thresholdValue",
       thresholds.threshold_unit AS "thresholdUnit",
@@ -983,17 +1083,38 @@ async function loadPublicProductTestEvidence(
           product_tests.tested_product_name AS "testedProductName",
           product_tests.tested_product_brand AS "testedProductBrand",
           product_tests.tested_product_upc AS "testedProductUpc",
+          product_tests.tested_product_upc_raw AS "testedProductUpcRaw",
           product_tests.tested_source_product_id AS "testedSourceProductId",
+          product_tests.evidence_type AS "evidenceType",
+          product_tests.sampling_context AS "samplingContext",
+          product_tests.source_sample_id AS "sourceSampleId",
+          product_tests.source_sample_count AS "sourceSampleCount",
+          product_tests.tested_lot_code AS "testedLotCode",
+          product_tests.tested_best_by AS "testedBestBy",
+          product_tests.tested_package_size AS "testedPackageSize",
+          product_tests.collected_on::text AS "collectedOn",
+          product_tests.tested_on::text AS "testedOn",
           product_tests.match_method AS "matchMethod",
           product_tests.contaminant_key AS "contaminantKey",
           product_tests.contaminant_name AS "contaminantName",
           product_tests.result_operator AS "resultOperator",
           product_tests.result_value::double precision AS "resultValue",
+          product_tests.result_upper_value::double precision AS "resultUpperValue",
           product_tests.result_unit AS "resultUnit",
           product_tests.result_basis AS "resultBasis",
           product_tests.normalized_value::double precision AS "normalizedValue",
+          product_tests.normalized_upper_value::double precision AS "normalizedUpperValue",
           product_tests.normalized_unit AS "normalizedUnit",
           product_tests.normalized_basis AS "normalizedBasis",
+          product_tests.result_qualifier AS "resultQualifier",
+          product_tests.detection_limit_value::double precision AS "detectionLimitValue",
+          product_tests.detection_limit_unit AS "detectionLimitUnit",
+          product_tests.quantification_limit_value::double precision AS "quantificationLimitValue",
+          product_tests.quantification_limit_unit AS "quantificationLimitUnit",
+          product_tests.reporting_limit_value::double precision AS "reportingLimitValue",
+          product_tests.reporting_limit_unit AS "reportingLimitUnit",
+          product_tests.uncertainty_value::double precision AS "uncertaintyValue",
+          product_tests.uncertainty_unit AS "uncertaintyUnit",
           product_tests.lab_name AS "labName",
           product_tests.test_method AS "testMethod",
           ${productLabelTimestampIsoSql("product_tests.imported_at")} AS "importedAt",
@@ -1208,6 +1329,7 @@ function createProductContaminantAlert(
     result: {
       operator: row.resultOperator,
       value: row.normalizedValue,
+      ...productContaminantResultMetadata(row, row.normalizedUpperValue),
       unit: row.normalizedUnit ?? row.resultUnit,
       basis: row.normalizedBasis ?? row.resultBasis,
     },
@@ -1236,6 +1358,7 @@ function createProductContaminantAlert(
       sourceProductId: row.testedSourceProductId,
       matchMethod: row.matchMethod,
     },
+    sample: productContaminantSample(row),
   };
 }
 
@@ -1248,6 +1371,7 @@ function createProductContaminantObservation(
     result: {
       operator: row.resultOperator,
       value: row.resultValue,
+      ...productContaminantResultMetadata(row, row.resultUpperValue),
       unit: row.resultUnit,
       basis: row.resultBasis,
     },
@@ -1256,6 +1380,7 @@ function createProductContaminantObservation(
       && row.normalizedBasis !== null
       ? {
         value: row.normalizedValue,
+        upperValue: row.normalizedUpperValue ?? null,
         unit: row.normalizedUnit,
         basis: row.normalizedBasis,
       }
@@ -1274,6 +1399,59 @@ function createProductContaminantObservation(
       sourceProductId: row.testedSourceProductId,
       matchMethod: row.matchMethod,
     },
+    sample: productContaminantSample(row),
+  };
+}
+
+function productContaminantResultMetadata(
+  row: ProductContaminantQueryRow,
+  upperValue: number | null | undefined,
+): ProductContaminantResultMetadata {
+  return {
+    upperValue: upperValue ?? null,
+    qualifier: row.resultQualifier ?? null,
+    detectionLimit: productContaminantMeasurementMetadata(
+      row.detectionLimitValue,
+      row.detectionLimitUnit,
+    ),
+    quantificationLimit: productContaminantMeasurementMetadata(
+      row.quantificationLimitValue,
+      row.quantificationLimitUnit,
+    ),
+    reportingLimit: productContaminantMeasurementMetadata(
+      row.reportingLimitValue,
+      row.reportingLimitUnit,
+    ),
+    uncertainty: productContaminantMeasurementMetadata(
+      row.uncertaintyValue,
+      row.uncertaintyUnit,
+    ),
+  };
+}
+
+function productContaminantMeasurementMetadata(
+  value: number | null | undefined,
+  unit: string | null | undefined,
+): ProductContaminantMeasurementMetadata | null {
+  return value != null && unit != null ? { value, unit } : null;
+}
+
+function productContaminantSample(
+  row: ProductContaminantQueryRow,
+): ProductContaminantSample {
+  return {
+    evidenceType: row.evidenceType ?? "laboratory_measurement",
+    samplingContext: row.samplingContext ?? "unspecified",
+    sourceSampleId: row.sourceSampleId ?? null,
+    sampleCount: row.sourceSampleCount ?? null,
+    reportedUpc: row.testedProductUpcRaw ?? null,
+    lotCode: row.testedLotCode ?? null,
+    bestBy: row.testedBestBy ?? null,
+    packageSize: row.testedPackageSize ?? null,
+    collectedOn: row.collectedOn ?? null,
+    testedOn: row.testedOn ?? null,
+    labName: row.labName ?? null,
+    testMethod: row.testMethod ?? null,
   };
 }
 
@@ -1314,6 +1492,7 @@ function scoreProductContaminantThreshold(
         row.resultOperator,
         row.normalizedValue,
         row.thresholdNormalizedValue,
+        row.normalizedUpperValue,
       ),
       threshold: {
         value: row.thresholdNormalizedValue,
@@ -1338,12 +1517,20 @@ function scoreProductContaminantThreshold(
       row.servingGrams *
       PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay /
       PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg;
+    const exposureUpperValue = row.normalizedUpperValue == null
+      ? null
+      : row.normalizedUpperValue *
+        NANOGRAMS_PER_GRAM_PER_PPM *
+        row.servingGrams *
+        PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay /
+        PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg;
 
     return {
       comparison: productContaminantThresholdComparison(
         row.resultOperator,
         exposureValue,
         row.thresholdValue,
+        exposureUpperValue,
       ),
       threshold: {
         value: row.thresholdValue,
@@ -1379,11 +1566,16 @@ function productContaminantObservationKey(
     row.contaminantKey,
     row.resultOperator,
     row.resultValue ?? "",
+    row.resultUpperValue ?? "",
     row.resultUnit,
     row.resultBasis,
     row.normalizedValue ?? "",
+    row.normalizedUpperValue ?? "",
     row.normalizedUnit ?? "",
     row.normalizedBasis ?? "",
+    row.sourceSampleId ?? "",
+    row.sourceSampleCount ?? "",
+    row.testedLotCode ?? "",
   ].join("\u001f");
 }
 
@@ -1400,14 +1592,24 @@ function unknownProductContaminantThresholdScore(): ProductContaminantThresholdS
 
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
-): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
-  return operator === "eq" || operator === "gt" || operator === "gte";
+): operator is Extract<
+  ProductContaminantResultOperator,
+  "eq" | "gt" | "gte" | "range"
+> {
+  return operator === "eq"
+    || operator === "gt"
+    || operator === "gte"
+    || operator === "range";
 }
 
 function productContaminantThresholdComparison(
-  operator: Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte">,
+  operator: Extract<
+    ProductContaminantResultOperator,
+    "eq" | "gt" | "gte" | "range"
+  >,
   normalizedValue: number,
   thresholdValue: number,
+  normalizedUpperValue: number | null,
 ): "does_not_exceed" | "exceeds" | "unknown" {
   switch (operator) {
     case "eq":
@@ -1416,6 +1618,16 @@ function productContaminantThresholdComparison(
       return normalizedValue >= thresholdValue ? "exceeds" : "unknown";
     case "gte":
       return normalizedValue > thresholdValue ? "exceeds" : "unknown";
+    case "range":
+      if (normalizedUpperValue == null) {
+        return "unknown";
+      }
+      if (normalizedValue > thresholdValue) {
+        return "exceeds";
+      }
+      return normalizedUpperValue <= thresholdValue
+        ? "does_not_exceed"
+        : "unknown";
   }
 }
 
@@ -1547,13 +1759,7 @@ function isMissingProductContaminantSchemaError(error: unknown): boolean {
 }
 
 function productLabelSourceFilterSql(columnSql: string): string {
-  return `${columnSql} NOT IN (${PRODUCT_TEST_SOURCE_DATA_ORIGINS
-    .map(sqlStringLiteral)
-    .join(", ")})`;
-}
-
-function sqlStringLiteral(value: string): string {
-  return `'${value.replace(/'/gu, "''")}'`;
+  return `NOT murph_product_test_legacy_source_backed_origin(${columnSql})`;
 }
 
 function isObjectRecord(value: unknown): value is { [key: string]: unknown } {

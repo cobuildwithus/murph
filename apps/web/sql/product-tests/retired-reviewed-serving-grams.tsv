@@ -1,0 +1,26 @@
+entity_type	label_id	stale_serving_grams	retirement_note
+food	safeway:960127250	240	PlasticList 240 g was a study comparison estimate for a liquid serving, not label gram evidence.
+food	fdc:1301823	370	PlasticList 370 g was a study comparison estimate; the target label states 355 mL.
+food	fdc:2663955	450	PlasticList 450 g was a study comparison estimate; the target label states 414 mL.
+food	wfm:b00iae9y5a	355	PlasticList 355 g described a 12 fl oz comparison amount, while this target is a 16.9 fl oz product.
+food	brand_site:good-farms-organic-strawberries	140	PlasticList 140 g was a study comparison estimate and the target source does not independently state a gram serving.
+food	brand_site:nespresso-medium-roast-black-capsule-coffee	237	PlasticList 237 g was a brewed-coffee comparison estimate and the target source does not independently state a gram serving.
+food	fdc:1168556	366	PlasticList 366 g was a study comparison estimate; the target label states 360 mL.
+food	fdc:170700	450	PlasticList 450 g was a study comparison estimate and is not a serving mass stated by the USDA legacy target.
+food	fdc:1965636	450	PlasticList 450 g was a study comparison estimate; the target label states 414 mL.
+food	fdc:2203038	370	PlasticList 370 g was a study comparison estimate; the target label states 360 mL.
+food	fdc:2418882	370	PlasticList 370 g described a 12 fl oz comparison amount, while this target label states 458 mL.
+food	fdc:2519549	370	PlasticList 370 g described a 12 fl oz comparison amount, while this target is an 8.5 fl oz product.
+food	fdc:2663953	450	PlasticList 450 g described a 14 fl oz comparison amount, while this target is a 32 fl oz product.
+food	fdc:2663962	450	PlasticList 450 g was a study comparison estimate; the target label states 414 mL.
+food	fdc:2663963	450	PlasticList 450 g was a study comparison estimate; the target label states 414 mL.
+food	fdc:2668980	450	PlasticList 450 g was a study comparison estimate; the target label states 414 mL.
+food	kroger_site:0083514300104	370	PlasticList 370 g described a 12 fl oz comparison amount, while this target is a 16.9 fl oz product.
+food	safeway:960127068	240	PlasticList 240 g was a study comparison estimate for a liquid serving, not label gram evidence.
+food	brand_site:rishi-english-breakfast-organic-black-tea	300	PlasticList 300 g was a brewed-tea comparison estimate; the official target describes an 8 fl oz cup.
+food	brand_site:tazo-awake-english-breakfast-black-tea	300	PlasticList 300 g was a brewed-tea comparison estimate; the official target describes an 8 fl oz cup.
+food	fdc:1086537	370	PlasticList 370 g described a 12 fl oz comparison amount, while this target label states 250 mL.
+supplement	271503	370	PlasticList 370 g was a study comparison estimate; the supplement label states 12 fl oz without gram evidence.
+supplement	280356	1.5	PlasticList 1.5 g was a study comparison estimate; the supplement label states one softgel without its mass.
+supplement	40351	370	PlasticList 370 g was a study comparison estimate; the supplement label states 12 fl oz without gram evidence.
+supplement	40352	370	PlasticList 370 g was a study comparison estimate; the supplement label states 12 fl oz without gram evidence.

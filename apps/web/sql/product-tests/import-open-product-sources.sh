@@ -19,6 +19,10 @@ Optional env:
                                   Required with --replace-source. Must equal
                                   the CSV data row count before the import can
                                   unlink rows absent from the complete input.
+                                  A sync-generated
+                                  open_product_sources_source_counts.tsv must
+                                  sit beside the CSV and exactly match every
+                                  staged source key and per-source row count.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
@@ -86,6 +90,7 @@ fi
 
 product_tests_csv_path="${OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:-}"
 replace_source_expected_rows="${OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS:-}"
+source_counts_tsv_path="$(dirname "$product_tests_csv_path")/open_product_sources_source_counts.tsv"
 
 if [ -z "$product_tests_csv_path" ]; then
   echo "OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required" >&2
@@ -125,14 +130,27 @@ if [ "$replace_source" = true ]; then
     echo "Open product sources --replace-source expected $replace_source_expected_rows product test rows but found $product_test_rows; refusing destructive import." >&2
     exit 65
   fi
+
+  if [ ! -f "$source_counts_tsv_path" ]; then
+    echo "Open product sources --replace-source requires open_product_sources_source_counts.tsv beside the CSV" >&2
+    exit 66
+  fi
+
+  IFS= read -r source_counts_header < "$source_counts_tsv_path" || true
+  if [ "$source_counts_header" != $'source_key\trow_count' ]; then
+    echo "Open product sources source-count manifest has an invalid header" >&2
+    exit 65
+  fi
 fi
 
 apply_product_test_schemas
 
 awk \
   -v product_tests_csv="$(labels_db_psql_copy_literal "$product_tests_csv_path")" \
+  -v source_counts_tsv="$(labels_db_psql_copy_literal "$source_counts_tsv_path")" \
   '{
     gsub(/__PRODUCT_TESTS_CSV__/, product_tests_csv)
+    gsub(/__SOURCE_COUNTS_TSV__/, source_counts_tsv)
     print
   }' \
   "$script_dir/import-open-product-sources.sql" > "$rendered_import_sql"

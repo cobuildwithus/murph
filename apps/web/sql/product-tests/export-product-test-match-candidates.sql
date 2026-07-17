@@ -8,13 +8,50 @@ WITH source_products AS MATERIALIZED (
     NULLIF(MIN(NULLIF(tests.tested_product_name, '')), '') AS tested_product_name,
     NULLIF(MIN(NULLIF(tests.tested_product_brand, '')), '') AS tested_product_brand,
     NULLIF(MIN(NULLIF(tests.tested_product_upc, '')), '') AS tested_product_upc,
+    NULLIF(MIN(NULLIF(tests.tested_product_upc_raw, '')), '') AS tested_product_upc_raw,
+    NULLIF(MIN(NULLIF(tests.tested_package_size, '')), '') AS tested_package_size,
     COUNT(*) AS product_test_rows,
-    string_agg(DISTINCT tests.contaminant_key, ', ' ORDER BY tests.contaminant_key) AS contaminant_keys
+    string_agg(DISTINCT tests.contaminant_key, ', ' ORDER BY tests.contaminant_key) AS contaminant_keys,
+    MIN(tests.food_id) AS current_food_id,
+    MIN(tests.supplement_id) AS current_supplement_id,
+    MIN(tests.match_method) AS current_match_method,
+    md5(jsonb_build_object(
+      'version', 'product-test-link-state-fingerprint-v1',
+      'foodId', MIN(tests.food_id),
+      'supplementId', MIN(tests.supplement_id),
+      'matchMethod', MIN(tests.match_method),
+      'targetFingerprint', NULL
+    )::text) AS current_state_fingerprint,
+    md5(jsonb_build_object(
+      'version', 'product-test-source-fingerprint-v2',
+      'sourceKey', tests.source_key,
+      'testedSourceProductId', tests.tested_source_product_id,
+      'testedProductName', MIN(tests.tested_product_name),
+      'testedProductBrand', MIN(tests.tested_product_brand),
+      'testedProductUpc', MIN(tests.tested_product_upc),
+      'testedProductUpcRaw', MIN(tests.tested_product_upc_raw),
+      'testedPackageSize', MIN(tests.tested_package_size)
+    )::text) AS source_fingerprint,
+    md5(jsonb_build_object(
+      'version', 'product-test-source-snapshot-v1',
+      'sourceKey', tests.source_key,
+      'testedSourceProductId', tests.tested_source_product_id,
+      'observations', jsonb_agg(
+        jsonb_build_array(tests.source_result_id, tests.contaminant_key)
+        ORDER BY tests.source_result_id, tests.contaminant_key
+      )
+    )::text) AS source_snapshot_fingerprint
   FROM product_tests tests
   WHERE
-    tests.match_method = 'source_only'
+    tests.tested_source_product_id IS NOT NULL
     AND (:'source_key_filter' = '' OR tests.source_key = :'source_key_filter')
   GROUP BY tests.source_key, tests.tested_source_product_id
+  HAVING
+    bool_and(
+      tests.match_method = 'source_only'
+      AND tests.food_id IS NULL
+      AND tests.supplement_id IS NULL
+    )
 ),
 source_queries AS MATERIALIZED (
   SELECT
@@ -33,7 +70,28 @@ source_queries AS MATERIALIZED (
     )) AS source_search_query,
     btrim(regexp_replace(replace(lower(COALESCE(source_products.tested_product_name, '')), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_source_name,
     btrim(regexp_replace(replace(lower(COALESCE(source_products.tested_product_brand, '')), '''', ''), '[^a-z0-9]+', ' ', 'g')) AS normalized_source_brand,
-    regexp_replace(COALESCE(source_products.tested_product_upc, ''), '\D', '', 'g') AS normalized_source_upc
+    murph_product_test_canonical_gtin(source_products.tested_product_upc) AS canonical_source_gtin,
+    CASE
+      WHEN murph_product_test_canonical_gtin(source_products.tested_product_upc) IS NOT NULL THEN (
+        SELECT COUNT(DISTINCT jsonb_build_array(exact_targets.target_kind, exact_targets.canonical_key))
+        FROM (
+          SELECT 'food'::text AS target_kind, foods.canonical_key
+          FROM foods
+          WHERE
+            murph_product_test_canonical_gtin(foods.upc)
+              = murph_product_test_canonical_gtin(source_products.tested_product_upc)
+            AND NOT murph_product_test_legacy_source_backed_origin(foods.data_origin)
+          UNION ALL
+          SELECT 'supplement'::text AS target_kind, supplements.canonical_key
+          FROM supplements
+          WHERE
+            murph_product_test_canonical_gtin(supplements.upc)
+              = murph_product_test_canonical_gtin(source_products.tested_product_upc)
+            AND NOT murph_product_test_legacy_source_backed_origin(supplements.data_origin)
+        ) exact_targets
+      )
+      ELSE 0
+    END AS exact_upc_canonical_groups
   FROM source_products
   WHERE NULLIF(source_products.tested_product_name, '') IS NOT NULL
 ),
@@ -44,10 +102,21 @@ ranked_candidates AS (
     source_queries.tested_product_name,
     source_queries.tested_product_brand,
     source_queries.tested_product_upc,
+    source_queries.tested_product_upc_raw,
+    source_queries.tested_package_size,
+    source_queries.canonical_source_gtin,
+    source_queries.exact_upc_canonical_groups,
     source_queries.product_test_rows,
     source_queries.contaminant_keys,
+    source_queries.source_fingerprint,
+    source_queries.source_snapshot_fingerprint,
+    source_queries.current_food_id,
+    source_queries.current_supplement_id,
+    source_queries.current_match_method,
+    source_queries.current_state_fingerprint,
     candidates.candidate_kind,
     candidates.candidate_id,
+    candidates.candidate_canonical_key,
     candidates.candidate_name,
     candidates.candidate_brand,
     candidates.candidate_upc,
@@ -56,6 +125,7 @@ ranked_candidates AS (
     candidates.candidate_off_market,
     candidates.candidate_reason,
     candidates.candidate_score,
+    candidates.target_fingerprint,
     row_number() OVER (
       PARTITION BY source_queries.source_key, source_queries.tested_source_product_id
       ORDER BY
@@ -67,9 +137,10 @@ ranked_candidates AS (
     ) AS candidate_rank
   FROM source_queries
   JOIN LATERAL (
-    SELECT DISTINCT ON (candidate_kind, candidate_id)
+    SELECT DISTINCT ON (candidate_kind, candidate_canonical_key)
       candidate_kind,
       candidate_id,
+      candidate_canonical_key,
       candidate_name,
       candidate_brand,
       candidate_upc,
@@ -77,11 +148,13 @@ ranked_candidates AS (
       candidate_data_origin_id,
       candidate_off_market,
       candidate_reason,
-      candidate_score
+      candidate_score,
+      target_fingerprint
     FROM (
       SELECT
         'food'::text AS candidate_kind,
         foods.id AS candidate_id,
+        foods.canonical_key AS candidate_canonical_key,
         foods.name AS candidate_name,
         foods.brand AS candidate_brand,
         foods.upc AS candidate_upc,
@@ -100,23 +173,32 @@ ranked_candidates AS (
           END
           - CASE WHEN foods.off_market THEN 10 ELSE 0 END
           - (foods.data_origin_priority::double precision / 1000)
-        )::double precision AS candidate_score
+        )::double precision AS candidate_score,
+        md5(jsonb_build_object(
+          'version', 'product-test-target-fingerprint-v1',
+          'kind', 'food',
+          'id', foods.id,
+          'canonicalKey', foods.canonical_key,
+          'dataOrigin', foods.data_origin,
+          'dataOriginId', foods.data_origin_id,
+          'name', foods.name,
+          'brand', foods.brand,
+          'upc', foods.upc,
+          'offMarket', foods.off_market
+        )::text) AS target_fingerprint
       FROM foods
       WHERE
-        source_queries.normalized_source_upc <> ''
-        AND foods.upc = source_queries.normalized_source_upc
-        AND foods.data_origin NOT IN (
-          'plasticlist_bay_area_2024',
-          'nyc_dohmh_consumer_products',
-          'king_county_consumer_products',
-          'pure_earth_rms_2024'
-        )
+        source_queries.exact_upc_canonical_groups = 1
+        AND source_queries.canonical_source_gtin IS NOT NULL
+        AND murph_product_test_canonical_gtin(foods.upc) = source_queries.canonical_source_gtin
+        AND NOT murph_product_test_legacy_source_backed_origin(foods.data_origin)
 
       UNION ALL
 
       SELECT
         'supplement'::text AS candidate_kind,
         supplements.id AS candidate_id,
+        supplements.canonical_key AS candidate_canonical_key,
         supplements.name AS candidate_name,
         supplements.brand AS candidate_brand,
         supplements.upc AS candidate_upc,
@@ -135,17 +217,25 @@ ranked_candidates AS (
           END
           - CASE WHEN supplements.off_market THEN 10 ELSE 0 END
           - (supplements.data_origin_priority::double precision / 1000)
-        )::double precision AS candidate_score
+        )::double precision AS candidate_score,
+        md5(jsonb_build_object(
+          'version', 'product-test-target-fingerprint-v1',
+          'kind', 'supplement',
+          'id', supplements.id,
+          'canonicalKey', supplements.canonical_key,
+          'dataOrigin', supplements.data_origin,
+          'dataOriginId', supplements.data_origin_id,
+          'name', supplements.name,
+          'brand', supplements.brand,
+          'upc', supplements.upc,
+          'offMarket', supplements.off_market
+        )::text) AS target_fingerprint
       FROM supplements
       WHERE
-        source_queries.normalized_source_upc <> ''
-        AND supplements.upc = source_queries.normalized_source_upc
-        AND supplements.data_origin NOT IN (
-          'plasticlist_bay_area_2024',
-          'nyc_dohmh_consumer_products',
-          'king_county_consumer_products',
-          'pure_earth_rms_2024'
-        )
+        source_queries.exact_upc_canonical_groups = 1
+        AND source_queries.canonical_source_gtin IS NOT NULL
+        AND murph_product_test_canonical_gtin(supplements.upc) = source_queries.canonical_source_gtin
+        AND NOT murph_product_test_legacy_source_backed_origin(supplements.data_origin)
 
       UNION ALL
 
@@ -154,6 +244,7 @@ ranked_candidates AS (
         SELECT
           'food'::text AS candidate_kind,
           foods.id AS candidate_id,
+          foods.canonical_key AS candidate_canonical_key,
           foods.name AS candidate_name,
           foods.brand AS candidate_brand,
           foods.upc AS candidate_upc,
@@ -184,17 +275,24 @@ ranked_candidates AS (
             END
             - CASE WHEN foods.off_market THEN 10 ELSE 0 END
             - (foods.data_origin_priority::double precision / 1000)
-          )::double precision AS candidate_score
+          )::double precision AS candidate_score,
+          md5(jsonb_build_object(
+            'version', 'product-test-target-fingerprint-v1',
+            'kind', 'food',
+            'id', foods.id,
+            'canonicalKey', foods.canonical_key,
+            'dataOrigin', foods.data_origin,
+            'dataOriginId', foods.data_origin_id,
+            'name', foods.name,
+            'brand', foods.brand,
+            'upc', foods.upc,
+            'offMarket', foods.off_market
+          )::text) AS target_fingerprint
         FROM foods
         WHERE
           source_queries.source_search_query <> ''
           AND to_tsvector('simple', foods.search_text) @@ websearch_to_tsquery('simple', source_queries.source_search_query)
-          AND foods.data_origin NOT IN (
-            'plasticlist_bay_area_2024',
-            'nyc_dohmh_consumer_products',
-            'king_county_consumer_products',
-            'pure_earth_rms_2024'
-          )
+          AND NOT murph_product_test_legacy_source_backed_origin(foods.data_origin)
         ORDER BY candidate_score DESC, foods.off_market ASC, foods.name ASC, foods.id ASC
         LIMIT 25
       ) food_name_candidates
@@ -206,6 +304,7 @@ ranked_candidates AS (
         SELECT
           'supplement'::text AS candidate_kind,
           supplements.id AS candidate_id,
+          supplements.canonical_key AS candidate_canonical_key,
           supplements.name AS candidate_name,
           supplements.brand AS candidate_brand,
           supplements.upc AS candidate_upc,
@@ -236,27 +335,44 @@ ranked_candidates AS (
             END
             - CASE WHEN supplements.off_market THEN 10 ELSE 0 END
             - (supplements.data_origin_priority::double precision / 1000)
-          )::double precision AS candidate_score
+          )::double precision AS candidate_score,
+          md5(jsonb_build_object(
+            'version', 'product-test-target-fingerprint-v1',
+            'kind', 'supplement',
+            'id', supplements.id,
+            'canonicalKey', supplements.canonical_key,
+            'dataOrigin', supplements.data_origin,
+            'dataOriginId', supplements.data_origin_id,
+            'name', supplements.name,
+            'brand', supplements.brand,
+            'upc', supplements.upc,
+            'offMarket', supplements.off_market
+          )::text) AS target_fingerprint
         FROM supplements
         WHERE
           source_queries.source_search_query <> ''
           AND to_tsvector('simple', supplements.search_text) @@ websearch_to_tsquery('simple', source_queries.source_search_query)
-          AND supplements.data_origin NOT IN (
-            'plasticlist_bay_area_2024',
-            'nyc_dohmh_consumer_products',
-            'king_county_consumer_products',
-            'pure_earth_rms_2024'
-          )
+          AND NOT murph_product_test_legacy_source_backed_origin(supplements.data_origin)
         ORDER BY candidate_score DESC, supplements.off_market ASC, supplements.name ASC, supplements.id ASC
         LIMIT 25
       ) supplement_name_candidates
     ) raw_candidates
     ORDER BY
       candidate_kind,
-      candidate_id,
+      candidate_canonical_key,
       candidate_score DESC,
-      candidate_reason ASC
+      candidate_off_market ASC,
+      candidate_reason ASC,
+      candidate_id ASC
   ) candidates ON true
+),
+ranked_with_runner_up AS (
+  SELECT
+    ranked_candidates.*,
+    max(candidate_score) FILTER (WHERE candidate_rank = 2) OVER (
+      PARTITION BY source_key, tested_source_product_id
+    ) AS runner_up_score
+  FROM ranked_candidates
 )
 SELECT
   source_key,
@@ -264,11 +380,22 @@ SELECT
   tested_product_name,
   tested_product_brand,
   tested_product_upc,
+  tested_product_upc_raw,
+  tested_package_size,
+  canonical_source_gtin,
+  exact_upc_canonical_groups,
+  source_fingerprint,
+  source_snapshot_fingerprint,
   product_test_rows,
   contaminant_keys,
+  current_food_id,
+  current_supplement_id,
+  current_match_method,
+  current_state_fingerprint,
   candidate_rank,
   candidate_kind,
   candidate_id,
+  candidate_canonical_key,
   candidate_name,
   candidate_brand,
   candidate_upc,
@@ -277,9 +404,12 @@ SELECT
   candidate_off_market,
   candidate_reason,
   round(candidate_score::numeric, 3) AS candidate_score,
+  CASE WHEN candidate_rank = 1 THEN round(runner_up_score::numeric, 3) END AS runner_up_score,
+  CASE WHEN candidate_rank = 1 THEN round((candidate_score - runner_up_score)::numeric, 3) END AS candidate_score_margin,
+  target_fingerprint,
   CASE candidate_reason WHEN 'exact_upc' THEN 'exact_upc' ELSE 'manual_confirmed' END AS suggested_match_method,
   ''::text AS review_note
-FROM ranked_candidates
+FROM ranked_with_runner_up
 WHERE candidate_rank <= :'candidate_limit'::integer
 ORDER BY
   source_key,

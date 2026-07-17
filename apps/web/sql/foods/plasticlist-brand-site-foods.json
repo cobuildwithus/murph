@@ -335,5 +335,232 @@
       ],
       "updatedAt": "2026-06-14 11:47:18"
     }
+  },
+  {
+    "id": "brand_site:o-organics-organic-eggs-large-brown",
+    "canonicalKey": "o organics|o organics large brown eggs",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "o-organics-organic-eggs-large-brown",
+    "dataOriginUrl": "https://www.safeway.com/shop/product-details.138350308.html",
+    "dataOriginPriority": 5,
+    "name": "O Organics Organic Eggs Large Brown, 6 Count",
+    "brand": "O Organics",
+    "upc": "079893401522",
+    "offMarket": false,
+    "searchText": "O Organics Organic Eggs Large Brown 6 Count 079893401522 organic eggs large brown egg",
+    "fdcReleaseDate": "2026-07-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "safeway_o_organics",
+      "sourceId": "138350308",
+      "sourceFetchedAt": "2026-07-16",
+      "sourceUrl": "https://www.safeway.com/shop/product-details.138350308.html",
+      "sourceUrls": [
+        "https://www.safeway.com/shop/product-details.138350308.html",
+        "https://www.fda.gov/food/outbreaks-foodborne-illness/outbreak-investigation-salmonella-eggs-june-2025",
+        "https://fdc.nal.usda.gov/food-details/1541982/nutrients"
+      ],
+      "sourceType": "retailer_product_page_with_official_identity_and_serving_corroboration",
+      "evidenceStatus": "retailer_label_structured_officially_corroborated",
+      "sourceName": "O Organics Organic Eggs Large Brown",
+      "name": "O Organics Organic Eggs Large Brown, 6 Count",
+      "brandName": "O Organics",
+      "upc": "079893401522",
+      "packageDescription": "6 large brown eggs",
+      "identityEvidenceUrl": "https://www.fda.gov/food/outbreaks-foodborne-illness/outbreak-investigation-salmonella-eggs-june-2025",
+      "servingEvidenceUrl": "https://fdc.nal.usda.gov/food-details/1541982/nutrients",
+      "ingredients": "Organic Eggs",
+      "ingredientRows": [
+        { "name": "Organic Eggs" }
+      ],
+      "allergenText": "Contains eggs.",
+      "servingSizes": [
+        { "description": "1 large egg (50 g)", "amount": 1, "unit": "egg", "grams": 50 }
+      ],
+      "calories": 70,
+      "nutritionFacts": {
+        "servingSize": "1 large egg (50 g)",
+        "caloriesAmount": "70",
+        "macronutrients": [
+          { "name": "Total Fat", "level": "TOP", "amount": "5g", "percent": "6%" },
+          { "name": "Trans Fat", "level": "SUB", "amount": "0g", "percent": null },
+          { "name": "Cholesterol", "level": "TOP", "amount": "185mg", "percent": "62%" },
+          { "name": "Sodium", "level": "TOP", "amount": "70mg", "percent": "3%" },
+          { "name": "Total Carbohydrate", "level": "TOP", "amount": "0g", "percent": "0%" },
+          { "name": "Dietary Fiber", "level": "SUB", "amount": "0g", "percent": "0%" },
+          { "name": "Protein", "level": "TOP", "amount": "6g", "percent": "12%" }
+        ],
+        "servingsPerContainer": null
+      },
+      "nutrientsPerServing": [
+        { "name": "Energy", "unit": "kcal", "amount": "70", "dailyValue": null },
+        { "name": "Total Fat", "unit": "g", "amount": "5", "dailyValue": "6%" },
+        { "name": "Trans Fat", "unit": "g", "amount": "0", "dailyValue": null },
+        { "name": "Cholesterol", "unit": "mg", "amount": "185", "dailyValue": "62%" },
+        { "name": "Sodium", "unit": "mg", "amount": "70", "dailyValue": "3%" },
+        { "name": "Total Carbohydrate", "unit": "g", "amount": "0", "dailyValue": "0%" },
+        { "name": "Dietary Fiber", "unit": "g", "amount": "0", "dailyValue": "0%" },
+        { "name": "Protein", "unit": "g", "amount": "6", "dailyValue": "12%" }
+      ]
+    }
+  },
+  {
+    "id": "brand_site:fiji-water-1l-case-of-12",
+    "canonicalKey": "fiji|fiji water 1 l",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "fiji-water-1l-case-of-12",
+    "dataOriginUrl": "https://www.fijiwater.com/products/fiji-water-1l-case-of-12",
+    "dataOriginPriority": 5,
+    "name": "FIJI Water 1.0L, Case of 12",
+    "brand": "FIJI Water",
+    "upc": null,
+    "offMarket": false,
+    "searchText": "FIJI Water 1.0L Case of 12 33.8 fl oz natural artesian water Fiji bottled water",
+    "fdcReleaseDate": "2026-07-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "fiji-water",
+      "sourceId": "3941443698757",
+      "sourceFetchedAt": "2026-07-16",
+      "sourceUrl": "https://www.fijiwater.com/products/fiji-water-1l-case-of-12",
+      "sourceUrls": [
+        "https://www.fijiwater.com/products/fiji-water-1l-case-of-12",
+        "https://cdn.shopify.com/s/files/1/0051/7262/5477/files/2026_CA_Water_Quality_Report_English_-_FINAL_-_3.30.2026.pdf?v=1774914850"
+      ],
+      "sourceType": "official_brand_page_and_water_quality_report",
+      "evidenceStatus": "official_page_and_product_analysis",
+      "name": "FIJI Water 1.0L",
+      "brandName": "FIJI Water",
+      "shopifyProductId": "3941443698757",
+      "shopifyVariantId": "29473892859973",
+      "packageDescription": "Case of 12 bottles; 1.0 L (33.8 fl oz) per bottle",
+      "ingredients": "Natural artesian water.",
+      "ingredientRows": [
+        { "name": "Natural artesian water" }
+      ],
+      "servingSizes": [],
+      "waterQualityReport": {
+        "title": "Bottled Water Quality Report",
+        "reportDate": "March 2026",
+        "samplingPeriod": "February 2026",
+        "url": "https://cdn.shopify.com/s/files/1/0051/7262/5477/files/2026_CA_Water_Quality_Report_English_-_FINAL_-_3.30.2026.pdf?v=1774914850"
+      },
+      "typicalMineralAnalysis": [
+        { "name": "Bicarbonate", "amount": "126.4", "unit": "mg/L" },
+        { "name": "Calcium", "amount": "18", "unit": "mg/L" },
+        { "name": "Chloride", "amount": "9", "unit": "mg/L" },
+        { "name": "Fluoride", "amount": "0.2", "unit": "mg/L" },
+        { "name": "Magnesium", "amount": "14", "unit": "mg/L" },
+        { "name": "Sodium", "amount": "17", "unit": "mg/L" },
+        { "name": "Silica", "amount": "86", "unit": "mg/L" },
+        { "name": "Sulfate", "amount": "0.5", "unit": "mg/L" },
+        { "name": "Total Dissolved Solids", "amount": "210", "unit": "mg/L" },
+        { "name": "Total Alkalinity", "amount": "130", "unit": "mg/L" },
+        { "name": "Conductivity", "amount": "280", "unit": "umhos/cm" },
+        { "name": "pH", "amount": "7.91", "unit": "pH" }
+      ],
+      "productImages": [
+        "https://cdn.shopify.com/s/files/1/0051/7262/5477/files/FW_1.0L_900x900_2.png?v=1776979048"
+      ]
+    }
+  },
+  {
+    "id": "brand_site:nescafe-dark-roast-instant-coffee-35-oz-jar",
+    "canonicalKey": "nescafe|nescafe clasico dark roast instant coffee 3 5 oz",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "nescafe-dark-roast-instant-coffee-35-oz-jar",
+    "dataOriginUrl": "https://www.nescafe.com/us/products/dark-roast-instant-coffee-35-oz-jar/",
+    "dataOriginPriority": 5,
+    "name": "NESCAFÉ CLÁSICO Dark Roast Instant Coffee, 3.5 oz Jar",
+    "brand": "NESCAFÉ CLÁSICO",
+    "upc": "028000469429",
+    "offMarket": false,
+    "searchText": "NESCAFÉ CLÁSICO Dark Roast Instant Coffee 3.5 oz Jar 028000469429 pure coffee instant coffee",
+    "fdcReleaseDate": "2026-07-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "nescafe",
+      "sourceId": "028000469429",
+      "sourceFetchedAt": "2026-07-16",
+      "sourceUrl": "https://www.nescafe.com/us/products/dark-roast-instant-coffee-35-oz-jar/",
+      "sourceType": "official_brand_page_and_image",
+      "evidenceStatus": "official_page_structured",
+      "name": "NESCAFÉ CLÁSICO Dark Roast Instant Coffee, 3.5 oz Jar",
+      "brandName": "NESCAFÉ CLÁSICO",
+      "upc": "028000469429",
+      "packageDescription": "3.5 oz jar",
+      "ingredients": "Coffee.",
+      "ingredientRows": [
+        { "name": "Coffee" }
+      ],
+      "servingSizes": [
+        {
+          "description": "1 tsp instant coffee prepared with 6 fl oz hot water",
+          "amount": 1,
+          "unit": "tsp",
+          "basis": "official_preparation_instruction"
+        }
+      ],
+      "preparationInstructions": [
+        "Add 1 teaspoon of instant coffee to a cup.",
+        "Add 6 fluid ounces of hot water and stir."
+      ],
+      "claims": [
+        "100% pure coffee",
+        "Kosher"
+      ],
+      "productImages": [
+        "https://www.nescafe.com/us/sites/g/files/jgfbjl306/files/gdn_product/field_product_images/nescafe-c3layd55duodgt08rtz1.png"
+      ]
+    }
+  },
+  {
+    "id": "brand_site:tazo-awake-english-breakfast-black-tea",
+    "canonicalKey": "tazo|awake english breakfast black tea 20 count",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "tazo-awake-english-breakfast-black-tea",
+    "dataOriginUrl": "https://web.archive.org/web/20240228194618/https://www.tazo.com/us/en/products/tea-bags/awake-english-breakfast/",
+    "dataOriginPriority": 5,
+    "name": "TAZO Awake English Breakfast Black Tea, 20 Tea Bags",
+    "brand": "TAZO",
+    "upc": "794522200788",
+    "offMarket": true,
+    "searchText": "TAZO Awake English Breakfast Black Tea 20 Tea Bags 794522200788 non-organic blend of black teas historical",
+    "fdcReleaseDate": "2026-07-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "tazo",
+      "sourceId": "794522200788",
+      "sourceFetchedAt": "2026-07-16",
+      "sourceUrl": "https://web.archive.org/web/20240228194618/https://www.tazo.com/us/en/products/tea-bags/awake-english-breakfast/",
+      "sourceType": "official_brand_page_archived",
+      "evidenceStatus": "official_archived_page_structured",
+      "historicalSnapshotAt": "2024-02-28T19:46:18Z",
+      "name": "AWAKE™ ENGLISH BREAKFAST",
+      "brandName": "TAZO",
+      "upc": "794522200788",
+      "packageDescription": "20 tea bags; 1.8 oz (51 g)",
+      "ingredients": "A blend of black teas.",
+      "ingredientRows": [
+        { "name": "Black teas" }
+      ],
+      "servingSizes": [
+        {
+          "description": "1 tea bag brewed with 8 fl oz water",
+          "amount": 1,
+          "unit": "tea bag",
+          "basis": "official_preparation_instruction"
+        }
+      ],
+      "brewingInstructions": {
+        "teaBags": 1,
+        "waterTemperature": "212°F",
+        "waterVolume": "8 fl oz",
+        "steepTime": "5 minutes"
+      },
+      "productImages": [
+        "https://images.ctfassets.net/67yjwz9a8c38/73zHN8qUotLYaFEoQECyD3/987d6c59130ed37a39c434498b6a1f41/1651953-794522200788-05.png.rendition.470.470.png"
+      ]
+    }
   }
 ]
