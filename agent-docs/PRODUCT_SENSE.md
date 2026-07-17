@@ -149,3 +149,14 @@ Assistant runtime state is never the source of truth for these objects.
   exact protocol revision, test plan, and confidence language that produced it.
 - If user-visible behavior is still undefined, record it in
   `agent-docs/product-specs/` before it spreads into copy, UI, or runtime code.
+
+## Public product evidence
+
+Murph Safe is a public evidence surface, not a certification mark. Organize the
+answer around the exact product record, what its label says, what tests are
+linked to that record, what threshold was used for any comparison, and what
+remains unknown. Never collapse those facts into a safe/unsafe verdict or make
+missing testing sound reassuring. Keep supplement and branded-food search
+useful without implying that separately ranked corpora are directly
+comparable. Generic foods, inferred test linkage, and formula-revision claims
+remain outside the surface until their product meaning is explicitly defined.

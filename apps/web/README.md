@@ -329,9 +329,18 @@ Required for production migrations:
 
 - `DIRECT_DATABASE_URL`
 
-Required for the hosted device-sync lane:
+Required for live Labs discovery:
 
 - `JUNCTION_API_KEY`
+
+This is the same canonical Junction credential used by hosted device sync.
+Labs discovery keeps the key server-only, targets the code-owned production US
+origin, and serves authenticated `POST /api/labs` plus signed
+`POST /api/internal/hosted-execution/labs/tool` through one stateless service.
+No catalog, query, or ZIP is persisted.
+
+Required for the hosted device-sync lane in addition:
+
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -429,6 +438,39 @@ any proven violations, then validate `supplements_payload_format_check`
 explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
+
+## Murph Safe public product data
+
+`/search` exposes the public Murph Safe product-evidence experience. Its browser
+search calls `POST /api/public/v1/products/search`; server-rendered product
+details use the same service as
+`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
+is available at `/api/public/v1/openapi.json`, and the current schema id is
+`murph.public-products.v1`.
+
+The public catalog includes current supplement and branded-food sources and
+excludes generic food origins. Search and detail DTOs are bounded normalized
+projections; product tests join only through the selected row's exact
+`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
+echoed, persisted, analyzed, or logged.
+
+Before a production build, configure these Production-scoped server values:
+
+- `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
+- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
+- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `HOSTED_WEB_VERCEL_PROJECT_ID`
+- optional `HOSTED_WEB_VERCEL_TEAM_ID`
+- `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
+
+The exact-id custom rules must be the first active rules after the optional
+companion diagnostics rule. Search is an exact POST path with a fixed-window
+per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
+while excluding search, plus the public web-detail prefix, at 120 requests per
+60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+configuration and fails on disabled firewall, order, condition, algorithm,
+key, limit, window, action, or id drift. It never downloads environment values
+or prints the provider token or response body.
 
 Provider-owned webhook-admin settings:
 
@@ -815,11 +857,11 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 `PrismaPg`. The adapter owns external-pool disposal so `$disconnect()` retains
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
-transactions between backend connections. Pool limits remain five clients,
-five seconds for connection acquisition, and 30 seconds for idle retirement;
-tune those values only from measured pool and database pressure. Connection
-failure logs expose only a fixed failure category and numeric total, idle, and
-waiting counts.
+transactions between backend connections. The default pool limit is 15 clients
+per module runtime, with five seconds for connection acquisition and 30 seconds
+for idle retirement; tune those values only from measured pool and database
+pressure. Connection failure logs expose only a fixed failure category and
+numeric total, idle, and waiting counts.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the

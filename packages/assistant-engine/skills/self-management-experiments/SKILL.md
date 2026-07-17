@@ -5,11 +5,15 @@ description: Design, run, and interpret low-burden personalized experiments for 
 
 # Self-management experiments
 
+For any sleep-related experiment, load `sleep-improvement` first. That domain owner must classify the phenotype, preempt apnea or dangerous-sleepiness risk, and route persistent or impairing insomnia to CBT-I before this skill designs a method. This skill may own the experiment structure only after the sleep owner clears the intervention and safety lane.
+
 ## Purpose
 
 Turn uncertainty into useful action through small, personalized experiments. Help the user discover what reduces symptoms, improves function, protects recovery, or makes daily life easier without requiring perfect data or waiting for a formal clinical trial.
 
 This skill is for behavioral, environmental, routine, communication, and other reversible self-management changes. It is not a route for unsupervised prescription changes, invasive treatment, or deliberate dangerous symptom provocation.
+
+Any multi-day or repeated comparison intended as an experiment must also use `experiment-onboarding` for safety review, canonical run creation, session semantics, progress, and outcome closeout. This skill designs the question and low-burden method; it does not replace the canonical experiment workflow with chat history, a habit regimen, or reminder instructions. A one-time immediate micro-test may stay outside an experiment run when it creates no repeated plan or longitudinal claim.
 
 Use it with `chronic-illness-support` or `chronic-pain-support` when the user wants to try something, change a habit, understand a pattern, compare two routines, or make a repeated decision more intelligently.
 
@@ -46,7 +50,7 @@ Murph can usually recommend and start these directly when they fit the user’s 
 - planned breaks;
 - activity timing within known capacity;
 - a lower-demand version of a meaningful activity;
-- sleep wind-down or environment changes;
+- sleep wind-down, environment, or schedule/opportunity changes that do not compress time in bed;
 - posture or workspace changes;
 - sensory-load reduction;
 - relaxation, grounding, attention, or coping routines;
@@ -65,7 +69,6 @@ Murph may recommend these only after checking relevant diagnoses, restrictions, 
 - substantial changes in hydration, salt, caffeine, meal timing, or dietary pattern;
 - new braces, supports, or over-the-counter devices;
 - breath practices in people with respiratory, panic, or dysautonomia concerns;
-- sleep-window manipulation;
 - symptom-trigger challenges.
 
 State the assumption, start conservatively, and include a stop rule.
@@ -79,6 +82,7 @@ Do not direct the user to run these independently:
 - fasting, aggressive elimination diets, or dehydration/salt loading;
 - invasive procedures, injections, or devices;
 - deliberate exposure to allergens, syncope triggers, severe pain, post-exertional malaise, withdrawal, or other dangerous symptoms;
+- sleep restriction, prescribed sleep-window compression, or another CBT-I treatment component that requires clinical screening and monitoring;
 - major exercise loading in cancer, fracture risk, unstable cardiopulmonary disease, progressive neurological disease, or another incompatible context.
 
 Murph can still design the question, summarize evidence, and prepare a clinician-supervised trial request.
@@ -353,7 +357,7 @@ With consent, Murph may:
 - recommend the next decision;
 - stop all prompts when the trial ends or the user asks.
 
-Silence means no data unless the user has explicitly defined another meaning. Do not increase notification frequency after nonresponse.
+For manual observations, silence means no observation unless the user has explicitly defined another meaning. Do not reinterpret it as a symptom result. Experiment adherence may use a canonical assumed-session policy, and delivery silence is ambiguous when a message may not have arrived; defer to experiment-onboarding and behavior-followthrough for those lanes. Never increase notification frequency after nonresponse.
 
 At review, choose one:
 

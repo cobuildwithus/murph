@@ -18,6 +18,7 @@ import {
 } from "@/src/components/experiments/experiment-detail/trend-chart";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
+import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
@@ -583,6 +584,93 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(trendMarkup).not.toContain("Expected");
+  });
+
+  it("projects ordered comparable card metrics from production browser-vault signals", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        metricRows: [
+          ...metricRows("resting-heart-rate", "bpm", [
+            ["2026-04-01", 63],
+            ["2026-04-02", 62],
+            ["2026-04-03", 61],
+            ["2026-04-08", 60],
+            ["2026-04-09", 59],
+            ["2026-04-10", 58],
+          ]),
+          ...metricRows("hrv-rmssd", "ms", [
+            ["2026-04-01", 60],
+            ["2026-04-02", 60],
+            ["2026-04-03", 60],
+            ["2026-04-08", 55],
+            ["2026-04-09", 55],
+            ["2026-04-10", 55],
+          ]),
+          ...metricRows("deep-sleep-minutes", "min", [
+            ["2026-04-01", 90],
+            ["2026-04-02", 90],
+            ["2026-04-03", 90],
+            ["2026-04-08", 90],
+            ["2026-04-09", 90],
+            ["2026-04-10", 90],
+          ]),
+          ...metricRows("rem-sleep-minutes", "min", [
+            ["2026-04-01", 80],
+            ["2026-04-02", 80],
+            ["2026-04-03", 80],
+            ["2026-04-08", 82],
+          ]),
+        ],
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+              secondaryBiomarkerKeys: [
+                "biomarker:hrv-rmssd",
+                "biomarker:deep-sleep-minutes",
+                "biomarker:rem-sleep-minutes",
+              ],
+            },
+            id: "exp_sauna_card_metrics",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-10",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "finished",
+            title: "Private sauna run",
+          }),
+          id: "exp_sauna_card_metrics",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "finished",
+          summary: "Production card-metric projection.",
+          tags: ["sauna"],
+          title: "Private sauna run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).not.toBeNull();
+    expect(buildExperimentRunCardSummary(privateRun!).metrics.map((metric) => ({
+      label: metric.label,
+      sentiment: metric.sentiment,
+    }))).toEqual([
+      { label: "Resting Heart Rate", sentiment: "positive" },
+      { label: "Hrv Rmssd", sentiment: "negative" },
+      { label: "Deep Sleep Minutes", sentiment: "neutral" },
+    ]);
+    expect(privateRun?.signals.find((signal) => signal.label === "Rem Sleep Minutes")?.delta).toBe("");
   });
 
   it("hides deltas until the intervention window has enough days to compare", async () => {
@@ -1702,11 +1790,19 @@ function createContextEntity(input: {
 }
 
 function restingHeartRateRows(entries: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {
+  return metricRows("resting-heart-rate", "bpm", entries);
+}
+
+function metricRows(
+  metricKey: string,
+  unit: string,
+  entries: readonly (readonly [string, number])[],
+): BrowserVaultMetricRow[] {
   return entries.map(([date, value]) =>
     metricRow({
       date,
-      metricKey: "resting-heart-rate",
-      unit: "bpm",
+      metricKey,
+      unit,
       value,
     }),
   );
@@ -1718,8 +1814,15 @@ function metricRow(input: {
   unit: string;
   value: number;
 }): BrowserVaultMetricRow {
+  const biomarkerKeyByMetricKey: Readonly<Record<string, string>> = {
+    "deep-sleep-minutes": "biomarker:deep-sleep-minutes",
+    "hrv-rmssd": "biomarker:hrv-rmssd",
+    "rem-sleep-minutes": "biomarker:rem-sleep-minutes",
+    "resting-heart-rate": "biomarker:resting-heart-rate",
+  };
+
   return {
-    biomarkerKey: input.metricKey === "resting-heart-rate" ? "biomarker:resting-heart-rate" : null,
+    biomarkerKey: biomarkerKeyByMetricKey[input.metricKey] ?? null,
     confidence: "medium",
     context: {},
     date: input.date,

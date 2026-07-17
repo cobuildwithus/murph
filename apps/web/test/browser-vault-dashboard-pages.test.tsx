@@ -219,7 +219,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
 
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Hyperbaric Oxygen Therapy/);
-  assert.match(markup, /Red Light Glasses Before Bed/);
+  assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
   const featuredMarkup = markup.split("Browse all").at(0) ?? markup;
   assert.match(featuredMarkup, /Finnish Dry Sauna/);
   assert.match(featuredMarkup, /Norwegian 4x4/);
@@ -282,7 +282,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
   assert.match(markup, /The latest refresh failed\./);
   assert.match(markup, /The public experiment library is still available below\./);
   assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Red Light Glasses Before Bed/);
+  assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
 });
 
 test("OverviewPage preserves stale data when a refresh fails", () => {

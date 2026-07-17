@@ -16,7 +16,7 @@ const globalForPrisma = globalThis as typeof globalThis & {
   __murphHostedWebPrisma?: PrismaClient;
 };
 
-const DEFAULT_DATABASE_POOL_MAX = 5;
+const DEFAULT_DATABASE_POOL_MAX = 15;
 const DATABASE_POOL_MAX = Number.parseInt(process.env.DATABASE_POOL_MAX ?? "", 10);
 const PG_CONNECTION_TIMEOUT_MS = 5_000;
 const PG_IDLE_TIMEOUT_MS = 30_000;

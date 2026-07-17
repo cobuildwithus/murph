@@ -158,7 +158,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('plain adult language')
     expect(insightRecord?.instructions).toContain('clear claim anchored in recognizable context')
     expect(insightRecord?.instructions).toContain('Use dates for traceability, not as the story')
-    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting causes')
+    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting inputs')
     expect(insightRecord?.instructions).toContain('simple translation')
     expect(insightRecord?.instructions).toContain('raw biomarker names')
     expect(insightRecord?.instructions).toContain('TSH is the brain\'s signal')

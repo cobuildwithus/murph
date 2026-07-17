@@ -293,8 +293,8 @@ describe("ProtocolTab", () => {
     expect(countOccurrences(markup, 'open=""')).toBe(1);
   });
 
-  it("uses the page-authored red-light-glasses focus signal and moves the noisier ones into context pills", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
+  it("uses the page-authored tomorrow-list focus signal and moves the secondary signal into context pills", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("five-minute-tomorrow-list");
 
     expect(protocol).not.toBeNull();
 
@@ -306,22 +306,17 @@ describe("ProtocolTab", () => {
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
-    expect(countOccurrences(markup, "data-card=")).toBe(1);
-    expect(markup).not.toContain('data-card="Sleep Efficiency"');
-    expect(markup).toContain('data-card="Sleep Onset Latency"');
-    expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
-    expect(markup).not.toContain('data-card="HRV / RMSSD"');
-    expect(markup).not.toContain('data-card="Resting Heart Rate"');
+    expect(countOccurrences(markup, "data-card=")).toBe(2);
+    expect(markup).toContain('data-card="Pre-Sleep Arousal"');
+    expect(markup).not.toContain('data-card="Sleep Onset Latency"');
+    expect(markup).not.toContain('data-card="Subjective Sleep Quality"');
+    expect(markup).toContain('data-card="Daytime Sleepiness"');
     expect(markup).not.toContain("Primary marker");
     expect(markup).not.toContain("Sleep context");
     expect(markup).not.toContain("Exploratory signal");
-    expect(markup).toContain("Deep Sleep");
-    expect(markup).toContain("HRV / RMSSD");
-    expect(markup).toContain("Resting Heart Rate");
-    expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Sleep Onset Latency");
-    expect(markup).toContain("glasses on");
-    expect(markup).toContain("−120 min");
+    expect(markup).toContain("write specific future tasks and first actions");
+    expect(markup).toContain("stop at 5 min");
   });
 
   it("keeps expected signals outcome-only while rendering measurement paths separately", () => {

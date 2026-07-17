@@ -251,15 +251,21 @@ export async function readHostedMemberEmailSnapshots(input: {
     },
   });
 
-  return Promise.all(records.map(async (record) => ({
-    core: projectHostedMemberCoreState(record),
-    emailAuthorization: record.emailAuthorization
-      ? await projectHostedMemberEmailAuthorizationState(
-          record.emailAuthorization,
-          input.prisma,
-        )
-      : null,
-  })));
+  // Sequential on purpose: each projection can read per-member crypto envelopes,
+  // so running members in parallel fans out one query per member on the pool.
+  const snapshots: HostedMemberEmailSnapshot[] = [];
+  for (const record of records) {
+    snapshots.push({
+      core: projectHostedMemberCoreState(record),
+      emailAuthorization: record.emailAuthorization
+        ? await projectHostedMemberEmailAuthorizationState(
+            record.emailAuthorization,
+            input.prisma,
+          )
+        : null,
+    });
+  }
+  return snapshots;
 }
 
 export async function readHostedMemberVerifiedEmailSnapshots(input: {

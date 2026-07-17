@@ -1,6 +1,8 @@
 import { normalizePhoneNumber } from "./phone";
 import type { HostedLinqAssignableHomeLine } from "./linq-line-store";
 
+export const HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY = 50;
+
 export type HostedLinqActiveRouteDecision =
   | {
       kind: "bind_home";
@@ -18,6 +20,7 @@ export type HostedLinqActiveRouteDecision =
 
 export function chooseHostedLinqHomeLine(input: {
   activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  ignoreDailyNewConversationLimit?: boolean;
   lines: readonly HostedLinqAssignableHomeLine[];
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
@@ -26,6 +29,7 @@ export function chooseHostedLinqHomeLine(input: {
   const candidates = input.lines.filter((line) =>
     isHostedLinqHomeLineUnderLimits({
       activeMembersByRecipientPhone: input.activeMembersByRecipientPhone,
+      ignoreDailyNewConversationLimit: input.ignoreDailyNewConversationLimit ?? false,
       line,
       newAssignmentsByRecipientPhone: input.newAssignmentsByRecipientPhone,
     }),
@@ -57,6 +61,38 @@ export function chooseHostedLinqHomeLine(input: {
 
     return left.phoneNumberLookupKey.localeCompare(right.phoneNumberLookupKey);
   })[0] ?? null;
+}
+
+export function chooseHostedLinqSignupWelcomeLine(input: {
+  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  lines: readonly HostedLinqAssignableHomeLine[];
+  newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
+  preferredRecipientPhone: string | null;
+}): HostedLinqAssignableHomeLine | null {
+  const selected = chooseHostedLinqHomeLine({
+    ...input,
+    lines: input.lines.map((line) => ({
+      ...line,
+      maxNewConversationsPerDay: resolveHostedLinqSignupWelcomeDailyLimit(line),
+    })),
+  });
+
+  return selected
+    ? input.lines.find((line) => line.phoneNumberLookupKey === selected.phoneNumberLookupKey) ?? null
+    : null;
+}
+
+export function resolveHostedLinqSignupWelcomeDailyLimit(
+  line: Pick<HostedLinqAssignableHomeLine, "maxNewConversationsPerDay">,
+): number {
+  return Math.min(
+    HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY,
+    Math.max(
+      0,
+      line.maxNewConversationsPerDay
+        ?? HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY,
+    ),
+  );
 }
 
 export function resolveHostedLinqHomeBindingRecipientPhone(input: {
@@ -135,6 +171,7 @@ export function resolveHostedLinqActiveRouteDecision(input: {
 
 function isHostedLinqHomeLineUnderLimits(input: {
   activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  ignoreDailyNewConversationLimit: boolean;
   line: HostedLinqAssignableHomeLine;
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
 }): boolean {
@@ -147,7 +184,8 @@ function isHostedLinqHomeLineUnderLimits(input: {
   }
 
   if (
-    input.line.maxNewConversationsPerDay !== null
+    !input.ignoreDailyNewConversationLimit
+    && input.line.maxNewConversationsPerDay !== null
     && (input.newAssignmentsByRecipientPhone.get(input.line.phoneNumber) ?? 0)
       >= input.line.maxNewConversationsPerDay
   ) {

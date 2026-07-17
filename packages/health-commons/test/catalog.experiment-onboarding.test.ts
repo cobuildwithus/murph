@@ -72,6 +72,7 @@ function createMeasurementMethodPage(): HealthCommonsSourcePage {
 function createProtocolPage(input: {
   adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
+  expectedSignalDescription?: string;
   firstSessionGuidance?: string;
   measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
@@ -107,6 +108,15 @@ function createProtocolPage(input: {
       cautionLevel: "high",
       stopIf: ["Chest pain"],
     },
+    ...(input.expectedSignalDescription === undefined
+      ? {}
+      : {
+          expectedSignalDescriptions: [{
+            biomarkerKey: "biomarker:estimated-vo2max",
+            description: input.expectedSignalDescription,
+            expectedDirection: "up" as const,
+          }],
+        }),
     ...(input.measurementPlan === undefined
       ? {}
       : { measurementPlan: input.measurementPlan }),
@@ -150,6 +160,7 @@ function createProtocolPage(input: {
 function createContentSet(input: {
   adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
+  expectedSignalDescription?: string;
   firstSessionGuidance?: string;
   measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
@@ -246,6 +257,31 @@ describe("buildHealthCommonsCatalogFromContent", () => {
     expect(firstRevision).toBeTruthy();
     expect(secondRevision).toBeTruthy();
     expect(secondRevision).not.toEqual(firstRevision);
+  });
+
+  it("changes runSpecRevisionId when an expected signal changes", () => {
+    const firstCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        expectedSignalDescription: "Wearable VO2max may improve over the block.",
+      }),
+    );
+    const secondCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        expectedSignalDescription: "Wearable VO2max may improve modestly over the block.",
+      }),
+    );
+
+    const firstRevision = firstCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+    const secondRevision = secondCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+
+    expect(firstRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).not.toEqual(firstRevision?.runSpecRevisionId);
+    expect(secondRevision?.recipeHash).toEqual(firstRevision?.recipeHash);
   });
 
   it("changes runSpecRevisionId without changing recipeHash when adaptation policy changes", () => {

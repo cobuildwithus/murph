@@ -50,7 +50,7 @@ measurementContexts:
 unit: "score"
 interpretationFrame:
   principle: "Compare repeated baseline and intervention windows rather than single nights."
-  caveat: "Use diary context and safety notes when device detection, naps, illness, travel, or schedule constraints distort the metric."
+  caveat: "Murph experiment sessions use a lightweight 0-to-10 rating where 0 is fully alert and 10 is struggling to stay awake; it is not the Epworth or Karolinska scale. Use context and safety notes when naps, illness, travel, or schedule constraints distort the metric."
 biomarker:
   shortName: "Daytime Sleepiness"
   displayName: "Daytime Sleepiness"
@@ -66,12 +66,12 @@ biomarker:
     minimumPoints: 5
     aggregation: "median"
   measurement:
-    bestContext: "Use the same diary and/or wearable method across baseline and intervention."
+    bestContext: "Use the same 0-to-10 diary question at a comparable daytime point across baseline and intervention."
     howToMeasure:
-      - "Record the relevant sleep field daily, ideally immediately after waking or during the morning log."
-      - "Use the same device and diary wording across baseline and intervention."
+      - "Ask how sleepy the person felt during the day from 0 (fully alert) to 10 (struggling to stay awake), and keep the wording and timing stable."
+      - "Record drowsy driving, sleep attacks, or safety-sensitive impairment separately; no score makes those safe."
       - "Tag nights with illness, travel, caregiving interruptions, shift work, late alcohol, unusual caffeine, or device missingness."
-      - "Interpret changes beside total sleep time and daytime sleepiness so regularity does not hide unsafe sleep loss."
+      - "Interpret changes beside total sleep time and sleep opportunity so regularity does not hide unsafe sleep loss."
     confounders:
       - "device changes"
       - "missing nights"
@@ -90,4 +90,4 @@ Daytime Sleepiness is included for the Consistent Wake Time protocol because the
 
 For Consistent Wake Time, daytime sleepiness is both an outcome and a stop-rule signal. Worsening sleepiness should outweigh adherence.
 
-This page is not a diagnostic definition. It is a practical Health Commons measurement page for repeated self-experiment windows.
+Murph experiment sessions use one stable question: “How sleepy were you during the day, from 0 (fully alert) to 10 (struggling to stay awake)?” This is a repeated same-person signal, not a diagnostic scale. Drowsy driving, sleep attacks, or unsafe impairment override the score and require appropriate safety action.

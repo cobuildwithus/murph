@@ -122,7 +122,7 @@ test('custom experiment plans can be planned once explicitly marked custom', asy
     },
   })
 
-  assert.deepEqual(result.plan.operations, ['experiment_create', 'experiment_update'])
+  assert.deepEqual(result.plan.operations, ['experiment_create'])
 })
 
 test('custom experiment starts keep calendar-less synthesized adherence read-time only', async () => {
@@ -230,5 +230,96 @@ test('custom experiment starts still persist calendar-ful synthesized adherence 
         },
       },
     ])
+  })
+})
+
+test('active experiment starts reject ambiguous primary session metrics before writing', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    await assert.rejects(
+      services.core.startExperiment({
+        vault,
+        requestId: null,
+        payload: {
+          source: { kind: 'custom' },
+          experiment: {
+            slug: 'ambiguous-sleep-latency',
+            title: 'Ambiguous Sleep Latency',
+            startedOn: '2026-06-01',
+          },
+          runPlan: {
+            interventionStart: '2026-06-01',
+            interventionEnd: '2026-06-14',
+            logging: {
+              sessionFields: [
+                'sleep-onset-latency',
+                'sleep_onset_latency_minutes',
+              ],
+            },
+          },
+          analysisPlan: {
+            primaryBiomarkerKey: 'biomarker:sleep-onset-latency',
+          },
+        },
+      }),
+      /exactly one matching session field/u,
+    )
+
+    await assert.rejects(
+      services.query.showExperiment({
+        vault,
+        requestId: null,
+        lookup: 'ambiguous-sleep-latency',
+      }),
+    )
+  })
+})
+
+test('active experiment edits reject ambiguous primary session metrics atomically', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const result = await services.core.startExperiment({
+      vault,
+      requestId: null,
+      payload: {
+        source: { kind: 'custom' },
+        experiment: {
+          slug: 'sleep-latency-capture',
+          title: 'Sleep Latency Capture',
+          startedOn: '2026-06-01',
+        },
+        runPlan: {
+          interventionStart: '2026-06-01',
+          interventionEnd: '2026-06-14',
+          logging: {
+            sessionFields: ['sleep-onset-latency'],
+          },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: 'biomarker:sleep-onset-latency',
+        },
+      },
+    })
+    const experimentPath = path.join(vault, result.experiment.experimentPath)
+    const before = await readFile(experimentPath, 'utf8')
+
+    await assert.rejects(
+      services.core.updateExperiment({
+        vault,
+        requestId: null,
+        lookup: 'sleep-latency-capture',
+        runPlan: {
+          interventionStart: '2026-06-01',
+          interventionEnd: '2026-06-14',
+          logging: {
+            sessionFields: [
+              'sleep-onset-latency',
+              'sleep_onset_latency_minutes',
+            ],
+          },
+        },
+      }),
+      /exactly one matching session field/u,
+    )
+
+    assert.equal(await readFile(experimentPath, 'utf8'), before)
   })
 })
