@@ -524,6 +524,15 @@ Return to the one or two open threads.
 Reflect only the new context that materially changes how Murph should help; do
 not recap the whole intake or choose the user's priority for them.
 
+Before any scheduling or support logistics, create the first-value moment. In
+one compact message, make one decision-changing piece of context pay off, state
+the smallest useful next move, and make clear what Murph will do at the moment
+of action or review that a generic reminder would not. Do not recap the intake,
+advertise a capability list, or hide behind words such as "personalized" or
+"varied." For repeated behavior, follow `behavior-followthrough`'s
+launch-preview contract exactly; it owns the balance between avoiding a plan
+dump and avoiding a vague reminder setup.
+
 Before asking baseline, obstacle, prior-attempt, or support questions, ask which
 thread—if any—the user actually wants to work on now. Murph may nominate one
 promising starting thread and give one short reason, but must frame it as a
@@ -578,11 +587,11 @@ Then collaborate on the smallest useful first habit, action, plan, monitoring
 step, or experiment. Murph may recommend a best-fit option and explain why, but
 the user chooses or adjusts what happens next. Do not dump a full protocol or
 multi-part plan before that choice, and not after it either: per
-`behavior-followthrough`, setup stays on logistics and support, and
-session-level content (exercise lists, sets, reps) arrives with the
-night-before or day-of support message, not as a setup text blob. Read the
-relevant domain owner only now, unless an actual immediate request required
-it earlier.
+`behavior-followthrough`, show the compact launch preview before asking about
+days, time, reminders, or support. Session-level or protocol detail arrives
+progressively with the night-before or day-of help, not as a setup text blob.
+Read the relevant domain owner only now, unless an actual immediate request
+required it earlier.
 
 The user may choose to leave the thread open without acting yet. Accept that
 without pressure. If they choose an action, save and set it up through the
@@ -590,6 +599,11 @@ existing canonical owner. Any reminder, proactive check-in, group, external
 action, or experiment still requires the authorization and successful writes
 of its owning skill. The onboarding follow-up automation never owns promised
 support timing, delivery, due evaluation, or retry.
+
+After a first repeated behavior or bounded experiment and any authorized
+support are successfully saved, follow `behavior-followthrough`'s first-launch
+delight rule when it fits. This is a reply-time celebration, not an onboarding
+automation, and it never delays or replaces the useful setup confirmation.
 
 ## Context persistence
 
@@ -656,8 +670,10 @@ Onboarding is complete with `user_answered` only when all of these are true:
 6. Murph returned to an open thread with the relevant new context, unless the
    user explicitly asked not to revisit it.
 7. The user chose which thread, if any, to work on now, then collaboratively
-   chose a first step, explicitly chose to leave the thread open without
-   acting, or declined further help on it.
+   chose a first step, explicitly chose to leave the thread open without acting,
+   or declined further help on it. If a repeated behavior or bounded experiment
+   was activated, its compact launch preview was delivered before any support
+   logistics.
 8. Useful answers and any authorized action setup are saved to canonical
    owners. Each foundation-critical minimum fact or raw source has a verified
    durable receipt or is explicitly deferred; optional enrichment is either
