@@ -330,6 +330,41 @@ describe('assistant CLI delivery contracts', () => {
     }
   })
 
+  it('accepts only the exact assistant runtime generated-delivery ref exception', () => {
+    const media = {
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      kind: 'vault_file' as const,
+      ref: '.runtime/operations/assistant/generated-deliveries/report.pdf',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }
+
+    expect(assistantResponseMediaSchema.parse(media)).toEqual(media)
+    expect(assistantResponseMediaSchema.parse({
+      ...media,
+      ref: 'documents/report.pdf',
+    })).toMatchObject({ ref: 'documents/report.pdf' })
+
+    for (const ref of [
+      '.runtime/operations/assistant/generated-deliveries-backup/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/nested/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/.hidden.pdf',
+      '.runtime/operations/assistant/generated-deliveries/report.pdf.tmp',
+      '.runtime/operations/assistant/outbox/intent.json',
+      '.hidden/report.pdf',
+      '../report.pdf',
+      '/report.pdf',
+    ]) {
+      expect(() => assistantResponseMediaSchema.parse({
+        ...media,
+        ref,
+      }), ref).toThrow()
+    }
+  })
+
   it('accepts Linq-backed voice memo media via a discriminated transport', () => {
     expect(
       assistantResponseMediaSchema.parse({
