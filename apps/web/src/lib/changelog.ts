@@ -67,8 +67,24 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-16",
     title: "More follow-through, less friction",
     summary:
-      "Make supported Pulse and Edge changes in private chat, give each group its own Murph style, and opt into check-ins that verify before they ask. Replies keep their context, WHOOP setup has a clear fallback, phone calls count toward plan usage, and everyday screens and saves avoid repeated work.",
+      "Sleep support now follows a plan instead of handing out one-off tips, you can buy a usage top-up when you run out, and a public product search shows what is actually in a supplement. Supported Pulse and Edge changes work in private chat, each group can have its own Murph style, and onboarding starts from your goals.",
     items: [
+      {
+        id: "sleep-support-that-stays",
+        kind: "feature",
+        priority: 5,
+        title: "Sleep help that sticks with the plan",
+        summary:
+          "Murph now treats a sleep complaint as an ongoing project: it screens for red flags, reads your recent wearable sleep pattern, and sets up experiments and check-ins you agree to.",
+        details:
+          "Reminders, check-ins, and reviews each need your explicit agreement, run for a finite window, and end with a review instead of trailing off. Concerning patterns route to a clinician conversation rather than self-management.",
+        relevanceTags: ["sleep", "assistant", "experiments", "wearables"],
+        sourcePullRequests: [752],
+        tryIt: {
+          label: "Work on your sleep",
+          prompt: "I keep waking up at 3am and can't fall back asleep. Help me figure out why.",
+        },
+      },
       {
         id: "conversation-subscription-actions",
         kind: "feature",
@@ -80,6 +96,22 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph confirms only the result returned by the billing system. Any required payment or payment-method step stays on Stripe. Cancellations, Family changes, usage top-ups, and direct trial-to-Edge changes remain outside this chat flow.",
         relevanceTags: ["billing", "assistant", "subscriptions"],
         sourcePullRequests: [736],
+      },
+      {
+        id: "usage-top-ups",
+        kind: "feature",
+        priority: 5,
+        title: "Add usage when you need more",
+        summary:
+          "Direct Pulse and Edge members can add $5, $10, or $25 of usage in Settings through Stripe Checkout. Credit carries across monthly resets.",
+        details:
+          "Purchased credit shows separately from the included-usage percentage. If you run out entirely, your messages wait safely and processing resumes once a purchase is verified. Family plans are not eligible yet.",
+        relevanceTags: ["billing", "usage", "plans"],
+        sourcePullRequests: [751],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "Add usage in Settings",
+        },
       },
       {
         id: "group-owned-murph-style",
@@ -106,6 +138,22 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [733, 737, 753],
       },
       {
+        id: "murph-safe-product-search",
+        kind: "feature",
+        priority: 4,
+        title: "Look up what is actually in a supplement",
+        summary:
+          "A new public search covers supplements and branded foods, showing label contents, linked product-test results, and what has not been tested, with unknowns stated as unknowns.",
+        details:
+          "Murph Safe names the evidence-checking process; it never stamps a product safe or unsafe. Search terms stay out of URLs, logs, and analytics, and the same records are available through a versioned public API.",
+        relevanceTags: ["supplements", "nutrition", "search"],
+        sourcePullRequests: [765],
+        tryIt: {
+          href: "/search",
+          label: "Search a product",
+        },
+      },
+      {
         id: "scheduled-replies-keep-context",
         kind: "improvement",
         priority: 5,
@@ -116,6 +164,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "For established iMessage conversations, Murph also starts waking after a safely stored message while the durable handoff finishes, removing one serial wait without weakening duplicate-reply protection.",
         relevanceTags: ["assistant", "messaging", "reliability"],
         sourcePullRequests: [742, 749],
+      },
+      {
+        id: "onboarding-asks-before-it-prescribes",
+        kind: "improvement",
+        priority: 4,
+        title: "Onboarding asks before it prescribes",
+        summary:
+          "Murph now opens by understanding one or two outcomes you care about and saves them as an anchor, instead of turning your first answer into an unsolicited routine.",
+        details:
+          "You choose which thread to work on after the health foundation is gathered. Keeping the assistant warm between turns also trims reply time.",
+        relevanceTags: ["onboarding", "assistant", "performance"],
+        sourcePullRequests: [746],
       },
       {
         id: "whoop-apple-health-fallback",
@@ -153,6 +213,26 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["dashboard", "performance", "reliability"],
         sourcePullRequests: [727, 728, 729, 730, 731, 732, 735],
       },
+      {
+        id: "home-experiment-history-compact",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed experiments take less room on Home",
+        summary:
+          "Finished experiment cards are denser and show every comparable metric change in order, instead of one hand-picked result that could hide a mixed outcome.",
+        relevanceTags: ["experiments", "dashboard"],
+        sourcePullRequests: [758],
+      },
+      {
+        id: "biomarker-pages-restored",
+        kind: "improvement",
+        priority: 3,
+        title: "Biomarker detail pages load again",
+        summary:
+          "The HRV (RMSSD) biomarker page and its research tab render normally in production instead of a 404, with a build check that keeps every published biomarker route intact.",
+        relevanceTags: ["biomarkers", "reliability"],
+        sourcePullRequests: [756],
+      },
     ],
   },
   {
@@ -160,7 +240,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-15",
     title: "A lighter way to say yes",
     summary:
-      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. New Pulse Trials now run for two weeks, and billing questions lead straight to the account controls that own the change.",
+      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. Family owners can change a member's plan person by person, anyone can leave a group on their own, new Pulse Trials run for two weeks, and replies read more like natural texting.",
     items: [
       {
         id: "affirmative-reactions-as-replies",
@@ -185,6 +265,30 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph now defaults to this in-chat consent flow when existing members approve additional permissions.",
         relevanceTags: ["groups", "permissions", "reactions"],
         sourcePullRequests: [661],
+      },
+      {
+        id: "family-member-plan-management",
+        kind: "feature",
+        priority: 4,
+        title: "Manage Family plans person by person",
+        summary:
+          "Each Family member row in Settings now has a Manage action to upgrade someone to Edge or bring them back to Pulse, with the prorated difference applied on the next invoice.",
+        details:
+          "Seat-quantity controls are gone; you manage people, not Stripe inventory. The row shows the pending change until billing confirms it, and Family usage stays attributed to your Family plan during brief billing-data gaps.",
+        relevanceTags: ["family", "billing", "settings"],
+        sourcePullRequests: [671, 672],
+      },
+      {
+        id: "leave-a-group-yourself",
+        kind: "feature",
+        priority: 4,
+        title: "Leave a group on your own",
+        summary:
+          "Non-owner members can ask their private Murph to leave a group, or use the Leave group action on the join page. Leaving ends your sharing with that group's Murph.",
+        details:
+          "It does not remove you from the iMessage thread or erase past messages, and you can rejoin later through the normal join flow.",
+        relevanceTags: ["groups", "privacy"],
+        sourcePullRequests: [676],
       },
       {
         id: "exercise-library-250-more-visual-guides",
@@ -220,7 +324,57 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Every new Pulse Trial now lasts 14 days instead of 10. Trials already created keep the policy and end date they started with.",
         relevanceTags: ["pulse", "billing", "trial"],
-        sourcePullRequests: [],
+        sourcePullRequests: [726],
+      },
+      {
+        id: "replies-read-like-texting",
+        kind: "improvement",
+        priority: 4,
+        title: "Replies read like texting again",
+        summary:
+          "Send a follow-up while Murph is still working and it folds into the reply in progress, and multi-bubble answers now land at a short, readable cadence instead of all at once.",
+        relevanceTags: ["assistant", "imessage", "messaging"],
+        sourcePullRequests: [705, 713],
+      },
+      {
+        id: "model-settings-refresh",
+        kind: "improvement",
+        priority: 4,
+        title: "Model choices are easier to compare and change",
+        summary:
+          "Settings shows Luna, Terra, and Sol as clear cards, Family Edge seats can now pick Sol, and asking Murph to change model or reasoning saves immediately without an approval link.",
+        relevanceTags: ["settings", "models", "family"],
+        sourcePullRequests: [678, 686, 687],
+      },
+      {
+        id: "experiment-cards-honest-colors",
+        kind: "improvement",
+        priority: 3,
+        title: "Experiment cards color results by the biomarker",
+        summary:
+          "Progress cards now color movement by whether it is good for that biomarker, so a higher HRV reads as favorable even when your hypothesis expected a drop.",
+        relevanceTags: ["experiments", "biomarkers"],
+        sourcePullRequests: [699],
+      },
+      {
+        id: "voice-previews-pick-the-voice",
+        kind: "improvement",
+        priority: 3,
+        title: "Voice previews respond to a click anywhere",
+        summary:
+          "In the voice picker, clicking a waveform now plays that preview, and clicking a preview selects that voice, so trying and choosing are one motion.",
+        relevanceTags: ["voice", "settings"],
+        sourcePullRequests: [695, 718],
+      },
+      {
+        id: "signup-and-email-linking-fixes",
+        kind: "improvement",
+        priority: 3,
+        title: "Sign-up and email linking behave",
+        summary:
+          "New members who sign up through the shared dialog now land in the first-visit welcome, and linking an email in Settings only reports success after it actually saves, with a clear retry.",
+        relevanceTags: ["onboarding", "settings", "reliability"],
+        sourcePullRequests: [670, 717],
       },
       {
         id: "billing-settings-handoff",
