@@ -24,7 +24,7 @@ export default function MurphSafeSearchPage() {
           <h1 className="font-serif text-5xl font-semibold leading-[0.98] tracking-[-0.045em] text-foreground sm:text-6xl lg:text-7xl">
             Is it Murph Safe?
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl font-serif text-2xl leading-tight tracking-[-0.02em] text-muted-foreground sm:text-3xl">
+          <p className="mx-auto mt-6 max-w-2xl font-serif text-xl leading-tight tracking-[-0.02em] text-muted-foreground sm:text-2xl">
             What’s in it, what’s been tested, and what we still don’t know.
           </p>
         </div>
