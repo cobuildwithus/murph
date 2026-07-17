@@ -12,6 +12,8 @@ import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
+import { commonsProtocolRefSchema } from '@murphai/contracts'
+import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   importDeviceBatch,
@@ -334,6 +336,8 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
         'sauna-two-week',
         '--from-protocol',
         'PROTOCOL_VARIANT:SAUNA/FINNISH-DRY/MURPH-STANDARD-3X-WEEK',
+        '--status',
+        'planned',
         '--intervention-start',
         '2026-05-01',
         '--config',
@@ -646,8 +650,14 @@ test.sequential(
   'experiment edit maps public run options into canonical frontmatter',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-onboarding-'))
-    const pageRevisionId = `sha256:${'a'.repeat(64)}`
-    const runSpecRevisionId = `sha256:${'b'.repeat(64)}`
+    const protocolKey = 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
+    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+      (candidate) => candidate.key === protocolKey,
+    )
+    assert.ok(protocol)
+    const pageRevisionId = protocol.revision.pageRevisionId
+    const runSpecRevisionId = protocol.revision.runSpecRevisionId
+    assert.ok(runSpecRevisionId)
 
     try {
       await runSliceCli([
@@ -712,21 +722,12 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const statusOnly = await runSliceCli<{ status: string }>([
-        'experiment',
-        'edit',
-        'sauna-daily',
-        '--status',
-        'active',
-        '--vault',
-        vaultRoot,
-      ])
       const missingProtocolTriplet = await runSliceCli([
         'experiment',
         'edit',
         'sauna-daily',
         '--protocol-key',
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        protocolKey,
         '--page-revision-id',
         pageRevisionId,
         '--vault',
@@ -737,7 +738,7 @@ test.sequential(
         'edit',
         'sauna-daily',
         '--protocol-key',
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        protocolKey,
         '--page-revision-id',
         'sha256:not-a-real-revision',
         '--run-spec-revision-id',
@@ -817,7 +818,7 @@ test.sequential(
         '--status',
         'active',
         '--protocol-key',
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        protocolKey,
         '--hydrate-protocol-defaults',
         '--page-revision-id',
         pageRevisionId,
@@ -883,8 +884,6 @@ test.sequential(
         'low',
         '--safety-disposition',
         'continue_with_caution',
-        '--positive-question-id',
-        'heat_intolerance',
         '--safety-note',
         'No contraindications reported.',
         '--context-note',
@@ -901,6 +900,15 @@ test.sequential(
         '--missed-log-followup',
         'default_on',
         '--weekly-digest-enabled',
+        '--vault',
+        vaultRoot,
+      ])
+      const statusOnly = await runSliceCli<{ status: string }>([
+        'experiment',
+        'edit',
+        'sauna-daily',
+        '--status',
+        'active',
         '--vault',
         vaultRoot,
       ])
@@ -958,7 +966,7 @@ test.sequential(
         'commonsProtocolRef',
       )
       assert.deepEqual(commonsProtocolRef, {
-        key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        key: protocolKey,
         pageRevisionId,
         runSpecRevisionId,
         testPlanId: 'rhr-21d',
@@ -1031,7 +1039,7 @@ test.sequential(
       const safety = requireRecord(onboarding.safety, 'onboarding.safety')
       assert.equal(safety.cautionLevel, 'low')
       assert.equal(safety.disposition, 'continue_with_caution')
-      assert.deepEqual(safety.positiveQuestionIds, ['heat_intolerance'])
+      assert.equal('positiveQuestionIds' in safety, false)
       assert.deepEqual(safety.notes, ['No contraindications reported.'])
 
       const assistantSupport = requireRecord(
@@ -1212,6 +1220,8 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'finnish-sauna',
       '--intervention-start',
       '2026-05-01',
+      '--onboarding-completed-at',
+      '2026-04-30T15:00:00.000Z',
       '--dry-run',
       '--vault',
       vaultRoot,
@@ -1270,10 +1280,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.equal(dryRun.ok, true)
     assert.equal(requireData(dryRun).dryRun, true)
     assert.equal(requireData(dryRun).experiment, null)
-    assert.deepEqual(requireData(dryRun).plan.operations, [
-      'experiment_create',
-      'experiment_update',
-    ])
+    assert.deepEqual(requireData(dryRun).plan.operations, ['experiment_create'])
 
     assert.equal(started.ok, true)
     assert.equal(requireData(started).dryRun, false)
@@ -1376,6 +1383,10 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants',
       '--intervention-start',
       '2026-05-01',
+      '--onboarding-completed-at',
+      '2026-04-30T15:00:00.000Z',
+      '--positive-question-id',
+      'can_stop_and_remove_device',
       '--vault',
       vaultRoot,
     ])
@@ -1428,7 +1439,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     ])
     assert.equal('confounderFields' in compressionLogging, false)
 
-    const alcoholStarted = await runSliceCli([
+    const draftAlcoholStart = await runSliceCli([
       'experiment',
       'start',
       'alcohol-free-selected-plan',
@@ -1439,25 +1450,356 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       '--vault',
       vaultRoot,
     ])
-    const alcoholShown = await runSliceCli<{
-      entity: {
-        data: Record<string, unknown>
-      }
-    }>([
+    const draftAlcoholShown = await runSliceCli([
       'experiment',
       'show',
       'alcohol-free-selected-plan',
       '--vault',
       vaultRoot,
     ])
-    assert.equal(alcoholStarted.ok, true)
-    assert.equal(alcoholShown.ok, true)
-    const alcoholRunPlan = requireRecord(
-      requireData(alcoholShown).entity.data.runPlan,
-      'alcohol runPlan',
+    assert.equal(draftAlcoholStart.ok, false)
+    if (draftAlcoholStart.ok) {
+      throw new Error('Draft alcohol protocol must not start.')
+    }
+    assert.equal(draftAlcoholStart.error.code, 'not_found')
+    assert.match(
+      draftAlcoholStart.error.message ?? '',
+      /No Health Commons protocol variant matched/u,
     )
-    assert.equal(alcoholRunPlan.targetSessions, 30)
-    assert.equal(alcoholRunPlan.minimumUsefulSessions, 26)
+    assert.equal(draftAlcoholShown.ok, false)
+    if (draftAlcoholShown.ok) {
+      throw new Error('Rejected draft start must not persist an experiment.')
+    }
+    assert.equal(draftAlcoholShown.error.code, 'not_found')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('Health Commons active starts require completed non-blocking safety screens', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-gate-'))
+  const bedtimeProtocol =
+    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const completedAt = '2026-04-30T15:00:00.000Z'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
+
+    const missingScreenDryRun = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-missing-screen-dry-run',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--dry-run',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingScreenDryRun.ok, false)
+    assert.match(missingScreenDryRun.error.message ?? '', /Complete the safety screen/u)
+
+    const missingScreen = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-missing-screen',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingScreen.ok, false)
+    assert.match(missingScreen.error.message ?? '', /Complete the safety screen/u)
+
+    const missingScreenRecord = await runSliceCli([
+      'experiment',
+      'show',
+      'bedtime-missing-screen',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingScreenRecord.ok, false)
+
+    const dangerousSleepiness = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-dangerous-sleepiness',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--onboarding-completed-at',
+      completedAt,
+      '--positive-question-id',
+      'dangerous_sleepiness',
+      '--safety-disposition',
+      'continue_with_caution',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(dangerousSleepiness.ok, false)
+    assert.match(
+      dangerousSleepiness.error.message ?? '',
+      /requires do_not_start_unsupervised/u,
+    )
+
+    const dangerousSleepinessRecord = await runSliceCli([
+      'experiment',
+      'show',
+      'bedtime-dangerous-sleepiness',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(dangerousSleepinessRecord.ok, false)
+
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('Health Commons safety screening validates recorded question ids and dispositions', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-answers-'))
+  const bedtimeProtocol =
+    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const completedAt = '2026-04-30T15:00:00.000Z'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
+    const missingDisposition = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-missing-disposition',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--onboarding-completed-at',
+      completedAt,
+      '--positive-question-id',
+      'external_schedule_constraint',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingDisposition.ok, false)
+    assert.match(missingDisposition.error.message ?? '', /Record the safety-screen disposition/u)
+
+    const unknownQuestion = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-unknown-question',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--onboarding-completed-at',
+      completedAt,
+      '--positive-question-id',
+      'not_in_current_protocol',
+      '--safety-disposition',
+      'continue_with_caution',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(unknownQuestion.ok, false)
+    assert.match(unknownQuestion.error.message ?? '', /does not belong to the current/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('Health Commons safety screening enforces negative-answer dispositions', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-negative-safety-'))
+  const compressionProtocol =
+    'protocol_variant:intermittent-pneumatic-compression/pneumatic-compression-pants'
+  const completedAt = '2026-04-30T15:00:00.000Z'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
+    const negativeStopAnswer = await runSliceCli([
+      'experiment',
+      'start',
+      'compression-cannot-remove',
+      '--from-protocol',
+      compressionProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--onboarding-completed-at',
+      completedAt,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(negativeStopAnswer.ok, false)
+    assert.match(
+      negativeStopAnswer.error.message ?? '',
+      /requires do_not_start_unsupervised/u,
+    )
+
+    const safeCompression = await runSliceCli([
+      'experiment',
+      'start',
+      'compression-can-remove',
+      '--from-protocol',
+      compressionProtocol,
+      '--intervention-start',
+      '2026-05-01',
+      '--onboarding-completed-at',
+      completedAt,
+      '--positive-question-id',
+      'can_stop_and_remove_device',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      safeCompression.ok,
+      true,
+      safeCompression.ok ? undefined : safeCompression.error.message,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('Health Commons safety screening gates reactivation and preserves lineage', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-reactivation-'))
+  const bedtimeProtocol =
+    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const completedAt = '2026-04-30T15:00:00.000Z'
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
+    const planned = await runSliceCli([
+      'experiment',
+      'start',
+      'bedtime-planned',
+      '--from-protocol',
+      bedtimeProtocol,
+      '--status',
+      'planned',
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(planned.ok, true, planned.ok ? undefined : planned.error.message)
+
+    const scalarActivation = await runSliceCli([
+      'experiment',
+      'edit',
+      'bedtime-planned',
+      '--status',
+      'active',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(scalarActivation.ok, false)
+    assert.match(scalarActivation.error.message ?? '', /Complete the safety screen/u)
+
+    const staleActivation = await runSliceCli([
+      'experiment',
+      'edit',
+      'bedtime-planned',
+      '--status',
+      'active',
+      '--onboarding-completed-at',
+      completedAt,
+      '--page-revision-id',
+      `sha256:${'0'.repeat(64)}`,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(staleActivation.ok, false)
+    assert.match(staleActivation.error.message ?? '', /changed after this plan was prepared/u)
+
+    const services = createIntegratedVaultServices()
+    const plannedShown = await runSliceCli<{
+      entity: { data: { commonsProtocolRef?: unknown } }
+    }>(['experiment', 'show', 'bedtime-planned', '--vault', vaultRoot])
+    assert.equal(plannedShown.ok, true)
+    const plannedProtocolRef = commonsProtocolRefSchema.parse(
+      requireData(plannedShown).entity.data.commonsProtocolRef,
+    )
+    await assert.rejects(
+      services.core.updateExperiment({
+        vault: vaultRoot,
+        requestId: null,
+        lookup: 'bedtime-planned',
+        commonsProtocolRef: null,
+      }),
+      /must preserve its exact protocol lineage/u,
+    )
+    await services.core.createExperiment({
+      vault: vaultRoot,
+      requestId: null,
+      slug: 'active-custom-before-protocol',
+      status: 'active',
+    })
+    await assert.rejects(
+      services.core.updateExperiment({
+        vault: vaultRoot,
+        requestId: null,
+        lookup: 'active-custom-before-protocol',
+        commonsProtocolRef: plannedProtocolRef,
+      }),
+      /Only a planned experiment may change its protocol lineage/u,
+    )
+
+    const safeActivation = await runSliceCli([
+      'experiment',
+      'edit',
+      'bedtime-planned',
+      '--status',
+      'active',
+      '--onboarding-completed-at',
+      completedAt,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      safeActivation.ok,
+      true,
+      safeActivation.ok ? undefined : safeActivation.error.message,
+    )
+
+    const unsafeActiveScreenUpdate = await runSliceCli([
+      'experiment',
+      'edit',
+      'bedtime-planned',
+      '--positive-question-id',
+      'dangerous_sleepiness',
+      '--safety-disposition',
+      'do_not_start_unsupervised',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(unsafeActiveScreenUpdate.ok, false)
+    assert.match(
+      unsafeActiveScreenUpdate.error.message ?? '',
+      /requires do_not_start_unsupervised/u,
+    )
+
+    const downgradedWithBlockingScreen = await runSliceCli([
+      'experiment',
+      'edit',
+      'bedtime-planned',
+      '--status',
+      'planned',
+      '--positive-question-id',
+      'dangerous_sleepiness',
+      '--safety-disposition',
+      'do_not_start_unsupervised',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      downgradedWithBlockingScreen.ok,
+      true,
+      downgradedWithBlockingScreen.ok
+        ? undefined
+        : downgradedWithBlockingScreen.error.message,
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1487,6 +1829,8 @@ test.sequential('experiment prose flags accept commas inside prose values', asyn
       'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
       '--intervention-start',
       '2026-05-01',
+      '--onboarding-completed-at',
+      '2026-04-30T15:00:00.000Z',
       '--stop-condition',
       stopCondition,
       '--analysis-note',
@@ -1594,7 +1938,7 @@ test.sequential(
         '--started-on',
         '2026-04-01',
         '--status',
-        'active',
+        'planned',
         '--intervention-start',
         '2026-04-01',
         '--intervention-days',
@@ -2031,8 +2375,14 @@ test.sequential(
   'experiment session/context logging feeds deterministic progress and outcome analysis for the same run',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-analysis-'))
-    const pageRevisionId = `sha256:${'c'.repeat(64)}`
-    const runSpecRevisionId = `sha256:${'d'.repeat(64)}`
+    const protocolKey = 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
+    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+      (candidate) => candidate.key === protocolKey,
+    )
+    assert.ok(protocol)
+    const pageRevisionId = protocol.revision.pageRevisionId
+    const runSpecRevisionId = protocol.revision.runSpecRevisionId
+    assert.ok(runSpecRevisionId)
 
     try {
       await runSliceCli([
@@ -2056,7 +2406,7 @@ test.sequential(
         '--started-on',
         '2026-04-01',
         '--status',
-        'active',
+        'planned',
         '--intervention-start',
         '2026-04-01',
         '--intervention-days',
@@ -2076,8 +2426,10 @@ test.sequential(
         'experiment',
         'edit',
         'focus-sprint',
+        '--status',
+        'active',
         '--protocol-key',
-        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        protocolKey,
         '--hydrate-protocol-defaults',
         '--page-revision-id',
         pageRevisionId,
@@ -2104,6 +2456,8 @@ test.sequential(
         '--desired-direction',
         'decrease',
         '--reminders-enabled',
+        '--onboarding-completed-at',
+        '2026-04-01T15:00:00.000Z',
         '--vault',
         vaultRoot,
       ])

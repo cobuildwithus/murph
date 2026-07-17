@@ -378,3 +378,76 @@ test("buildWearableSourceHealth sorts equal-date providers alphabetically and re
     true,
   );
 });
+
+test("sleep freshness ignores generic cardiorespiratory observations unless anchored to valid sleep", () => {
+  const staleSleepWindow = makeSleepWindowCandidate({
+    candidateId: "alpha:sleep:stale",
+    date: "2026-04-01",
+    durationMinutes: 480,
+    endAt: "2026-04-01T07:00:00Z",
+    nap: false,
+    provider: "alpha",
+    sourceFamily: "event",
+    sourceKind: "sleep_session",
+    startAt: "2026-03-31T23:00:00Z",
+  });
+  const genericCardiorespiratory = [
+    ["averageHeartRate", "bpm", 61],
+    ["hrv", "ms", 42],
+    ["respiratoryRate", "breaths_per_minute", 15],
+    ["spo2", "%", 98],
+  ].map(([metric, unit, value], index) => makeMetricCandidate({
+    candidateId: `alpha:${String(metric)}:fresh`,
+    date: `2026-04-${String(7 + index).padStart(2, "0")}`,
+    externalRef: {
+      facet: null,
+      resourceId: `daily-${String(metric)}`,
+      resourceType: "daily-summary",
+      system: "alpha",
+      version: null,
+    },
+    metric: String(metric),
+    occurredAt: `2026-04-${String(7 + index).padStart(2, "0")}T12:00:00Z`,
+    provider: "alpha",
+    sourceFamily: "event",
+    sourceKind: `observation:${String(metric)}`,
+    unit: String(unit),
+    value: Number(value),
+  }));
+  const unambiguousSleepScore = makeMetricCandidate({
+    candidateId: "beta:sleep-score:fresh",
+    date: "2026-04-08",
+    externalRef: {
+      facet: null,
+      resourceId: "sleep-score",
+      resourceType: "daily-summary",
+      system: "beta",
+      version: null,
+    },
+    metric: "sleepScore",
+    occurredAt: "2026-04-08T08:00:00Z",
+    provider: "beta",
+    sourceFamily: "event",
+    sourceKind: "observation:sleep-score",
+    unit: "%",
+    value: 81,
+  });
+
+  const sourceHealth = rowsByProvider(buildWearableSourceHealth({
+    activityDays: [],
+    bodyStateDays: [],
+    dataset: makeDataset({
+      metricCandidates: [...genericCardiorespiratory, unambiguousSleepScore],
+      rawMetricCandidates: [...genericCardiorespiratory, unambiguousSleepScore],
+      sleepWindows: [staleSleepWindow],
+    }),
+    recoveryDays: [],
+    sleepNights: [],
+  }));
+
+  assert.equal(sourceHealth.get("alpha")?.lastDate, "2026-04-10");
+  assert.equal(sourceHealth.get("alpha")?.lastSleepDate, "2026-04-01");
+  assert.equal(sourceHealth.get("alpha")?.sleepStalenessVsNewestDays, 7);
+  assert.equal(sourceHealth.get("beta")?.lastSleepDate, "2026-04-08");
+  assert.equal(sourceHealth.get("beta")?.sleepStalenessVsNewestDays, 0);
+});

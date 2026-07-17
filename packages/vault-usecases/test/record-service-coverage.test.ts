@@ -1761,12 +1761,37 @@ describe("record service seams", () => {
     vi.setSystemTime(new Date("2026-04-09T01:02:03.000Z"));
     try {
       const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFM";
-      const experimentOutcomeCore = {
-        applyCanonicalWriteBatch: vi.fn(async (input: {
-          textWrites?: Array<{ relativePath: string; content: string }>
+      const closeoutConflict = Object.assign(
+        new Error("Experiment changed during outcome analysis."),
+        { code: "EXPERIMENT_REVISION_CONFLICT" },
+      );
+      const writeExperimentOutcome = vi
+        .fn()
+        .mockRejectedValueOnce(closeoutConflict)
+        .mockImplementation(async (input: {
+          relativePath: string;
+          outcome: Record<string, unknown> & {
+            experiment: Record<string, unknown>;
+          };
         }) => ({
-          textWrites: input.textWrites?.map(({ relativePath }) => relativePath) ?? [],
-        })),
+          experimentId,
+          slug: "focus-sprint",
+          relativePath: input.relativePath,
+          status: "active",
+          outcome: {
+            ...input.outcome,
+            generatedAt: "2026-04-09T01:02:03.000Z",
+            schema: "murph.experiment-outcome.v1",
+          },
+          outcomePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
+          updatedExperiment: true,
+        }));
+      const experimentOutcomeCore = {
+        withCanonicalWriteLock: vi.fn(async (
+          _vaultRoot: string | undefined,
+          run: () => Promise<unknown>,
+        ) => run()),
+        writeExperimentOutcome,
       };
       const experimentOutcomeQuery = {
         readVault: vi.fn(async () => journalQuery.readVault()),
@@ -1879,21 +1904,20 @@ describe("record service seams", () => {
           schema: "murph.experiment-outcome.v1",
         },
       });
-      const writeBatchInput = experimentOutcomeCore.applyCanonicalWriteBatch.mock.calls[0]?.[0];
-      expect(writeBatchInput).toMatchObject({
-        operationType: "experiment_outcome_write",
-        summary: `Write experiment outcome ${experimentId}-outcome-2026-04-08`,
-        textWrites: expect.arrayContaining([
-          expect.objectContaining({
-            relativePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
-          }),
-        ]),
-      });
-      expect(
-        JSON.parse(writeBatchInput?.textWrites?.[0]?.content ?? "{}"),
-      ).toMatchObject({
-        schemaVersion: "murph.experiment-outcome.v1",
-        generatedAt: "2026-04-09T01:02:03.000Z",
+      expect(experimentOutcomeCore.writeExperimentOutcome).toHaveBeenCalledTimes(2);
+      expect(experimentOutcomeCore.withCanonicalWriteLock).toHaveBeenCalledTimes(2);
+      const closeoutInput = experimentOutcomeCore.writeExperimentOutcome.mock.calls[1]?.[0];
+      expect(closeoutInput).toMatchObject({
+        relativePath: "experiments/focus-sprint.md",
+        expectedFrontmatter: {
+          experimentId,
+          slug: "focus-sprint",
+          status: "active",
+        },
+        outcome: {
+          outcomeId: `${experimentId}-outcome-2026-04-08`,
+          asOf: "2026-04-08",
+        },
       });
     } finally {
       vi.useRealTimers();

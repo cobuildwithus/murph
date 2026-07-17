@@ -17,6 +17,7 @@ Last verified: 2026-07-16
 - Add tests for failure modes before relying on production-side recovery logic.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. Every create retry during the first 30 minutes uses the

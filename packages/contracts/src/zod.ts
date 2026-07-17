@@ -1132,6 +1132,16 @@ const experimentConfounderSchema = z.union([
   uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }),
   experimentConfounderMapSchema,
 ]);
+const experimentSessionFieldValueSchema = z.union([
+  boundedString(1, 240),
+  numberSchema(),
+  z.boolean(),
+  z.null(),
+]);
+const experimentSessionFieldsSchema = z.record(
+  healthCommonsStableIdSchema,
+  experimentSessionFieldValueSchema,
+);
 
 function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape>(
   kind: TKind,
@@ -1278,6 +1288,7 @@ const sleepSessionEventFieldsShape = {
   startAt: isoDateTimeString(),
   endAt: isoDateTimeString(),
   durationMinutes: integerSchema(1),
+  sleepType: z.enum(["main_sleep", "nap"]).optional(),
 } satisfies z.ZodRawShape;
 
 const interventionSessionEventFieldsShape = {
@@ -1294,6 +1305,7 @@ const interventionSessionEventFieldsShape = {
   afterExercise: z.boolean().optional(),
   symptoms: uniqueArray(boundedString(1, 160), { maxItems: 25, uniqueItems: true }).optional(),
   confounders: experimentConfounderSchema.optional(),
+  fields: experimentSessionFieldsSchema.optional(),
 } satisfies z.ZodRawShape;
 
 const experimentContextEventFieldsShape = {
@@ -2348,6 +2360,8 @@ const experimentProgressReadinessReasonSchema = z.enum([
   "missing_analysis_plan",
   "missing_primary_biomarker",
   "missing_metric_window",
+  "unsupported_primary_biomarker",
+  "uncapturable_primary_biomarker",
 ]);
 
 const experimentProgressReadinessSchema = z

@@ -276,7 +276,7 @@ describe("@murphai/health-commons build determinism", () => {
     ).toThrow("Duplicate Health Commons web route id generated for protocol_variant:shared");
   });
 
-  it("does not generate experiment research-tab projections for hidden or deprecated protocols", () => {
+  it("keeps legacy statusless protocols runnable but excludes draft, hidden, and deprecated protocols", () => {
     const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
       ...createCatalog("sha256:first"),
       entities: [
@@ -284,6 +284,12 @@ describe("@murphai/health-commons build determinism", () => {
           key: "protocol_variant:family/public",
           slug: "protocols/family/public",
           title: "Public Protocol",
+        }),
+        createProtocolEntity({
+          key: "protocol_variant:family/draft",
+          slug: "protocols/family/draft",
+          status: "draft",
+          title: "Draft Protocol",
         }),
         createProtocolEntity({
           hidden: true,
@@ -297,6 +303,20 @@ describe("@murphai/health-commons build determinism", () => {
           status: "deprecated",
           title: "Deprecated Protocol",
         }),
+      ],
+      redirects: [
+        {
+          from: "protocol_variant:legacy/draft-alias",
+          to: "protocol_variant:family/draft",
+        },
+        {
+          from: "protocol_variant:legacy/hidden-alias",
+          to: "protocol_variant:family/hidden",
+        },
+        {
+          from: "protocol_variant:legacy/deprecated-alias",
+          to: "protocol_variant:family/deprecated",
+        },
       ],
     });
 
@@ -314,12 +334,15 @@ describe("@murphai/health-commons build determinism", () => {
       "experiment.results-public": "tabs/experiments/public/results-public.json",
       "experiment.shell": "shell/experiments/public.json",
     });
-    expect(webArtifacts.routeIndex.routes.find((route) =>
-      route.routeId === "hidden"
-    )?.projections).toBeUndefined();
-    expect(webArtifacts.routeIndex.routes.find((route) =>
-      route.routeId === "deprecated"
-    )?.projections).toBeUndefined();
+    expect(webArtifacts.routeIndex.routes.map((route) => route.routeId)).toEqual([
+      "public",
+    ]);
+    expect([...webArtifacts.routeBundles.keys()]).toEqual([
+      "bundles/protocol_variant/public.json",
+    ]);
+    expect(webArtifacts.experimentIndex.experiments.map((entry) => entry.routeId)).toEqual([
+      "public",
+    ]);
   });
 
   it("keeps protocol signal data for revision-qualified biomarker references", () => {

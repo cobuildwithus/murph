@@ -6,6 +6,7 @@ slug: protocols/pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-
 title: Resonance Breathing Before Bed
 summary: "Slow steady breathing before bed, where each breath lines up more predictably with heart-rate rhythms and gives the nervous system a calmer pre-sleep cue."
 status: draft
+hidden: true
 quality: usable
 aliases:
   - pre-sleep resonance breathing and meditation

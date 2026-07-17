@@ -73,21 +73,21 @@ describe("StudyCard", () => {
   });
 
   it("resolves the fallback study copy when a source has no Findings block", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("at-home-static-stretching-for-flexibility");
+    const protocol = resolveHealthCommonsExperimentProtocol("walking-after-every-meal");
     expect(protocol).toBeTruthy();
 
     const study = protocol?.studies.find(
       (entry) =>
-        entry.title === "Effect of static and ballistic stretching on the muscle-tendon tissue properties",
+        entry.title === "Two bouts of exercise before meals, but not after meals, lower fasting blood glucose",
     );
 
     expect(study).toEqual(expect.objectContaining({
-      caveat: "Includes ballistic stretching, which should not be promoted into static-stretch protocol claims.",
+      caveat: "Dose and timing evidence varies by population, meal, comparator, and endpoint; keep implementation claims practical and bounded.",
       finding:
-        "Shows that different stretching modalities can produce different passive-tissue responses even when ROM changes occur.",
+        "It preserves a negative/contrary finding: after-meal exercise is not always superior when the endpoint is fasting glucose rather than immediate post-meal excursions.",
       findingKind: "why_it_matters",
-      headline: "Static and ballistic calf stretching both affected ROM, but tissue-property patterns differed.",
-      implication: "Use to separate static stretching from adjacent stretching variants in mechanism claims.",
+      headline: "Two bouts of exercise before meals, but not after meals, lower fasting blood glucose",
+      implication: "Use as timing-boundary context: after-meal activity may target postprandial excursions, not necessarily fasting glucose.",
     }));
   });
 

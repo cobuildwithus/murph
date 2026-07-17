@@ -26,7 +26,9 @@ export function listHealthCommonsExperimentRouteParams(): { experimentId: string
 }
 
 function isPublicExperimentIndexEntry(entry: GeneratedExperimentIndexEntry): boolean {
-  return entry.status !== "deprecated" && entry.hidden !== true;
+  return entry.status !== "draft"
+    && entry.status !== "deprecated"
+    && entry.hidden !== true;
 }
 
 function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): ExperimentProtocol {

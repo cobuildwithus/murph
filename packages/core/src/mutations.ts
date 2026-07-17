@@ -2443,6 +2443,48 @@ function eventSpineRevisionsAreComplete(
     && revisions.size === maxRevision;
 }
 
+function whoopSleepTypeProviderBaselineRevision(
+  index: EventExternalRefIndex,
+  refKey: string,
+  eventId: string,
+  incoming: EventRecord,
+): number | null {
+  if (
+    incoming.kind !== "sleep_session"
+    || incoming.externalRef?.system !== "whoop"
+    || incoming.externalRef.resourceType !== "sleep"
+    || (incoming.sleepType !== "main_sleep" && incoming.sleepType !== "nap")
+  ) {
+    return null;
+  }
+
+  const ownersByFingerprint = index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
+  const earliestRevisionFor = (record: EventRecord): number | null => {
+    const revisions = ownersByFingerprint
+      ?.get(deviceEventContentFingerprint(record))
+      ?.get(eventId);
+    // Exact device replays do not append revisions. Use the earliest match as
+    // the provider baseline because later matching revisions may be supported
+    // user edits that retained source=device.
+    let baselineRevision: number | null = null;
+    for (const revision of revisions ?? []) {
+      baselineRevision = Math.min(baselineRevision ?? revision, revision);
+    }
+    return baselineRevision;
+  };
+
+  const typedBaselineRevision = earliestRevisionFor(incoming);
+  if (typedBaselineRevision !== null) {
+    return typedBaselineRevision;
+  }
+
+  // Before sleepType normalization shipped, the provider-authored row had the
+  // same content without this field. Keep that one-time legacy fallback only
+  // after complete typed history fails to match.
+  const { sleepType: _sleepType, ...withoutSleepType } = incoming;
+  return earliestRevisionFor(withoutSleepType);
+}
+
 function resolveDeviceEventIdentity(
   entry: PreparedDeviceEventEntry,
   context: DeviceEventIdentityContext,
@@ -2780,13 +2822,42 @@ async function reconcileDeviceEventEntriesByExternalRef(
         records.push(latest);
         continue;
       }
-      if (sourceVersionComparison === 0) {
+      const sleepTypeBaselineRevision = sourceVersionComparison === 0
+        ? whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, entry.record)
+        : null;
+      const hasSleepTypeProviderBaseline = sleepTypeBaselineRevision !== null;
+      if (
+        sourceVersionComparison === 0
+        && !hasSleepTypeProviderBaseline
+      ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
           `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
             `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
             `"${externalRef.version}"; nothing was imported.`,
         );
+      }
+      if (
+        hasSleepTypeProviderBaseline
+        && (
+          isDeletedEventSpineRecord(latest)
+          || eventSpineRevision(latest)
+            !== sleepTypeBaselineRevision
+          || matchedEntries.some((match) =>
+            hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+          )
+        )
+      ) {
+        // sleepType is provider normalization metadata. Never resurrect a
+        // deleted event or replace a newer canonical revision merely to
+        // backfill it; preserving this row also lets unrelated snapshot
+        // resources commit.
+        skippedDuplicateCount += 1;
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
+        records.push(latest);
+        continue;
       }
     }
 
