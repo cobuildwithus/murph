@@ -195,9 +195,16 @@ export async function resolveAssistantVaultFileResponseMedia(input: {
   return (await readAssistantVaultFileSnapshot(input)).file
 }
 
-// Consuming the model-selected staging file into a stable per-send name happens
-// before hashing or approval. A retry can recover the same owned bytes, while a
-// distinct send that reuses the friendly staging name receives a different ref.
+// Consuming the model-selected staging file into a deterministic per-send name
+// happens before hashing or approval. The owned ref is keyed on the tool-call
+// identity, so distinct sends reusing one friendly name never collide and an
+// exact re-delivery of the same call idempotently re-adopts its own bytes.
+// Accepted limitation (see agent-docs/references/hosted-runtime-protocol.md):
+// the key is attempt-scoped, so a model in-turn recovery after a pre-persist
+// failure arrives as a new provider call with a new toolCallId and does not
+// recover the earlier owned file, which is then pruned as unclaimed. The
+// exposed bytes are a regenerable one-time artifact only; the persisted-outbox
+// retry path is unaffected.
 async function consumeAssistantGeneratedDeliveryStagingRef(input: {
   ref: string
   sessionId: string

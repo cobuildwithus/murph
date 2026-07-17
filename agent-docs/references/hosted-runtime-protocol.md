@@ -751,6 +751,25 @@ tightens the exact path's parent directories to `0700`, rejects symlinks and
 non-regular files, tightens the file to `0600`, and revalidates it before the
 assistant hashes or reads it. Ordinary vault-file refs are not chmodded.
 
+The owned physical ref is derived deterministically from
+`sha256([sessionId, turnId, toolCallId, ref])`, so two distinct tool calls that
+reuse one friendly staging name receive distinct owned refs (no cross-send
+overwrite), and an exact re-delivery of the same tool call re-derives and
+idempotently re-adopts the same owned bytes. Accepted limitation: this identity
+is attempt-scoped. If `send_vault_file` fails after the staging file is moved to
+its owned ref but before the outbox intent is persisted (approval-HTTP failure
+or process death), the model's in-turn recovery is a new provider call with a
+new `toolCallId` (the App Server mints a fresh call id per Responses request),
+which derives a different owned ref; the earlier owned file has no active
+descriptor and is pruned as unclaimed at the next quiescent checkpoint. The
+exposed data is a freshly generated, regenerable one-time artifact only — no
+stored user/vault data, no already-persisted outbox intent, and the persisted
+awaiting-approval retry path is unaffected. A retry-stable logical send identity
+that survives a replacement provider call would require a durable send fact or
+an explicit identical-send coalescing decision that no currently available input
+provides; this is intentionally deferred rather than solved with a registry,
+sidecar, scan-based recovery, or reconciliation loop.
+
 Idle snapshot publication already waits for foreground and background assistant
 work to become quiescent. At that boundary, cleanup validates the complete direct
 staging inventory and outbox state before deleting anything. Exact files remain

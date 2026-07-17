@@ -335,7 +335,12 @@ describe('assistant vault-file send', () => {
     }
   })
 
-  it('reuses one owned file and approval identity after outbox persistence is interrupted', async () => {
+  // Proves the exact-call-id re-delivery path only: the same tool call
+  // (identical toolCallId) recovers its owned file and approval identity after
+  // an outbox-persist interruption. A model recovery via a NEW provider call id
+  // is an accepted, deliberately unhandled limitation (see the consume-site
+  // comment in vault-file-send.ts).
+  it('reuses one owned file and approval identity when the same tool call is re-delivered after outbox persistence is interrupted', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-staging-retry-',
     )
