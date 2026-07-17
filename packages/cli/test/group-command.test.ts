@@ -315,17 +315,14 @@ describe('buildGroupSharedResult', () => {
     expect(result.members[1]?.displayName).toBeNull()
   })
 
-  it('filters to a single kind without hiding landed members missing that data', async () => {
+  it('filters to a single kind for a leaderboard and drops members without it', async () => {
     await writeStore(fixtureStore())
     const result = await buildGroupSharedResult({ kinds: ['steps-days.v0'], vault })
 
-    expect(result.memberCount).toBe(2)
-    expect(result.sharingMemberCount).toBe(1)
-    expect(result.members.map((member) => member.memberId)).toEqual(['member-a', 'member-b'])
+    expect(result.members.map((member) => member.memberId)).toEqual(['member-a'])
     expect(result.members[0]?.shares.map((share) => share.projectionKind)).toEqual([
       'steps-days.v0',
     ])
-    expect(result.members[1]?.shares).toEqual([])
   })
 
   it('filters to exact activity distance and count selector scopes for challenge leaderboards', async () => {
@@ -336,11 +333,10 @@ describe('buildGroupSharedResult', () => {
       scopeKeys: [RUNNING_DISTANCE_SCOPE_KEY],
       vault,
     })
-    expect(distance.members.map((member) => member.memberId)).toEqual(['member-a', 'member-b'])
+    expect(distance.members.map((member) => member.memberId)).toEqual(['member-a'])
     expect(distance.members[0]?.shares.map((share) => share.projectionScopeKey)).toEqual([
       RUNNING_DISTANCE_SCOPE_KEY,
     ])
-    expect(distance.members[1]?.shares).toEqual([])
     expect(distance.members[0]?.shares[0]?.records[0]?.data).toEqual({
       activityKind: 'running',
       date: '2026-07-05',
@@ -353,12 +349,11 @@ describe('buildGroupSharedResult', () => {
       scopeKeys: [RUNNING_SESSION_COUNT_SCOPE_KEY],
       vault,
     })
-    expect(count.members.map((member) => member.memberId)).toEqual(['member-a', 'member-b'])
-    expect(count.members[0]?.shares).toEqual([])
-    expect(count.members[1]?.shares.map((share) => share.projectionScopeKey)).toEqual([
+    expect(count.members.map((member) => member.memberId)).toEqual(['member-b'])
+    expect(count.members[0]?.shares.map((share) => share.projectionScopeKey)).toEqual([
       RUNNING_SESSION_COUNT_SCOPE_KEY,
     ])
-    expect(count.members[1]?.shares[0]?.records[0]?.data).toEqual({
+    expect(count.members[0]?.shares[0]?.records[0]?.data).toEqual({
       activityKind: 'running',
       date: '2026-07-05',
       sessionCount: 2,
