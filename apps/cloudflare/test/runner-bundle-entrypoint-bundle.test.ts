@@ -534,11 +534,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // 2026-07-16 mainline prompt integration, which landed without moving this
     // lock; the lock is reconciled to that already-shipped ratchet here.
     // Locking exact values makes any silent change to a ratchet a failing,
-    // reviewed diff. The mainline prompt-growth ratchet advanced the static
-    // closure baseline to 7,121,190B without updating this mirror; align it.
+    // reviewed diff. Mainline ratchets advanced the static closure baseline
+    // (most recently to 7,127,273B) without updating this mirror; align it.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_121_190 + 96_000 + 250_000,
+      staticClosureBytes: 7_127_273 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });
