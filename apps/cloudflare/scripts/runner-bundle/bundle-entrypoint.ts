@@ -89,7 +89,13 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // closure, 24,408B over the prior budget (CI linux measures 7,426,324B on the
 // same tree). Advance only by that measured overage and preserve the separate
 // 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_121_190;
+// Shared accepted-message targeting adds the reviewed boot-critical shared
+// resolver, both targeting tools, and the true-only native-reply outbox
+// marker: 7,481,760B local macOS static boot closure measured with the
+// feature on the pre-#772 base, a 14,570B feature increment over that
+// merge's own measurement. Advance by that exact feature increment and
+// preserve the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_135_760;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.
