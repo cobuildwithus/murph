@@ -25,6 +25,7 @@ export function CategoryFilter({ value, onChange, categories }: CategoryFilterPr
 
   return (
     <ResponsiveSelect
+      ariaLabel="Experiment category"
       value={value}
       onValueChange={onChange}
       placeholder="All categories"
