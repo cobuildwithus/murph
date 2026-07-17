@@ -5095,6 +5095,100 @@ describe("ComputerUseService", () => {
     )).toBe(true);
   });
 
+  it("keeps the old browser attached when the claimed checkpoint dies before Kernel cleanup", async () => {
+    let now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [createResumeMailboxItem()],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({ deleteBrowserResults: ["fail"] });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toMatchObject({ status: "completed" });
+
+    // The first Kernel browser mutation fails after the durable claim: the
+    // claim must already be recorded while the run row still points at the
+    // old browser, so the login profile is never silently lost.
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+      retryable: true,
+    });
+    expect(store.handoff).toMatchObject({
+      completedAt: new Date("2026-06-17T12:00:00.000Z"),
+      status: "checkpointing",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-1",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(kernel.createdSessionIds).toEqual([]);
+
+    // While the claim is fresh, an overlapping resume stops at the durable
+    // owner without any Kernel call.
+    const executeCallsBeforeRetry = kernel.executePlaywrightCalls;
+    const deletesBeforeRetry = kernel.deletedSessionIds.length;
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
+      retryable: true,
+    });
+    expect(kernel.executePlaywrightCalls).toBe(executeCallsBeforeRetry);
+    expect(kernel.deletedSessionIds).toHaveLength(deletesBeforeRetry);
+    expect(kernel.createdSessionIds).toEqual([]);
+
+    // Stale-owner recovery re-claims and completes the checkpoint from the
+    // still-attached old browser.
+    now = new Date("2026-06-17T12:06:00.000Z");
+    await expect(service.startRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({ status: "completed" });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      "kernel-session-1",
+      "kernel-session-1",
+      deterministicRunBrowserNameMatcher(),
+    ]);
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        browserName: deterministicRunBrowserNameMatcher(),
+        profileName: "murph-test-member",
+      }),
+    ]);
+    expect(kernel.deletedProfileNames).toEqual([]);
+  });
+
   it("does not delete the member profile when suspension races with login checkpoint replacement", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "login" });
@@ -6897,6 +6991,117 @@ describe("PrismaComputerUseStore", () => {
     expect(tx.hostedComputerRun.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
       tx.hostedComputerHandoff.updateMany.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("returns no login checkpoint claim when the claim CAS misses", async () => {
+    const tx = {
+      $queryRaw: vi.fn<(
+        strings: TemplateStringsArray,
+        memberId: string,
+      ) => Promise<Array<{ id: string }>>>()
+        .mockResolvedValue([{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        findUnique: vi.fn(async () => createHandoffRecord()),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.claimLoginHandoffForCheckpoint({
+      expectedAwaitingReason: "login_needed",
+      expectedKernelSessionId: "kernel-session-1",
+      expectedPausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      expectedResumeAfterMailboxLaneSeq: null,
+      expectedStatus: "completed",
+      expectedUpdatedAt: new Date("2026-06-17T12:04:00.000Z"),
+      handoffId: "hch_handoff123",
+      memberId: "member_123",
+      now: new Date("2026-06-17T12:05:00.000Z"),
+      runId: "hcr_run123",
+    })).resolves.toBeNull();
+    expect(tx.hostedComputerHandoff.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("aborts the resume transaction when the login checkpoint consume misses", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:05:00.000Z");
+    const tx = {
+      $queryRaw: vi.fn<(
+        strings: TemplateStringsArray,
+        memberId: string,
+      ) => Promise<Array<{ id: string }>>>()
+        .mockResolvedValue([{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(async () => createRunRecord()),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.resumeRunAfterLoginCheckpoint({
+      awaitingReason: "login_needed",
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      expectedKernelSessionId: "kernel-session-2",
+      expectedPausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      expectedResumeAfterMailboxLaneSeq: null,
+      handoffId: "hch_handoff123",
+      memberId: "member_123",
+      now: new Date("2026-06-17T12:05:30.000Z"),
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+      retryable: true,
+    });
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("does not consume the login checkpoint claim when the fenced resume misses", async () => {
+    const tx = {
+      $queryRaw: vi.fn<(
+        strings: TemplateStringsArray,
+        memberId: string,
+      ) => Promise<Array<{ id: string }>>>()
+        .mockResolvedValue([{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      hostedComputerRun: {
+        findUnique: vi.fn(async () => createRunRecord()),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx)),
+    } as never);
+
+    await expect(store.resumeRunAfterLoginCheckpoint({
+      awaitingReason: "login_needed",
+      expectedHandoffUpdatedAt: new Date("2026-06-17T12:05:00.000Z"),
+      expectedKernelSessionId: "kernel-session-2",
+      expectedPausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      expectedResumeAfterMailboxLaneSeq: null,
+      handoffId: "hch_handoff123",
+      memberId: "member_123",
+      now: new Date("2026-06-17T12:05:30.000Z"),
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+      retryable: true,
+    });
+    expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
   });
 
   it("rotates a managed-login capability without refreshing its claim lease", async () => {
