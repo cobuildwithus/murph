@@ -378,13 +378,6 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.sources.listConnectionSources(connectionId, tx);
   }
 
-  async listConnectionSourcesForConnections(
-    connectionIds: readonly string[],
-    tx?: HostedPrismaTransactionClient,
-  ): Promise<HostedDeviceConnectionSource[]> {
-    return this.sources.listConnectionSourcesForConnections(connectionIds, tx);
-  }
-
   async listRuntimeSnapshotConnectionSources(
     input: ListHostedRuntimeSnapshotConnectionSourcesInput,
   ): Promise<HostedDeviceConnectionSource[]> {

@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   getConnectionStatus: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
   listConfiguredDeviceSyncPublicProviderDescriptors: vi.fn(),
-  listConnectionSourcesForConnections: vi.fn(),
+  listConnectionSources: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
@@ -296,7 +296,7 @@ describe("device sync settings routes", () => {
       store: {
         getConnectionForUser: mocks.getConnectionForUser,
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
-        listConnectionSourcesForConnections: mocks.listConnectionSourcesForConnections,
+        listConnectionSources: mocks.listConnectionSources,
         listConnectionsForUser: mocks.listConnectionsForUser,
       },
     });
@@ -327,7 +327,7 @@ describe("device sync settings routes", () => {
     });
     mocks.getConnectionForUser.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
-    mocks.listConnectionSourcesForConnections.mockResolvedValue([]);
+    mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.findManyDeviceConnections.mockResolvedValue([
       buildDeviceConnectionRecord({
@@ -860,7 +860,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
+    mocks.listConnectionSources.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource({
         resourceAvailabilitySummary: null,
       }),
@@ -876,6 +876,8 @@ describe("device sync settings routes", () => {
       "dsc_junction_123",
     );
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.diagnoseBackfill).toHaveBeenCalledWith(expect.objectContaining({
       account: expect.objectContaining({
         credential: {
@@ -989,7 +991,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
+    mocks.listConnectionSources.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource({
         resourceAvailabilitySummary: {
           steps: true,
@@ -1004,6 +1006,8 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "timeseries",
       now: "2026-04-03T12:00:00.000Z",
@@ -1121,7 +1125,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
+    mocks.listConnectionSources.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource(),
     ]);
 
@@ -1134,6 +1138,8 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "refresh",
       now: "2026-04-03T12:00:00.000Z",
@@ -1221,6 +1227,7 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(409);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {

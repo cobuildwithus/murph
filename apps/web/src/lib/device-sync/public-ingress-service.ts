@@ -29,10 +29,6 @@ import {
   type CompanionConnectionIntent,
 } from "./companion";
 import {
-  toHostedBrowserDeviceSyncConnectionSource,
-  type HostedBrowserDeviceSyncConnectionSource,
-} from "./browser-connection-source";
-import {
   createHostedBrowserConnectionId,
   toHostedBrowserDeviceSyncConnection,
   type HostedBrowserDeviceSyncConnection,
@@ -46,7 +42,6 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
-import type { HostedDeviceConnectionSource } from "./prisma-store";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 import { createHostedDeviceSyncRegistry } from "./providers";
 
@@ -103,42 +98,6 @@ export class HostedDeviceSyncPublicIngressService {
 
   describeProviders(): PublicProviderDescriptor[] {
     return this.ingress.describeProviders();
-  }
-
-  async listConnections(userId: string): Promise<{
-    providers: PublicProviderDescriptor[];
-    connections: HostedBrowserDeviceSyncConnection[];
-    connectionSources: HostedBrowserDeviceSyncConnectionSource[];
-  }> {
-    const connections = await this.context.store.listConnectionsForUser(userId);
-    const connectionEntries = connections.map((connection) => ({
-      browserConnection: this.toBrowserConnection(connection),
-      connectionId: connection.id,
-    }));
-    const sourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
-    const sources = await this.context.store.listConnectionSourcesForConnections(
-      connectionEntries.map((entry) => entry.connectionId),
-    );
-    for (const source of sources) {
-      const bucket = sourcesByConnectionId.get(source.connectionId);
-      if (bucket) {
-        bucket.push(source);
-      } else {
-        sourcesByConnectionId.set(source.connectionId, [source]);
-      }
-    }
-
-    return {
-      providers: this.describeProviders(),
-      connections: connectionEntries.map((entry) => entry.browserConnection),
-      connectionSources: connectionEntries.flatMap((entry) =>
-        (sourcesByConnectionId.get(entry.connectionId) ?? []).map((source) =>
-          toHostedBrowserDeviceSyncConnectionSource(
-            source,
-            entry.browserConnection.id,
-          ))
-      ),
-    };
   }
 
   async getConnectionStatus(
