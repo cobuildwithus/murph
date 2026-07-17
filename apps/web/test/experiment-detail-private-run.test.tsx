@@ -1973,6 +1973,83 @@ describe("experiment detail private-run composition", () => {
     expect(stoppedMarkup).toContain("Your experiment was stopped");
     expect(stoppedMarkup).toContain("Resting Heart Rate");
   });
+
+  it("projects stopped runs from live boundaries when they diverge from a suppressed outcome", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const outcome = createSavedOutcome({
+      id: "exp_sauna_divergent_stop",
+      slug: "finnish-sauna",
+      title: "Divergent stop run",
+      windows: {
+        baselineEnd: "2026-04-03",
+        baselineStart: "2026-04-01",
+        interventionEnd: "2026-04-10",
+        interventionStart: "2026-04-04",
+      },
+    });
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: [],
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-05",
+            id: "exp_sauna_divergent_stop",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+              relativePath: "bank/experiments/outcomes/divergent-stop.json",
+            },
+            runPlan: {
+              baselineEnd: "2026-04-04",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-05",
+              interventionStart: "2026-04-05",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "paused",
+            title: "Divergent stop run",
+          }),
+          id: "exp_sauna_divergent_stop",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "paused",
+          summary: "Stopped with edited live boundaries.",
+          tags: ["sauna"],
+          title: "Divergent stop run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-05",
+      outcomeStatus: "not_expected",
+      status: "stopped",
+    }));
+    expect(stoppedRun?.conclusions).toBeUndefined();
+    expect(stoppedRun?.timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        date: "Apr 5",
+        label: "Protocol",
+      }),
+    ]));
+    expect(stoppedRun?.timeline).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        date: "Apr 4",
+        label: "Protocol",
+      }),
+    ]));
+  });
 });
 
 function createEntity(

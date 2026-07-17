@@ -472,15 +472,14 @@ function buildRunContext(
   const diagnostics: BrowserVaultExperimentResultDiagnostic[] = [];
   const attributes = entity.attributes;
   const sourceStatus = readString(attributes.status) ?? entity.status;
-  const authoritativeWindows = referencedOutcome?.windows ?? readRunWindows(attributes);
+  const liveWindows = readRunWindows(attributes);
   const endedOn = readIsoDate(attributes.endedOn);
-  const endedEarly = endedOn !== null &&
-    authoritativeWindows.interventionEnd !== null &&
-    endedOn < authoritativeWindows.interventionEnd;
-  const windows = endedEarly
-    ? clampRunWindowsToTerminalDate(authoritativeWindows, endedOn)
-    : authoritativeWindows;
+  const plannedEnd = (referencedOutcome?.windows ?? liveWindows).interventionEnd;
+  const endedEarly = endedOn !== null && plannedEnd !== null && endedOn < plannedEnd;
   const persistedOutcome = endedEarly ? null : referencedOutcome;
+  const windows = endedEarly
+    ? clampRunWindowsToTerminalDate(liveWindows, endedOn)
+    : persistedOutcome?.windows ?? liveWindows;
   const schedule = readRunSchedule(attributes, diagnostics);
   const runPlanRecord = readRecord(attributes.runPlan);
   const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);

@@ -1198,6 +1198,62 @@ test("excludes point-measurement anchors observed after an early stop", () => {
   assert.equal(result.biomarkers[0]?.intervention.mean, 59);
 });
 
+test("projects suppressed-outcome stopped runs with live windows clamped to the stop date", () => {
+  const outcome = savedOutcome({
+    windows: {
+      baselineEnd: "2026-04-03",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-10",
+      interventionStart: "2026-04-04",
+    },
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          endedOn: "2026-04-05",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "paused",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-04",
+            interventionStart: "2026-04-05",
+            interventionEnd: "2026-04-05",
+          },
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-02", 62],
+        ["2026-04-04", 60],
+        ["2026-04-05", 58],
+        ["2026-04-06", 50],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.equal(result.persistedOutcome, null);
+  assert.equal(result.experiment.windows.baselineStart, "2026-04-01");
+  assert.equal(result.experiment.windows.baselineEnd, "2026-04-04");
+  assert.equal(result.experiment.windows.interventionStart, "2026-04-05");
+  assert.equal(result.experiment.windows.interventionEnd, "2026-04-05");
+  assert.equal(result.biomarkers[0]?.baseline.mean, 61);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 58);
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-02", "2026-04-04", "2026-04-05"],
+  );
+});
+
 test("fails closed on cross-run and stale outcome references", () => {
   const outcome = savedOutcome();
   const client = createBrowserVaultQueryClient(

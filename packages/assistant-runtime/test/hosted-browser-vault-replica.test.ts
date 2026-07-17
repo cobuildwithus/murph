@@ -202,23 +202,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
         vault: vaultRoot,
       });
       await services.core.updateExperiment({
-        commonsProtocolRef: {
-          key: "protocol_variant:writer-projection/revised",
-          pageRevisionId: `sha256:${"1".repeat(64)}`,
-          runSpecRevisionId: `sha256:${"2".repeat(64)}`,
-          testPlanId: "writer-projection-revised",
-        },
-        effectiveProtocolSnapshot: {
-          doseSignature: "Revised writer-projection dose",
-          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
-          modality: "custom",
-        },
         lookup: "writer-projection",
-        protocolRef: {
-          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
-          protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
-          protocolRevisionId: `sha256:${"3".repeat(64)}`,
-        },
         requestId: null,
         runPlan: {
           baselineEnd: "2026-06-04",
