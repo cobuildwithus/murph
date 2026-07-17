@@ -15434,6 +15434,147 @@ describe('assistant codex event shaping', () => {
       )
     })
 
+    it('keeps an earlier-context reaction pending for a later-context no-reply settlement', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-cross-context-reaction-work-')
+      const codexHome = await createTempDir('assistant-codex-cross-context-reaction-home-')
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const onFinishWithoutReplyRecorded = vi.fn()
+      const messageRef = `ain_${'e'.repeat(32)}`
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_550 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-cross-context-reaction',
+              turnId: 'turn-cross-context-reaction',
+            })
+            child.stdout.write(jsonLine({
+              id: 45,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'react_to_message',
+                arguments: {
+                  message_ref: messageRef,
+                  reaction: 'heart',
+                },
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 45)).resolves.toMatchObject({
+              id: 45,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'user-cross-context-initial',
+                  type: 'user_message',
+                  message: 'react to my earlier message',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'user-cross-context-steered',
+                  type: 'user_message',
+                  message: 'steered follow up',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              id: 46,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 46)).resolves.toMatchObject({
+              id: 46,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                status: 'failed',
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        authorizeAcceptedMessageTarget: async () => ({
+          targetInputId: messageRef,
+        }),
+        dynamicTools: resolveMurphDynamicTools({
+          messageTargetingAvailable: true,
+        }),
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        prompt: 'react then no-reply in a later steered context',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the Codex turn to fail')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+      })
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+            targetInputId: messageRef,
+          },
+        ],
+      })
+      // The accepted event settles the cumulative prefix through ordinal 1,
+      // so the ordinal-0 reaction must keep suppression evidence deferred.
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 1,
+        messageReactionPending: true,
+      })
+    })
+
     it('preserves accepted no-reply and rollout context when the recorded hook fails', async () => {
       const workingDirectory = await createTempDir('assistant-codex-no-reply-recorded-fail-work-')
       const codexHome = await createTempDir('assistant-codex-no-reply-recorded-fail-home-')

@@ -2912,8 +2912,12 @@ async function runCodexAppServerTurnOnProcess(
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
+        // The accepted event settles the cumulative accepted-turn prefix
+        // through this ordinal, so a reaction recorded for any covered
+        // earlier context must keep terminal suppression evidence deferred
+        // until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
-          (entry) => entry.deliveryContextOrdinal === deliveryContextOrdinal,
+          (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
