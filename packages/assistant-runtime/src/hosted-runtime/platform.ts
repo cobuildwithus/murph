@@ -83,6 +83,10 @@ import type {
   HostedRuntimeSubscriptionToolResponse,
 } from "@murphai/hosted-execution/subscription";
 import type {
+  HostedRuntimeLabsToolRequest,
+  HostedRuntimeLabsToolResponse,
+} from "@murphai/hosted-execution/labs";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -423,6 +427,13 @@ export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
 }
 
+export interface HostedRuntimeLabsToolPort {
+  request(
+    request: HostedRuntimeLabsToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLabsToolResponse>;
+}
+
 export interface HostedRuntimeSubscriptionToolPort {
   request(
     request: HostedRuntimeSubscriptionControlRequest,
@@ -599,6 +610,7 @@ export interface HostedRuntimePlatform {
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
+  labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;

@@ -243,6 +243,9 @@ type RuntimeUsageRecordPort = NonNullable<
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
 >;
+type RuntimeLabsToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["labsToolPort"]
+>;
 type RuntimeSubscriptionToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["subscriptionToolPort"]
 >;
@@ -881,6 +884,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         hosted: expect.objectContaining({
           subscriptionTool: subscriptionToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("passes the hosted labs port into assistant execution when available", async () => {
+    const labsToolPort: RuntimeLabsToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeLabsToolPort: labsToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          labsTool: labsToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("omits the hosted labs port from assistant execution when unavailable", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.not.objectContaining({
+          labsTool: expect.anything(),
         }),
       },
       expect.any(Object),
@@ -13316,6 +13351,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantPersonalizationToolPort"]
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
+  runtimeLabsToolPort?: RuntimeLabsToolPort;
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -13454,6 +13490,9 @@ function createPhaseInput(input: {
               assistantConfigurationToolPort:
                 input.runtimeAssistantConfigurationToolPort,
             }
+          : {}),
+        ...(input.runtimeLabsToolPort
+          ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }

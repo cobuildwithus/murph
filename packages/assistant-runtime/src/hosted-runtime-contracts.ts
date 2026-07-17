@@ -36,6 +36,7 @@ export type {
   HostedRuntimeLinqTargetOverride,
   HostedRuntimeLatencyTracePort,
   HostedRuntimeLatencyTraceRecordResponse,
+  HostedRuntimeLabsToolPort,
   HostedRuntimeActionApprovalPort,
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,

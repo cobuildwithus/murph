@@ -451,16 +451,18 @@ test("HomePage shows a blocked Family usage notice without a personal action", a
     usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "family_usage_limit_reached",
-      message: "Your Family has used 100% of this month's included usage. New usage is blocked.",
+      message: "Unused test fixture message",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Family has used 100% of this month(?:&#x27;|')s included usage/u);
+  assert.match(markup, /used 100% of your included usage this month/u);
+  assert.match(markup, /Other Family members have separate allowances/u);
   assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /Family(?:&#x27;|')s included usage resets/u);
+  assert.match(markup, /until your included usage resets/);
+  assert.doesNotMatch(markup, /shared allowance|Family(?:&#x27;|')s included usage/u);
   assert.match(markup, /Resets in 6 days/);
   assert.doesNotMatch(markup, />Add usage</);
 });

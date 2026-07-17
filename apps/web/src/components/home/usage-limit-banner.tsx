@@ -31,8 +31,8 @@ const usageLimitBannerCopy: Record<
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "New replies and other AI work are blocked until your Family's included usage resets.",
-    title: "Your Family has used 100% of this month's included usage",
+    body: "New replies and other AI work are blocked until your included usage resets. Other Family members have separate allowances.",
+    title: "You've used 100% of your included usage this month",
   },
   pulse_upgrade_edge: {
     body: "New replies and other AI work are blocked until your included usage resets.",

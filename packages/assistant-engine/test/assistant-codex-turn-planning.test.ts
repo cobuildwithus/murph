@@ -1016,6 +1016,99 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it('exposes labs only to private interactive provider turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      labsTool: { request: vi.fn() },
+    }
+    const common = {
+      executionContext: {
+        hosted: {
+          memberId: 'member-labs-planning',
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: createMessageInput(),
+      promptTimeContext: {
+        currentLocalDate: '2026-07-16',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+    } satisfies Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'profile' | 'sharedPlan'
+    >
+
+    const direct = await resolveAssistantRouteTurnPlan({
+      ...common,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    const group = await resolveAssistantRouteTurnPlan({
+      ...common,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      sharedPlan: createSharedPlan({}, {
+        effectiveThreadIsDirect: false,
+        threadIsDirect: false,
+      }),
+    })
+    const maintenance = await resolveAssistantRouteTurnPlan({
+      ...common,
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    const notification = await resolveAssistantRouteTurnPlan({
+      ...common,
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    const outputOnly = await resolveAssistantRouteTurnPlan({
+      ...common,
+      profile: {
+        promptProfile: 'assistant-ask-continuation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'output-only-turn',
+      },
+      sharedPlan: createPrivateSharedPlan(),
+    })
+
+    expect(direct.dynamicTools.map((tool) => tool.name)).toContain('labs')
+    expect(direct.developerInstructions).toContain('Junction lab catalog:')
+    expect(group.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
+    expect(group.developerInstructions).not.toContain('Junction lab catalog:')
+    expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
+    expect(maintenance.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(notification.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
+    expect(notification.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
+    expect(outputOnly.systemPrompt).not.toContain('Junction lab catalog:')
+  })
+
   it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -1236,6 +1329,7 @@ describe('assistant Codex turn planning', () => {
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
+      labsTool: { request: vi.fn() },
       newsletterTool: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
@@ -1355,6 +1449,7 @@ describe('assistant Codex turn planning', () => {
       'connected_apps_manage',
       'create_phone_call',
       'family_plan',
+      'labs',
       'plan_usage',
       'send_vault_file',
       'subscription',
@@ -1576,6 +1671,7 @@ describe('assistant Codex turn planning', () => {
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
+      labsTool: { request: vi.fn() },
       newsletterTool: { request: vi.fn() },
       phoneCalls: { start: vi.fn() },
     }

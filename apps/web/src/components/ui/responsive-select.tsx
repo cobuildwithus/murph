@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useIsMobile } from "@/src/hooks/use-mobile";
 import { cn } from "@/src/lib/utils";
 
-import { Drawer, DrawerContent, DrawerTrigger } from "./drawer";
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "./drawer";
 import {
   Select,
   SelectContent,
@@ -21,6 +21,7 @@ interface ResponsiveSelectOption {
 }
 
 interface ResponsiveSelectProps {
+  ariaLabel: string;
   className?: string;
   onValueChange: (value: string) => void;
   options: ResponsiveSelectOption[];
@@ -29,6 +30,7 @@ interface ResponsiveSelectProps {
 }
 
 export function ResponsiveSelect({
+  ariaLabel,
   className,
   onValueChange,
   options,
@@ -40,6 +42,7 @@ export function ResponsiveSelect({
   if (isMobile) {
     return (
       <DrawerSelect
+        ariaLabel={ariaLabel}
         className={className}
         onValueChange={onValueChange}
         options={options}
@@ -51,7 +54,7 @@ export function ResponsiveSelect({
 
   return (
     <Select value={value} onValueChange={(v) => v && onValueChange(v)}>
-      <SelectTrigger size="sm" className={className}>
+      <SelectTrigger aria-label={ariaLabel} size="sm" className={className}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -66,6 +69,7 @@ export function ResponsiveSelect({
 }
 
 function DrawerSelect({
+  ariaLabel,
   className,
   onValueChange,
   options,
@@ -80,6 +84,7 @@ function DrawerSelect({
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger asChild>
         <button
+          aria-label={`${ariaLabel}: ${selectedLabel}`}
           type="button"
           className={cn(
             "flex w-full items-center justify-between gap-1.5 rounded-lg border border-border bg-card py-2 pr-2 pl-3 text-sm whitespace-nowrap select-none h-12 md:h-8",
@@ -91,9 +96,11 @@ function DrawerSelect({
         </button>
       </DrawerTrigger>
       <DrawerContent>
+        <DrawerTitle className="sr-only">{ariaLabel}</DrawerTitle>
         <div className="flex flex-col py-3 pb-12">
           {options.map((option) => (
             <button
+              aria-pressed={option.value === value}
               key={option.value}
               type="button"
               className={cn(
