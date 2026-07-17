@@ -52,6 +52,9 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain(
       'vault-cli memory show --vault "$VAULT" --format json',
     )
+    expect(raw).toMatch(
+      /saved name,\s+date of birth, provider relationship/iu,
+    )
     expect(raw).toContain(
       'A blank\n   calendar does not prove the user is available',
     )
@@ -68,6 +71,9 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('Fallback authority')
     expect(raw).toContain('Access and cost constraints when material')
     expect(raw).toContain('Identity, contact, and disclosure')
+    expect(raw).toMatch(
+      /Patient name and date of birth are required for every real\s+booking/iu,
+    )
     expect(raw).toContain('Success and stop condition')
     expect(raw).toContain('For rescheduling or cancellation')
     expect(raw).toContain(
@@ -85,18 +91,27 @@ describe('appointment scheduling skill', () => {
     expect(raw).toContain('Bundle closely related missing fields')
   })
 
-  it('reads before writing and persists only reusable approved preferences', async () => {
+  it('reads before writing, persists required date of birth, and limits other memory', async () => {
     const raw = await readAppointmentSkill()
 
     expect(raw).toContain('## Durable Memory boundary')
+    expect(raw).toContain(
+      'Date of birth is the one required durable identity exception',
+    )
+    expect(raw).toContain('`Date of birth: YYYY-MM-DD`')
+    expect(raw).toContain('`bank/memory.md`')
+    expect(raw).toContain('private vault for future medical scheduling')
+    expect(raw).toContain('--section Identity')
+    expect(raw).toContain('vault-cli memory forget <memoryId>')
     expect(raw).toContain('means it to apply beyond this appointment')
     expect(raw).toContain('vault-cli memory set-name <displayName>')
     expect(raw).toContain('vault-cli memory update <memoryId> <text>')
     expect(raw).toContain('vault-cli memory upsert <text>')
     expect(raw).toContain('Do not claim it was saved unless the write')
     expect(raw).toMatch(
-      /Never store one appointment's reason, exact date or time, transient\s+availability, date of birth, callback details/iu,
+      /Never store one appointment's reason, exact date or time, transient\s+availability, callback details/iu,
     )
+    expect(raw).not.toMatch(/transient\s+availability, date of birth/iu)
     expect(raw).toContain('insurance or prescription identifiers')
     expect(raw).toMatch(/current action\/disclosure\s+authority/iu)
     expect(raw).toContain('A memory record is not disclosure consent')
@@ -114,6 +129,12 @@ describe('appointment scheduling skill', () => {
     )
     expect(raw).toMatch(
       /A successful test call, office\s+hours lookup, or availability inquiry cannot satisfy this gate/iu,
+    )
+    expect(raw).toMatch(
+      /gate also requires exactly one\s+verified `Date of birth: YYYY-MM-DD` Identity record/iu,
+    )
+    expect(raw).toMatch(
+      /include the approved `patient_name` and normalized `date_of_birth`/iu,
     )
     expect(raw).toMatch(
       /resume intake on the\s+next ordinary conversational turn/iu,
