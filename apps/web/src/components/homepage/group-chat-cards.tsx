@@ -13,29 +13,59 @@ export type GroupMember = (typeof GROUP_MEMBERS)[number];
 const CHALLENGE_ROWS = [
   {
     name: "You",
+    avatarSrc: null,
     daysDone: "5/5 days",
     level: 1,
     delta: "+31% steps vs baseline",
   },
   {
     name: "Maya",
+    avatarSrc: "/personas/athlete.jpg",
     daysDone: "4/5 days",
     level: 0.8,
     delta: "+22 min avg walk",
   },
   {
     name: "Sam",
+    avatarSrc: "/personas/founder.jpg",
     daysDone: "4/5 days",
     level: 0.8,
     delta: "+12% steps vs baseline",
   },
   {
     name: "Theo",
+    avatarSrc: "/personas/sleeper.jpg",
     daysDone: "3/5 days",
     level: 0.6,
     delta: "+4% steps vs baseline",
   },
 ] as const;
+
+function ChallengeRowAvatar({
+  name,
+  src,
+}: {
+  name: string;
+  src: string | null;
+}) {
+  if (!src) {
+    return (
+      <div
+        aria-hidden="true"
+        className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-[#5a6e32] font-mono text-[8px] font-semibold uppercase tracking-[0.06em] text-white"
+      >
+        {name.slice(0, 3)}
+      </div>
+    );
+  }
+  return (
+    <div
+      aria-hidden="true"
+      className="size-[26px] shrink-0 rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/30"
+      style={{ backgroundImage: `url('${src}')` }}
+    />
+  );
+}
 
 const NEWSLETTER_ROWS = [
   "You · every walk day logged",
@@ -57,25 +87,28 @@ export function ChallengeCard({ className }: { className?: string }) {
       </div>
       <div className="mt-2.5 space-y-2.5">
         {CHALLENGE_ROWS.map((row) => (
-          <div key={row.name}>
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-serif text-[13px] font-semibold leading-tight text-[#2d3436]">
-                  {row.name}
-                </p>
-                <p className="mt-0.5 font-mono text-[8px] tracking-[0.12em] text-[#736a58]">
-                  {row.daysDone}
+          <div key={row.name} className="flex items-center gap-2.5">
+            <ChallengeRowAvatar name={row.name} src={row.avatarSrc} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-serif text-[13px] font-semibold leading-tight text-[#2d3436]">
+                    {row.name}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[8px] tracking-[0.12em] text-[#736a58]">
+                    {row.daysDone}
+                  </p>
+                </div>
+                <p className="shrink-0 text-right text-[9px] font-medium leading-tight tracking-tight text-[#5a6e32]">
+                  {row.delta}
                 </p>
               </div>
-              <p className="shrink-0 text-right text-[9px] font-medium leading-tight tracking-tight text-[#5a6e32]">
-                {row.delta}
-              </p>
-            </div>
-            <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-[#f5f0e8]/90">
-              <div
-                className="h-full rounded-full bg-[#5a6e32]"
-                style={{ width: `${row.level * 100}%` }}
-              />
+              <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-[#f5f0e8]/90">
+                <div
+                  className="h-full rounded-full bg-[#5a6e32]"
+                  style={{ width: `${row.level * 100}%` }}
+                />
+              </div>
             </div>
           </div>
         ))}

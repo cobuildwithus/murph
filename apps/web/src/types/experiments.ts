@@ -349,6 +349,7 @@ export interface ExperimentRunProjection {
   schedule?: ExperimentSchedule;
   sessionContext?: ExperimentRunContextEntry[];
   nextStep?: ExperimentNextStep;
+  outcomeStatus: "available" | "not_expected" | "pending" | "unavailable";
   summary?: string;
   summaryDetail?: string;
   conclusions?: ExperimentConclusionSection[];

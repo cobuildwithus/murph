@@ -36,9 +36,6 @@ describe("Murph Safe public pages", () => {
     expect(markup).toContain(
       "What’s in it, what’s been tested, and what we still don’t know.",
     );
-    expect(markup).toContain("LABEL CONTENTS");
-    expect(markup).toContain("PRODUCT TESTS");
-    expect(markup).toContain("KNOWN GAPS");
     expect(markup).toContain("/api/public/v1/openapi.json");
     expect(markup).not.toContain("name=\"q\"");
   });

@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
+import { ErrandsSection } from "@/src/components/homepage/errands-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import {
   HeroClocksIn,
@@ -23,7 +24,10 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
-import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  formatHostedLandingTrialDurationPhrase,
+  formatHostedLandingTrialPricingNote,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
@@ -100,7 +104,6 @@ export default async function HomePage() {
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
-  const launchPricingSummary = formatHostedLandingPricingLongSummary();
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
@@ -114,10 +117,10 @@ export default async function HomePage() {
         body: null,
         eyebrow: "Sign up",
         metaItems: [
-          `${launchPricingSummary}`,
+          `${formatHostedLandingTrialDurationPhrase()} free trial`,
           "Open source",
         ],
-        note: null,
+        note: formatHostedLandingTrialPricingNote(),
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
@@ -143,9 +146,10 @@ export default async function HomePage() {
         <MealPhotosSection />
         <NutritionSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
+        <ErrandsSection />
         <IntegrationsSection authenticated={authenticated} />
-        <HowItWorksSection />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
+        <HowItWorksSection />
         <SecurityTeaserSection />
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />

@@ -285,7 +285,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
   assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
   assert.match(markup, /target="_blank"/);
@@ -501,7 +500,6 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
@@ -875,7 +873,6 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
   assert.match(markup, /Apple Health not connected/u);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);

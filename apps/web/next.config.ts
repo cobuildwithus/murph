@@ -306,6 +306,11 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
+      "/experiments/[experimentId]/results": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
+        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
+      ],
       "/biomarkers": [
         "../../packages/health-commons/generated/web/browse/biomarkers.json",
         "../../packages/health-commons/generated/web/routes/index.json",

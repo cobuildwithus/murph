@@ -1418,6 +1418,35 @@ describe('assistant skill assets', () => {
       'A bare outcome by itself is not enough to activate a durable support loop.',
     )
     expect(compact).toContain(
+      'make the value, schedule, and support concrete before any writes',
+    )
+    expect(compact).toContain(
+      'A vague promise to "remind you" is not enough.',
+    )
+    expect(compact).toContain(
+      'two or three short sentences and one easy question',
+    )
+    expect(compact).toContain(
+      'Use one editable recommendation rather than a menu.',
+    )
+    expect(compact).toContain(
+      "If Murph's visible contribution is no better than a generic phone reminder, the loop is underspecified",
+    )
+    expect(compact).toContain(
+      'recommend one best-fit support pattern rather than presenting a menu',
+    )
+    expect(raw).not.toContain('Offer it as a menu the user picks from')
+    expect(raw).toContain('### 7. Mark the first launch')
+    expect(compact).toContain(
+      'one original 15–20 second standalone launch song',
+    )
+    expect(compact).toContain(
+      'This is reply-time media, never a scheduled onboarding automation.',
+    )
+    expect(compact).toContain(
+      'Delight marks real value; it never substitutes for the launch offer, working support, or mandatory text close.',
+    )
+    expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
     expect(compact).toContain(
@@ -1587,6 +1616,7 @@ describe('assistant skill assets', () => {
         readSkillFile(strengthTraining),
       ])
 
+    const compactCatalog = catalog.replace(/\s+/gu, ' ')
     const sharedReference =
       '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md'
     expect(physicalTherapyRaw).toContain(sharedReference)
@@ -1596,9 +1626,34 @@ describe('assistant skill assets', () => {
     expect(catalog).toContain(
       'vault-cli exercise show <id-or-slug>\n   --format json',
     )
-    expect(catalog).toContain('normally two to four and rarely more than five')
-    expect(catalog).toContain('attach returned\n   `images[]`')
-    expect(catalog).toContain('"no\n   catalog image yet"')
+    expect(compactCatalog).toContain(
+      'Decide likely familiarity per movement from the current conversation and durable context.',
+    )
+    expect(compactCatalog).toContain(
+      'Strong familiarity signals include stated training experience, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
+    )
+    expect(compactCatalog).toContain(
+      'Treat stated novice status, a first workout plan, uncertain language, or no clear familiarity signal as likely unfamiliar.',
+    )
+    expect(compactCatalog).toContain(
+      'Familiarity is per movement: an experienced trainee can still be new to an uncommon variation.',
+    )
+    expect(compactCatalog).toContain(
+      'Do not ask a separate experience question only to decide whether to include media.',
+    )
+    expect(compactCatalog).toContain(
+      'normally two to four and rarely more than five',
+    )
+    expect(compactCatalog).toContain(
+      'If any prescribed movement is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+    )
+    expect(compactCatalog).toContain(
+      'If the user clearly demonstrates relevant training fluency and every prescribed movement is common or already familiar, omit exercise images unless the user asks for them.',
+    )
+    expect(compactCatalog).toContain(
+      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+    )
+    expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )
@@ -1825,17 +1880,22 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
+      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
+    )
+    expect(compact).toContain('Can you send me a voice memo covering a few things?')
+    expect(compact).toContain(
+      'spawn a separate background child for each: the medical-persistence child owns the entire medical save, and the supplement child owns label enrichment',
+    )
+    expect(compact).toContain(
+      'Up to three may be active at once, as an explicit exception to the global one-at-a-time default',
+    )
+    expect(compact).toContain(
+      "ok, one last question and then I'll leave you alone, promise",
+    )
+    expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
     )
-    expect(compact).toContain(
-      'attach the current protocol-or-experiment question as a short voice memo and leave the final response text empty',
-    )
-    expect(compact).toContain(
-      'This is an explicit product-flow voice preference; do not require the user to ask for voice separately.',
-    )
-    expect(compact).toContain(
-      'a photo of bottles or labels is welcome if easier',
-    )
+    expect(compact).toContain('a photo of bottles or labels is welcome if easier')
     expect(compact).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
     )
@@ -1924,6 +1984,21 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain(
       'steer back to the goals they named and toward setting up the first habit or experiment below',
+    )
+    expect(compact).toContain(
+      'create the first-value launch offer before any plan or support write.',
+    )
+    expect(compact).toContain(
+      "follow `behavior-followthrough`'s launch-offer contract exactly",
+    )
+    expect(compact).toContain(
+      'the compact launch offer contains the proposed schedule, actionable reminder package, and early review.',
+    )
+    expect(compact).toContain(
+      "always follow `behavior-followthrough`'s first-launch delight rule",
+    )
+    expect(compact).toContain(
+      'This is reply-time delight, not an onboarding automation',
     )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
@@ -2093,7 +2168,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt above, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt and the foundation brain-dump memo above, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',

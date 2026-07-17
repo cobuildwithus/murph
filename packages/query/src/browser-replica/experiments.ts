@@ -1,7 +1,9 @@
 import {
   experimentAdherenceTargetsSchema,
+  experimentOutcomeRefSchema,
   experimentRunScheduleIntentSchema,
   type ExperimentAdherenceTarget,
+  type ExperimentOutcome,
   type ExperimentRunScheduleIntent,
 } from "@murphai/contracts";
 
@@ -74,6 +76,12 @@ export type BrowserVaultExperimentOutcomeStatus =
   | "not_ready"
   | "sparse_data"
   | "enough_data";
+
+export type BrowserVaultExperimentSavedOutcomeStatus =
+  | "available"
+  | "not_expected"
+  | "pending"
+  | "unavailable";
 
 export type BrowserVaultExperimentExpectedDirection =
   | "increase"
@@ -298,7 +306,9 @@ export interface BrowserVaultExperimentResultsView {
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
   experiment: BrowserVaultExperimentResultRun;
   outcome: BrowserVaultExperimentOutcomeResult | null;
+  persistedOutcome: ExperimentOutcome | null;
   progress: BrowserVaultExperimentProgressResult | null;
+  savedOutcomeStatus: BrowserVaultExperimentSavedOutcomeStatus;
   schedule: BrowserVaultExperimentScheduleResult | null;
 }
 
@@ -306,12 +316,13 @@ interface BrowserVaultExperimentRunContext {
   adherenceEvents: BrowserVaultEntity[];
   adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
-  asOfDate: string;
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
+  evidenceThrough: string;
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
   eventTimeZone: string | null;
   expectedEffects: BrowserVaultExperimentExpectedEffectInput[];
+  persistedOutcome: ExperimentOutcome | null;
   run: BrowserVaultExperimentResultRun;
   unsupportedExplicitAdherenceTargets: boolean;
 }
@@ -352,24 +363,39 @@ export function selectBrowserVaultExperimentResults(
     return null;
   }
 
-  const context = buildRunContext(client, entity, asOf);
-  const metricWindow = buildMetricWindowContext(context.run.windows, context.asOfDate);
-  const biomarkers = buildBiomarkerResults(client, context, metricWindow);
+  const context = buildRunContext(
+    client,
+    entity,
+    asOf,
+    findReferencedExperimentOutcome(client, entity),
+  );
+  const { persistedOutcome } = context;
+  const biomarkers = persistedOutcome
+    ? buildPersistedOutcomeBiomarkers(persistedOutcome)
+    : buildBiomarkerResults(
+        client,
+        context,
+        buildMetricWindowContext(context.run.windows, context.evidenceThrough),
+      );
   const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule, adherence);
-  const outcome = buildOutcomeResult(context, biomarkers, progress);
+  const outcome = persistedOutcome
+    ? buildPersistedOutcomeResult(persistedOutcome)
+    : null;
   const runContext = buildExperimentContextEntries(context);
 
   return {
     adherence,
-    asOf,
+    asOf: context.asOf,
     biomarkers,
     context: runContext,
     diagnostics: context.diagnostics,
     experiment: context.run,
     outcome,
+    persistedOutcome,
     progress,
+    savedOutcomeStatus: resolveSavedOutcomeStatus(context, persistedOutcome),
     schedule,
   };
 }
@@ -441,10 +467,19 @@ function buildRunContext(
   client: BrowserVaultQueryClient,
   entity: BrowserVaultEntity,
   asOf: string,
+  referencedOutcome: ExperimentOutcome | null,
 ): BrowserVaultExperimentRunContext {
   const diagnostics: BrowserVaultExperimentResultDiagnostic[] = [];
   const attributes = entity.attributes;
-  const windows = readRunWindows(attributes);
+  const sourceStatus = readString(attributes.status) ?? entity.status;
+  const liveWindows = readRunWindows(attributes);
+  const endedOn = readIsoDate(attributes.endedOn);
+  const plannedEnd = (referencedOutcome?.windows ?? liveWindows).interventionEnd;
+  const endedEarly = endedOn !== null && plannedEnd !== null && endedOn < plannedEnd;
+  const persistedOutcome = endedEarly ? null : referencedOutcome;
+  const windows = endedEarly
+    ? clampRunWindowsToTerminalDate(liveWindows, endedOn)
+    : persistedOutcome?.windows ?? liveWindows;
   const schedule = readRunSchedule(attributes, diagnostics);
   const runPlanRecord = readRecord(attributes.runPlan);
   const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);
@@ -459,20 +494,40 @@ function buildRunContext(
       })
     : parsedAdherenceTargets.targets;
   const runTimeZone = adherenceTargets.find((target) => target.calendar)?.calendar?.timeZone ?? schedule?.timeZone ?? null;
-  const asOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
+  const requestedAsOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
+  const evidenceThrough = endedOn !== null
+    ? minIsoDate(requestedAsOfDate, endedOn) ?? requestedAsOfDate
+    : requestedAsOfDate;
+  const effectiveAsOf = endedEarly ? evidenceThrough : asOf;
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
   const runStart = windows.baselineStart ?? windows.interventionStart;
   const run = {
-    commonsProtocolRef: cloneRecordOrNull(attributes.commonsProtocolRef),
+    commonsProtocolRef: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.commonsProtocolRef
+        : attributes.commonsProtocolRef,
+    ),
     completedAt,
     dayInRun: windows.interventionStart !== null && windows.interventionEnd !== null
-      ? computeDayInRun(runStart, asOfDate)
+      ? computeDayInRun(runStart, evidenceThrough)
       : null,
-    effectiveProtocolSnapshot: cloneRecordOrNull(attributes.effectiveProtocolSnapshot),
+    effectiveProtocolSnapshot: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.effectiveProtocolSnapshot
+        : attributes.effectiveProtocolSnapshot,
+    ),
     id: readString(attributes.experimentId) ?? entity.id,
-    phase: resolveExperimentPhase(readString(attributes.status) ?? entity.status, windows, asOfDate),
-    protocolRef: cloneRecordOrNull(attributes.protocolRef),
+    phase: endedEarly
+      ? "abandoned"
+      : persistedOutcome
+        ? "completed"
+        : resolveExperimentPhase(sourceStatus, windows, evidenceThrough),
+    protocolRef: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.protocolRef
+        : attributes.protocolRef,
+    ),
     runPlan: {
       ...windows,
       adherenceTargets: adherenceTargets.map(projectBrowserAdherenceTarget),
@@ -483,14 +538,14 @@ function buildRunContext(
     },
     slug: readString(attributes.slug) ?? entity.experimentSlug ?? entity.id,
     startedOn,
-    status: readString(attributes.status) ?? entity.status,
-    title: entity.title ?? readString(attributes.title) ?? entity.id,
+    status: persistedOutcome?.experiment.status ?? sourceStatus,
+    title: persistedOutcome?.experiment.title ?? entity.title ?? readString(attributes.title) ?? entity.id,
     windows,
   } satisfies BrowserVaultExperimentResultRun;
-  const events = selectExperimentEvents(client, entity, run, asOfDate, runTimeZone);
+  const events = selectExperimentEvents(client, entity, run, evidenceThrough, runTimeZone);
   const adherenceEvents = selectAdherenceEvidenceEvents({
-    asOfDate,
     client,
+    evidenceThrough,
     eventTimeZone: runTimeZone,
     linkedEvents: events,
     run,
@@ -500,14 +555,15 @@ function buildRunContext(
 
   return {
     adherenceEvents,
-    asOf,
-    asOfDate,
+    asOf: effectiveAsOf,
     diagnostics,
     entity,
+    evidenceThrough,
     events,
     eventTimeZone: runTimeZone,
     adherenceTargets,
     expectedEffects,
+    persistedOutcome,
     run,
     unsupportedExplicitAdherenceTargets: parsedAdherenceTargets.unsupportedExplicit,
   };
@@ -538,6 +594,123 @@ function readRunWindows(attributes: JsonRecord): BrowserVaultExperimentRunWindow
     interventionEnd: readIsoDate(runPlan?.interventionEnd) ?? readIsoDate(attributes.interventionEnd),
     interventionStart: readIsoDate(runPlan?.interventionStart) ?? readIsoDate(attributes.interventionStart),
   };
+}
+
+function clampRunWindowsToTerminalDate(
+  windows: BrowserVaultExperimentRunWindows,
+  terminalDate: string,
+): BrowserVaultExperimentRunWindows {
+  return {
+    baselineEnd: minIsoDate(windows.baselineEnd, terminalDate),
+    baselineStart: windows.baselineStart,
+    interventionEnd: minIsoDate(windows.interventionEnd, terminalDate),
+    interventionStart: windows.interventionStart,
+  };
+}
+
+function findReferencedExperimentOutcome(
+  client: BrowserVaultQueryClient,
+  entity: BrowserVaultEntity,
+): ExperimentOutcome | null {
+  const parsedRef = experimentOutcomeRefSchema.safeParse(
+    entity.attributes.outcomeRef,
+  );
+  if (!parsedRef.success) {
+    return null;
+  }
+
+  const experimentId = readString(entity.attributes.experimentId) ?? entity.id;
+  const experimentSlug = readString(entity.attributes.slug) ?? entity.experimentSlug ?? entity.id;
+
+  return (client.replica.experimentOutcomes ?? []).find((outcome) =>
+    outcome.outcomeId === parsedRef.data.outcomeId &&
+    (parsedRef.data.generatedAt === undefined ||
+      outcome.generatedAt === parsedRef.data.generatedAt) &&
+    outcome.experiment.id === experimentId &&
+    outcome.experiment.slug === experimentSlug
+  ) ?? null;
+}
+
+function resolveSavedOutcomeStatus(
+  context: BrowserVaultExperimentRunContext,
+  persistedOutcome: ExperimentOutcome | null,
+): BrowserVaultExperimentSavedOutcomeStatus {
+  if (context.run.phase !== "completed" && context.run.phase !== "review_due") {
+    return "not_expected";
+  }
+
+  if (persistedOutcome) {
+    return "available";
+  }
+
+  if (context.entity.attributes.outcomeRef === undefined ||
+      context.entity.attributes.outcomeRef === null) {
+    return "pending";
+  }
+
+  return "unavailable";
+}
+
+function buildPersistedOutcomeResult(
+  outcome: ExperimentOutcome,
+): BrowserVaultExperimentOutcomeResult {
+  const primary = outcome.metricResults[0] ?? null;
+
+  return {
+    confidence: outcome.confidence,
+    primaryBiomarkerKey: primary?.biomarkerKey ?? null,
+    status: primary?.completeness === "good" ? "enough_data" : "sparse_data",
+  };
+}
+
+function buildPersistedOutcomeBiomarkers(
+  outcome: ExperimentOutcome,
+): BrowserVaultExperimentBiomarkerResult[] {
+  return outcome.metricResults.map((metric) => {
+    const baselineUnit = metric.baseline?.unit ?? metric.unit;
+    const interventionUnit = metric.intervention?.unit ?? metric.unit;
+    const expectedEffect: BrowserVaultExperimentExpectedEffect = {
+      caveats: [],
+      confidence: null,
+      description: null,
+      direction: metric.expectedDirection,
+      expectedRange: null,
+      sourceKeys: [],
+    };
+
+    return {
+      baseline: {
+        daysWithData: metric.baseline?.daysWithData ?? metric.baselineDayCount,
+        end: outcome.windows.baselineEnd,
+        mean: metric.baseline?.mean ?? metric.baselineMean,
+        start: outcome.windows.baselineStart,
+        totalDays: metric.baseline?.totalDays ??
+          dateRange(outcome.windows.baselineStart, outcome.windows.baselineEnd).length,
+        unit: baselineUnit,
+      },
+      biomarkerKey: metric.biomarkerKey,
+      completeness: metric.completeness,
+      deltaAbs: metric.deltaAbs,
+      deltaPct: metric.deltaPct,
+      expectedEffect,
+      intervention: {
+        daysWithData: metric.intervention?.daysWithData ?? metric.interventionDayCount,
+        end: outcome.windows.interventionEnd,
+        mean: metric.intervention?.mean ?? metric.interventionMean,
+        start: outcome.windows.interventionStart,
+        totalDays: metric.intervention?.totalDays ??
+          dateRange(outcome.windows.interventionStart, outcome.windows.interventionEnd).length,
+        unit: interventionUnit,
+      },
+      label: metric.label,
+      movedAsExpected: metric.movedAsExpected,
+      points: [],
+      sourceMetric: resolveBiomarkerMetricSource(metric.biomarkerKey),
+      status: "available",
+      statusReason: "Saved experiment analysis is available.",
+      unit: metric.unit,
+    };
+  });
 }
 
 function readRunSchedule(
@@ -605,7 +778,7 @@ function selectExperimentEvents(
   client: BrowserVaultQueryClient,
   experiment: BrowserVaultEntity,
   run: BrowserVaultExperimentResultRun,
-  asOfDate: string,
+  evidenceThrough: string,
   eventTimeZone: string | null,
 ): BrowserVaultEntity[] {
   const from = run.windows.baselineStart ?? run.startedOn;
@@ -620,7 +793,7 @@ function selectExperimentEvents(
       return false;
     }
 
-    if (eventDate && eventDate > asOfDate) {
+    if (eventDate && eventDate > evidenceThrough) {
       return false;
     }
 
@@ -641,8 +814,8 @@ function selectExperimentEvents(
 }
 
 function selectAdherenceEvidenceEvents(input: {
-  asOfDate: string;
   client: BrowserVaultQueryClient;
+  evidenceThrough: string;
   eventTimeZone: string | null;
   linkedEvents: readonly BrowserVaultEntity[];
   run: BrowserVaultExperimentResultRun;
@@ -659,10 +832,10 @@ function selectAdherenceEvidenceEvents(input: {
 
   const interventionStart = input.run.windows.interventionStart;
   const interventionEnd = input.run.windows.interventionEnd;
-  if (!interventionStart || !interventionEnd || input.asOfDate < interventionStart) {
+  if (!interventionStart || !interventionEnd || input.evidenceThrough < interventionStart) {
     return [...byId.values()];
   }
-  const effectiveEnd = minIsoDate(interventionEnd, input.asOfDate);
+  const effectiveEnd = minIsoDate(interventionEnd, input.evidenceThrough);
   if (!effectiveEnd) {
     return [...byId.values()];
   }
@@ -702,12 +875,12 @@ function readSessionEventLocalDate(entity: BrowserVaultEntity): string | null {
 
 function buildMetricWindowContext(
   windows: BrowserVaultExperimentRunWindows,
-  asOfDate: string,
+  evidenceThrough: string,
 ): MetricWindowContext {
   const baselineDates = dateRange(windows.baselineStart, windows.baselineEnd);
   const interventionDates = dateRange(
     windows.interventionStart,
-    minIsoDate(windows.interventionEnd, asOfDate),
+    minIsoDate(windows.interventionEnd, evidenceThrough),
   );
 
   return {
@@ -787,7 +960,7 @@ function buildBiomarkerResult(
       totalDays: metricWindow.baselineDates.length,
     },
     comparisonWindow: {
-      end: minIsoDate(metricWindow.windows.interventionEnd, context.asOfDate),
+      end: minIsoDate(metricWindow.windows.interventionEnd, context.evidenceThrough),
       start: metricWindow.windows.interventionStart,
       totalDays: metricWindow.interventionDates.length,
     },
@@ -887,11 +1060,13 @@ function buildAnchoredBiomarkerResult(input: {
     input.client,
     input.sourceMetric,
     baselineAnchors,
+    input.context.evidenceThrough,
   );
   const followupRows = collectAnchoredMetricRows(
     input.client,
     input.sourceMetric,
     followupAnchors,
+    input.context.evidenceThrough,
   );
   const baselinePoints = metricRowsToAnchoredExperimentPoints(
     baselineRows,
@@ -995,6 +1170,7 @@ function collectAnchoredMetricRows(
   client: BrowserVaultQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   anchors: readonly BrowserMeasurementAnchor[],
+  evidenceThrough: string,
 ): BrowserVaultMetricRowWithValue[] {
   const anchorIds = new Set(anchors.map((anchor) => anchor.recordId));
   if (anchorIds.size === 0) {
@@ -1004,6 +1180,7 @@ function collectAnchoredMetricRows(
   return client.metrics.series({ metricKey: sourceMetric.metricKey })
     .filter((row): row is BrowserVaultMetricRowWithValue =>
       hasNumericMetricValue(row) &&
+      row.date <= evidenceThrough &&
       row.recordIds.some((recordId) => anchorIds.has(recordId))
     )
     .sort(compareMetricRowsAsc);
@@ -1287,12 +1464,12 @@ function buildAdherenceObservations(
             eventKind: event.kind,
             localDate:
               event.kind === "activity_session"
-                ? resolveActivityEvidenceLocalDate(event) ?? context.asOfDate
+                ? resolveActivityEvidenceLocalDate(event) ?? context.evidenceThrough
                 : readSessionEventLocalDate(event) ??
                   readEventLocalDate(event, target.calendar?.timeZone ?? context.eventTimeZone) ??
                   event.date ??
                   extractDate(event.occurredAt) ??
-                  context.asOfDate,
+                  context.evidenceThrough,
             source: readString(event.attributes.source),
             status: readSessionScheduleStatus(event),
             targetId: target.targetId,
@@ -1484,7 +1661,7 @@ function buildProgressResult(
     : [];
   const progressCounts = progressTarget && !progressTarget.calendar
     ? countCompletedAdherenceSessions({
-        asOfDate: context.asOfDate,
+        asOfDate: context.evidenceThrough,
         observations: progressObservations,
         target: progressTarget,
         windows: context.run.windows,
@@ -1538,7 +1715,7 @@ function buildProgressResult(
     ? null
     : computeExpectedSessionsByNow(
         context.run,
-        context.asOfDate,
+        context.evidenceThrough,
         targetSessions,
         progressSchedule,
       );
@@ -1661,57 +1838,6 @@ function hasCompleteBrowserPrimaryPointMeasurementWindow(
         primaryBiomarkerKey,
       ),
   );
-}
-
-function buildOutcomeResult(
-  context: BrowserVaultExperimentRunContext,
-  biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
-  progress: BrowserVaultExperimentProgressResult,
-): BrowserVaultExperimentOutcomeResult | null {
-  if (context.run.phase !== "completed" && context.run.phase !== "review_due") {
-    return null;
-  }
-
-  const primary = biomarkers[0] ?? null;
-  const reasons: string[] = [];
-
-  if (!primary || primary.completeness !== "good") {
-    reasons.push("Primary biomarker coverage is insufficient for a strong before-and-after read.");
-  }
-
-  if (
-    progress.adherence.minimumUsefulSessions !== null &&
-    progress.adherence.loggedSessions < progress.adherence.minimumUsefulSessions
-  ) {
-    reasons.push("Logged session count stayed below the minimum useful target.");
-  }
-
-  if (
-    (progress.adherence.assumedSessions ?? 0) >
-      (progress.adherence.sensedSessions ?? 0) + (progress.adherence.confirmedSessions ?? 0)
-  ) {
-    reasons.push("Most sessions are assumed rather than confirmed.");
-  }
-
-  if (context.unsupportedExplicitAdherenceTargets) {
-    reasons.push("Browser Results cannot evaluate this experiment's adherence target yet.");
-  }
-
-  const unsupportedCount = biomarkers.filter((entry) => entry.status === "unsupported_source").length;
-  if (unsupportedCount > 0) {
-    reasons.push("Some planned biomarkers are not supported by browser metric sources yet.");
-  }
-
-  const enoughData = primary?.completeness === "good";
-
-  return {
-    confidence: {
-      level: reasons.length >= 2 ? "low" : reasons.length === 1 ? "medium" : "high",
-      reasons,
-    },
-    primaryBiomarkerKey: primary?.biomarkerKey ?? null,
-    status: enoughData ? "enough_data" : "sparse_data",
-  };
 }
 
 function collectBiomarkerKeys(attributes: JsonRecord): string[] {
