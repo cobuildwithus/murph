@@ -46,10 +46,6 @@ export function resolveHostedDeviceSyncCallbackStatus(
 export function buildHostedDeviceSyncMessagingReturnMessageBody(
   providerLabel: string | null,
 ): string {
-  if (providerLabel?.trim().toLowerCase() === "whoop") {
-    return "I just connected my WHOOP. Help me finish Apple Health sync.";
-  }
-
   return providerLabel ? `I just connected my ${providerLabel}` : "I just connected my device";
 }
 
