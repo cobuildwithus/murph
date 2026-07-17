@@ -1333,6 +1333,7 @@ function buildAssistantGroupNotificationDecisionGuidanceText(
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
 - Text is the single final room message. Subject applies only to a new outbound email.
+- Apply a standalone-interruption test to \`text\`: after hours of unrelated conversation, the room must still know what this message is about from the message itself. Unless the room requested exact copy or the concrete action already makes the subject unmistakable, name the specific group-owned task, behavior, plan, or item with the least-sensitive clear label allowed by the automation's privacy boundary. Do not let generic referents such as "it", "this", "the timing", or "the plan" be the only subject. Keep it brief only after it is clear.
 - Never include personal settings, billing, device, account, authorization, or browser-handoff URLs, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings. Other URLs are allowed only for group-owned deliverables.`
   );
 }
@@ -1382,6 +1383,7 @@ function buildAssistantNotificationDecisionGuidanceText(
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
 - \`text\` must contain only the final user-facing message to send once on the bound channel.
+- Apply a standalone-interruption test to \`text\`: after hours of unrelated conversation, the user must still know what this message is about from the message itself. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, name the specific task, behavior, plan, or item with the least-sensitive clear label allowed by the automation's privacy boundary. Do not let generic referents such as "it", "this", "the timing", or "the plan" be the only subject. Keep it brief only after it is clear.
 - \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
 - Never include Markdown links in \`text\`; use raw URLs only when the URL itself is the deliverable or the user asks for links.
@@ -1554,6 +1556,8 @@ function buildAssistantSharedAutomationPreferenceText(
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
     : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
   return `Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.
+
+For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
 
 When creating automations, choose continuity deliberately. Use ${code(
     hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"

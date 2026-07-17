@@ -587,6 +587,23 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('baseline/current state, target/date, ladder')
   })
 
+  it('requires generated automation instructions to carry a clear subject anchor', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'include a privacy-safe user-facing subject anchor in the stored instructions',
+    )
+    expect(prompt).toContain(
+      'after hours of unrelated conversation, the recipient should still know what it is about from the message itself',
+    )
+    expect(prompt).toContain(
+      'A title, slug, metadata, or preserved thread is not enough.',
+    )
+    expect(prompt).toContain(
+      'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+    )
+  })
+
   it('guides explicit structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1318,7 +1335,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(63_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(64_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1990,6 +2007,36 @@ describe('assistant notification decision guidance', () => {
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+  })
+
+  it('requires scheduled messages to identify their subject without thread context', () => {
+    const directPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({ channel: 'linq' }),
+      ).prompt
+    const groupPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          channel: 'linq',
+          conversationScope: 'group',
+        }),
+      ).prompt
+
+    expect(directPrompt).toContain(
+      'Apply a standalone-interruption test to `text`',
+    )
+    expect(directPrompt).toContain(
+      'after hours of unrelated conversation, the user must still know what this message is about from the message itself',
+    )
+    expect(directPrompt).toContain(
+      'Do not let generic referents such as "it", "this", "the timing", or "the plan" be the only subject.',
+    )
+    expect(groupPrompt).toContain(
+      'Apply a standalone-interruption test to `text`',
+    )
+    expect(groupPrompt).toContain(
+      'name the specific group-owned task, behavior, plan, or item',
+    )
   })
 
   it('keeps group notification decisions on room-owned context and actions', () => {
