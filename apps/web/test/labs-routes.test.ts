@@ -45,7 +45,6 @@ const EMPTY_SEARCH_RESPONSE = {
   items: [],
   orderableThroughMurph: false,
   orderingStatus: "discovery_only",
-  provider: { page: 1, pages: 0, total: 0 },
 } as const;
 
 beforeAll(async () => {

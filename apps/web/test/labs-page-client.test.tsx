@@ -101,14 +101,14 @@ describe("LabsPageClient", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("trims a search, preserves provider relevance, and renders panels and missing prices", async () => {
+  it("trims a search and renders display-ready panels and missing prices", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(searchResponse([
       panelOffering,
       {
         ...biomarkerOffering,
         catalogPrice: null,
       },
-    ], 42)));
+    ])));
     const rendered = await renderLabsPage();
     const persistentStatus = rendered.container.querySelector("#labs-catalog-status");
     assert.ok(persistentStatus);
@@ -127,11 +127,11 @@ describe("LabsPageClient", () => {
     expect(rendered.container.textContent).toContain("$149.00");
     expect(rendered.container.textContent).toContain("Unavailable");
     expect(rendered.container.textContent).toContain(
-      "2 results shown of 42 matching catalog items",
+      "2 results shown",
     );
     expect(rendered.container.querySelector("#labs-catalog-status")).toBe(persistentStatus);
     expect(persistentStatus.textContent).toContain(
-      "2 results shown of 42 matching catalog items",
+      "2 results shown",
     );
 
     const text = rendered.container.textContent ?? "";
@@ -169,12 +169,12 @@ describe("LabsPageClient", () => {
     await changeInput(rendered, "#labs-catalog-query", "lipids");
     await submitForm(rendered, 0);
     expect(rendered.container.textContent).toContain("Session needs attention");
-    expect(rendered.container.textContent).toContain("Your search was not saved");
+    expect(rendered.container.textContent).toContain("Murph did not save your search");
     expect(rendered.container.textContent).not.toContain("Catalog temporarily unavailable");
 
     await changeInput(rendered, "#labs-location-zip", "10001");
     await submitForm(rendered, 1);
-    expect(rendered.container.textContent).toContain("Your ZIP was not saved");
+    expect(rendered.container.textContent).toContain("Murph did not save your ZIP");
     expect(rendered.container.textContent).not.toContain("Locations temporarily unavailable");
   });
 
@@ -225,6 +225,10 @@ describe("LabsPageClient", () => {
     expect(rendered.container.textContent).toContain(
       "A provider-authored cardiovascular panel description.",
     );
+    expect(rendered.container.textContent).toContain(
+      "Total cholesterol, HDL cholesterol, LDL cholesterol",
+    );
+    expect(rendered.container.textContent).toContain("Showing 3 of 4 markers.");
     expect(rendered.container.textContent).toContain(
       "Ordering through Murph is planned for later.",
     );
@@ -358,17 +362,13 @@ const panelOffering: HostedRuntimeLabsOffering = {
   description: "A synthetic panel used for interface coverage.",
   includedMarkerCount: 4,
   includedMarkers: [
-    { name: "Total cholesterol", slug: "total-cholesterol" },
-    { name: "HDL cholesterol", slug: "hdl-cholesterol" },
-    { name: "LDL cholesterol", slug: "ldl-cholesterol" },
+    { name: "Total cholesterol" },
+    { name: "HDL cholesterol" },
+    { name: "LDL cholesterol" },
   ],
   kind: "panel",
-  labId: 7,
   maximumTurnaroundDays: 7,
   name: "Broad Heart Panel",
-  offeringId: "fixture:panel:heart",
-  providerId: "fixture-panel-heart",
-  slug: "broad-heart-panel",
   unit: null,
 };
 
@@ -382,12 +382,8 @@ const biomarkerOffering: HostedRuntimeLabsOffering = {
   includedMarkerCount: 0,
   includedMarkers: [],
   kind: "biomarker",
-  labId: 7,
   maximumTurnaroundDays: 5,
   name: "Apolipoprotein B",
-  offeringId: "fixture:biomarker:apob",
-  providerId: "fixture-biomarker-apob",
-  slug: "apolipoprotein-b",
   unit: "mg/dL",
 };
 
@@ -399,22 +395,17 @@ const locationFixture: HostedRuntimeLabsLocation = {
     postalCode: "10001",
     state: "NY",
   },
-  capabilities: ["blood_draw"],
   coordinates: {
     latitude: 40.75,
     longitude: -73.99,
   },
   distanceMiles: 1.7,
-  labId: 7,
-  labSlug: "fixture-lab",
   name: "Fixture Collection Center",
   phoneNumber: "(555) 010-0100",
-  siteCode: "fixture-site-1",
 };
 
 function searchResponse(
   items: HostedRuntimeLabsOffering[],
-  total = items.length,
 ): HostedRuntimeLabsSearchResponse {
   return {
     action: "search",
@@ -422,11 +413,6 @@ function searchResponse(
     items,
     orderableThroughMurph: false,
     orderingStatus: "discovery_only",
-    provider: {
-      page: 1,
-      pages: 1,
-      total,
-    },
   };
 }
 

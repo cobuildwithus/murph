@@ -105,9 +105,8 @@ describe("hosted labs tool port", () => {
     });
 
     await expect(port.request({
-      action: "show",
-      labId: 12,
-      providerId: "provider_123",
+      action: "locations",
+      zipCode: "10001",
     }, {
       signal: controller.signal,
     })).rejects.toMatchObject({ name: "AbortError" });
@@ -135,9 +134,8 @@ describe("hosted labs tool port", () => {
     let thrown: unknown;
     try {
       await port.request({
-        action: "show",
-        labId: 12,
-        providerId: "provider_123",
+        action: "locations",
+        zipCode: "10001",
       });
     } catch (error) {
       thrown = error;

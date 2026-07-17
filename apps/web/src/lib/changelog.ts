@@ -642,7 +642,7 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [496, 508, 510, 519, 537],
       },
       {
-        id: "wearable-history-self-heals",
+        id: "junction-history-self-heals",
         kind: "improvement",
         priority: 4,
         title: "Missing wearable history keeps trying to recover",
@@ -650,7 +650,7 @@ const RAW_CHANGELOG_EDITIONS = [
           "A successful activity import can no longer make Murph assume your missing sleep history is complete. Historical sync now checks each kind of data independently and retries bounded gaps.",
         details:
           "The evidence window also stays anchored to the period Murph actually requested, so older records do not create a false picture of recent coverage.",
-        relevanceTags: ["wearables", "sync"],
+        relevanceTags: ["wearables", "junction", "sync"],
         sourcePullRequests: [516, 545],
       },
       {
@@ -1189,7 +1189,7 @@ const RAW_CHANGELOG_EDITIONS = [
         title: "Device history imports recover on their own",
         summary:
           "The 180-day historical import at connect time now re-runs automatically after any lost or failed attempt. No reconnect, no support ping, and connections that never finished one get a one-time repair pass.",
-        relevanceTags: ["wearables", "sync", "reliability"],
+        relevanceTags: ["wearables", "junction", "reliability"],
         sourcePullRequests: [379],
       },
     ],
@@ -1486,13 +1486,13 @@ const RAW_CHANGELOG_EDITIONS = [
       "Garmin sleep, cycles, and hypnograms now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
     items: [
       {
-        id: "garmin-sleep-records",
+        id: "garmin-junction-sleep-records",
         kind: "feature",
         priority: 4,
         title: "Garmin sleep arrives as real records",
         summary:
           "Garmin sleep, sleep cycles, and hypnograms now land as full records instead of being dropped as skeleton completion events.",
-        relevanceTags: ["wearables", "garmin", "sleep"],
+        relevanceTags: ["wearables", "garmin", "junction", "sleep"],
         sourcePullRequests: [336],
       },
       {
@@ -1721,13 +1721,13 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [318, 314],
       },
       {
-        id: "wearable-local-day",
+        id: "whoop-junction-local-day",
         kind: "improvement",
         priority: 4,
         title: "Wearable days line up with your calendar",
         summary:
           "Closed a class of bugs where wearable records could drift into the next calendar day when a source timestamp crossed UTC midnight. Past records repair on replay.",
-        relevanceTags: ["wearables", "whoop", "sync", "data"],
+        relevanceTags: ["wearables", "whoop", "junction", "data"],
         sourcePullRequests: [304],
       },
       {
@@ -2714,13 +2714,13 @@ const RAW_CHANGELOG_EDITIONS = [
       "Picking a specific wearable source skips the picker, scheduled Telegram reminders deliver reliably, and the mobile sidebar dismisses on navigation.",
     items: [
       {
-        id: "direct-device-provider-link",
+        id: "junction-direct-provider-link",
         kind: "improvement",
         priority: 4,
         title: "Picking a source skips the picker",
         summary:
           "Choosing a specific wearable source like Garmin now starts OAuth directly instead of showing a one-option picker first.",
-        relevanceTags: ["wearables", "connect"],
+        relevanceTags: ["wearables", "junction", "connect"],
         sourcePullRequests: [179],
         tryIt: {
           href: "/connect",
@@ -2763,7 +2763,7 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [186],
       },
       {
-        id: "device-source-reconnect",
+        id: "junction-source-reconnect",
         kind: "improvement",
         priority: 4,
         title: "Reconnect one device without dropping the rest",
@@ -3146,7 +3146,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-09",
     title: "Sidebar contact picker and hourly wearable refresh",
     summary:
-      "Chat opens straight to a channel picker, email verification fits in one dialog, and connected wearables refresh every hour instead of every six.",
+      "Chat opens straight to a channel picker, email verification fits in one dialog, and an affected wearable import path refreshes every hour instead of every six.",
     items: [
       {
         id: "sidebar-chat-contact-picker",
@@ -3163,23 +3163,23 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
-        id: "hourly-wearable-reconcile",
+        id: "junction-hourly-reconcile",
         kind: "improvement",
         priority: 5,
         title: "Hourly wearable refresh",
         summary:
-          "Connected wearables — WHOOP, Oura, Garmin and friends — now reconcile every hour instead of every six. Morning sleep and recovery show up sooner.",
-        relevanceTags: ["wearables", "sync", "whoop", "oura", "garmin"],
+          "An affected connected-wearable import path now reconciles every hour instead of every six. Morning sleep and recovery show up sooner.",
+        relevanceTags: ["wearables", "junction", "whoop", "oura", "garmin"],
         sourcePullRequests: [73],
       },
       {
-        id: "connected-meal-imports",
+        id: "junction-meal-imports",
         kind: "feature",
         priority: 4,
         title: "Meals flow in from MyFitnessPal & Cronometer",
         summary:
           "Meals you log in MyFitnessPal, Cronometer, and other connected apps now flow into Murph with ingredients and nutrition, ready for questions about food alongside training and sleep.",
-        relevanceTags: ["nutrition", "connections", "meals"],
+        relevanceTags: ["nutrition", "junction", "meals"],
         sourcePullRequests: [72],
         tryIt: {
           label: "Ask about meals",

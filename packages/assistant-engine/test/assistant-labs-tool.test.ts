@@ -43,7 +43,6 @@ describe('murph.labs dynamic tool', () => {
       action: 'search',
       kind: 'panel',
       limit: 5,
-      page: 2,
       query: '  heart health  ',
     })).toEqual({
       kind: 'labs',
@@ -51,25 +50,11 @@ describe('murph.labs dynamic tool', () => {
         action: 'search',
         kind: 'panel',
         limit: 5,
-        page: 2,
         query: 'heart health',
       },
     })
     expect(readLabsRequest({
-      action: 'show',
-      labId: 10,
-      providerId: 'marker-1',
-    })).toEqual({
-      kind: 'labs',
-      request: {
-        action: 'show',
-        labId: 10,
-        providerId: 'marker-1',
-      },
-    })
-    expect(readLabsRequest({
       action: 'locations',
-      labId: 10,
       limit: 4,
       radiusMiles: 25,
       zipCode: '10001',
@@ -77,7 +62,6 @@ describe('murph.labs dynamic tool', () => {
       kind: 'labs',
       request: {
         action: 'locations',
-        labId: 10,
         limit: 4,
         radiusMiles: 25,
         zipCode: '10001',
@@ -90,8 +74,9 @@ describe('murph.labs dynamic tool', () => {
       { action: 'search', query: 'x' },
       { action: 'search', limit: 21, query: 'cholesterol' },
       { action: 'search', query: 'private health interest', token: 'raw-secret' },
-      { action: 'show', labId: 0, providerId: 'marker-1' },
-      { action: 'show', labId: 10, offeringId: 'not-accepted', providerId: 'marker-1' },
+      { action: 'search', page: 2, query: 'cholesterol' },
+      { action: 'show', labId: 10, providerId: 'marker-1' },
+      { action: 'locations', labId: 10, zipCode: '10001' },
       { action: 'locations', radiusMiles: 100, zipCode: '10001' },
       { action: 'locations', zipCode: 'private-address' },
     ]) {
@@ -139,6 +124,9 @@ describe('murph.labs dynamic tool', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(readResultPayload(result)).toEqual(createSearchResponse())
     expect(readResultText(result)).not.toMatch(/junction/iu)
+    expect(readResultText(result)).not.toMatch(
+      /offeringId|providerId|labId|slug|provider/iu,
+    )
   })
 
   it('fails closed with generic text for missing transport, thrown errors, and extra fields', async () => {
@@ -201,13 +189,12 @@ describe('murph.labs dynamic tool', () => {
       'raw-secret-provider-body',
     )
 
-    const showRequest = readLabsRequest({
-      action: 'show',
-      labId: 10,
-      providerId: 'marker-1',
+    const locationsRequest = readLabsRequest({
+      action: 'locations',
+      zipCode: '10001',
     })
-    if (!showRequest || showRequest.kind !== 'labs') {
-      throw new Error('Expected a labs show request.')
+    if (!locationsRequest || locationsRequest.kind !== 'labs') {
+      throw new Error('Expected a labs locations request.')
     }
     const mismatchedAction = await executeMurphDynamicToolRequest({
       env: {},
@@ -219,7 +206,7 @@ describe('murph.labs dynamic tool', () => {
       }),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
-      request: showRequest,
+      request: locationsRequest,
     })
     expect(mismatchedAction.rpcResult).toMatchObject({ success: false })
     expect(readResultText(mismatchedAction)).toBe(
@@ -241,14 +228,8 @@ describe('murph.labs dynamic tool', () => {
       items: Array.from({ length: 20 }, (_, index) => ({
         ...createOffering(),
         description: 'x'.repeat(8_000),
-        offeringId: `10:marker-${index}`,
-        providerId: `marker-${index}`,
+        name: `Marker ${index}`,
       })),
-      provider: {
-        page: 1,
-        pages: 1,
-        total: 20,
-      },
     }
 
     const result = await executeMurphDynamicToolRequest({
@@ -290,14 +271,10 @@ function createOffering(): HostedRuntimeLabsOffering {
     commonTurnaroundDays: 2,
     description: 'A focused cholesterol marker.',
     includedMarkerCount: 1,
-    includedMarkers: [{ name: 'Total cholesterol', slug: 'total-cholesterol' }],
+    includedMarkers: [{ name: 'Total cholesterol' }],
     kind: 'biomarker',
-    labId: 10,
     maximumTurnaroundDays: 4,
     name: 'Total cholesterol',
-    offeringId: '10:marker-1',
-    providerId: 'marker-1',
-    slug: 'total-cholesterol',
     unit: 'mg/dL',
   }
 }
@@ -309,11 +286,6 @@ function createSearchResponse(): HostedRuntimeLabsSearchResponse {
     items: [createOffering()],
     orderableThroughMurph: false,
     orderingStatus: 'discovery_only',
-    provider: {
-      page: 1,
-      pages: 1,
-      total: 1,
-    },
   }
 }
 

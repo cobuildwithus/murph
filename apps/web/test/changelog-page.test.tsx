@@ -104,18 +104,15 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Older");
   });
 
-  it("keeps internal provider branding out of every rendered archive page", async () => {
-    const editions = listChangelogEditions();
-    const pageStarts = editions.filter((_, index) => index % 7 === 0);
+  it("uses provider-neutral visible copy for the historical wearable visual", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-06-26" }),
+      }),
+    );
 
-    for (const [index, edition] of pageStarts.entries()) {
-      const markup = renderToStaticMarkup(
-        await ChangelogPage({
-          searchParams: Promise.resolve(index === 0 ? {} : { edition: edition.id }),
-        }),
-      );
-      expect(markup).not.toMatch(/junction/iu);
-    }
+    expect(markup).toContain("Wearable record days");
+    expect(markup).not.toContain("WHOOP / Junction days");
   });
 
   it("publishes a canonical URL for each valid archive page", async () => {

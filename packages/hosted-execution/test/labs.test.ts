@@ -14,16 +14,12 @@ const offering = {
   description: "A synthetic catalog fixture.",
   includedMarkerCount: 2,
   includedMarkers: [
-    { name: "Marker Alpha", slug: "marker-alpha" },
-    { name: "Marker Beta", slug: null },
+    { name: "Marker Alpha" },
+    { name: "Marker Beta" },
   ],
   kind: "panel" as const,
-  labId: 7,
   maximumTurnaroundDays: 5,
   name: "Synthetic Panel",
-  offeringId: "7:synthetic-panel",
-  providerId: "synthetic-panel",
-  slug: "synthetic-panel",
   unit: null,
 };
 
@@ -33,29 +29,35 @@ const responseBase = {
   orderingStatus: "discovery_only" as const,
 };
 
+const location = {
+  address: {
+    city: "Fixture City",
+    line1: "1 Fixture Way",
+    line2: null,
+    postalCode: "00000",
+    state: "NY",
+  },
+  coordinates: { latitude: 40, longitude: -73 },
+  distanceMiles: 1.25,
+  name: "Synthetic Collection Site",
+  phoneNumber: null,
+};
+
 describe("hosted Labs contract", () => {
-  it("parses the bounded search, show, and location requests", () => {
+  it("parses the bounded search and location requests", () => {
     expect(parseHostedRuntimeLabsToolRequest({
       action: "search",
       kind: "panel",
       limit: 5,
-      page: 2,
       query: "heart health",
     })).toEqual({
       action: "search",
       kind: "panel",
       limit: 5,
-      page: 2,
       query: "heart health",
     });
     expect(parseHostedRuntimeLabsToolRequest({
-      action: "show",
-      labId: 7,
-      providerId: "synthetic-panel",
-    })).toMatchObject({ action: "show", labId: 7 });
-    expect(parseHostedRuntimeLabsToolRequest({
       action: "locations",
-      labId: 7,
       limit: 4,
       radiusMiles: 25,
       zipCode: "00000",
@@ -75,7 +77,18 @@ describe("hosted Labs contract", () => {
     })).toThrow();
     expect(() => parseHostedRuntimeLabsToolRequest({
       action: "show",
-      offeringId: "opaque-only",
+      labId: 7,
+      providerId: "synthetic-panel",
+    })).toThrow();
+    expect(() => parseHostedRuntimeLabsToolRequest({
+      action: "search",
+      page: 2,
+      query: "lipid",
+    })).toThrow();
+    expect(() => parseHostedRuntimeLabsToolRequest({
+      action: "locations",
+      labId: 7,
+      zipCode: "00000",
     })).toThrow();
     expect(() => parseHostedRuntimeLabsToolRequest({
       action: "locations",
@@ -96,12 +109,11 @@ describe("hosted Labs contract", () => {
     }
   });
 
-  it("parses normalized catalog search and detail responses", () => {
+  it("parses normalized display-ready catalog search responses", () => {
     const parsed = parseHostedRuntimeLabsToolResponse({
       action: "search",
       ...responseBase,
       items: [offering],
-      provider: { page: 1, pages: 4, total: 67 },
     });
     expect(parsed).toMatchObject({
       action: "search",
@@ -109,15 +121,43 @@ describe("hosted Labs contract", () => {
       orderableThroughMurph: false,
     });
     expect(JSON.stringify(parsed)).not.toMatch(/junction/iu);
+    expect(JSON.stringify(parsed)).not.toMatch(
+      /offeringId|providerId|labId|slug|provider/iu,
+    );
+  });
 
-    expect(parseHostedRuntimeLabsToolResponse({
-      action: "show",
+  it.each([
+    ["offeringId", { ...offering, offeringId: "internal-offering" }],
+    ["labId", { ...offering, labId: 7 }],
+    ["providerId", { ...offering, providerId: "internal-provider" }],
+    ["slug", { ...offering, slug: "internal-slug" }],
+    [
+      "included marker slug",
+      { ...offering, includedMarkers: [{ name: "Marker Alpha", slug: "marker-alpha" }] },
+    ],
+  ])("rejects removed public catalog field %s", (_field, candidate) => {
+    expect(() => parseHostedRuntimeLabsToolResponse({
+      action: "search",
       ...responseBase,
-      offering,
-    })).toMatchObject({
-      action: "show",
-      offering: { catalogPrice: { amount: "42.50" } },
-    });
+      items: [candidate],
+    })).toThrow("Hosted Labs tool response is invalid.");
+  });
+
+  it.each([
+    ["labId", { labId: 7 }],
+    ["labSlug", { labSlug: "internal-lab" }],
+    ["siteCode", { siteCode: "internal-site" }],
+    ["capabilities", { capabilities: ["appointment_scheduling"] }],
+  ])("rejects removed public location field %s", (_field, extra) => {
+    expect(() => parseHostedRuntimeLabsToolResponse({
+      action: "locations",
+      ...responseBase,
+      homeCollectionAvailable: false,
+      locations: [{ ...location, ...extra }],
+      radiusMiles: 25,
+      status: "available",
+      zipCode: "00000",
+    })).toThrow("Hosted Labs tool response is invalid.");
   });
 
   it("parses bounded locations and enforces not-served consistency", () => {
@@ -125,23 +165,7 @@ describe("hosted Labs contract", () => {
       action: "locations",
       ...responseBase,
       homeCollectionAvailable: false,
-      locations: [{
-        address: {
-          city: "Fixture City",
-          line1: "1 Fixture Way",
-          line2: null,
-          postalCode: "00000",
-          state: "NY",
-        },
-        capabilities: ["walk_in"],
-        coordinates: { latitude: 40, longitude: -73 },
-        distanceMiles: 1.25,
-        labId: 7,
-        labSlug: "synthetic-lab",
-        name: "Synthetic Collection Site",
-        phoneNumber: null,
-        siteCode: "fixture-site",
-      }],
+      locations: [location],
       radiusMiles: 25,
       status: "available",
       zipCode: "00000",
@@ -160,29 +184,38 @@ describe("hosted Labs contract", () => {
 
   it("rejects incomplete or overclaimed response facts", () => {
     expect(() => parseHostedRuntimeLabsToolResponse({
-      action: "show",
+      action: "search",
       ...responseBase,
-      offering: {
+      items: [{
         ...offering,
         includedMarkerCount: 1,
-      },
+      }],
     })).toThrow();
     expect(() => parseHostedRuntimeLabsToolResponse({
-      action: "show",
+      action: "search",
       ...responseBase,
       orderableThroughMurph: true,
-      offering,
+      items: [offering],
     })).toThrow();
     expect(() => parseHostedRuntimeLabsToolResponse({
       action: "search",
       ...responseBase,
       items: [offering],
-      provider: { page: 1, pages: 1, rawToken: "not-allowed", total: 1 },
+      provider: { page: 1, pages: 1, total: 1 },
+    })).toThrow();
+    expect(() => parseHostedRuntimeLabsToolResponse({
+      action: "locations",
+      ...responseBase,
+      homeCollectionAvailable: false,
+      locations: [{ ...location, labId: 7 }],
+      radiusMiles: 25,
+      status: "available",
+      zipCode: "00000",
     })).toThrow();
 
     try {
       parseHostedRuntimeLabsToolResponse({
-        action: "show",
+        action: "search",
         privateProviderPayload: "private-response-must-not-echo",
       });
       throw new Error("Expected the invalid Labs response to throw.");

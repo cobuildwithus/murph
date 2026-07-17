@@ -30,7 +30,7 @@ describe("Junction labs provider boundary", () => {
       expect(url.searchParams.get("name")).toBe("heart health");
       expect(url.searchParams.get("a_la_carte_enabled")).toBe("true");
       expect(url.searchParams.get("include_pricing")).toBe("true");
-      expect(url.searchParams.get("page")).toBe("2");
+      expect(url.searchParams.get("page")).toBe("1");
       expect(url.searchParams.get("size")).toBe("50");
       expect(new Headers(init?.headers).get("x-vital-api-key")).toBe(FIXTURE_API_KEY);
       expect(init).toMatchObject({
@@ -74,7 +74,6 @@ describe("Junction labs provider boundary", () => {
       action: "search",
       kind: "panel",
       limit: 4,
-      page: 2,
       query: "heart health",
     }, dependencies(fetchImpl));
 
@@ -83,7 +82,6 @@ describe("Junction labs provider boundary", () => {
       checkedAt: FIXED_NOW.toISOString(),
       orderableThroughMurph: false,
       orderingStatus: "discovery_only",
-      provider: { page: 2, pages: null, total: null },
     });
     if (result.action !== "search") {
       throw new Error("Expected a labs search result.");
@@ -100,6 +98,9 @@ describe("Junction labs provider boundary", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/junction/iu);
     expect(result.items[0]?.includedMarkers).toHaveLength(40);
+    expect(JSON.stringify(result)).not.toMatch(
+      /offeringId|providerId|labId|slug|provider/iu,
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -137,103 +138,6 @@ describe("Junction labs provider boundary", () => {
       retryable: true,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("resolves show from the complete marker catalog with an exact lab and provider match", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
-      const url = toUrl(input);
-      expect(url.origin).toBe("https://api.us.junction.com");
-      expect(url.pathname).toBe("/v3/lab_tests/markers");
-      expect(url.searchParams.get("lab_id")).toBe("7");
-      expect(url.searchParams.get("name")).toBe("code/alpha");
-      expect(url.searchParams.get("size")).toBe("20");
-      return jsonResponse({
-        data: [
-          junctionMarker({
-            lab_id: 8,
-            provider_id: "code/alpha",
-          }),
-          junctionMarker({
-            expected_results: [
-              { name: "Included result", slug: "included-result" },
-            ],
-            provider_id: "code/alpha",
-          }),
-        ],
-      });
-    });
-
-    const result = await executeJunctionLabsTool({
-      action: "show",
-      labId: 7,
-      providerId: "code/alpha",
-    }, dependencies(fetchImpl));
-
-    expect(result.action).toBe("show");
-    if (result.action !== "show") {
-      throw new Error("Expected a labs show result.");
-    }
-    expect(result.offering.includedMarkers).toEqual([
-      { name: "Included result", slug: "included-result" },
-    ]);
-    expect(result.offering.includedMarkerCount).toBe(1);
-    expect(result.offering.offeringId).toBe("7:code/alpha");
-  });
-
-  it("returns not found when the bounded show lookup has no exact identity match", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
-      data: [junctionMarker({ lab_id: 8, provider_id: "different-code" })],
-    }));
-
-    const error = await captureHostedError(executeJunctionLabsTool({
-      action: "show",
-      labId: 7,
-      providerId: "code/alpha",
-    }, dependencies(fetchImpl)));
-
-    expect(error).toMatchObject({
-      code: "LABS_OFFERING_NOT_FOUND",
-      httpStatus: 404,
-      retryable: false,
-    });
-  });
-
-  it("fails closed for a malformed exact show row but keeps explicit disablement as not found", async () => {
-    const fetchImpl = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({
-        data: [junctionMarker({
-          name: null,
-          provider_id: "code/alpha",
-        })],
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        data: [junctionMarker({
-          a_la_carte_enabled: false,
-          provider_id: "code/alpha",
-        })],
-      }));
-
-    const malformed = await captureHostedError(executeJunctionLabsTool({
-      action: "show",
-      labId: 7,
-      providerId: "code/alpha",
-    }, dependencies(fetchImpl)));
-    expect(malformed).toMatchObject({
-      code: "LABS_TEMPORARILY_UNAVAILABLE",
-      httpStatus: 503,
-      retryable: true,
-    });
-
-    const disabled = await captureHostedError(executeJunctionLabsTool({
-      action: "show",
-      labId: 7,
-      providerId: "code/alpha",
-    }, dependencies(fetchImpl)));
-    expect(disabled).toMatchObject({
-      code: "LABS_OFFERING_NOT_FOUND",
-      httpStatus: 404,
-      retryable: false,
-    });
   });
 
   it("fans out to at most four eligible labs with concurrency at most three, then dedupes and sorts", async () => {
@@ -302,8 +206,16 @@ describe("Junction labs provider boundary", () => {
     expect(pscCalls.sort((left, right) => left - right)).toEqual([1, 2, 3, 4]);
     expect(maximumInFlight).toBe(3);
     expect(result.status).toBe("available");
-    expect(result.locations.map((location) => location.labId)).toEqual([4, 3, 2]);
+    expect(result.locations.map((location) => location.name)).toEqual([
+      "Collection site 4",
+      "Collection site 3",
+      "Collection site 2",
+    ]);
+    expect(result.locations.map((location) => location.distanceMiles)).toEqual([2, 3, 4]);
     expect(result.locations).toHaveLength(3);
+    expect(JSON.stringify(result)).not.toMatch(
+      /labId|labSlug|siteCode|capabilities|provider/iu,
+    );
   });
 
   it("returns a clean not-served result without PSC calls when the area has no coverage", async () => {
