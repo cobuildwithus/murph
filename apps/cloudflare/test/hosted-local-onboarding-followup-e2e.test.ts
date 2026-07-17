@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import { readHostedLinqFirstContactMemberState } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -77,6 +78,18 @@ describe("hosted local onboarding follow-up e2e", () => {
     await welcomeSendPromise;
 
     const materializedChatId = requireLinqStub().requireObservedChatId(userId);
+    const memberStateBeforeInbound = await readHostedLinqFirstContactMemberState({
+      environment: requireScenario().runtimeEnv,
+      memberPhone,
+    });
+    expect(memberStateBeforeInbound).toMatchObject({
+      homeChatId: materializedChatId,
+      homeRecipientPhone: homePhone,
+      memberCount: 1,
+      memberId: userId,
+      pendingChatId: null,
+    });
+
     const followupPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const completionBaseline = requireLinqStub().countObservedSends(followupPath);
     requireScenario().queueAssistantResponses(

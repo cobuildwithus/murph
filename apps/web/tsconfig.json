@@ -147,6 +147,9 @@
       "@murphai/runtime-state": [
         "../../packages/runtime-state/src/index.ts"
       ],
+      "@murphai/runtime-state/assistant-generated-deliveries": [
+        "../../packages/runtime-state/src/assistant-generated-deliveries.ts"
+      ],
       "@murphai/runtime-state/hosted-codex-subscription-auth": [
         "../../packages/runtime-state/src/hosted-codex-subscription-auth.ts"
       ],

@@ -1,6 +1,7 @@
 import { ArrowRightIcon } from "lucide-react";
 
 import { StartExperimentButton } from "@/src/components/experiments/experiment-detail/start-experiment-button";
+import type { ExperimentStartProtocolReference } from "@/src/lib/experiments/start-experiment-contact";
 import {
   getHostedMurphContactContext,
   readHostedMurphContactContext,
@@ -11,6 +12,7 @@ import { ExperimentStartOrRunStatus } from "./experiment-start-or-run-status";
 interface HostedExperimentStartButtonProps {
   activeRunProtocol?: ExperimentResultsPublicProjection | null;
   protocolDays: number;
+  protocolRef?: ExperimentStartProtocolReference | null;
   protocolTitle: string;
 }
 
@@ -42,6 +44,7 @@ export function ExperimentStartButtonFallback({
 export async function HostedExperimentStartButton({
   activeRunProtocol = null,
   protocolDays,
+  protocolRef,
   protocolTitle,
 }: HostedExperimentStartButtonProps) {
   const { initialContactChannels, murphPhoneNumber } =
@@ -52,6 +55,7 @@ export async function HostedExperimentStartButton({
       initialContactChannels={initialContactChannels}
       murphPhoneNumber={murphPhoneNumber}
       protocolDays={protocolDays}
+      protocolRef={protocolRef}
       protocolTitle={protocolTitle}
     />
   );

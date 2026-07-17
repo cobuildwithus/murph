@@ -25,6 +25,7 @@ interface CommitAuditedCanonicalWriteInput<TResult> {
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+  assertCanContinue?: (() => void) | null;
   audit: CanonicalMutationAuditInput;
   mutate: (input: {
     batch: WriteBatch;
@@ -37,6 +38,7 @@ export async function commitAuditedCanonicalWrite<TResult>({
   operationType,
   summary,
   occurredAt,
+  assertCanContinue,
   audit,
   mutate,
 }: CommitAuditedCanonicalWriteInput<TResult>): Promise<{
@@ -50,11 +52,16 @@ export async function commitAuditedCanonicalWrite<TResult>({
     operationType,
     summary,
     occurredAt: operationOccurredAt,
+    ...(assertCanContinue === undefined
+      ? {}
+      : { assertCanContinue }),
     mutate: async ({ batch, vaultRoot: lockedVaultRoot }) => {
+      assertCanContinue?.();
       const outcome = await mutate({
         batch,
         vaultRoot: lockedVaultRoot,
       });
+      assertCanContinue?.();
       const emittedAudit = await emitAuditRecord({
         vaultRoot: lockedVaultRoot,
         batch,
@@ -66,6 +73,7 @@ export async function commitAuditedCanonicalWrite<TResult>({
         changes: outcome.changes,
         targetIds: outcome.targetIds ?? audit.targetIds ?? [],
       });
+      assertCanContinue?.();
 
       return {
         result: outcome.result,

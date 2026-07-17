@@ -10,6 +10,7 @@ import type {
   AutomationContinuityPolicy,
   AutomationSchedule,
   AutomationStatus,
+  AutomationSupportKind,
 } from '@murphai/contracts'
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -133,6 +134,7 @@ export interface AssistantHostedLabsTool {
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'save'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
@@ -141,11 +143,14 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title: string
     }
   | {
       action: 'patch'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
       instructions?: string
@@ -155,18 +160,34 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title?: string
     }
+  | {
+      action: 'reconcile'
+      desiredAutomationIds: readonly string[]
+      supportSeriesId: string
+    }
 
-export interface AssistantHostedAutomationToolResponse {
-  action: 'patch' | 'save'
-  automationId: string
-  created: boolean
-  lookupId: string
-  routeBinding: 'current_conversation' | 'preserved'
-  status: AutomationStatus
-}
+export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'patch' | 'save'
+      automationId: string
+      created: boolean
+      lookupId: string
+      routeBinding: 'current_conversation' | 'preserved'
+      status: AutomationStatus
+    }
+  | {
+      action: 'reconcile'
+      archivedCount: number
+      matchedCount: number
+      missingDesiredAutomationIds: readonly string[]
+      supportSeriesId: string
+      unchangedCount: number
+    }
 
 export interface AssistantHostedAutomationTool {
   request(

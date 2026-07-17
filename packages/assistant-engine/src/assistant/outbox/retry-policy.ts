@@ -40,6 +40,12 @@ const RETRYABLE_OUTBOX_ERROR_MESSAGE_MARKERS = [
   'connection',
   'network',
 ] as const
+const FRESH_INTENT_RETRY_FORBIDDEN_ERROR_CODES = new Set([
+  'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+  'ASSISTANT_DELIVERY_AMBIGUOUS',
+  'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+  'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+])
 
 export function shouldDispatchAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
@@ -110,6 +116,19 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
 
   return assistantOutboxErrorCodeLooksRetryable(code) ||
     assistantOutboxErrorMessageLooksRetryable(message)
+}
+
+/**
+ * These terminal outcomes must never be retried by creating a new intent.
+ * Revoked automation authority means the send is no longer authorized;
+ * ambiguous or confirmation-pending delivery may already have reached the
+ * provider; retry exhaustion is the durable automatic-retry ceiling.
+ */
+export function assistantDeliveryErrorPreventsFreshIntentRetry(
+  error: unknown,
+): boolean {
+  const code = normalizeAssistantDeliveryError(error).code?.toUpperCase() ?? ''
+  return FRESH_INTENT_RETRY_FORBIDDEN_ERROR_CODES.has(code)
 }
 
 export function normalizeAssistantDeliveryError(

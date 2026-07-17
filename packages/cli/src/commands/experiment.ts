@@ -25,6 +25,13 @@ import {
   type HealthCommonsTestPlan,
 } from '@murphai/contracts'
 import type { HealthCommonsProtocolRunSpec } from '@murphai/health-commons/runtime'
+import {
+  experimentSessionMetricIsDeclared,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+} from '@murphai/health-metrics'
 import { Cli, z } from 'incur'
 import {
   requestIdFromOptions,
@@ -476,6 +483,74 @@ function buildEffectiveSnapshotFromCommonsProtocol(
   )
 }
 
+function assertProtocolRevisionExpectation(input: {
+  actual: string | null | undefined
+  expected: string | undefined
+  optionName: 'page-revision-id' | 'run-spec-revision-id'
+  protocolKey: string
+}) {
+  if (input.expected === undefined) {
+    return
+  }
+
+  if (input.expected !== input.actual) {
+    throw new VaultCliError(
+      'invalid_option',
+      `--${input.optionName} revision expectation ${input.expected} does not match current ${input.protocolKey} revision ${input.actual ?? 'none'}. Refresh the protocol and retry.`,
+    )
+  }
+}
+
+function assertPrimaryOutcomeIsCapturable(input: {
+  biomarkerKey: string
+  sessionFields: readonly string[] | undefined
+}) {
+  const seenSessionMetrics = new Map<string, string>()
+  for (const sessionField of input.sessionFields ?? []) {
+    const spec = resolveExperimentSessionMetricSpec(sessionField)
+    if (!spec) {
+      continue
+    }
+    const previousField = seenSessionMetrics.get(spec.key)
+    if (previousField) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Session fields ${previousField} and ${sessionField} both resolve to canonical metric ${spec.key}; declare exactly one alias.`,
+      )
+    }
+    seenSessionMetrics.set(spec.key, sessionField)
+  }
+
+  const normalizedBiomarkerKey = input.biomarkerKey.trim().toLowerCase()
+  const slug = normalizedBiomarkerKey.split(':').at(-1) ?? normalizedBiomarkerKey
+  const canonicalBiomarkerKey = normalizedBiomarkerKey.startsWith('biomarker:')
+    ? normalizedBiomarkerKey
+    : `biomarker:${slug}`
+  const definition =
+    resolveMetricDefinitionForBiomarker(canonicalBiomarkerKey) ??
+    resolveMetricDefinition(slug)
+
+  if (!definition) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Primary outcome ${input.biomarkerKey} cannot resolve to a canonical health metric, so this run cannot produce an outcome.`,
+    )
+  }
+
+  if (
+    resolveExperimentSessionMetricSpecForBiomarker(canonicalBiomarkerKey) &&
+    !experimentSessionMetricIsDeclared({
+      biomarkerKey: canonicalBiomarkerKey,
+      sessionFields: input.sessionFields,
+    })
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Primary outcome ${input.biomarkerKey} requires a matching declared --session-field so Murph can capture and analyze it.`,
+    )
+  }
+}
+
 function resolveStartWindows(input: {
   baselineStart?: string
   baselineEnd?: string
@@ -633,6 +708,20 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     fromProtocol === undefined
       ? undefined
       : await resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
+  if (protocol) {
+    assertProtocolRevisionExpectation({
+      actual: protocol.revision.pageRevisionId,
+      expected: input.options.pageRevisionId,
+      optionName: 'page-revision-id',
+      protocolKey: protocol.key,
+    })
+    assertProtocolRevisionExpectation({
+      actual: protocol.revision.runSpecRevisionId,
+      expected: input.options.runSpecRevisionId,
+      optionName: 'run-spec-revision-id',
+      protocolKey: protocol.key,
+    })
+  }
   const testPlan = protocol
     ? resolveProtocolTestPlan({
         entity: protocol,
@@ -790,6 +879,11 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     )
   }
 
+  assertPrimaryOutcomeIsCapturable({
+    biomarkerKey: analysisPlan.primaryBiomarkerKey,
+    sessionFields: runPlan.logging?.sessionFields,
+  })
+
   return jsonObjectSchema.parse(
     compactRecord({
       schemaVersion: 'murph.experiment-plan.v1',
@@ -809,10 +903,8 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
           ? undefined
           : compactRecord({
               key: protocol.key,
-              pageRevisionId:
-                input.options.pageRevisionId ?? protocol.revision.pageRevisionId,
-              runSpecRevisionId:
-                input.options.runSpecRevisionId ?? protocol.revision.runSpecRevisionId,
+              pageRevisionId: protocol.revision.pageRevisionId,
+              runSpecRevisionId: protocol.revision.runSpecRevisionId,
               testPlanId: testPlan?.planId,
             }),
       effectiveProtocolSnapshot,
@@ -830,6 +922,7 @@ async function hydrateExperimentProtocolDefaults(input: {
   requestId: string | null
   lookup: string
   options: {
+    status?: z.infer<typeof experimentStatusSchema>
     protocolKey?: string
     testPlanId?: string
     interventionStart?: string
@@ -838,6 +931,13 @@ async function hydrateExperimentProtocolDefaults(input: {
     baselineStart?: string
     baselineEnd?: string
     baselineDays?: number
+    onboardingCompletedAt?: string
+    setupAnswer?: readonly string[]
+    safetyCautionLevel?: z.infer<typeof experimentSafetyCautionLevelSchema>
+    safetyDisposition?: z.infer<typeof experimentSafetyDispositionSchema>
+    positiveQuestionId?: readonly string[]
+    safetyNote?: readonly string[]
+    contextNote?: readonly string[]
     skipAnalysisPlanDefaults?: boolean
   }
 }) {
@@ -886,6 +986,18 @@ async function hydrateExperimentProtocolDefaults(input: {
   const defaultAssistantSupport = experimentAssistantSupportSchema.parse(
     payload.assistantSupport,
   )
+  const onboardingCapture = buildExperimentOnboardingCaptureFromOptions(
+    {
+      onboardingCompletedAt: input.options.onboardingCompletedAt,
+      setupAnswer: input.options.setupAnswer,
+      safetyCautionLevel: input.options.safetyCautionLevel,
+      safetyDisposition: input.options.safetyDisposition,
+      positiveQuestionId: input.options.positiveQuestionId,
+      safetyNote: input.options.safetyNote,
+      contextNote: input.options.contextNote,
+    },
+    current.onboarding,
+  )
   const defaultRunLogging =
     defaultRunPlan.logging === undefined && current.runPlan?.logging === undefined
       ? undefined
@@ -905,6 +1017,7 @@ async function hydrateExperimentProtocolDefaults(input: {
     vault: input.vault,
     requestId: input.requestId,
     lookup: input.lookup,
+    status: input.options.status,
     commonsProtocolRef:
       current.commonsProtocolRef ??
       commonsProtocolRefSchema.parse(payload.commonsProtocolRef),
@@ -928,6 +1041,7 @@ async function hydrateExperimentProtocolDefaults(input: {
       ...defaultAssistantSupport,
       ...(current.assistantSupport ?? {}),
     }),
+    onboarding: onboardingCapture,
   })
 }
 
@@ -949,6 +1063,7 @@ type ExperimentSessionConfounderMap = Record<
   string,
   ExperimentSessionConfounderValue
 >
+type ExperimentSessionFieldMap = ExperimentSessionConfounderMap
 
 function resolveExperimentSessionStatus(input: {
   sessionStatus?: z.infer<typeof experimentSessionStatusSchema>
@@ -1008,6 +1123,51 @@ function parseExperimentSessionConfounderEntries(
   }
 
   return Object.keys(confounders).length > 0 ? confounders : undefined
+}
+
+function parseExperimentSessionFieldEntries(
+  value: readonly string[] | undefined,
+): ExperimentSessionFieldMap | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const fields: ExperimentSessionFieldMap = {}
+
+  for (const entry of value) {
+    const separatorIndex = entry.indexOf('=')
+    if (separatorIndex < 0) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--field entries must use id=value form.',
+      )
+    }
+
+    const fieldId = entry.slice(0, separatorIndex).trim()
+    const rawValue = entry.slice(separatorIndex + 1).trim()
+    if (!fieldId) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--field entries must include a non-empty id before "=".',
+      )
+    }
+    if (!rawValue) {
+      throw new VaultCliError(
+        'invalid_option',
+        `--field ${fieldId}= must include a non-empty value.`,
+      )
+    }
+    if (Object.hasOwn(fields, fieldId)) {
+      throw new VaultCliError(
+        'invalid_option',
+        `--field ${fieldId} was provided more than once.`,
+      )
+    }
+
+    fields[fieldId] = coerceExperimentSessionConfounderValue(rawValue)
+  }
+
+  return Object.keys(fields).length > 0 ? fields : undefined
 }
 
 function coerceExperimentSessionConfounderValue(
@@ -1339,10 +1499,10 @@ export function registerExperimentCommands(
         ),
       pageRevisionId: sha256RevisionOptionSchema
         .optional()
-        .describe('Protocol page content revision id override. Only valid with --from-protocol.'),
+        .describe('Expected current protocol page revision. Fails on mismatch; only valid with --from-protocol.'),
       runSpecRevisionId: sha256RevisionOptionSchema
         .optional()
-        .describe('Protocol run spec revision id override. Only valid with --from-protocol.'),
+        .describe('Expected current protocol run-spec revision. Fails on mismatch; only valid with --from-protocol.'),
       baselineStart: localDateSchema.optional().describe('Baseline window start date.'),
       baselineEnd: localDateSchema.optional().describe('Baseline window end date.'),
       baselineDays: z
@@ -1768,6 +1928,7 @@ export function registerExperimentCommands(
             requestId: requestIdFromOptions(options),
             lookup: args.id,
             options: {
+              status: options.status,
               protocolKey: options.protocolKey,
               testPlanId: options.testPlanId,
               baselineStart: options.baselineStart,
@@ -1776,6 +1937,16 @@ export function registerExperimentCommands(
               interventionStart: options.interventionStart,
               interventionEnd: options.interventionEnd,
               interventionDays: options.interventionDays,
+              onboardingCompletedAt: options.onboardingCompletedAt,
+              setupAnswer: normalizeSetupAnswerOptions(options.setupAnswer),
+              safetyCautionLevel: options.safetyCautionLevel,
+              safetyDisposition: options.safetyDisposition,
+              positiveQuestionId: normalizeRepeatableFlagOption(
+                options.positiveQuestionId,
+                'positive-question-id',
+              ),
+              safetyNote: normalizeRepeatableTextFlagOption(options.safetyNote),
+              contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
               skipAnalysisPlanDefaults:
                 options.primaryBiomarkerKey !== undefined ||
                 options.secondaryBiomarkerKey !== undefined ||
@@ -2085,6 +2256,12 @@ export function registerExperimentCommands(
         .describe(
           'Potential confounder map entry in key=value form. Repeat --confounder for multiple entries.',
         ),
+      field: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Declared session field in id=value form. Repeat --field for multiple typed values.',
+        ),
     }),
     output: experimentSessionLogResultSchema,
     async run({ args, options }) {
@@ -2096,6 +2273,7 @@ export function registerExperimentCommands(
         list: normalizeRepeatableFlagOption(options.confounders, 'confounders'),
         map: parseExperimentSessionConfounderEntries(options.confounder),
       })
+      const fields = parseExperimentSessionFieldEntries(options.field)
 
       return services.core.logExperimentSession({
         vault: options.vault,
@@ -2119,6 +2297,7 @@ export function registerExperimentCommands(
         afterExercise: options.afterExercise,
         symptoms: normalizeRepeatableFlagOption(options.symptoms, 'symptoms'),
         confounders,
+        fields,
       })
     },
   })

@@ -90,6 +90,22 @@ export function readStoredVaultSource(
   }
 }
 
+export function readStoredVaultMetadata(
+  location: QueryProjectionLocation,
+): QueryRecordData | null {
+  const database = openQueryProjectionDatabase(location, {
+    create: false,
+    readOnly: true,
+  });
+
+  try {
+    assertQueryProjectionTables(database, location);
+    return parseJsonValue<QueryRecordData | null>(readMeta(database, "metadata_json"), null);
+  } finally {
+    database.close();
+  }
+}
+
 export function listStoredCanonicalEntities(
   location: QueryProjectionLocation,
   filters: QueryCanonicalEntityFilters,

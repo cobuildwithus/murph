@@ -164,6 +164,7 @@ vi.mock("@murphai/operator-config/telegram-runtime", () => ({
 
 import {
   collectHostedAssistantDeliverySideEffects,
+  createHostedAssistantProgressDeliveryDependencies,
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
@@ -8091,7 +8092,9 @@ describe("hosted runtime callbacks", () => {
     const assertRecentInbound = vi.fn(async (request) =>
       buildClaimedLinqEngagementResult(request)
     );
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -8161,17 +8164,19 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("records hosted runtime Linq delivery outcomes after provider acceptance", async () => {
+  it("requires signup welcome outcome recording without answered mailbox items", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
-      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+      answeredMailboxItemIds: [],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -8180,7 +8185,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
-        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+        answeredMailboxItemIds: [],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -8216,13 +8221,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
-    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
-        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         attemptedAt: expect.stringMatching(/Z$/u),
+        directRecipientPhoneNumber: "+15550100001",
         failureCode: null,
         failureReason: null,
         fromPhoneNumber: "+15550100099",
@@ -8237,6 +8241,50 @@ describe("hosted runtime callbacks", () => {
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty(
+      "answeredMailboxItemIds",
+    );
+  });
+
+  it("requires malformed signup-welcome participant outcome recording", async () => {
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => {
+      throw new Error("web callback unavailable");
+    });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "participant" as const,
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+    });
+    const sendLinq = dependencies.sendLinq;
+    assert.ok(sendLinq);
+
+    await expect(sendLinq({
+      answeredMailboxItemIds: [],
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123:retry",
+      message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      replyToMessageId: null,
+      target: "+15550100001",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      context: expect.objectContaining({ retryable: true }),
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
   });
 
   it("recovers a missing Linq egress target without replay-scoped route authority", async () => {
@@ -8387,7 +8435,9 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const recordDeliveryOutcome = vi.fn(async () => {
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => {
       throw new Error("web callback unavailable");
     });
     mocks.sendLinqMessage.mockResolvedValueOnce({
@@ -8447,6 +8497,9 @@ describe("hosted runtime callbacks", () => {
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty(
+      "directRecipientPhoneNumber",
+    );
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted Linq delivery outcome recording failed.",
       { errorName: "Error" },
@@ -8480,6 +8533,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_123",
       targetKind: "thread" as const,
     });
+    let outcomeRecordingError: unknown = null;
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       try {
         await dependencies.sendLinq({
@@ -8491,6 +8545,7 @@ describe("hosted runtime callbacks", () => {
           targetKind: "thread",
         });
       } catch (error) {
+        outcomeRecordingError = error;
         const deliveryError = {
           code: error instanceof VaultCliError ? error.code : null,
           message: error instanceof Error ? error.message : String(error),
@@ -8524,6 +8579,11 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(outcomeRecordingError).toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      context: expect.objectContaining({ retryable: true }),
+      deliveryMayHaveSucceeded: true,
+    });
 
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",

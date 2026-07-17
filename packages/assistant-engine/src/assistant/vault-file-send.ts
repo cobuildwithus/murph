@@ -17,6 +17,9 @@ import {
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  isNormalizedAssistantVaultFileRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import {
@@ -33,28 +36,14 @@ import {
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
+import {
+  isAssistantGeneratedDeliveryRef,
+  resolveSupportedAssistantVaultFileContentType,
+} from './generated-delivery-files.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
 const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
-
-const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
-  ['.csv', 'text/csv'],
-  ['.doc', 'application/msword'],
-  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  ['.ics', 'text/calendar'],
-  ['.json', 'application/json'],
-  ['.md', 'text/markdown'],
-  ['.pdf', 'application/pdf'],
-  ['.ppt', 'application/vnd.ms-powerpoint'],
-  ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-  ['.rtf', 'text/rtf'],
-  ['.txt', 'text/plain'],
-  ['.vcf', 'text/vcard'],
-  ['.xls', 'application/vnd.ms-excel'],
-  ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-  ['.zip', 'application/zip'],
-])
 
 export interface AssistantActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
@@ -179,7 +168,10 @@ export async function resolveAssistantVaultFileResponseMedia(input: {
   ref: string
   vaultRoot: string
 }): Promise<AssistantVaultFileResponseMedia> {
-  return (await readAssistantVaultFileSnapshot(input)).file
+  return (await readAssistantVaultFileSnapshot({
+    ...input,
+    allowAssistantGeneratedDeliveryRef: false,
+  })).file
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {
@@ -187,6 +179,7 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
   vaultRoot: string
 }): Promise<Uint8Array> {
   const snapshot = await readAssistantVaultFileSnapshot({
+    allowAssistantGeneratedDeliveryRef: true,
     ref: input.file.ref,
     vaultRoot: input.vaultRoot,
   })
@@ -502,13 +495,17 @@ export function deferAssistantVaultFileApprovalCheck(input: {
 }
 
 async function readAssistantVaultFileSnapshot(input: {
+  allowAssistantGeneratedDeliveryRef: boolean
   ref: string
   vaultRoot: string
 }): Promise<{
   bytes: Uint8Array
   file: AssistantVaultFileResponseMedia
 }> {
-  const ref = normalizeVaultFileRef(input.ref)
+  const ref = normalizeVaultFileRef(
+    input.ref,
+    input.allowAssistantGeneratedDeliveryRef,
+  )
   const absolutePath = await resolveAssistantVaultPath(
     input.vaultRoot,
     ref,
@@ -563,30 +560,30 @@ function applyAssistantVaultFileApprovalToMedia(input: {
   }
 }
 
-function normalizeVaultFileRef(value: string): string {
+function normalizeVaultFileRef(
+  value: string,
+  allowAssistantGeneratedDeliveryRef: boolean,
+): string {
   const ref = value.trim().replace(/\\/gu, '/')
-  const segments = ref.split('/')
   if (
     ref.length === 0
     || ref.length > 1024
-    || ref.startsWith('/')
-    || /^[A-Za-z]:/u.test(ref)
-    || /[\u0000-\u001F\u007F]/u.test(ref)
-    || segments.some(
-      (segment) => segment.length === 0 || segment === '.' || segment === '..' || segment.startsWith('.'),
+    || !isNormalizedAssistantVaultFileRef(ref)
+    || (
+      isAssistantGeneratedDeliveryRef(ref)
+      && !allowAssistantGeneratedDeliveryRef
     )
   ) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_REF_INVALID',
-      'Vault file refs must be normalized, non-hidden paths inside the vault.',
+      'Vault file refs must be normalized supported paths inside the vault.',
     )
   }
-  return segments.join('/')
+  return ref
 }
 
 function resolveAssistantVaultFileContentType(filename: string): string {
-  const extension = path.posix.extname(filename).toLowerCase()
-  const contentType = ASSISTANT_VAULT_FILE_CONTENT_TYPES.get(extension)
+  const contentType = resolveSupportedAssistantVaultFileContentType(filename)
   if (!contentType) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',

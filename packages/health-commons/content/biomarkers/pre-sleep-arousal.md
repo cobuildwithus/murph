@@ -18,21 +18,23 @@ categories:
   - manual-measurement
   - subjective-rating
 relations:
-
+  -
+    type: cites
+    target: source_artifact:pmid-4004706
   -
     type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
 measurementContexts:
   - evening_self_report
   - pre_sleep_log
-unit: rating
+unit: score
 interpretationFrame:
   principle: Compare the same same-person rating setup across baseline and intervention nights rather than interpreting one score.
-  caveat: Ratings are sensitive to stress, caffeine, alcohol, bedtime pressure, symptoms, sleep tracking anxiety, and the exact wording of the prompt.
+  caveat: This lightweight single-item 0-to-10 rating is not the validated 16-item Pre-Sleep Arousal Scale and has no diagnostic cutoff. Ratings are sensitive to stress, caffeine, alcohol, bedtime pressure, symptoms, sleep tracking anxiety, and the exact wording of the prompt.
 biomarker:
   shortName: Pre-Sleep Arousal
   displayName: Pre-Sleep Arousal
-  unit: rating
+  unit: score
   valuePrecision: 0
   direction:
     desired: lower
@@ -64,4 +66,4 @@ communityOutcomeSummary:
   placeholder: Community summaries will appear once enough opted-in pre-sleep downshift runs use a comparable rating scale.
 ---
 
-A manual subjective rating of how wired, keyed-up, panicky, or cognitively activated someone feels before sleep.
+A manual subjective rating of how wired, keyed-up, panicky, or cognitively activated someone feels before sleep. Murph uses a lightweight single-item rating for repeated same-person comparison; it is not the validated multi-item Pre-Sleep Arousal Scale and should not be used diagnostically or compared against a population cutoff.

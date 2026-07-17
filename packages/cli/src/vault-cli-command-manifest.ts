@@ -178,6 +178,7 @@ import {
   wearablesMetricTrendResultSchema,
   wearablesRecoveryListResultSchema,
   wearablesSleepListResultSchema,
+  wearablesSleepPatternResultSchema,
   wearablesSourcesListResultSchema,
 } from './commands/wearables.js'
 
@@ -1549,6 +1550,11 @@ export const vaultCliCommandDescriptors = [
         output: wearablesSleepListResultSchema,
       },
       {
+        path: ['wearables', 'sleep', 'pattern'],
+        description: 'Summarize longitudinal sleep regularity, timing, missingness, provider mix, and sleep-source freshness with explicit caveats.',
+        output: wearablesSleepPatternResultSchema,
+      },
+      {
         path: ['wearables', 'activity', 'list'],
         description: 'List semantic daily activity summaries with deduped workouts, steps, and distance details.',
         output: wearablesActivityListResultSchema,
@@ -1581,6 +1587,7 @@ export const vaultCliCommandDescriptors = [
         'showWearableMetricLatest',
         'showWearableMetricTrend',
         'listWearableSleep',
+        'showWearableSleepPattern',
         'listWearableActivity',
         'listWearableBodyState',
         'listWearableRecovery',

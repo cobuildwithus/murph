@@ -6,6 +6,7 @@ import {
   PUBLIC_EVENT_WRITE_KINDS,
   bloodTestImportPayloadSchema,
   eventImportDecisionSchema,
+  eventRecordSchema,
   healthEntityDefinitionByKind,
   publicEventImportJsonlRowPayloadSchemasByKind,
 } from "../src/index.ts";
@@ -33,6 +34,28 @@ function schemaHasFormat(schema: JsonSchemaObject | undefined, format: string): 
 
   return schema.format === format || (schema.anyOf?.some((branch) => schemaHasFormat(branch, format)) ?? false);
 }
+
+test("sleep session records accept only explicit canonical main-sleep and nap identities", () => {
+  const base = {
+    schemaVersion: "murph.event.v1",
+    id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+    kind: "sleep_session",
+    occurredAt: "2026-03-15T22:00:00.000Z",
+    recordedAt: "2026-03-16T07:30:00.000Z",
+    dayKey: "2026-03-16",
+    timeZone: "UTC",
+    source: "device",
+    title: "Sleep session",
+    startAt: "2026-03-15T22:00:00.000Z",
+    endAt: "2026-03-16T07:00:00.000Z",
+    durationMinutes: 540,
+  };
+
+  assert.equal(eventRecordSchema.safeParse(base).success, true);
+  assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "main_sleep" }).success, true);
+  assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "nap" }).success, true);
+  assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "rest" }).success, false);
+});
 
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");

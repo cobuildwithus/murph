@@ -12,6 +12,21 @@ const repoRoot = path.resolve(
   fileURLToPath(new URL("../../../", import.meta.url)),
 );
 
+const withCanonicalWriteLock = async <T>(
+  _vaultRoot: string | undefined,
+  run: () => Promise<T>,
+): Promise<T> => run();
+
+const mockExperimentDocumentRead = async () => {
+  const actual = await vi.importActual<typeof import("node:fs/promises")>(
+    "node:fs/promises",
+  );
+  return {
+    ...actual,
+    readFile: vi.fn(async () => "---\n"),
+  };
+};
+
 afterEach(() => {
   vi.doUnmock("../src/query-runtime.js");
   vi.doUnmock("../src/runtime-import.js");
@@ -68,9 +83,10 @@ test("applyExperimentOnboardingRecord writes structured run-plan schedules", asy
     "../src/runtime-import.js": () => ({
       loadRuntimeModule: vi.fn(async (specifier: string) => {
         assert.equal(specifier, "@murphai/core");
-        return { updateExperiment };
+        return { updateExperiment, withCanonicalWriteLock };
       }),
     }),
+    "node:fs/promises": mockExperimentDocumentRead,
   });
 
   await module.applyExperimentOnboardingRecord({
@@ -109,6 +125,9 @@ test("applyExperimentOnboardingRecord accepts status-only updates", async () => 
       status: "planned",
       title: "Sauna Daily",
       startedOn: "2026-04-29",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      },
     },
     links: [],
     relatedIds: [],
@@ -140,9 +159,10 @@ test("applyExperimentOnboardingRecord accepts status-only updates", async () => 
     "../src/runtime-import.js": () => ({
       loadRuntimeModule: vi.fn(async (specifier: string) => {
         assert.equal(specifier, "@murphai/core");
-        return { updateExperiment };
+        return { updateExperiment, withCanonicalWriteLock };
       }),
     }),
+    "node:fs/promises": mockExperimentDocumentRead,
   });
 
   await module.applyExperimentOnboardingRecord({
@@ -215,9 +235,10 @@ test("applyExperimentOnboardingRecord preserves untouched hypothesis fields on p
     "../src/runtime-import.js": () => ({
       loadRuntimeModule: vi.fn(async (specifier: string) => {
         assert.equal(specifier, "@murphai/core");
-        return { updateExperiment };
+        return { updateExperiment, withCanonicalWriteLock };
       }),
     }),
+    "node:fs/promises": mockExperimentDocumentRead,
   });
 
   await module.applyExperimentOnboardingRecord({
@@ -264,6 +285,9 @@ test("applyExperimentOnboardingRecord clears run baseline windows with zero base
         interventionEnd: "2026-08-01",
         modality: "psyllium",
       },
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:ldl-c",
+      },
     },
     links: [],
     relatedIds: [],
@@ -295,9 +319,10 @@ test("applyExperimentOnboardingRecord clears run baseline windows with zero base
     "../src/runtime-import.js": () => ({
       loadRuntimeModule: vi.fn(async (specifier: string) => {
         assert.equal(specifier, "@murphai/core");
-        return { updateExperiment };
+        return { updateExperiment, withCanonicalWriteLock };
       }),
     }),
+    "node:fs/promises": mockExperimentDocumentRead,
   });
 
   await module.applyExperimentOnboardingRecord({
@@ -367,7 +392,7 @@ test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", 
       "../src/runtime-import.js": () => ({
         loadRuntimeModule: vi.fn(async (specifier: string) => {
           assert.equal(specifier, "@murphai/core");
-          return { updateExperiment };
+          return { updateExperiment, withCanonicalWriteLock };
         }),
       }),
     });

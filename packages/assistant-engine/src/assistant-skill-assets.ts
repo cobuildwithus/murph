@@ -35,7 +35,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'sleep-improvement',
     name: 'sleep-improvement',
     triggerHint:
-      'Use for improving sleep duration, sleep efficiency, sleep onset, night awakenings, sleep environment, wind-down routines, wearable sleep stage or sleep score interpretation, and non-clinical melatonin framing. Use sleep-recovery-readiness for train-vs-rest decisions and circadian-rhythm for clock-shifting plans.',
+      'Use for improving sleep duration, sleep efficiency, sleep onset, night awakenings, bedtime procrastination or getting-to-bed transition friction, sleep-environment disruption such as noise or vibration, high-altitude sleep disruption, wind-down routines, wearable sleep stage or sleep score interpretation, non-clinical melatonin framing, and initial screening when snoring, gasping, unrefreshing sleep, or dangerous daytime sleepiness could indicate sleep-disordered breathing. Use sleep-recovery-readiness for train-vs-rest decisions and circadian-rhythm for body-clock, light-timing, jet-lag, shift-work, or clock-shifting plans.',
   },
   {
     slug: 'circadian-rhythm',
@@ -53,7 +53,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'substance-load',
     name: 'substance-load',
     triggerHint:
-      'Use for caffeine, alcohol, nicotine, cannabis, and other common substance effects on sleep, HRV, resting heart rate, recovery, energy, appetite, and performance, including reduction experiments and honest same-night wearable interpretation.',
+      'Use for caffeine, alcohol, nicotine, cannabis, branded OTC sleep aids or sedating antihistamines, medication-related sedation, and other common substance effects on sleep, HRV, resting heart rate, recovery, energy, appetite, and performance, including reduction experiments and honest same-night wearable interpretation.',
   },
   {
     slug: 'cognitive-focus',

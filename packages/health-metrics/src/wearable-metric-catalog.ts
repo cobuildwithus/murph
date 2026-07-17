@@ -38,6 +38,7 @@ export const wearableCanonicalMetricKeys = [
   "sleepBreathingDisturbance",
   "sleepConsistency",
   "sleepEfficiency",
+  "sleepLatencyMinutes",
   "sleepPerformance",
   "sleepScore",
   "spo2",
@@ -163,6 +164,9 @@ export const wearableMetricCatalog = Object.freeze({
   sleepBreathingDisturbance: defineMetric("sleepBreathingDisturbance", "count", "daily_observation", 0.5, ["breathing_disturbances"]),
   sleepConsistency: defineMetric("sleepConsistency", "%", "daily_observation", 1, ["sleep_consistency"]),
   sleepEfficiency: defineMetric("sleepEfficiency", "%", "session_observation", 1, ["sleep_efficiency"]),
+  sleepLatencyMinutes: defineMetric("sleepLatencyMinutes", "minutes", "session_observation", 5, [
+    "sleep_latency_minutes",
+  ]),
   sleepPerformance: defineMetric("sleepPerformance", "%", "daily_observation", 1, ["sleep_performance"]),
   sleepScore: defineMetric("sleepScore", "%", "daily_observation", 1, ["sleep_score"]),
   spo2: defineMetric("spo2", "%", "daily_observation", 1, ["oxygen_saturation", "spo2"]),

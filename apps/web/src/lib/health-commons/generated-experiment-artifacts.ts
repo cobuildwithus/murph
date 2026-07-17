@@ -45,7 +45,7 @@ export interface GeneratedExperimentIndexEntry {
   routeId: string;
   slug: string;
   sortRank?: number | null;
-  status: HealthCommonsExperimentRouteStatus;
+  status: HealthCommonsExperimentRouteStatus | null;
   studyCount: number;
   title: string;
 }

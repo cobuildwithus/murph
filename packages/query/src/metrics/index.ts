@@ -1,9 +1,12 @@
 import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
+  experimentSessionMetricIsDeclared,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
   type MetricComparator,
   type MetricConfidence,
   type MetricGrain,
@@ -24,6 +27,8 @@ import { buildSampleSummaryId } from "../sample-summary-id.ts";
 export { parseGoalMetricTargets } from "./goals.ts";
 
 export type {
+  ExperimentPrimaryMetricCaptureAssessment,
+  ExperimentPrimaryMetricCaptureIssue,
   GoalMetricTarget,
   MetricComparator,
   MetricConfidence,
@@ -50,8 +55,10 @@ export type {
 export {
   METRIC_POINT_SCHEMA_VERSION,
   METRIC_SELECTION_SCHEMA_VERSION,
+  assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
+  experimentSessionMetricIsDeclared,
   formatMetricDisplayValue,
   listMetricPoints,
   listMetricDefinitions,
@@ -59,12 +66,15 @@ export {
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricWindowComparison,
   selectMetricValue,
+  validateExperimentSessionMetricValue,
 } from "@murphai/health-metrics";
 
 export interface MetricRowEvidence {
