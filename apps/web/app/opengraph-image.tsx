@@ -137,8 +137,8 @@ export default async function OGImage() {
               flexDirection: "column",
               fontFamily: "Fraunces",
               fontWeight: 400,
-              fontSize: 51,
-              lineHeight: 1.25,
+              fontSize: 72,
+              lineHeight: 1.15,
               letterSpacing: "-0.03em",
             }}
           >
