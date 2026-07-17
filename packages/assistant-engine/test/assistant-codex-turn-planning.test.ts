@@ -700,7 +700,7 @@ describe('assistant Codex turn planning', () => {
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
-        'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+        'Humor 9/10: initiate when there is an opening and commit to the bit',
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: lead with the shortest complete answer',
@@ -800,7 +800,7 @@ describe('assistant Codex turn planning', () => {
       })
       expect(
         localAttemptPlan.routePlan.developerInstructions,
-      ).toContain('Humor 9/10: when humor is welcome, take a bold, situation-specific swing')
+      ).toContain('Humor 9/10: initiate when there is an opening and commit to the bit')
       expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
       )
