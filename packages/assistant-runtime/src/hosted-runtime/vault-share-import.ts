@@ -59,9 +59,11 @@ const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT = {
  * readers report "unavailable" and scheduled turns withhold standings while
  * the accepted turn still runs. Landed records are never discarded on a
  * transient failure (Web's mailbox dedupe cannot redeliver an unchanged
- * record); revokes keep landing through their own durable mailbox channel
- * during the outage, and new deliveries block retryably until a successful
- * authority read clears the marker. The authority callback runs only after a
+ * record). Deliveries and revokes keep importing through the one ordered
+ * system lane during the outage — Web's atomic append is their
+ * authorization, and blocking either would strand the other behind it —
+ * so the marker gates readers, never mailbox progress, until a successful
+ * authority read clears it. The authority callback runs only after a
  * non-empty local store is known to exist, so ordinary personal runtimes pay
  * no control-plane request.
  */
@@ -215,15 +217,10 @@ export async function importHostedVaultShareDeliveryWake(input: {
   }
 
   try {
-    // While share authority is unverifiable the workspace accepts no new
-    // shared records; the durable mailbox item retries after recovery.
-    if (await hasSharedVaultShareAuthorityUnavailableMarker(input.vaultRoot)) {
-      return {
-        reasonCode: "vault_share.authority_unavailable",
-        retryable: true,
-        status: "blocked",
-      };
-    }
+    // Web's atomic grant check at append time authorizes this delivery, and
+    // deliveries share one ordered system lane with revoke cleanup, so the
+    // import must progress even while the authority marker is present: a
+    // blocked delivery would strand every later revoke behind it.
     const storePath = resolveSharedVaultShareProjectionStorePath(input.vaultRoot);
     const read = await readRepairableSharedVaultShareProjectionStoreFile(storePath);
     if (read.status === "read_failed") {

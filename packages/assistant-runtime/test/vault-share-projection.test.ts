@@ -2171,8 +2171,9 @@ describe("importHostedVaultShareDeliveryWake", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("blocks deliveries retryably while share authority is unverifiable", async () => {
+  it("keeps ordered delivery and revoke imports flowing while authority is unverifiable", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    const markerPath = join(vaultRoot, "derived", "vault-share", "authority-unavailable.json");
     await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
     await prepareSharedVaultShareModelView({
       readAuthority: async () => {
@@ -2181,25 +2182,71 @@ describe("importHostedVaultShareDeliveryWake", () => {
       vaultRoot,
     });
 
+    // Delivery B lands at the next system sequence: Web's atomic grant check
+    // at append time is its authorization, and blocking it would strand the
+    // revoke behind it in the same ordered lane.
     await expect(importHostedVaultShareDeliveryWake({
       vaultRoot,
       wake: {
         ...wake,
         delivery: {
           ...wake.delivery,
-          grantorMemberId: "member_outage_import",
-          shareId: "share_outage_import",
+          grantorMemberId: "member_b_outage",
+          shareId: "share_b_outage",
         },
-        eventId: "vault-share:outage-import",
+        eventId: "vault-share:b-outage",
       },
+    })).resolves.toEqual({ status: "imported" });
+
+    // The committed revoke for member A lands right after B and must remove
+    // A's records before any later model read, marker or not.
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share:revoke-a",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-06-10T08:00:00.000Z",
+        revoke: {
+          grantorMemberId: wake.delivery.grantorMemberId,
+          projectionKind: wake.delivery.projectionKind,
+          projectionScope: wake.delivery.projectionScope,
+          revokedAt: "2026-06-10T08:00:00.000Z",
+          shareId: wake.delivery.shareId,
+        },
+        userId: wake.userId,
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const raw = await readFile(storePath(vaultRoot), "utf8");
+    expect(raw).not.toContain(wake.delivery.grantorMemberId);
+    const store = JSON.parse(raw);
+    expect(Object.keys(store.projections["sleep-times.v0"].grantors))
+      .toEqual(["member_b_outage"]);
+
+    // Readers stay fail-closed until a successful authority read clears the
+    // marker; the retained content is Web-authorized as of each append.
+    await expect(prepareSharedVaultShareModelView({
+      readAuthority: async () => {
+        throw new Error("control unavailable");
+      },
+      vaultRoot,
     })).resolves.toEqual({
       reasonCode: "vault_share.authority_unavailable",
-      retryable: true,
-      status: "blocked",
+      status: "unavailable",
     });
-    const retained = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
-    expect(Object.keys(retained.projections["sleep-times.v0"].grantors))
-      .toEqual([wake.delivery.grantorMemberId]);
+    expect(JSON.parse(await readFile(markerPath, "utf8")).schema)
+      .toBe("murph.shared-vault-authority-unavailable.v1");
+
+    await expect(prepareSharedVaultShareModelView({
+      readAuthority: async () => [{
+        memberId: "member_b_outage",
+        projectionScopeKey: "sleep-times.v0",
+        shareId: "share_b_outage",
+      }],
+      vaultRoot,
+    })).resolves.toEqual({ status: "ready" });
+    await expect(readFile(markerPath, "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("skips the authority control read when no landed store exists", async () => {

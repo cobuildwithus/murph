@@ -64,11 +64,22 @@ authority and reconciles the derived projection store by exact `(memberId,
 projectionScopeKey, shareId)`. It removes revoked scopes, former members,
 superseded re-grants, and records whose share id does not match the active grant
 before the model can run. If the authority read or atomic reconciliation fails,
-that model path fails closed and retries without exposing the landed store.
-Foreground mailbox imports pause and requeue detached asks until the mutation
-and any subsequent assistant pass finish; a resumed ask then revalidates the
-new store. The normal mailbox revoke remains cleanup delivery; it is not the
-read-time authorization boundary.
+a detached ask fails closed and requeues without model execution, while an
+accepted foreground turn still runs against the last successfully verified
+store content: a fixed unavailable marker makes `vault-cli group shared`,
+`group weekly`, and newsletter readers report "unavailable" and scheduled
+turns withhold standings until a later successful read clears the marker.
+Landed records are never discarded on a transient failure, and vault-share
+deliveries and revokes keep importing through their one ordered system lane
+during the outage — Web's atomic grant check at append time is their
+authorization, and blocking either item class would strand the other behind
+it. A full-access foreground shell can therefore still read the retained
+store during the outage; every retained record was Web-authorized as of its
+append, and the exposure ends when the pending revoke imports or authority
+recovers. Foreground mailbox imports pause and requeue detached asks until
+the mutation and any subsequent assistant pass finish; a resumed ask then
+revalidates the new store. The normal mailbox revoke remains cleanup
+delivery; it is not the read-time authorization boundary.
 
 The reader starts with challenge participants recorded as `in`, reconciles
 them with current Web-owned membership and grants, and left joins metric and

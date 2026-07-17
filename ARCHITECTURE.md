@@ -16,9 +16,15 @@ timestamps; it never turns a connection sync-job time into health-data receipt
 evidence. Before either a hosted assistant pass or a detached read-only
 Assistant Ask can read landed group projections, the runtime obtains Web's
 current share authority and atomically filters the derived store by exact
-member, scope key, and share id. A failed authority read blocks that model path.
-Scheduled challenge context uses that narrow member/scope/share authority
-snapshot rather than the broader interactive group summary.
+member, scope key, and share id. When that read fails, a detached ask fails
+closed and requeues, while an accepted foreground turn still runs: the store
+keeps its last successfully verified content, a fixed unavailable marker makes
+every shared-data reader report "unavailable" and withholds scheduled
+standings until a later successful read clears it, and vault-share deliveries
+and revokes keep importing through their one ordered system lane because Web's
+atomic append is their authorization and blocking either would strand the
+other. Scheduled challenge context uses that narrow member/scope/share
+authority snapshot rather than the broader interactive group summary.
 Foreground mailbox mutation pauses and requeues detached reads through import
 and the subsequent assistant pass, so a resumed ask revalidates the resulting
 store; delayed revoke cleanup is not an authorization boundary.
