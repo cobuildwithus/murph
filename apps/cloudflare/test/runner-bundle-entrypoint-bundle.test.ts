@@ -527,14 +527,15 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
     // overage, this PR's exact 1,929B merged-base overage, and the same final
     // 233B integration, less the same 179B ownership reduction, plus the same
-    // 230B provenance correction, its original 96,000B noise band, and the
-    // same 250,000B operational headroom because the closure contains the
+    // 230B provenance correction, shared message targeting's exact 38,978B
+    // local-macOS boot-critical overage, its original 96,000B noise band, and
+    // the same 250,000B operational headroom because the closure contains the
     // entry chunk.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_096_782 + 96_000 + 250_000,
+      staticClosureBytes: 7_135_760 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });
