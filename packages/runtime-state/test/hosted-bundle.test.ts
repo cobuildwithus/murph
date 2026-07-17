@@ -4662,6 +4662,11 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/generated-deliveries/report.pdf")).toMatchObject({
+    classification: "operational",
+    owner: "assistant-runtime",
+    portability: "portable",
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron")).toMatchObject({
     classification: "operational",
     portability: "portable",

@@ -735,6 +735,22 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
+
+Generated-delivery staging uses an expand-then-produce rollout. The first
+Cloudflare release adds persisted-outbox, hosted-side-effect, retry-read, and
+encrypted-checkpoint compatibility for the exact flat ref
+`.runtime/operations/assistant/generated-deliveries/<filename>`, while initial
+`send_vault_file` preparation continues to reject it so that release cannot
+mint state an older runner would quarantine. Deploy that release with immediate
+container rollout and prove the exact runner fingerprint has converged before a
+later release enables writer guidance or cleanup. Once a producer can persist
+the hidden ref, the compatibility release is the rollback floor while any
+active or retained outbox record or committed checkpoint can contain it.
+Portable support bundles continue to omit all `.runtime/**`; the generic
+`exports/assistant-deliveries/**` path remains ordinary checkpointed vault data
+and receives no path-specific portable-package exclusion. Existing global
+file-type exclusions still apply regardless of directory.
+
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
