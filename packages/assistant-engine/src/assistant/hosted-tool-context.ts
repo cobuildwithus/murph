@@ -88,6 +88,7 @@ export interface AssistantHostedToolContext {
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   beforeToolExecution?(): Promise<void>
+  prepareSharedData?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
@@ -140,6 +141,7 @@ export function createAssistantHostedToolContext(input: {
     vault: string
   } | null
   phoneCalls?: AssistantPhoneCallPort | null
+  prepareSharedData?: () => Promise<void>
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
@@ -212,6 +214,9 @@ export function createAssistantHostedToolContext(input: {
     phoneCalls: input.phoneCalls ?? null,
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
+      : {}),
+    ...(input.prepareSharedData
+      ? { prepareSharedData: input.prepareSharedData }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantInputId: () => input.getAssistantInputId?.() ?? null,

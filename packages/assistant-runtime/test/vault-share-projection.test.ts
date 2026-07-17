@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyHostedVaultShareRevokeWake,
   importHostedVaultShareDeliveryWake,
+  markSharedVaultShareAuthorityUnavailableForPass,
   prepareSharedVaultShareModelView,
 } from "../src/hosted-runtime/vault-share-import.ts";
 import {
@@ -2056,6 +2057,24 @@ describe("importHostedVaultShareDeliveryWake", () => {
       join(vaultRoot, "raw", "shared", "vault-share-projections.json"),
       "utf8",
     )).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("marks a landed store unavailable at pass start without changing it", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-pass-marker-"));
+    const markerPath = join(
+      vaultRoot,
+      "derived",
+      "vault-share",
+      "authority-unavailable.json",
+    );
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+    const before = await readFile(storePath(vaultRoot));
+
+    await markSharedVaultShareAuthorityUnavailableForPass(vaultRoot);
+
+    expect(await readFile(storePath(vaultRoot))).toEqual(before);
+    const marker = JSON.parse(await readFile(markerPath, "utf8"));
+    expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
   });
 
   it("reconciles revoked, former-member, and old-generation entries before reads", async () => {

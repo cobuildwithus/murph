@@ -112,6 +112,7 @@ import {
   buildHostedBackgroundGroupRosterPrompt,
 } from "./group-roster-prompt.ts";
 import {
+  markSharedVaultShareAuthorityUnavailableForPass,
   prepareSharedVaultShareModelView,
   type HostedVaultShareModelViewOutcome,
 } from "./vault-share-import.ts";
@@ -876,6 +877,47 @@ export async function runHostedWorkspaceAssistantPhase(
     );
     return Promise.resolve();
   };
+  // One invocation-local share-authority snapshot serves every lazy shared-data
+  // reconciliation and scheduled roster read. Multiple assistant lanes may run
+  // in one invocation, but Web is consulted at most once.
+  let shareAuthorityResponsePromise: ReturnType<
+    NonNullable<typeof input.runtime.platform.groupToolPort>["request"]
+  > | null = null;
+  const readShareAuthorityResponseOnce = () => {
+    const groupToolPort = input.runtime.platform.groupToolPort;
+    if (!groupToolPort) {
+      return null;
+    }
+    shareAuthorityResponsePromise ??= groupToolPort.request({
+      action: "read_share_authority",
+    });
+    return shareAuthorityResponsePromise;
+  };
+  let vaultShareModelViewOutcome: HostedVaultShareModelViewOutcome | null = null;
+  let vaultShareModelViewPromise:
+    | Promise<HostedVaultShareModelViewOutcome>
+    | null = null;
+  const prepareSharedDataOnce = (): Promise<HostedVaultShareModelViewOutcome> => {
+    vaultShareModelViewPromise ??= prepareSharedVaultShareModelView({
+      readAuthority: async () => {
+        const response = await readShareAuthorityResponseOnce();
+        if (!response || response.action !== "read_share_authority") {
+          throw new Error("group_share_authority_invalid");
+        }
+        if (response.result.status === "unavailable") {
+          throw new Error("group_share_authority_unavailable");
+        }
+        return response.result.status === "none"
+          ? []
+          : response.result.shares;
+      },
+      vaultRoot: input.restored.vaultRoot,
+    }).then((outcome) => {
+      vaultShareModelViewOutcome = outcome;
+      return outcome;
+    });
+    return vaultShareModelViewPromise;
+  };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -900,6 +942,9 @@ export async function runHostedWorkspaceAssistantPhase(
         connectedApps: input.runtime.platform.connectedApps ?? null,
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
+        prepareSharedData: async () => {
+          await prepareSharedDataOnce();
+        },
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
@@ -1160,24 +1205,8 @@ export async function runHostedWorkspaceAssistantPhase(
         cancellation.dispose();
       }
     };
-    // One pass-local share-authority snapshot serves both landed-store
-    // reconciliation and scheduled roster context, so a single Web read owns
-    // one consistent membership/grant view and one failure disposition.
-    let shareAuthorityResponsePromise: ReturnType<
-      NonNullable<typeof input.runtime.platform.groupToolPort>["request"]
-    > | null = null;
-    const readShareAuthorityResponseOnce = () => {
-      const groupToolPort = input.runtime.platform.groupToolPort;
-      if (!groupToolPort) {
-        return null;
-      }
-      shareAuthorityResponsePromise ??= groupToolPort.request({
-        action: "read_share_authority",
-      });
-      return shareAuthorityResponsePromise;
-    };
-    let vaultShareModelViewOutcome: HostedVaultShareModelViewOutcome | null = null;
     const readBackgroundGroupRosterPrompt = async (): Promise<string | null> => {
+      await prepareSharedDataOnce();
       const response = await Promise.resolve(readShareAuthorityResponseOnce())
         .catch(() => null);
       return buildHostedBackgroundGroupRosterPrompt({ authority: response });
@@ -1212,21 +1241,11 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
-      vaultShareModelViewOutcome = await prepareSharedVaultShareModelView({
-        readAuthority: async () => {
-          const response = await readShareAuthorityResponseOnce();
-          if (!response || response.action !== "read_share_authority") {
-            throw new Error("group_share_authority_invalid");
-          }
-          if (response.result.status === "unavailable") {
-            throw new Error("group_share_authority_unavailable");
-          }
-          return response.result.status === "none"
-            ? []
-            : response.result.shares;
-        },
-        vaultRoot: input.restored.vaultRoot,
-      });
+      vaultShareModelViewOutcome = null;
+      vaultShareModelViewPromise = null;
+      await markSharedVaultShareAuthorityUnavailableForPass(
+        input.restored.vaultRoot,
+      );
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,

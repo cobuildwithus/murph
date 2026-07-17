@@ -3072,6 +3072,9 @@ async function executeGroupTool(input: {
   }
 
   try {
+    if (request.action === 'read_current') {
+      await input.hostedToolContext?.prepareSharedData?.()
+    }
     const result = await groupTool.request(request)
     const payload = generatedAvatarCapture
       ? { ...result, generatedImage: generatedAvatarCapture }
@@ -3285,6 +3288,9 @@ async function executeNewsletterTool(input: {
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
+    if (input.request.action === 'prepare') {
+      await input.hostedToolContext?.prepareSharedData?.()
+    }
     if (
       input.request.action === 'send'
       && input.vaultRoot

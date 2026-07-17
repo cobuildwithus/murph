@@ -333,6 +333,7 @@ export interface AssistantHostedExecutionContext {
   productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
+  prepareSharedData?: () => Promise<void>
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
     homeRouteFallbackAllowed: boolean
@@ -464,6 +465,9 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...(phoneCalls ? { phoneCalls } : {}),
+      ...(typeof hosted?.prepareSharedData === 'function'
+        ? { prepareSharedData: hosted.prepareSharedData }
+        : {}),
       ...(typeof hosted?.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),

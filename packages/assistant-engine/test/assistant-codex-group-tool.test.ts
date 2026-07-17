@@ -426,6 +426,44 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("reconciles shared data immediately before read_current", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_current",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const events: string[] = [];
+    const prepareSharedData = vi.fn(async () => {
+      events.push("prepare_shared_data");
+    });
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      events.push("read_current");
+      return {
+        action: "read_current",
+        result: { group: null, status: "none" },
+      };
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupRequest,
+        prepareSharedData,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(events).toEqual(["prepare_shared_data", "read_current"]);
+    expect(prepareSharedData).toHaveBeenCalledTimes(1);
+    expect(groupRequest).toHaveBeenCalledWith({ action: "read_current" });
+  });
+
   it.each([
     ["missing", () => null],
     [
@@ -1743,6 +1781,93 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
+  it("reconciles shared data before newsletter preparation reads the local store", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-lazy-authority-"));
+    const sharedRoot = join(vaultRoot, "derived", "vault-share");
+    const markerPath = join(sharedRoot, "authority-unavailable.json");
+    const events: string[] = [];
+    try {
+      await initializeVault({ timezone: "UTC", vaultRoot });
+      await mkdir(sharedRoot, { recursive: true });
+      await writeFile(join(sharedRoot, "projections.json"), JSON.stringify({
+        projections: {
+          "steps-days.v0": {
+            grantors: {
+              member_a: sharedDailyMetricGrantor({
+                memberId: "member_a",
+                value: 7_000,
+              }),
+            },
+          },
+        },
+        schema: "murph.shared-vault-projections.v1",
+        updatedAt: "2026-07-06T12:00:00.000Z",
+      }), "utf8");
+      await writeFile(
+        markerPath,
+        JSON.stringify({ schema: "murph.shared-vault-authority-unavailable.v1" }),
+        "utf8",
+      );
+      const prepareSharedData = vi.fn(async () => {
+        events.push("prepare_shared_data");
+        await rm(markerPath);
+      });
+      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => {
+        events.push("newsletter_prepare");
+        return {
+          action: "prepare",
+          result: {
+            authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+            groupId: "group_1",
+            missingEmailParticipants: [],
+            participants: [{
+              authorizedShares: [{
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share-member_a",
+              }],
+              hasEmail: true,
+              memberId: "member_a",
+            }],
+            status: "ok",
+          },
+        };
+      });
+      const request = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "prepare",
+        groupId: "group_1",
+      }));
+      if (!request || request.kind !== "newsletter") {
+        throw new Error("Expected newsletter request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createNewsletterHostedToolContext({
+          newsletterRequest,
+          prepareSharedData,
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(events).toEqual(["prepare_shared_data", "newsletter_prepare"]);
+      expect(prepareSharedData).toHaveBeenCalledTimes(1);
+      expect(readNewsletterToolPayload(result)).toMatchObject({
+        action: "prepare",
+        result: {
+          members: [{ memberId: "member_a" }],
+          status: "ok",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("blocks prepare and send when shared projections are corrupt", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-stats-corrupt-"));
     try {
@@ -2048,6 +2173,7 @@ describe("murph.newsletter dynamic tool", () => {
 function createNewsletterHostedToolContext(input: {
   closeNewsletterCapability?: () => void;
   newsletterRequest?: NewsletterToolRequest;
+  prepareSharedData?: () => Promise<void>;
   recordNewsletterSendResult?: (result: unknown) => void;
 } = {}): AssistantHostedToolContext {
   const context = {
@@ -2095,6 +2221,9 @@ function createNewsletterHostedToolContext(input: {
       ),
     },
     phoneCalls: null,
+    ...(input.prepareSharedData
+      ? { prepareSharedData: input.prepareSharedData }
+      : {}),
     ...(input.recordNewsletterSendResult
       ? { recordNewsletterSendResult: input.recordNewsletterSendResult }
       : {}),
@@ -2166,6 +2295,7 @@ function sharedDailyMetricGrantor(input: {
 function createGroupHostedToolContext(input: {
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   groupRequest?: GroupToolRequest;
+  prepareSharedData?: () => Promise<void>;
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
@@ -2183,6 +2313,9 @@ function createGroupHostedToolContext(input: {
     },
     newsletterTool: null,
     phoneCalls: null,
+    ...(input.prepareSharedData
+      ? { prepareSharedData: input.prepareSharedData }
+      : {}),
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this test.");
     },

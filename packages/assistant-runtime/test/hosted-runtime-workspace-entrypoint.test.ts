@@ -1134,6 +1134,17 @@ describe("hosted workspace runtime entrypoint", () => {
         requireEventIndex(events, "share.authority.read")
           < requireEventIndex(events, "ask.model.started"),
       );
+      assert.equal(
+        events.filter((event) => event === "share.authority.read").length,
+        1,
+      );
+      await assert.rejects(
+        readFile(
+          path.join(path.dirname(projectionPath), "authority-unavailable.json"),
+          "utf8",
+        ),
+        { code: "ENOENT" },
+      );
       assert.ok(events.includes("ask.completed"));
       assert.equal(restoreCallCount, 1);
       assert.ok(result.status === "idle" || result.status === "scheduled");
@@ -1285,6 +1296,15 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.ok(events.includes("share.authority.unavailable"));
+      assert.equal(
+        events.filter((event) => event === "share.authority.unavailable").length,
+        1,
+      );
+      const marker = JSON.parse(await readFile(
+        path.join(path.dirname(projectionPath), "authority-unavailable.json"),
+        "utf8",
+      ));
+      assert.equal(marker.schema, "murph.shared-vault-authority-unavailable.v1");
       assert.equal(
         mocks.executeReadOnlyAssistantAsk.mock.calls.length,
         executeCallCountBefore,

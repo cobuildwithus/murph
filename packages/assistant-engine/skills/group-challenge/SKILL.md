@@ -264,6 +264,11 @@ automation action rules with a `dailyLocal` schedule and
    is unavailable. Interactive turns use the exact
    `grantedVaultShareProjectionScopes` entries returned by `read_current`;
    scheduled turns use the exact canonical scope keys in the trusted context.
+   On an interactive turn, call `read_current` immediately before the first
+   `vault-cli group shared` or `vault-cli group weekly` read in that runtime
+   pass. That tool call is the authority-reconciliation gate for the
+   no-network CLI; never run the CLI first. If authority or the shared reader
+   is unavailable, withhold standings rather than exposing landed records.
    A projection kind alone is never grant authority for every selector. If
    neither source provides a current authoritative roster/grant snapshot, stop
    before reading or using shared records. Say that current permissions could

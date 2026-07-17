@@ -335,6 +335,7 @@ export async function sendAssistantNotificationLocal(
 
       const turnId = createAssistantTurnId()
       const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const prepareSharedData = executionContext?.hosted?.prepareSharedData
       const hostedDeviceTool =
         !isAssistantNotificationMaintenanceExactSkip(input) &&
         conversationScope === 'direct'
@@ -345,6 +346,7 @@ export async function sendAssistantNotificationLocal(
           ? createAssistantHostedToolContext({
               deviceTool: hostedDeviceTool,
               newsletterTool: hostedNewsletterTool,
+              ...(prepareSharedData ? { prepareSharedData } : {}),
               messageInput,
               newsletterOutbox: {
                 turnId,

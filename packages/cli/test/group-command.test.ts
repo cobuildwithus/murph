@@ -387,17 +387,37 @@ describe('buildGroupSharedResult', () => {
     expect(result.status).toBe('unavailable')
   })
 
-  it('reports unavailable while the authority-unavailable marker is present', async () => {
+  it('keeps shared and weekly reads fail-closed until this pass reconciles authority', async () => {
+    await writeStore(fixtureStore())
     const dir = join(vault, 'derived', 'vault-share')
-    await mkdir(dir, { recursive: true })
+    const markerPath = join(dir, 'authority-unavailable.json')
     await writeFile(
-      join(dir, 'authority-unavailable.json'),
+      markerPath,
       JSON.stringify({ schema: 'murph.shared-vault-authority-unavailable.v1' }),
       'utf8',
     )
 
-    const result = await buildGroupSharedResult({ kinds: null, vault })
-    expect(result.status).toBe('unavailable')
-    expect(result.members).toEqual([])
+    const sharedUnavailable = await buildGroupSharedResult({ kinds: null, vault })
+    const weeklyUnavailable = await buildGroupWeeklyResult({
+      asOf: '2026-07-06T13:00:00.000Z',
+      vault,
+    })
+    expect(sharedUnavailable.status).toBe('unavailable')
+    expect(sharedUnavailable.members).toEqual([])
+    expect(weeklyUnavailable.status).toBe('unavailable')
+    expect(weeklyUnavailable.members).toEqual([])
+
+    await rm(markerPath)
+    const sharedReady = await buildGroupSharedResult({ kinds: null, vault })
+    const weeklyReady = await buildGroupWeeklyResult({
+      asOf: '2026-07-06T13:00:00.000Z',
+      vault,
+    })
+    expect(sharedReady.status).toBe('ok')
+    expect(sharedReady.members.map((member) => member.memberId))
+      .toEqual(['member-a', 'member-b'])
+    expect(weeklyReady.status).toBe('ok')
+    expect(weeklyReady.members.map((member) => member.memberId))
+      .toEqual(['member-a', 'member-b'])
   })
 })

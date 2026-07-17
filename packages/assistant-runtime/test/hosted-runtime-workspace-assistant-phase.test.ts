@@ -804,30 +804,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("verifies landed share authority before entering the assistant lane", async () => {
+  it("keeps an unrelated foreground group turn off the authority control plane", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     await writeHostedPhaseSharedProjection({ vaultRoot });
-    const sequence: string[] = [];
+    const storeFilePath = path.join(vaultRoot, "derived", "vault-share", "projections.json");
+    const before = await readFile(storeFilePath, "utf8");
     const request: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-    >["request"] = vi.fn(async (request) => {
-      sequence.push("authority");
-      expect(request).toEqual({ action: "read_share_authority" });
-      return {
-        action: "read_share_authority" as const,
-        result: {
-          memberIds: ["member_shared_current"],
-          shares: [{
-            memberId: "member_shared_current",
-            projectionScopeKey: "profile-name.v0",
-            shareId: "share_profile_current",
-          }],
-          status: "ok" as const,
-        },
-      };
+    >["request"] = vi.fn(async () => {
+      throw new Error("Unrelated turns must not read share authority.");
     });
+    let modelRan = false;
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      sequence.push("assistant_lane");
+      modelRan = true;
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -841,8 +830,66 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      expect(sequence).toEqual(["authority", "assistant_lane"]);
+      expect(request).not.toHaveBeenCalled();
+      expect(modelRan).toBe(true);
+      expect(await readFile(storeFilePath, "utf8")).toBe(before);
+      const marker = JSON.parse(await readFile(
+        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+        "utf8",
+      ));
+      expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("memoizes a triggered shared-data reconcile and clears the reader gate", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
+    await writeHostedPhaseSharedProjection({ vaultRoot });
+    const request: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = vi.fn(async () => ({
+      action: "read_share_authority" as const,
+      result: {
+        memberIds: ["member_shared_current"],
+        shares: [{
+          memberId: "member_shared_current",
+          projectionScopeKey: "profile-name.v0",
+          shareId: "share_profile_current",
+        }],
+        status: "ok" as const,
+      },
+    }));
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async ({ executionContext }) => {
+        await executionContext.hosted?.prepareSharedData?.();
+        await executionContext.hosted?.prepareSharedData?.();
+        return {
+          assistantAutomationProgressed: false,
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    try {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }));
       expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
+      await expect(readFile(
+        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+        "utf8",
+      )).rejects.toMatchObject({ code: "ENOENT" });
+      const store = JSON.parse(await readFile(
+        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
+        "utf8",
+      ));
+      expect(store.projections["profile-name.v0"].grantors.member_shared_current)
+        .toBeDefined();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -862,12 +909,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         unavailableReason: "control_plane_unavailable",
       },
     }));
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => ({
-      assistantAutomationProgressed: false,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    }));
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async ({ executionContext }) => {
+        await executionContext.hosted?.prepareSharedData?.();
+        return {
+          assistantAutomationProgressed: false,
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
 
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -917,12 +969,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const request: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = vi.fn(async () => responses.shift() ?? responses[0]!);
-    mocks.runHostedAssistantAutomationLane.mockImplementation(async () => ({
-      assistantAutomationProgressed: false,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    }));
+    mocks.runHostedAssistantAutomationLane.mockImplementation(
+      async ({ executionContext }) => {
+        await executionContext.hosted?.prepareSharedData?.();
+        return {
+          assistantAutomationProgressed: false,
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
 
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -933,6 +990,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
+      expect(request).toHaveBeenCalledTimes(2);
       await expect(readFile(
         path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
         "utf8",

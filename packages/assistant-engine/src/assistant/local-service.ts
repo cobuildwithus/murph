@@ -716,6 +716,9 @@ export async function sendAssistantMessageLocal(
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,
               planUsageTool: hostedExecutionContext.planUsageTool ?? null,
+              ...(hostedExecutionContext.prepareSharedData
+                ? { prepareSharedData: hostedExecutionContext.prepareSharedData }
+                : {}),
               subscriptionTool: hostedExecutionContext.subscriptionTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
               ...(hostedExecutionContext.currentAssistantInputId

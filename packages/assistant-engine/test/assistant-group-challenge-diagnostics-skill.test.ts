@@ -21,6 +21,15 @@ describe('assistant group challenge diagnostics guidance', () => {
       'challenge-page participants whose participation state is `in`',
     )
     expect(challenge).toContain('`action="read_current"`')
+    expect(challenge).toContain(
+      'call `read_current` immediately before the first `vault-cli group shared` or `vault-cli group weekly` read',
+    )
+    expect(challenge).toContain(
+      'authority-reconciliation gate for the no-network CLI',
+    )
+    expect(challenge).toContain(
+      'withhold standings rather than exposing landed records',
+    )
     expect(challenge).toContain('trusted current roster/grant context')
     expect(challenge).toContain(
       'Left join both shared-data results to that challenge roster by exact `memberId`',

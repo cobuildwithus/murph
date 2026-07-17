@@ -52,7 +52,7 @@ const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT = {
 
 /**
  * Revalidates every already-landed projection against Web's current grant-row
- * generation before a model read. Share authority is visibility authority
+ * generation before a shared-data read. Share authority is visibility authority
  * only, never model-admission authority. When it cannot be verified the store
  * keeps its last successfully verified content — the sanctioned
  * last-known-good authorized state — and a fixed marker makes shared-data
@@ -63,9 +63,9 @@ const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT = {
  * system lane during the outage — Web's atomic append is their
  * authorization, and blocking either would strand the other behind it —
  * so the marker gates readers, never mailbox progress, until a successful
- * authority read clears it. The authority callback runs only after a
- * non-empty local store is known to exist, so ordinary personal runtimes pay
- * no control-plane request.
+ * authority read clears it. Callers invoke this owner lazily from paths that
+ * actually consume shared group data; unrelated foreground turns only set
+ * the local unavailable marker and pay no control-plane request.
  */
 export async function prepareSharedVaultShareModelView(input: {
   readAuthority: () => Promise<readonly HostedRuntimeGroupShareAuthorityEntry[]>;
@@ -151,6 +151,18 @@ export async function prepareSharedVaultShareModelView(input: {
     await markSharedVaultShareAuthorityUnavailable(input.vaultRoot);
     return { status: "unavailable", reasonCode: "vault_share.write_failed" };
   }
+}
+
+export async function markSharedVaultShareAuthorityUnavailableForPass(
+  vaultRoot: string,
+): Promise<void> {
+  const read = await readSharedVaultShareProjectionStoreFile(
+    resolveSharedVaultShareProjectionStorePath(vaultRoot),
+  );
+  if (read.status === "empty") {
+    return;
+  }
+  await markSharedVaultShareAuthorityUnavailable(vaultRoot);
 }
 
 async function markSharedVaultShareAuthorityUnavailable(
