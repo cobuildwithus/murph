@@ -60,9 +60,18 @@ type HostedGrowthPrisma = Pick<
   PrismaClient,
   | "hostedAccountGroup"
   | "hostedGrowthDailySnapshot"
+  | "hostedLinqDelivery"
+  | "hostedMailboxItem"
   | "hostedMember"
   | "hostedMemberBillingRef"
 >;
+
+const INBOUND_MESSAGE_MAILBOX_KIND = "conversation.message";
+const OUTBOUND_LINQ_SENT_STATUSES = [
+  "accepted",
+  "delivered",
+  "sent_no_receipt_expected",
+] as const;
 
 export type HostedGrowthStatusKey = (typeof CHURN_STATUS_KEYS)[number];
 
@@ -115,7 +124,9 @@ export interface HostedGrowthTrialStartRow {
 export interface HostedGrowthSnapshotRow {
   capturedAt: Date;
   coveredMembers: number;
+  inboundMessagesPriorDay: number | null;
   mrrUsdCents: number;
+  outboundMessagesPriorDay: number | null;
   payingCustomers: number;
   payingFamilyGroups: number;
   payingFamilySeats: number;
@@ -748,19 +759,51 @@ export async function readHostedGrowthDashboard(
 /**
  * Paying metrics use paid billing phase, active billing status, and unsuspended
  * rows. Family paid groups also require at least one billed seat.
+ *
+ * Message counts cover the full UTC day before `snapshot_date`, so reruns on
+ * the same date are deterministic. Inbound counts `conversation.message`
+ * mailbox items across all channels; those rows expire, so the snapshot is
+ * the durable record. Outbound counts sent rows in the Linq delivery ledger,
+ * currently the only channel with a delivery ledger.
  */
 export async function captureHostedGrowthDailySnapshot(
   now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
 ): Promise<HostedGrowthSnapshotRow> {
-  const current = await readCurrentHostedGrowthMetrics(now, prisma);
   const snapshotDate = startOfUtcDay(now);
+  const priorDayStart = addUtcDays(snapshotDate, -1);
+  const [current, inboundMessagesPriorDay, outboundMessagesPriorDay] =
+    await Promise.all([
+      readCurrentHostedGrowthMetrics(now, prisma),
+      prisma.hostedMailboxItem.count({
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          occurredAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
+      prisma.hostedLinqDelivery.count({
+        where: {
+          attemptedAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+          status: {
+            in: [...OUTBOUND_LINQ_SENT_STATUSES],
+          },
+        },
+      }),
+    ]);
 
   return prisma.hostedGrowthDailySnapshot.upsert({
     create: {
       capturedAt: now,
       coveredMembers: current.coveredMembers,
+      inboundMessagesPriorDay,
       mrrUsdCents: current.mrrUsdCents,
+      outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
       payingFamilyGroups: current.payingFamilyGroups,
       payingFamilySeats: current.payingFamilySeats,
@@ -773,7 +816,9 @@ export async function captureHostedGrowthDailySnapshot(
     update: {
       capturedAt: now,
       coveredMembers: current.coveredMembers,
+      inboundMessagesPriorDay,
       mrrUsdCents: current.mrrUsdCents,
+      outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
       payingFamilyGroups: current.payingFamilyGroups,
       payingFamilySeats: current.payingFamilySeats,
@@ -959,7 +1004,9 @@ function keyIfInWindow(
 const growthSnapshotSelect = {
   capturedAt: true,
   coveredMembers: true,
+  inboundMessagesPriorDay: true,
   mrrUsdCents: true,
+  outboundMessagesPriorDay: true,
   payingCustomers: true,
   payingFamilyGroups: true,
   payingFamilySeats: true,

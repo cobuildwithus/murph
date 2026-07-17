@@ -204,7 +204,7 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects deprecated local Codex app-server bridge config", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
@@ -219,7 +219,7 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects the removed local-codex hosted assistant provider", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "local-codex",
         NODE_ENV: "development",
         OPENAI_API_KEY: "openai-key",
@@ -231,12 +231,12 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards OpenAI assistant config into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       NODE_ENV: "development",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     })).toEqual({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",

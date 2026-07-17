@@ -700,7 +700,7 @@ describe('assistant Codex turn planning', () => {
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
-        'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+        'Humor 9/10: initiate when there is an opening and commit to the bit',
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: lead with the shortest complete answer',
@@ -800,7 +800,7 @@ describe('assistant Codex turn planning', () => {
       })
       expect(
         localAttemptPlan.routePlan.developerInstructions,
-      ).toContain('Humor 9/10: when humor is welcome, take a bold, situation-specific swing')
+      ).toContain('Humor 9/10: initiate when there is an opening and commit to the bit')
       expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
       )
@@ -1098,15 +1098,16 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(direct.dynamicTools.map((tool) => tool.name)).toContain('labs')
-    expect(direct.developerInstructions).toContain('Junction lab catalog:')
+    expect(direct.developerInstructions).toContain('Lab test discovery:')
+    expect(direct.developerInstructions).not.toMatch(/junction/iu)
     expect(group.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(group.developerInstructions).not.toContain('Junction lab catalog:')
+    expect(group.developerInstructions).not.toContain('Lab test discovery:')
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(maintenance.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
     expect(notification.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(notification.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(notification.systemPrompt).not.toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(outputOnly.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
   it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
@@ -1326,6 +1327,7 @@ describe('assistant Codex turn planning', () => {
       ...createHostedToolContext(),
       assistantConfigurationTool: { request: vi.fn() },
       automationTool: { request: vi.fn() },
+      clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1447,6 +1449,7 @@ describe('assistant Codex turn planning', () => {
       'computer_open',
       'assistant_configuration',
       'connected_apps_manage',
+      'create_clinical_records_connect_link',
       'create_phone_call',
       'family_plan',
       'labs',
@@ -1507,6 +1510,59 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.dynamicTools.some((tool) => tool.name === 'subscription'))
         .toBe(expectedAvailable)
+    },
+  )
+
+  it.each([
+    ['assistant-input', true],
+    ['manual', true],
+    ['initial', false],
+    ['system', false],
+  ] as const)(
+    'gates Clinical Records connect links on eligible current-turn %s input',
+    async (source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+      }
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'c'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-clinical-records-link-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-16',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.dynamicTools.some((tool) =>
+        tool.name === 'create_clinical_records_connect_link'
+      )).toBe(expectedAvailable)
     },
   )
 
@@ -3040,7 +3096,7 @@ describe('assistant Codex turn planning', () => {
         executionContext: null,
         input: {
           ...createMessageInput(),
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           prompt: 'Use medium reasoning now.',
           vault,
         },

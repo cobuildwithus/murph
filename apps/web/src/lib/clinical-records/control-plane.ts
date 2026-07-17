@@ -298,14 +298,6 @@ async function persistClinicalConnection(input: {
         tokenVersion,
         value: input.token.accessToken,
       });
-      const refreshTokenEncrypted = await sealClinicalConnectionSecret({
-        connectionId,
-        field: "refreshToken",
-        memberId: input.memberId,
-        prisma: tx,
-        tokenVersion,
-        value: input.token.refreshToken,
-      });
       if (!patientIdEncrypted || !accessTokenEncrypted) {
         throw new TypeError("Clinical Records connection encryption returned an empty required value.");
       }
@@ -326,7 +318,7 @@ async function persistClinicalConnection(input: {
         memberId: input.memberId,
         patientIdEncrypted,
         providerDirectoryEntryId: input.provider.id,
-        refreshTokenEncrypted,
+        refreshTokenEncrypted: null,
         requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
         retrievalGeneration,
         sourceSystem: input.provider.sourceSystem,

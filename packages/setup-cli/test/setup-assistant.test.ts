@@ -58,7 +58,7 @@ test('setup assistant option normalization infers Codex presets and rejects lega
   assert.equal(hasExplicitSetupAssistantOptions({}), false)
   assert.equal(
     hasExplicitSetupAssistantOptions({
-      assistantModel: 'gpt-5.5',
+      assistantModel: 'gpt-5.6-terra',
     }),
     true,
   )
@@ -70,7 +70,7 @@ test('setup assistant option normalization infers Codex presets and rejects lega
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
-      assistantModel: 'gpt-5.5',
+      assistantModel: 'gpt-5.6-terra',
     }),
     'codex',
   )
@@ -96,7 +96,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: true,
       profile: 'primary',
@@ -115,7 +115,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
   }
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(codexDefaults), {
     assistantPreset: 'codex',
-    assistantModel: 'gpt-5.5',
+    assistantModel: 'gpt-5.6-terra',
     assistantModelProvider: 'vercel-ai-gateway',
     assistantCodexCommand: 'codex',
     assistantCodexHome: '/tmp/codex-home',
@@ -125,7 +125,7 @@ test('setup assistant defaults round-trip Codex defaults', () => {
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
-    'gpt-5.5 via Codex OSS app-server (Team account)',
+    'gpt-5.6-terra via Codex OSS app-server (Team account)',
   )
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
@@ -136,7 +136,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: null,
     codexCommand: null,
     codexHome: undefined,
@@ -157,7 +157,7 @@ test('setup assistant summary helpers label Codex accounts consistently', () => 
 
   assert.equal(
     formatAssistantDefaultsSummary(assistant),
-    'gpt-5.5 via Codex app-server (Plus account)',
+    'gpt-5.6-terra via Codex app-server (Plus account)',
   )
   assert.equal(
     formatSetupAssistantAccountLabel(assistant.account),
@@ -318,7 +318,7 @@ test('setup assistant account resolver merges Codex auth and RPC snapshots', asy
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: null,
       codexCommand: 'codex',
       codexHome: '/tmp/custom-codex',
@@ -351,7 +351,7 @@ test('setup assistant selection normalizes Codex values into operator defaults p
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     codexCommand: 'codex',
     codexHome: '/tmp/codex-home',
@@ -377,7 +377,7 @@ test('setup assistant selection normalizes Codex values into operator defaults p
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'team',
@@ -430,7 +430,7 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome: null,
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: null,
         oss: false,
         profile: null,
@@ -497,14 +497,14 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
   assert.equal(defaultCodex.modelProvider, null)
   assert.equal(
     defaultCodex.detail,
-    'Use Codex with gpt-5.5. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
+    'Use Codex with gpt-5.6-terra. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   )
 
   const codex = await resolver.resolve({
     allowPrompt: false,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantModel: 'gpt-5.5',
+      assistantModel: 'gpt-5.6-terra',
       assistantModelProvider: 'vercel-ai-gateway',
       assistantCodexCommand: 'codex-beta',
       assistantProfile: 'team',
@@ -515,7 +515,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
@@ -526,7 +526,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     oss: false,
     account: null,
     detail:
-      'Use Codex with gpt-5.5. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output.',
+      'Use Codex with gpt-5.6-terra. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output.',
   })
   assert.equal(capturedAssistants.length, 1)
 })

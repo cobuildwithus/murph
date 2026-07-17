@@ -24,7 +24,7 @@ import type {
 
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 
 export interface HostedLocalEgressScenario {
   chatId: string;

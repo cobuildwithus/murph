@@ -104,6 +104,17 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Older");
   });
 
+  it("uses provider-neutral visible copy for the historical wearable visual", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-06-26" }),
+      }),
+    );
+
+    expect(markup).toContain("Wearable record days");
+    expect(markup).not.toContain("WHOOP / Junction days");
+  });
+
   it("publishes a canonical URL for each valid archive page", async () => {
     const editions = listChangelogEditions();
     const pageTwoEditions = editions.slice(7, 14);

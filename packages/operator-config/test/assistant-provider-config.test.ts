@@ -16,7 +16,7 @@ describe('assistant provider config runtime resolution', () => {
   it('keeps continuity stable across model and reasoning changes', () => {
     const first = resolveAssistantProviderRuntimeTarget({
       approvalPolicy: 'never',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       reasoningEffort: 'low',
@@ -50,7 +50,7 @@ describe('assistant provider config runtime resolution', () => {
       provider: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
-      model: ' gpt-5.5 ',
+      model: ' gpt-5.6-terra ',
       modelProvider: ' Vercel-AI-Gateway ',
       oss: false,
       profile: ' hosted ',
@@ -70,7 +70,7 @@ describe('assistant provider config runtime resolution', () => {
         kind: 'codex-cli',
         codexCommand: null,
         codexHome: '/tmp/codex-home',
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'vercel-ai-gateway',
         oss: false,
         profile: 'hosted',
@@ -89,7 +89,7 @@ describe('assistant provider config runtime resolution', () => {
     expect(serializeAssistantProviderSessionOptions(input)).toMatchObject({
       approvalPolicy: 'never',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
@@ -97,7 +97,7 @@ describe('assistant provider config runtime resolution', () => {
       sandbox: 'danger-full-access',
     })
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
     })
   })

@@ -648,7 +648,7 @@ test('model catalog hook updates when Codex model state changes', async () => {
   })
 
   await flushAsyncWork(2)
-  activeModel = 'gpt-5.5'
+  activeModel = 'gpt-5.6-terra'
   activeReasoningEffort = 'high'
   session = {
     ...TEST_SESSION,
@@ -669,7 +669,7 @@ test('model catalog hook updates when Codex model state changes', async () => {
       provider: 'codex-cli',
     },
     {
-      currentModel: 'gpt-5.5',
+      currentModel: 'gpt-5.6-terra',
       currentReasoningEffort: 'high',
       oss: true,
       provider: 'codex-cli',

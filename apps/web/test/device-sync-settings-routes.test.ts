@@ -876,6 +876,8 @@ describe("device sync settings routes", () => {
       "dsc_junction_123",
     );
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.diagnoseBackfill).toHaveBeenCalledWith(expect.objectContaining({
       account: expect.objectContaining({
         credential: {
@@ -1004,6 +1006,8 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "timeseries",
       now: "2026-04-03T12:00:00.000Z",
@@ -1134,6 +1138,8 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "refresh",
       now: "2026-04-03T12:00:00.000Z",
@@ -1221,6 +1227,7 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(409);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {

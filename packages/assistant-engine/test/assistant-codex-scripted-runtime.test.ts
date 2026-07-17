@@ -29,7 +29,7 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 // a scriptable fake child process is the right tool.
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-const SCRIPTED_MODEL = 'gpt-5.5'
+const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
@@ -447,7 +447,7 @@ describe('real codex app-server with scripted provider', () => {
     scenario.stub.markRequestBaseline()
     const second = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      model: 'gpt-5.4',
+      model: 'gpt-5.6-luna',
       prompt: 'Reply exactly RESUME_SECOND_OK.',
       reasoningEffort: 'high',
       resumeSessionId: first.sessionId,
@@ -459,7 +459,7 @@ describe('real codex app-server with scripted provider', () => {
     expect(second.turnId).not.toBe(first.turnId)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       {
-        model: 'gpt-5.4',
+        model: 'gpt-5.6-luna',
         serviceTier: null,
       },
     ])

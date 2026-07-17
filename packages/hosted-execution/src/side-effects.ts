@@ -4,6 +4,9 @@ import {
   type GatewayDeliveryTargetKind,
   type GatewayReplyRouteKind,
 } from "@murphai/gateway-core";
+import {
+  isNormalizedAssistantVaultFileRef,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
@@ -812,19 +815,8 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     );
   }
   const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
-  if (
-    ref.startsWith("/")
-    || /^[A-Za-z]:/u.test(ref)
-    || ref.includes("\\")
-    || /[\u0000-\u001F\u007F]/u.test(ref)
-    || ref.split("/").some((segment) => (
-      segment.length === 0
-      || segment === "."
-      || segment === ".."
-      || segment.startsWith(".")
-    ))
-  ) {
-    throw new TypeError(`${label}.ref must be a normalized, non-hidden vault-relative path.`);
+  if (!isNormalizedAssistantVaultFileRef(ref)) {
+    throw new TypeError(`${label}.ref must be a normalized supported vault-relative path.`);
   }
   const sha256 = requireString(record.sha256, `${label}.sha256`);
   if (!/^[0-9a-f]{64}$/u.test(sha256)) {

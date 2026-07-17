@@ -342,6 +342,8 @@ describe("hosted ops Junction diagnostics", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
     expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
     expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_target");
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledWith(
       "member_target",
       "dsc_junction_123",
@@ -425,6 +427,251 @@ describe("hosted ops Junction diagnostics", () => {
         timeseriesDays: 7,
         windowEnd: "2026-06-28T23:59:59.999Z",
         windowStart: "2025-12-30T23:59:59.999Z",
+      },
+    });
+  });
+
+  it("reads sources for only the selected connection and excludes the member's other connections", async () => {
+    const junctionConnection = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-06-27T18:49:38.000Z",
+      createdAt: "2026-06-27T18:49:38.000Z",
+      displayName: "Junction",
+      externalAccountId: "junction-user-raw-id",
+      id: "dsc_junction_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: "2026-06-28T16:00:00.000Z",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+      updatedAt: "2026-06-28T08:51:00.000Z",
+    };
+    mocks.listConnectionsForUser.mockResolvedValue([
+      junctionConnection,
+      {
+        ...junctionConnection,
+        displayName: "Oura",
+        externalAccountId: "oura-user-raw-id",
+        id: "dsc_aaa_oura",
+        provider: "oura",
+      },
+    ]);
+    // Sources are read per selected connection: the diagnostic must ask for
+    // the selected Junction connection's sources exactly once, so rows that
+    // belong to the member's other connections are never fetched.
+    mocks.listConnectionSources.mockImplementation(async (connectionId: string) =>
+      connectionId === "dsc_junction_123"
+        ? [
+            {
+              connectionId: "dsc_junction_123",
+              createdAt: "2026-06-27T18:49:38.000Z",
+              displayName: null,
+              firstSeenAt: "2026-06-27T18:49:38.000Z",
+              id: "dcs_junction_123",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-06-28T08:50:56.000Z",
+              resourceAvailabilitySummary: Object.fromEntries(
+                Array.from({ length: 18 }, (_, index) => [`resource_${index}`, true]),
+              ),
+              sourceInstanceKey: "oura:default",
+              sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+              status: "connected",
+              updatedAt: "2026-06-28T08:50:56.000Z",
+            },
+          ]
+        : [
+            {
+              connectionId,
+              createdAt: "2026-06-27T18:49:38.000Z",
+              displayName: null,
+              firstSeenAt: "2026-06-27T18:49:38.000Z",
+              id: "dcs_oura_999",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-06-28T08:50:56.000Z",
+              resourceAvailabilitySummary: Object.fromEntries(
+                Array.from({ length: 5 }, (_, index) => [`other_resource_${index}`, true]),
+              ),
+              sourceInstanceKey: "oura:other",
+              sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+              status: "connected",
+              updatedAt: "2026-06-28T08:50:56.000Z",
+            },
+          ]
+    );
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+          windowEnd: "2026-06-28T23:59:59.999Z",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      selectedConnection: {
+        connectionMatchCount: 1,
+        provider: "junction",
+      },
+      webSourceProjection: {
+        sourceCount: 1,
+        totalResourceCount: 18,
+      },
+    });
+  });
+
+  it("reports connection-not-found dispositions without reading any connection sources", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([]);
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_FOUND",
+      },
+    });
+  });
+
+  it("reports connection-not-active dispositions without reading any connection sources", async () => {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-06-27T18:49:38.000Z",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-raw-id",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: null,
+        provider: "junction",
+        scopes: [],
+        setupPhase: null,
+        status: "disconnected",
+        updatedAt: "2026-06-28T08:51:00.000Z",
+      },
+    ]);
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_ACTIVE",
+      },
+    });
+  });
+
+  it("reports ambiguous-connection dispositions without reading any connection sources", async () => {
+    const junctionConnection = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-06-27T18:49:38.000Z",
+      createdAt: "2026-06-27T18:49:38.000Z",
+      displayName: "Junction",
+      externalAccountId: "junction-user-raw-id",
+      id: "dsc_junction_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: "2026-06-28T16:00:00.000Z",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+      updatedAt: "2026-06-28T08:51:00.000Z",
+    };
+    mocks.listConnectionsForUser.mockResolvedValue([
+      junctionConnection,
+      {
+        ...junctionConnection,
+        externalAccountId: "junction-user-raw-id-2",
+        id: "dsc_junction_456",
+      },
+    ]);
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_AMBIGUOUS",
       },
     });
   });

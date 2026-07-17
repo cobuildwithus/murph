@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import { readHostedLinqFirstContactMemberState } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -24,7 +25,7 @@ import {
 const userId = `member_local_linq_onboarding_followup_${Date.now()}`;
 const linqWebhookSecret = "linq-local-onboarding-followup-secret";
 const onboardingCompleteReplyText = "Setup is marked complete.";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -77,6 +78,18 @@ describe("hosted local onboarding follow-up e2e", () => {
     await welcomeSendPromise;
 
     const materializedChatId = requireLinqStub().requireObservedChatId(userId);
+    const memberStateBeforeInbound = await readHostedLinqFirstContactMemberState({
+      environment: requireScenario().runtimeEnv,
+      memberPhone,
+    });
+    expect(memberStateBeforeInbound).toMatchObject({
+      homeChatId: materializedChatId,
+      homeRecipientPhone: homePhone,
+      memberCount: 1,
+      memberId: userId,
+      pendingChatId: null,
+    });
+
     const followupPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const completionBaseline = requireLinqStub().countObservedSends(followupPath);
     requireScenario().queueAssistantResponses(

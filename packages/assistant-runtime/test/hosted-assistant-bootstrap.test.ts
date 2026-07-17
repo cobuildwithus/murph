@@ -20,7 +20,7 @@ const CODEX_VERCEL_GATEWAY_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
-  model: "gpt-5.5",
+  model: "gpt-5.6-terra",
   modelProvider: "openai",
   oss: false,
   profile: null,
@@ -30,7 +30,7 @@ const CODEX_VERCEL_GATEWAY_TARGET = {
 
 const CODEX_VERCEL_GATEWAY_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -196,7 +196,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
         allowMissing: false,
         env: {
           HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
           HOSTED_ASSISTANT_PROVIDER: "legacy",
           HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
           HOSTED_ASSISTANT_SANDBOX: "danger-full-access",

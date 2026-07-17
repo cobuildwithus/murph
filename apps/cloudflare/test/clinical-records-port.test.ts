@@ -3,6 +3,7 @@ import {
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -95,6 +96,14 @@ describe("hosted clinical records runtime port", () => {
           status: "ready",
         });
       }
+      if (path === HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH) {
+        return Response.json({
+          connectUrl:
+            `https://web.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+          expiresAt: "2026-07-10T12:15:00.000Z",
+          ok: true,
+        });
+      }
       if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH) {
         return Response.json({
           body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
@@ -114,6 +123,8 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
+    await expect(port.createConnectLink?.())
+      .resolves.toMatchObject({ ok: true });
     await expect(port.readRun({ generation: 1, runId: "run_1" }))
       .resolves.toMatchObject({ status: "ready" });
     await expect(port.fetchPage({
@@ -142,6 +153,10 @@ describe("hosted clinical records runtime port", () => {
 
     expect(received).toEqual([
       {
+        body: {},
+        path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+      },
+      {
         body: { generation: 1, runId: "run_1" },
         path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
       },
@@ -165,6 +180,40 @@ describe("hosted clinical records runtime port", () => {
       },
     ]);
     expect(JSON.stringify(received)).not.toContain("member_1");
+  });
+
+  it("rejects a direct-transport connect link on another origin", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      connectUrl:
+        `https://other.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-10T12:15:00.000Z",
+      ok: true,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: {
+        callbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: {
+          readCurrentLease: () => ({
+            attemptId: "attempt_1",
+            leaseGeneration: "1",
+            userId: "member_1",
+            workspaceVersion: "1",
+          }),
+        },
+      },
+    });
+
+    await expect(port.createConnectLink?.()).rejects.toThrow(
+      "must use the configured Web origin",
+    );
   });
 
   it("forwards cancellation through the outcome-record transport", async () => {
@@ -423,6 +472,10 @@ describe("hosted clinical records runtime port", () => {
   it("classifies each clinical records route as an explicit POST-only operation", () => {
     expect(readHostedRunnerWebControlOperation({
       method: "POST",
+      path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+    })).toBe("clinical_records_connect_link");
+    expect(readHostedRunnerWebControlOperation({
+      method: "POST",
       path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
     })).toBe("clinical_records_read_run");
     expect(readHostedRunnerWebControlOperation({
@@ -436,6 +489,10 @@ describe("hosted clinical records runtime port", () => {
     expect(readHostedRunnerWebControlOperation({
       method: "GET",
       path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+    })).toBe("web_control_blocked");
+    expect(readHostedRunnerWebControlOperation({
+      method: "GET",
+      path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
     })).toBe("web_control_blocked");
   });
 });

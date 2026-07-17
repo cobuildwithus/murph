@@ -167,7 +167,7 @@ export function PersonasSection({
   murphHeadshotSrc: MurphHeadshotSrc;
 }) {
   return (
-    <section className="bg-[#f5f0e8] px-4 pb-16 sm:px-6 lg:px-8 lg:pb-24">
+    <section className="bg-[#f5f0e8] px-4 pt-16 pb-16 sm:px-6 lg:px-8 lg:pt-24 lg:pb-24">
       <div className="mx-auto max-w-[1280px] overflow-hidden rounded-[2rem] bg-[#1f1c18] px-6 py-16 shadow-[0_30px_80px_-40px_rgba(31,28,24,0.55)] sm:rounded-[2.5rem] sm:px-10 sm:py-20 lg:px-16 lg:py-28">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
           Pick your goal

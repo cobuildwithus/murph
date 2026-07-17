@@ -212,7 +212,7 @@ describe('hosted assistant context diagnostics', () => {
     const sessionId = 'session-context-diagnostics'
     const providerOptions = serializeAssistantProviderSessionOptions({
       approvalPolicy: 'never',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       reasoningEffort: 'medium',

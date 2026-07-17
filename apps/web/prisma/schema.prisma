@@ -1189,6 +1189,10 @@ model HostedGrowthDailySnapshot {
   coveredMembers     Int      @map("covered_members")
   trialingMembers    Int      @map("trialing_members")
   mrrUsdCents        Int      @map("mrr_usd_cents")
+  // Message volume for the full UTC day before snapshot_date, captured here
+  // because the live source rows are short-lived (mailbox TTL, delivery churn).
+  inboundMessagesPriorDay  Int? @map("inbound_messages_prior_day")
+  outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
 
   @@map("hosted_growth_daily_snapshot")
 }
@@ -1498,6 +1502,8 @@ model HostedLinqLine {
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
   activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
+  proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
+  proactiveConversationCount  Int?      @map("proactive_conversation_count")
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")

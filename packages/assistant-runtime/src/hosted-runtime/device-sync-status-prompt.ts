@@ -218,7 +218,7 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
         ]
       : []),
     "- When the exact latest imported data day matters, verify it with `vault-cli wearables sources list --format json` or the relevant normalized `vault-cli wearables ... --format json` command before naming a date.",
-    "- In user-facing replies, use product labels such as WHOOP. Mention Junction only when debugging low-level sync plumbing.",
+    "- In user-facing replies, use product labels such as WHOOP. Never name the internal sync provider; for low-level problems, say device connection or sync service.",
   ].join("\n");
 }
 

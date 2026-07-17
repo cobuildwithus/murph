@@ -2769,7 +2769,7 @@ describe("hostedRunnerIntercept", () => {
         role: "user",
       }],
       instructions: `synthetic instructions ${syntheticStablePrefix}`,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       previous_response_id: syntheticPreviousResponse,
       prompt_cache_key: syntheticCacheNamespace,
       prompt_cache_retention: "24h",
@@ -2876,7 +2876,7 @@ describe("hostedRunnerIntercept", () => {
       jsonType: "object",
       jsonValid: true,
       methodKind: "POST",
-      modelKind: "gpt-5.5",
+      modelKind: "gpt-5.6-terra",
       previousResponsePresent: true,
       providerKind: "openai",
       requestFingerprintPresent: true,
@@ -2950,7 +2950,7 @@ describe("hostedRunnerIntercept", () => {
     const sensitiveTurnId = "turn-sensitive-diagnostic-id";
     const requestBody = {
       input: [],
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
     };
     const codexTurnMetadata = JSON.stringify({
       compaction: {
@@ -3052,7 +3052,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           prompt_cache_retention: "24h",
         }),
         headers: {
@@ -3132,7 +3132,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           prompt_cache_retention: "24h",
           stream: true,
         }),
@@ -3207,7 +3207,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
       })),
     });
 
@@ -3357,7 +3357,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
       })),
     });
 
@@ -3456,7 +3456,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
       })),
     });
 
@@ -3508,7 +3508,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
       })),
     });
     const expectedTail = input.slice(2);
@@ -3584,7 +3584,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
         input,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
       })),
     });
 
@@ -3600,7 +3600,7 @@ describe("hostedRunnerIntercept", () => {
       endpointKind: "responses",
       method: "POST",
       requestBytes: TEST_TEXT_ENCODER.encode(
-        `{"input":[${nestedJson}],"model":"gpt-5.5"}`,
+        `{"input":[${nestedJson}],"model":"gpt-5.6-terra"}`,
       ),
     });
 
@@ -3659,7 +3659,7 @@ describe("hostedRunnerIntercept", () => {
 
     const tooLargeBody = JSON.stringify({
       input: "x".repeat(6 * 1024 * 1024),
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
     });
     const tooLargeDiagnostic = await buildHostedOpenAiCacheDiagnostic({
       endpointKind: "responses",

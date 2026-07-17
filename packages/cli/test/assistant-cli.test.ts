@@ -951,7 +951,7 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
     '--preset',
     'codex',
     '--model',
-    'gpt-5.5',
+    'gpt-5.6-terra',
     '--modelProvider',
     'vercel-ai-gateway',
   ])
@@ -959,7 +959,7 @@ test('model --preset codex replaces an unsupported persisted backend', async () 
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
   assert.equal(result.envelope.data?.backend?.adapter, 'codex-cli')
-  assert.equal(result.envelope.data?.backend?.model, 'gpt-5.5')
+  assert.equal(result.envelope.data?.backend?.model, 'gpt-5.6-terra')
   assert.equal(result.envelope.data?.backend?.modelProvider, 'vercel-ai-gateway')
 
   const config = await readOperatorConfig(homeRoot)
@@ -1061,7 +1061,7 @@ test('interactive bare model uses the Codex wizard selection before resolving de
       preset,
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: options.assistantModelProvider ?? null,
       codexCommand: null,
       codexHome: options.assistantCodexHome ?? null,
@@ -1114,7 +1114,7 @@ test('interactive bare model uses the Codex wizard selection before resolving de
   })
   assert.equal(
     result.envelope.data?.summary,
-    'gpt-5.5 via Codex app-server',
+    'gpt-5.6-terra via Codex app-server',
   )
 })
 
@@ -1207,7 +1207,7 @@ test('interactive bare model clears a saved provider when wizard selects ChatGPT
       preset,
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: options.assistantModelProvider ?? null,
       codexCommand: null,
       codexHome: null,
@@ -1478,7 +1478,7 @@ test('model forwards an explicit Codex model provider to setup resolution', asyn
     '--preset',
     'codex',
     '--model',
-    'gpt-5.5',
+    'gpt-5.6-terra',
     '--modelProvider',
     'vercel-ai-gateway',
   ])
@@ -1494,7 +1494,7 @@ test('model forwards an explicit Codex model provider to setup resolution', asyn
       strict: true,
       whisperModel: 'base.en',
       assistantPreset: 'codex',
-      assistantModel: 'gpt-5.5',
+      assistantModel: 'gpt-5.6-terra',
       assistantModelProvider: 'vercel-ai-gateway',
     },
     preset: 'codex',

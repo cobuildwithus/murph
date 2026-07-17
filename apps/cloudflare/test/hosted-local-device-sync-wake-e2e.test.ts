@@ -12,7 +12,7 @@ import {
 const runId = Date.now();
 const userId = `member_local_device_sync_wake_${runId}`;
 const connectionId = `dsc_local_device_sync_wake_${runId}`;
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
 const whoopBaseUrl = "https://whoop-oauth.example.test";
 

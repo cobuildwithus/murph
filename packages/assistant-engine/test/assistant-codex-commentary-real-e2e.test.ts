@@ -39,7 +39,7 @@ async function createRealCodexFixture(): Promise<{
   temporaryPaths.push(workingDirectory)
   await mkdir(codexHome, { recursive: true })
   await writeFile(path.join(codexHome, 'config.toml'), [
-    'model = "gpt-5.5"',
+    'model = "gpt-5.6-terra"',
     'model_provider = "openai-env"',
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
@@ -97,7 +97,7 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
       codexHome,
       env,
       excludeResumeTurns: true,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'openai-env',
       onProgress(event) {
         internalProgress.push({ kind: event.kind, text: event.text })
@@ -155,7 +155,7 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
       }),
       env,
       excludeResumeTurns: true,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'openai-env',
       progressDelivery,
       prompt: [

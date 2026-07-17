@@ -705,6 +705,8 @@ export async function sendAssistantMessageLocal(
               assistantConfigurationTool:
                 hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
+              clinicalRecordsConnectLinkTool:
+                hostedExecutionContext.clinicalRecordsConnectLinkTool ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,

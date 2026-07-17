@@ -124,7 +124,13 @@ describe('assistant execution prompt contract', () => {
       'The child may outlive the reply.',
     )
     expect(prompt).toContain(
-      'Never call it pending, processing, or in progress',
+      'one short plain personable line about the kicked-off background work is welcome',
+    )
+    expect(prompt).toContain(
+      'on later turns do not call it pending, processing, or in progress',
+    )
+    expect(prompt).toContain(
+      'Keep internal machinery out of visible replies',
     )
     expect(prompt).toContain(
       'Claim child enrichment only after canonical readback confirms it',
@@ -233,7 +239,7 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
-      'Defaults: Humor 3—at most one earned situational beat when playful; no canned bits or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
+      'Defaults: Humor 3—deadpan; at most one earned beat when playful; no canned bits, laughing emojis, or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
       'Calm, observant, direct, plainspoken.',
@@ -254,13 +260,13 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences for this private conversation:',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+      'Humor 9/10: initiate when there is an opening and commit to the bit',
     )
     expect(layers.threadContextPrompt).toContain(
-      'absurd but unmistakably nonliteral escalation',
+      'absurd overcommitment stated as plain fact',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Make the contrast large enough to read as a joke',
+      'The bigger the swing, the calmer the delivery',
     )
     expect(layers.threadContextPrompt).toContain(
       'Humor is permission, not a quota',
@@ -269,16 +275,19 @@ describe('assistant execution prompt contract', () => {
       'if no specific beat sharpens the point or rewards shared context, omit it at any score',
     )
     expect(layers.threadContextPrompt).toContain(
-      'In factual answers, use at most one beat',
+      'Deliver every joke deadpan, in the same calm register as the rest of the reply',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Never explain a joke or repeat the same punchline; avoid stock personification, canned meme templates, and forced analogies',
+      'never flag, explain, or repeat a joke, and never laugh at your own line',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'never stock personification, canned meme templates, or forced analogies',
     )
     expect(layers.threadContextPrompt).toContain(
       'When health stakes or emotional reception are unclear, stay literal',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Target Murph or the situation, never the user, their identity, body, symptoms, condition, competence, or effort',
+      'Make Murph or the situation the butt, never the user, their identity, body, symptoms, condition, competence, or effort',
     )
     expect(layers.threadContextPrompt).not.toContain('Push 3/10')
     expect(layers.threadContextPrompt).not.toContain('Detail 5/10')
@@ -307,13 +316,13 @@ describe('assistant execution prompt contract', () => {
   it('maps exact personality scores into the reviewed behavior bands', () => {
     const humorCases = [
       [0, 'use no jokes, puns, teasing'],
-      [1, 'use occasional, subtle situational wit'],
-      [3, 'use occasional, subtle situational wit'],
-      [4, 'when a strong opportunity arises'],
-      [6, 'when a strong opportunity arises'],
-      [7, 'take a bold, situation-specific swing'],
-      [9, 'take a bold, situation-specific swing'],
-      [10, 'take the largest safe creative swing'],
+      [1, 'mostly straight-faced'],
+      [3, 'mostly straight-faced'],
+      [4, 'a dry wit the user can feel'],
+      [6, 'a dry wit the user can feel'],
+      [7, 'initiate when there is an opening and commit to the bit'],
+      [9, 'initiate when there is an opening and commit to the bit'],
+      [10, 'almost any safe, low-stakes exchange can carry one line'],
     ] as const
     for (const [score, expected] of humorCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -331,9 +340,9 @@ describe('assistant execution prompt contract', () => {
       [3, 'encourage gently'],
       [4, 'be direct and action-oriented'],
       [6, 'be direct and action-oriented'],
-      [7, 'use firm accountability'],
-      [9, 'use firm accountability'],
-      [10, 'use maximum directness and brevity'],
+      [7, 'hold the user to their own plan the way a good coach would'],
+      [9, 'hold the user to their own plan the way a good coach would'],
+      [10, 'maximum directness'],
     ] as const
     for (const [score, expected] of pushCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -375,11 +384,11 @@ describe('assistant execution prompt contract', () => {
       }),
     )
     expect(maximumPrompt).toContain(
-      'In factual answers, use at most one beat',
+      'no laughing emojis, no `lol` or `lmao`',
     )
-    expect(maximumPrompt).toContain('one bold deadpan beat, ridiculous escalation')
+    expect(maximumPrompt).toContain('a ridiculous commitment delivered with complete sincerity')
     expect(maximumPrompt).toContain(
-      'never motive or character; ask for a commitment, revision, or decline, then respect the answer',
+      'never motive or character — ask for a commitment, revision, or an explicit decline, then respect the answer completely',
     )
     expect(maximumPrompt).toContain(
       'Push changes delivery, not authority',
@@ -965,7 +974,7 @@ describe('assistant local PDF evidence guidance', () => {
       'do not use batch for interactive, server, or long-running assistant commands',
     )
     expect(prompt).toContain(
-      'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
+      'Keep the internal device-sync provider out of user-facing replies',
     )
     expect(prompt).toContain(
       'When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields.',
@@ -983,8 +992,9 @@ describe('assistant local PDF evidence guidance', () => {
       'Ask for subjective or protocol-specific details only when the wearable cannot answer them',
     )
     expect(prompt).toContain(
-      'mention Junction only when explicitly debugging low-level connection or runtime state',
+      'For low-level problems, say "device connection" or "sync service" rather than naming internal plumbing',
     )
+    expect(prompt).not.toMatch(/junction/iu)
     expect(prompt).toContain(
       'Never invent invite/share/auth/wearable URLs',
     )
@@ -1561,7 +1571,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd00d4b4e5832258ae3c4eb7f984484b359696e9d20a60d354a61a1fcefbac33d',
+      'd12bea1bda587aa3b5d76617a6b7facd88c4931945271c21f43b673fb585aeb1',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

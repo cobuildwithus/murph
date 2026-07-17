@@ -8,12 +8,18 @@ import {
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 
+import {
+  defaultAssistantVoiceOptionId,
+  isAssistantVoiceOptionId,
+} from "@murphai/contracts";
+
 import { PageHeader } from "@/src/components/ui/page-header";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { ConnectSourcesGrid } from "./connect-page-client";
@@ -321,9 +327,35 @@ export default async function ConnectPage({
         initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
+        whoopSyncVoiceMemoSrc={await resolveWhoopSyncVoiceMemoSrc(
+          auth.authenticatedMember?.id ?? null,
+        )}
       />
     </div>
   );
+}
+
+// The WHOOP fallback card plays a pre-generated memo in the member's picked
+// Murph voice (scripts/generate-whoop-sync-voice-memos.mjs); members without a
+// pick hear the default voice.
+async function resolveWhoopSyncVoiceMemoSrc(memberId: string | null): Promise<string> {
+  const fallback = `/audio/whoop-sync-memos/${defaultAssistantVoiceOptionId}.mp3`;
+  if (!memberId) {
+    return fallback;
+  }
+
+  try {
+    const member = await getPrisma().hostedMember.findUnique({
+      where: { id: memberId },
+      select: { assistantVoice: true },
+    });
+    const voice = member?.assistantVoice;
+    return isAssistantVoiceOptionId(voice)
+      ? `/audio/whoop-sync-memos/${voice}.mp3`
+      : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function listVisibleConnectSources(): ConnectSource[] {
