@@ -14,6 +14,7 @@ import {
 
 import { WatchCheckIcon } from "@/src/components/icons/home-icons";
 import { Button, buttonVariants } from "@/src/components/ui/button";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 import {
   Dialog,
   DialogContent,
@@ -94,6 +95,16 @@ export function DeviceSyncCompletionDialog({
               </DialogDescription>
             </div>
           </DialogHeader>
+
+          <VoiceMemoPlayer
+            src={setupGuide.voiceMemoSrc}
+            bars={24}
+            preload="metadata"
+            containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+            accentClassName="bg-primary"
+            fillClassName="bg-primary"
+            trackClassName="bg-primary/20"
+          />
 
           <ol className="flex flex-col gap-4">
             {setupGuide.steps.map((step, index) => (

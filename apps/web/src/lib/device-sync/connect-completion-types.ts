@@ -31,6 +31,8 @@ export interface DeviceSyncCompletionSetupGuide {
   downloadAction: DeviceSyncCompletionSetupAction;
   steps: DeviceSyncCompletionSetupGuideStep[];
   title: string;
+  // Pre-generated memo in the member's picked Murph voice.
+  voiceMemoSrc: string;
 }
 
 // `kind` chooses the dialog header icon: "device-sync" → watch+check (the

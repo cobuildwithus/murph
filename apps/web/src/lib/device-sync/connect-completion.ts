@@ -16,6 +16,7 @@ import type {
   DeviceSyncCompletionSetupGuide,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
+import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/whoop-sync-voice-memo";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -124,7 +125,11 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     failed,
     kind: "device-sync",
     retryHref: failed ? "/connect" : null,
-    setupGuide: needsWhoopAppleHealthRelay ? buildWhoopAppleHealthSetupGuide() : null,
+    setupGuide: needsWhoopAppleHealthRelay
+      ? buildWhoopAppleHealthSetupGuide(
+          await resolveWhoopSyncVoiceMemoSrc(input.member?.id ?? null),
+        )
+      : null,
     title,
     unverified: !failed && !connected && successAsserted,
   };
@@ -396,7 +401,7 @@ function resolveCompletionDetail(input: {
   return "Your wearable is ready. Murph will start learning from your data.";
 }
 
-function buildWhoopAppleHealthSetupGuide(): DeviceSyncCompletionSetupGuide {
+function buildWhoopAppleHealthSetupGuide(voiceMemoSrc: string): DeviceSyncCompletionSetupGuide {
   return {
     actionAriaLabel: "See how to sync all of your WHOOP data",
     actionLabel: "Get full sync",
@@ -419,6 +424,7 @@ function buildWhoopAppleHealthSetupGuide(): DeviceSyncCompletionSetupGuide {
       },
     ],
     title: "Get your full sync",
+    voiceMemoSrc,
   };
 }
 
