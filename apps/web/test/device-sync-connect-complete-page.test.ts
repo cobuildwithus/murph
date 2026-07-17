@@ -248,7 +248,7 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   assert.match(markup, /aria-label="See how to sync all of your WHOOP data"/);
   assert.match(markup, />Get full sync</);
   assert.doesNotMatch(markup, /href="whoop:/);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.match(markup, /variant="ghost"[^>]*>Continue exploring</);
   assert.doesNotMatch(markup, /Go home/);
@@ -276,7 +276,7 @@ test("HomePage renders replay-stripped matching store truth as connected", async
   assert.match(markup, /WHOOP is connected/);
   assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
   assert.match(markup, />Get full sync</);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.doesNotMatch(markup, /Device connection complete/);
@@ -305,7 +305,7 @@ test("HomePage uses a DB-assigned Messages line even when it is not in the legac
     }),
   }));
 
-  assert.match(markup, /href="sms:\+15550100999\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
+  assert.match(markup, /href="sms:\+15550100999\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /href="sms:\+15550100001/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
@@ -332,7 +332,7 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
     }),
   }));
 
-  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP\.\+Help\+me\+finish\+Apple\+Health\+sync\."/);
+  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
   assert.match(markup, /aria-label="Text Murph in Telegram"/);
   assert.match(markup, />Text Murph</);
   assert.match(markup, />Continue exploring</);
@@ -487,7 +487,7 @@ test("HomePage matches replay-stripped Junction upstream aliases by resolved con
   assert.match(markup, /WHOOP is connected/);
   assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
   assert.match(markup, />Get full sync</);
-  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP\.%20Help%20me%20finish%20Apple%20Health%20sync\."/);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
 });
