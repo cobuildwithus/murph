@@ -1848,7 +1848,7 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
     )
-    expect(compact).toContain('Last thing before I quit interrogating you')
+    expect(compact).toContain('Can you send me a voice memo covering a few things?')
     expect(compact).toContain(
       'spawn a separate background child for each: the medical-persistence child owns the entire medical save, and the supplement child owns label enrichment',
     )
