@@ -71,14 +71,6 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
-  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
   HostedExecutionAssistantAskRequestedWake,
   HostedExecutionBundleRef,
@@ -223,9 +215,6 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
-import {
-  stopHostedCliRuntimeBridge,
-} from "../src/hosted-runtime/cli-runtime-bridge.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
@@ -438,6 +427,93 @@ describe("hosted workspace runtime entrypoint", () => {
         workspace: createWorkspaceState({ version: "0" }),
       });
       await resultPromise.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("links host abort into active idle-checkpoint construction", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host aborted during checkpoint construction");
+    const snapshotStarted = createDeferred<void>();
+    const snapshotAborted = createDeferred<unknown>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_checkpoint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(_snapshotInput, context) {
+            const signal = context?.signal;
+            assert.ok(signal, "Checkpoint construction must receive a linked abort signal.");
+            snapshotStarted.resolve();
+            return await new Promise<never>((_resolve, reject) => {
+              const rejectForAbort = () => {
+                snapshotAborted.resolve(signal.reason);
+                reject(signal.reason);
+              };
+              if (signal.aborted) {
+                rejectForAbort();
+                return;
+              }
+              signal.addEventListener("abort", rejectForAbort, { once: true });
+            });
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        snapshotStarted.promise,
+        10_000,
+        () => "Idle checkpoint construction did not start.",
+      );
+      hostAbortController.abort(hostAbortReason);
+
+      assert.equal(
+        await withRealTimeout(
+          snapshotAborted.promise,
+          10_000,
+          () => "Host abort did not reach checkpoint construction.",
+        ),
+        hostAbortReason,
+      );
+      assert.equal(await resultPromise.catch((error: unknown) => error), hostAbortReason);
+      assert.equal(checkpointRequests.length, 0);
+    } finally {
+      hostAbortController.abort(hostAbortReason);
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
@@ -1100,8 +1176,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ["workspace.read", "done"],
         ["workspace.restore", "start"],
         ["workspace.restore", "done"],
-        ["cli.bridge", "start"],
-        ["cli.bridge", "done"],
         ["codex.prepare", "start"],
         ["codex.prepare", "done"],
         ["mailbox.import.initial", "start"],
@@ -4762,7 +4836,7 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.deepEqual(artifactGetCalls, []);
   });
 
-  test("emits metadata-only phase boundary logs for checkpoint and bridge shutdown", async () => {
+  test("emits metadata-only phase boundary logs for checkpoint and runtime shutdown", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -4835,7 +4909,6 @@ describe("hosted workspace runtime entrypoint", () => {
         entry.details.runtimePhase,
         entry.details.runtimePhaseStatus,
       ])).toEqual(expect.arrayContaining([
-        ["cli.bridge", "done"],
         ["workspace.checkpoint.idle_shutdown", "start"],
         ["workspace.checkpoint.idle_shutdown", "done"],
         ["runtime.return", "done"],
@@ -4852,14 +4925,6 @@ describe("hosted workspace runtime entrypoint", () => {
       }));
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, false);
-      expect(
-        phaseLogs.find((entry) =>
-          entry.details.runtimePhase === "cli.bridge"
-          && entry.details.runtimePhaseStatus === "done"
-        )?.details,
-      ).toEqual(expect.objectContaining({
-        bridgeStarted: true,
-      }));
       assert.equal(phaseLogs.every((entry) => entry.userId === null), true);
       assert.equal(
         readCapturedHostedExecutionLogs(consoleInfo)
@@ -9188,10 +9253,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const postCheckpointWakeAt = new Date(Date.now() + 15).toISOString();
     const phaseInputIds: string[][] = [];
-    const phaseRoutes: Array<{
-      threadId: string | null;
-      threadIsDirect: boolean | null;
-    } | null> = [];
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_entrypoint_current_route_continuation",
     })];
@@ -9254,61 +9315,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 ?? input.initialMailboxImport.importResult.assistantInputIds
                 ?? []),
             ]);
-            const bridgeUrl = input.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
-            const bridgeToken = input.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
-            assert.ok(bridgeUrl);
-            assert.ok(bridgeToken);
-            const readBridgeRoute = async (routeGrant?: string) => {
-              const routeResponse = await fetch(
-                new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridgeUrl),
-                {
-                  body: JSON.stringify({}),
-                  headers: {
-                    authorization: `Bearer ${bridgeToken}`,
-                    "content-type": "application/json",
-                    ...(routeGrant
-                      ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER]: routeGrant }
-                      : {}),
-                  },
-                  method: "POST",
-                },
-              );
-              if (!routeGrant) {
-                assert.equal(routeResponse.status, 403);
-                return null;
-              }
-              assert.equal(routeResponse.status, 200);
-              const routePayload = await routeResponse.json() as {
-                route: {
-                  threadId: string | null;
-                  threadIsDirect: boolean | null;
-                } | null;
-              };
-              return routePayload.route
-                ? {
-                    threadId: routePayload.route.threadId,
-                    threadIsDirect: routePayload.route.threadIsDirect,
-                  }
-                : null;
-            };
-            phaseRoutes.push(await readBridgeRoute());
-            if (assistantPhaseCalls === 1) {
-              assert.ok(input.currentDeliveryRouteScope);
-              await input.currentDeliveryRouteScope.run(
-                {
-                  channel: "linq",
-                  deliveryTarget: "thread_current_route_continuation",
-                  identityId: null,
-                  participantId: null,
-                  threadId: "thread_current_route_continuation",
-                  threadIsDirect: false,
-                },
-                async (routeGrant) => {
-                  phaseRoutes.push(await readBridgeRoute(routeGrant));
-                },
-              );
-              phaseRoutes.push(await readBridgeRoute());
-            }
             events.push(
               `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
             );
@@ -9349,15 +9355,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 2);
       assert.equal(phaseInputIds[0]?.length, 1);
       assert.deepEqual(phaseInputIds[1], []);
-      assert.deepEqual(phaseRoutes, [
-        null,
-        {
-          threadId: "thread_current_route_continuation",
-          threadIsDirect: false,
-        },
-        null,
-        null,
-      ]);
       assert.deepEqual(
         events.filter((event) =>
           event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
@@ -11864,175 +11861,6 @@ describe("hosted workspace runtime entrypoint", () => {
       if (resultPromise) {
         await resultPromise.catch(() => undefined);
       }
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("drains completed runner deferred usage before rethrowing CLI bridge drain failure", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-bridge-fail-"));
-    const events: string[] = [];
-    const usageRecordStarted = createDeferred<void>();
-    const releaseUsageRecord = createDeferred<void>();
-    const deviceSnapshotStarted = createDeferred<void>();
-    const releaseDeviceSnapshot = createDeferred<void>();
-    let bridgeRequestTimeoutMs: number | null = null;
-    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
-    let resultSettled = false;
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const deviceSyncPort = createSnapshotDeviceSyncPort({
-        connectionId: "connection_synthetic_bridge_drain_failure",
-        nextReconcileAt: "2099-01-01T00:00:00.000Z",
-        onFetchSnapshot: async () => {
-          events.push("device.snapshot:start");
-          deviceSnapshotStarted.resolve();
-          await releaseDeviceSnapshot.promise;
-          events.push("device.snapshot:done");
-        },
-      });
-      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          commitTimeoutMs: 50,
-          request: {
-            attemptId: "attempt_synthetic_deferred_usage_bridge_drain_failure",
-            idleCheckpointDelayMs: 1,
-            leaseGeneration: "9",
-            userId: TEST_USER_ID,
-            workspaceVersion: "4",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "e".repeat(64),
-                key: `users/bundles/member-synthetic/deferred-usage-bridge-fail-${snapshotInput.reason}.bundle.json`,
-                size: 640,
-              }),
-            };
-          },
-          async importItem(item) {
-            events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
-          },
-          platform: {
-            ...createPlatform({
-              deviceSyncPort,
-              mailboxPort: createMailboxPort({
-                events,
-                items: [],
-              }),
-              workspacePort: {
-                async read() {
-                  events.push("workspace.read");
-                  return {
-                    fetchedAt: TEST_NOW,
-                    workspace: createWorkspaceState({ version: "4" }),
-                  };
-                },
-                async checkpoint(request) {
-                  events.push(`workspace.checkpoint:${request.reason}`);
-                  return {
-                    checkpointed: true,
-                    workspace: createWorkspaceState({
-                      snapshotRef: request.snapshotRef,
-                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-                    }),
-                  };
-                },
-              },
-            }),
-            usageRecordPort: {
-              async recordUsage(record: AssistantUsageRecord) {
-                events.push("usage.record:start");
-                usageRecordStarted.resolve();
-                await releaseUsageRecord.promise;
-                events.push("usage.record:done");
-                return {
-                  recorded: true,
-                  usageId: record.usageId,
-                };
-              },
-            },
-          },
-          async runAssistantPhase(phaseInput) {
-            events.push("assistant.phase");
-            const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
-            const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
-            bridgeRequestTimeoutMs = Number(
-              phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV],
-            );
-            assert.ok(bridgeUrl);
-            assert.ok(bridgeToken);
-            assert.equal(bridgeRequestTimeoutMs, 5_050);
-            const bridgeRequest = fetch(
-              new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridgeUrl),
-              {
-                body: JSON.stringify({}),
-                headers: {
-                  authorization: `Bearer ${bridgeToken}`,
-                  "content-type": "application/json",
-                },
-                method: "POST",
-              },
-            );
-            void bridgeRequest.catch(() => undefined);
-            await withRealTimeout(
-              deviceSnapshotStarted.promise,
-              1_000,
-              () => "CLI bridge device snapshot request did not start.",
-            );
-            phaseInput.recordDeferredUsage?.(createAssistantUsageRecord({
-              usageId: "turn_entrypoint_deferred_usage_bridge_failure.attempt-1",
-            }));
-            return {
-              afterCheckpoint: async () => {
-                events.push("reply.deliver");
-                return {
-                  checkpointReason: "outbox_receipt",
-                };
-              },
-              checkpointReason: "assistant_runtime_commit",
-              progressed: true,
-            };
-          },
-          vaultRoot,
-        },
-      );
-      void resultPromise.finally(() => {
-        resultSettled = true;
-      }).catch(() => undefined);
-
-      await withRealTimeout(
-        usageRecordStarted.promise,
-        1_000,
-        () => "Deferred usage recording did not start before CLI bridge drain failure.",
-      );
-      assert.notEqual(bridgeRequestTimeoutMs, null);
-      await new Promise((resolve) =>
-        setTimeout(resolve, (bridgeRequestTimeoutMs ?? 0) + 50)
-      );
-      assert.equal(events.includes("usage.record:done"), false);
-      assert.equal(resultSettled, false);
-
-      releaseUsageRecord.resolve();
-      await expect(
-        withRealTimeout(
-          resultPromise,
-          2_000,
-          () => "Runtime did not reject after deferred usage recording finished.",
-        ),
-      ).rejects.toThrow("Hosted CLI bridge in-flight request drain timed out.");
-      assert.equal(events.includes("usage.record:done"), true);
-    } finally {
-      releaseUsageRecord.resolve();
-      releaseDeviceSnapshot.resolve();
-      if (resultPromise) {
-        await resultPromise.catch(() => undefined);
-      }
-      await stopHostedCliRuntimeBridge();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -25198,7 +25026,17 @@ async function ensureHostedBootstrapMetadataForSystemMailboxTest(
   try {
     await stat(metadataPath);
   } catch {
-    await writeFile(metadataPath, "{}\n", "utf8");
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify({
+        createdAt: TEST_NOW,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Synthetic hosted workspace",
+        vaultId: `vault_${"0".repeat(26)}`,
+      }, null, 2)}\n`,
+      "utf8",
+    );
   }
 }
 

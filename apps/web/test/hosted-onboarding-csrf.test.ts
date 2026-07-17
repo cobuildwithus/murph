@@ -207,6 +207,11 @@ function createHostedOnboardingEnvironment(
       launch_edge_monthly: null,
       launch_monthly: null,
     },
+    stripeUsageCreditPriceIdsByOffer: {
+      usage_5_usd: null,
+      usage_10_usd: null,
+      usage_25_usd: null,
+    },
     stripeSecretKey: null,
     stripeWebhookSecret: null,
     telegramBotUsername: null,

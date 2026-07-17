@@ -9,10 +9,11 @@ import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-on
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
-const COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES = 2_048;
+const COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES = 512;
 
-// Accepts only a compact on-device-derived RMSSD observation. Raw RR intervals,
-// BLE frames, device identity, and packet timestamps are not part of this API.
+// Accepts only one compact on-device-derived overnight RMSSD summary. Raw RR
+// intervals, per-window values, BLE frames, device identity, and packet
+// timestamps are not part of this API.
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
@@ -35,7 +36,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     acceptedAt,
-    captureId: observation.captureId,
+    nightDate: observation.nightDate,
     status: "accepted",
   }, 202);
 });

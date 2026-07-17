@@ -57,7 +57,9 @@ const TEST_CONTEXT_BY_KEY = {
 describe("user-facing message variants", () => {
   it("keeps at least 20 variants for every rotating message class", () => {
     for (const key of TEST_TEMPLATE_KEYS) {
-      expect(collectRenderedTexts(key).size).toBeGreaterThanOrEqual(USER_FACING_MESSAGE_MIN_VARIANT_COUNT);
+      expect(collectRenderedTexts(key).size, key).toBeGreaterThanOrEqual(
+        USER_FACING_MESSAGE_MIN_VARIANT_COUNT,
+      );
     }
   });
 
@@ -101,45 +103,87 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.home_redirect", "+15555550123");
     expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
-    expectEveryVariantContains("linq.ai_usage.edge_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
-    expectEveryVariantContains("linq.ai_usage.pulse_upgrade_edge", "https://withmurph.ai/home");
   });
 
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
   });
 
-  it("keeps thread allowance copy neutral and advisory", () => {
+  it("keeps thread allowance copy neutral while explaining the pause", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
-      expect(text).not.toMatch(/paused?|resume|reset|back after|return after/iu);
+      expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
     }
   });
 
   it("keeps notice templates neutral about unprojected billing actions", () => {
     for (const key of [
       "linq.ai_usage.trial_conversion_pending",
-      "linq.ai_usage.trial_limit_reached",
-      "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
-        expect(text).not.toMatch(/upgrade|start pulse|checkout|subscribe/iu);
+        expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
       }
     }
   });
 
-  it("describes the usage-saving model without unexplained model names", () => {
+  it("keeps direct paid limit templates neutral until delivery-time projection", () => {
     for (const key of [
       "linq.ai_usage.edge_limit_reached",
-      "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
-        expect(text).toMatch(/less capable|lower-usage|lighter(?:-model| model)/u);
-        expect(text).not.toMatch(/\b(?:Luna|Terra|Sol)\b/u);
+        expect(text).toMatch(/Murph is paused/iu);
+        expect(text).not.toMatch(
+          /add usage|top[ -]?up|checkout|https?:\/\/|until .+ usage is added|until you add usage/iu,
+        );
       }
+    }
+  });
+
+  it("explains how each blocked non-top-up allowance can resume", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.trial_limit_reached")) {
+      expect(text).toMatch(/Murph is paused until .+ plan/iu);
+      expect(text).toMatch(/plan/iu);
+      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+    }
+
+    for (const key of [
+      "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.thread_limit_reached",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
+        expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+      }
+    }
+  });
+
+  it("does not describe blocked usage as advisory", () => {
+    for (const key of [
+      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.pulse_upgrade_edge",
+      "linq.ai_usage.thread_limit_reached",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).not.toMatch(
+          /keep replying|replies continue|remain(?:s)? available|still available|chat stays open|conversation continues/iu,
+        );
+      }
+    }
+  });
+
+  it("keeps every Family usage notice scoped to one member's allowance", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).toMatch(/^(?:You've|Your)\b/u);
+      expect(text).toMatch(
+        /separate|does not (?:affect|draw from|use)|unaffected/u,
+      );
+      expect(text).toMatch(/AI usage is paused until your allowance resets/iu);
+      expect(text).not.toMatch(/\bshared\b/iu);
     }
   });
 
@@ -159,7 +203,11 @@ describe("user-facing message variants", () => {
   });
 
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
-    expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /\bMurph\b/u);
+    expectEveryVariantDoesNotMatch(
+      "assistant.signup_welcome",
+      /personal health assistant/iu,
+    );
     expectEveryVariantMatches("assistant.signup_welcome", /private/iu);
     expectEveryVariantMatches("assistant.signup_welcome", /remember|keep|learn/iu);
     for (const text of collectRenderedTexts("assistant.signup_welcome")) {

@@ -67,104 +67,104 @@ export interface RenderedUserFacingMessage {
 
 const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal.
+Everyone's got something they want from their health. My job is to help you actually get there. Everything you share stays private to you, and the more I learn, the better my help fits.
 
 Ready to get started?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-You can talk to me about any health goal, question, decision, data, or task. The more I learn about your health, the more useful my help becomes.
+Whatever you're working toward with your health, you don't have to figure it out alone. This space is private to you, and I remember what matters so my help keeps getting better.
 
 Ready to start?`,
-    `Murph here, your private personal health assistant.
+    `Murph here.
 
-Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful so later help fits you better.
+Most people know roughly what they want from their health. The hard part is getting there, and that's my job. Everything stays private to you, and I learn what works for you so my help gets more personal.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me a health question, goal, decision, record, or task and we'll take it from there. I'll remember useful context so you don't have to start over each time.
+Think of me as someone in your corner for your health. What you share is private to you, and I keep the context that matters so you don't have to repeat yourself.
 
 Ready to start?`,
-    `Hi, Murph here, your private personal health assistant.
+    `Hi, Murph here.
 
-You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better.
+Whatever you want from your health, big or small, we can get after it together. This is private between us, and I remember the useful parts so my help improves over time.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help becomes more personal over time.
+You've got things you want from your health, and I'm here to help you actually pull them off. Everything you tell me is private, and I learn as we go so my help gets better.
 
 Ready to start?`,
-    `Murph here, your private personal health assistant.
+    `Murph here.
 
-Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context so next time starts with a better picture.
+My job is simple: help you make real progress on whatever matters in your health. It all stays private to you, and I keep track of what I learn so next time starts from a better picture.
 
 Ready to get started?`,
-    `Hi, I'm Murph, a private personal health assistant for whatever comes up.
+    `Hi, I'm Murph.
 
-That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers over time.
+Whether you're after more energy, better sleep, or something bigger, I'm in your corner. What you share stays private, and I remember it so my help gets more useful.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll learn what matters as we go so my help becomes more personal.
+Health goals are easy to want and hard to hit alone. I'm here to change that. Everything here is private to you, and the more I learn about your life, the better I can help.
 
 Ready to get started?`,
-    `Hi, Murph here, your private personal health assistant.
+    `Murph here.
 
-I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it.
+Whatever you're working toward with your health, I'll help you figure out what actually works and stick with it. It's all private, and I keep what I learn so you don't have to start from zero.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help fits you better.
+I'm here for whatever your health throws at you and whatever you're chasing. This stays private to you, and I remember the context that makes my help better.
 
 Ready to get started?`,
-    `Murph here, your private personal health assistant.
+    `Hey, Murph here.
 
-You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that makes future help more useful.
+You bring what you want from your health, and I bring the follow-through. Everything is private between us, and I learn what fits your life so my help gets more personal.
 
 Ready to start?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember the relevant context so later help starts from a better picture.
+Making progress on your health is a lot easier with someone in your corner. That's me. What you share is private, and I remember it so my help improves over time.
 
 Ready to get started?`,
-    `Hey, Murph here, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. The more useful context I learn, the more personal my help becomes.
+Whatever you'd change about your health if it were easy, that's where I come in. It all stays private to you, and the more I learn, the more useful I get.
 
 Ready to start?`,
-    `Hello, I'm Murph, your private personal health assistant.
+    `Murph here.
 
-I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time.
+I help you figure out what actually works for your health, then stick with it. Everything stays private to you, and I keep what I learn so you don't have to repeat yourself.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hi, Murph here.
 
-You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context so later help gets better.
+Everyone's working on something with their health. Whatever yours is, we'll get after it together. This is private to you, and I learn as we go so my help keeps getting better.
 
 Ready to start?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts so next time starts with a better picture.
+Wanting something for your health is easy. Actually getting it is the hard part, and that's my job. Everything here is private, and I remember what matters so my help gets more personal.
 
 Ready to get started?`,
-    `Murph here, your private personal health assistant.
+    `Hi, I'm Murph.
 
-I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help improves over time.
+Whatever you want from your health, my job is to make it genuinely easier. What you share stays private to you, and I keep the useful context so my help gets better over time.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, Murph here.
 
-Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time.
+I'm in your corner for all of it: the goals, the questions, the stuff you've been putting off. It stays private between us, and the more I learn about you, the better my help fits.
 
 Ready to get started?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better over time.
+You don't need a plan or a perfect goal to start. Just tell me what you want from your health. Everything is private to you, and I remember what I learn so my help gets more useful.
 
 Ready to start?`,
   ],
@@ -372,118 +372,118 @@ Sound good?`,
     `Your trial closed out. Setup is waiting on the site:
 {homeUrl}`,
     `That was the trial. The rest is here: {homeUrl}`,
-    `Trial's done. If you want me to keep replying, setup is on the site:
+    `Trial's done. If you want to continue, setup is on the site:
 {homeUrl}`,
   ],
   "linq.ai_usage.trial_limit_reached": [
-    `You've used the AI included in your trial. I can keep replying. Want me to explain the available plans? Account details: {homeUrl}`,
-    `Your trial's included AI is used, but this chat stays open. Would a quick plan comparison help? Account details: {homeUrl}`,
-    `The included trial allowance has been reached. Replies continue. Want help deciding whether Pulse fits? Account details: {homeUrl}`,
-    `You've reached the trial allowance. I am still available. Want me to walk through what comes next? Account details: {homeUrl}`,
-    `Trial usage is at its included amount. I can keep helping. Would you like a summary of the plan options? Account details: {homeUrl}`,
-    `The AI included with your trial has been used. This conversation can continue. Want to compare plans here first? Account details: {homeUrl}`,
-    `You've used the trial's included AI. I can still reply. Would an explanation of Pulse be useful? Account details: {homeUrl}`,
-    `Your trial usage is at the included limit. Replies stay on. Want help understanding the monthly plans? Account details: {homeUrl}`,
-    `The trial allowance is used. I can keep working with you. Would you like me to explain your options? Account details: {homeUrl}`,
-    `You've reached the trial's included usage. This chat remains available. Want a plain comparison of the plans? Account details: {homeUrl}`,
-    `Trial AI usage has reached its included amount. I can continue replying. Would details about Pulse help? Account details: {homeUrl}`,
-    `The trial's included allowance is spent. Replies continue. Want me to answer questions about the next plan? Account details: {homeUrl}`,
-    `You've reached the AI included in the trial. I am still here. Would a short plan overview be useful? Account details: {homeUrl}`,
-    `Trial usage has reached its included amount. I can still help. Want to talk through the choices before deciding? Account details: {homeUrl}`,
-    `You've used the included trial allowance. This conversation stays open. Would you like help comparing monthly usage? Account details: {homeUrl}`,
-    `The trial AI allowance is at its limit. I can keep replying. Want me to explain how Pulse works? Account details: {homeUrl}`,
-    `Your included trial usage is spent. Replies are still available. Would you like a plan recommendation based on your usage? Account details: {homeUrl}`,
-    `The trial allowance has been reached. I can keep helping. Want to review the available plans together? Account details: {homeUrl}`,
-    `You've reached the trial usage amount. This chat continues. Would a quick explanation of monthly allowances help? Account details: {homeUrl}`,
-    `The AI included in your trial is used. I remain available. Want me to answer any plan questions? Account details: {homeUrl}`,
+    `You've used the AI included in your trial. Murph is paused until you start a plan. You can compare plans here: {homeUrl}`,
+    `Your trial's included AI is used. Murph is paused until you choose a plan. Plan options are here: {homeUrl}`,
+    `The included trial allowance has been reached. Murph is paused until a plan is active. You can compare plans here: {homeUrl}`,
+    `You've reached the trial allowance. Murph is paused until you start a plan. Plan details are here: {homeUrl}`,
+    `Trial usage is at its included amount. Murph is paused until you choose a plan. You can review the options here: {homeUrl}`,
+    `The AI included with your trial has been used. Murph is paused until a plan is active. Plan options: {homeUrl}`,
+    `You've used the trial's included AI. Murph is paused until you start a plan. You can compare plans here: {homeUrl}`,
+    `Your trial usage is at the included limit. Murph is paused until you choose a plan. Monthly plan details: {homeUrl}`,
+    `The trial allowance is used. Murph is paused until a plan is active. You can review plans here: {homeUrl}`,
+    `You've reached the trial's included usage. Murph is paused until you start a plan. Plan comparison: {homeUrl}`,
+    `Trial AI usage has reached its included amount. Murph is paused until you choose a plan. Plan details: {homeUrl}`,
+    `The trial's included allowance is spent. Murph is paused until a plan is active. You can compare plans here: {homeUrl}`,
+    `You've reached the AI included in the trial. Murph is paused until you start a plan. Available plans: {homeUrl}`,
+    `Trial usage has reached its included amount. Murph is paused until you choose a plan. You can review the choices here: {homeUrl}`,
+    `You've used the included trial allowance. Murph is paused until a plan is active. Plan options: {homeUrl}`,
+    `The trial AI allowance is at its limit. Murph is paused until you start a plan. You can see how Pulse works here: {homeUrl}`,
+    `Your included trial usage is spent. Murph is paused until you choose a plan. Plan comparison: {homeUrl}`,
+    `The trial allowance has been reached. Murph is paused until a plan is active. You can review the available plans here: {homeUrl}`,
+    `You've reached the trial usage amount. Murph is paused until you start a plan. Monthly allowance details: {homeUrl}`,
+    `The AI included in your trial is used. Murph is paused until you choose a plan. Plan details: {homeUrl}`,
   ],
   "linq.ai_usage.edge_limit_reached": [
-    `You've used this month's included Edge allowance. I can keep replying. Want a less capable, lower-usage model for future turns? Account details: {homeUrl}`,
-    `Your included Edge usage is at its monthly amount, and replies continue. Would a lighter model that stretches your included usage work for what is next? Account details: {homeUrl}`,
-    `This month's Edge allowance is used. I am still available. Want a quick comparison with a lower-usage model? Account details: {homeUrl}`,
-    `You've reached the included Edge allowance. This chat stays open. Would a less capable, lower-usage model make sense for your next turn? Account details: {homeUrl}`,
-    `Edge usage is at the included monthly limit. I can keep helping. Want me to explain how a lighter model affects included usage? Account details: {homeUrl}`,
-    `The included Edge allowance is spent for this period. Replies stay on. Would you like a lower-usage model for future work? Account details: {homeUrl}`,
-    `You've used the monthly Edge allowance. This conversation continues. Want help deciding whether a less capable model that uses less included usage fits? Account details: {homeUrl}`,
-    `Your Edge allowance has reached its included amount. I can still reply. Would you like a lighter model next? Account details: {homeUrl}`,
-    `This month's included Edge usage is used. Replies continue. Want to compare your current model with a lower-usage option? Account details: {homeUrl}`,
-    `You've reached the Edge usage amount for this month. I can continue. Would a lighter model help stretch future included usage? Account details: {homeUrl}`,
-    `The monthly Edge allowance is used. I am still here. Want to review the less capable, lower-usage option? Account details: {homeUrl}`,
-    `Edge's included usage is at its monthly limit. This conversation stays available. Would you like a lower-usage model next? Account details: {homeUrl}`,
-    `You've used this period's Edge allowance. Replies continue. Want to compare the current model with a lighter, less capable option before changing anything? Account details: {homeUrl}`,
-    `The included Edge usage has been reached. I can keep working with you. Would a lighter model that uses less included usage suit the work you have next? Account details: {homeUrl}`,
-    `Your monthly Edge allowance is spent. This chat remains open. Want future turns on a less capable, lower-usage model? Account details: {homeUrl}`,
-    `This period's Edge usage is at the included amount. I can still help. Would you like to discuss a lower-usage model? Account details: {homeUrl}`,
-    `You've reached the included monthly Edge usage. Replies stay on. Want me to explain the tradeoff of a less capable, lower-usage model? Account details: {homeUrl}`,
-    `Edge usage is at its monthly allowance. I remain available. Would a lighter model help stretch your included usage after this turn? Account details: {homeUrl}`,
-    `The monthly Edge allowance is used. This chat remains open. Want to keep your current model or try a less capable, lower-usage one next? Account details: {homeUrl}`,
-    `You've used Edge's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
+    `You've used this month's included Edge allowance. Murph is paused for this usage period. The allowance resets next period.`,
+    `Your included Edge usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
+    `This month's Edge allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
+    `You've reached the included Edge allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
+    `Edge usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
+    `The included Edge allowance is spent for this period. Murph is paused for the current usage period.`,
+    `You've used the monthly Edge allowance. Murph is paused right now. The included allowance resets next period.`,
+    `Your Edge allowance has reached its included amount. Murph is paused for this usage period.`,
+    `This month's included Edge usage is used. Murph is paused right now. A new allowance begins next period.`,
+    `You've reached the Edge usage amount for this month. Murph is paused for the current period.`,
+    `This month's Edge allowance is fully used. Murph is paused right now. The allowance resets next period.`,
+    `Edge's included usage is at its monthly limit. Murph is paused for this usage period.`,
+    `You've used this period's Edge allowance. Murph is paused right now. The monthly allowance will reset.`,
+    `The included Edge usage has been reached. Murph is paused for the current usage period.`,
+    `Your monthly Edge allowance is spent. Murph is paused right now. The next allowance begins next period.`,
+    `This period's Edge usage is at the included amount. Murph is paused for this usage period.`,
+    `You've reached the included monthly Edge usage. Murph is paused right now. The allowance resets next period.`,
+    `Edge usage is at its monthly allowance. Murph is paused for the current period.`,
+    `The monthly Edge allowance is used. Murph is paused right now. The included allowance will reset.`,
+    `You've used Edge's included allowance for this month. Murph is paused for this usage period.`,
   ],
   "linq.ai_usage.family_limit_reached": [
-    `The Family plan's included monthly allowance is used. I can keep replying. Want a less capable, lower-usage model for future turns? Account details: {homeUrl}`,
-    `Your shared Family allowance is at its monthly amount, and replies continue. Would a lighter model help stretch the included usage? Account details: {homeUrl}`,
-    `This month's Family allowance is used. I am still available. Want to hear about the lower-usage model option? Account details: {homeUrl}`,
-    `The included Family usage has been reached. This chat stays open. Would a less capable, lower-usage model fit the next turn? Account details: {homeUrl}`,
-    `Family usage is at the included monthly limit. I can keep helping. Want me to explain how a lighter model uses the shared allowance? Account details: {homeUrl}`,
-    `The shared allowance is spent for this period. Replies stay on. Would you like a lower-usage model for future work? Account details: {homeUrl}`,
-    `You've used the Family plan's monthly allowance. This conversation continues. Want help weighing a less capable model that uses less included usage? Account details: {homeUrl}`,
-    `The shared Family allowance has reached its included amount. I can still reply. Would you like a lighter model next? Account details: {homeUrl}`,
-    `This month's included Family usage is used. Replies continue. Want to compare the current model with a lower-usage option? Account details: {homeUrl}`,
-    `You've reached the Family usage amount for this month. I can continue. Would a lighter model stretch the shared included usage further? Account details: {homeUrl}`,
-    `The monthly Family allowance is used. I am still here. Want to review a less capable, lower-usage option? Account details: {homeUrl}`,
-    `The Family plan's included usage is at its monthly limit. This conversation stays available. Would you like a lower-usage model next? Account details: {homeUrl}`,
-    `You've used this period's shared allowance. Replies continue. Want a plain comparison with a lighter, less capable model before changing anything? Account details: {homeUrl}`,
-    `The included Family usage has been reached. I can keep working with you. Would a lighter model that uses less included usage suit what is next? Account details: {homeUrl}`,
-    `Your monthly Family allowance is spent. This chat remains open. Want future turns on a less capable, lower-usage model? Account details: {homeUrl}`,
-    `This period's shared usage is at the included amount. I can still help. Would you like to discuss the lower-usage model option? Account details: {homeUrl}`,
-    `You've reached the included monthly Family usage. Replies stay on. Want me to explain the tradeoff of a less capable, lower-usage model? Account details: {homeUrl}`,
-    `Family usage is at its monthly allowance. I remain available. Would a lighter model help stretch future included usage? Account details: {homeUrl}`,
-    `The shared monthly allowance is used. This chat remains open. Want to keep the current model or try a less capable, lower-usage one next? Account details: {homeUrl}`,
-    `You've used the Family plan's included allowance for this month. I can keep replying. Would a lower-usage model help with future turns? Account details: {homeUrl}`,
+    `You've used your individual Family allowance for this month. Other Family members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your included usage through Family is at its monthly amount. Everyone else on the plan has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your individual monthly allowance through Family is used. Other members' allowances are separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've reached your own included usage for the month. This does not use another Family member's allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your monthly usage is at the limit included with your Family seat. Each Family member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your individual allowance is spent for this period. Other Family members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've used your Family-sponsored monthly allowance. Other members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your own Family allowance has reached its included amount. Every other member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've reached the included usage for your Family seat this month. Other Family seats have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've reached your individual usage amount for this month. This does not affect another Family member's allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your monthly allowance through Family is used. Each member's allowance is separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your Family seat's included usage is at its monthly limit. Other members have their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've used your own allowance for this period. Other Family members' allowances are separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your individual included usage has been reached. It does not draw from anyone else's Family allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your monthly included usage through Family is spent. Everyone else on the plan has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your own usage is at the included amount for this period. Other Family members keep their separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've reached your included monthly usage. Each Family member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your individual Family usage is at its monthly allowance. Other members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `Your own monthly allowance is used. Other Family members have separate usage limits. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+    `You've used the allowance included with your Family seat for this month. Other members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
   ],
   "linq.ai_usage.pulse_upgrade_edge": [
-    `You've used this month's included Pulse allowance. I can keep replying. Want a less capable, lower-usage model, or a comparison with Edge? Plan details: {homeUrl}`,
-    `Your included Pulse usage is at its monthly amount, and replies continue. Would you like to compare a lighter model that stretches included usage with Edge? Plan details: {homeUrl}`,
-    `This month's Pulse allowance is used. I am still available. Want help choosing between a lower-usage model and a plan with a larger allowance? Plan details: {homeUrl}`,
-    `You've reached the included Pulse allowance. This chat stays open. Would a less capable, lower-usage model or Edge fit your next work better? Plan details: {homeUrl}`,
-    `Pulse usage is at the included monthly limit. I can keep helping. Want me to explain the lighter-model and Edge options? Plan details: {homeUrl}`,
-    `The included Pulse allowance is spent for this period. Replies stay on. Would comparing a lower-usage model with Edge help? Plan details: {homeUrl}`,
-    `You've used the monthly Pulse allowance. This conversation continues. Want a less capable, lower-usage model next, or details about Edge? Plan details: {homeUrl}`,
-    `Your Pulse allowance has reached its included amount. I can still reply. Would you like to compare Edge with a lighter model that stretches included usage before changing anything? Plan details: {homeUrl}`,
-    `This month's included Pulse usage is used. Replies continue. Want me to explain how a lower-usage model and Edge differ? Plan details: {homeUrl}`,
-    `You've reached the Pulse usage amount for this month. I can continue. Would a less capable, lower-usage model or Edge be more useful for what comes next? Plan details: {homeUrl}`,
-    `The monthly Pulse allowance is used. I am still here. Want a plain comparison of Edge and the lighter model option? Plan details: {homeUrl}`,
-    `Pulse's included usage is at its monthly limit. This conversation stays available. Would you like a lower-usage model next, or information about Edge? Plan details: {homeUrl}`,
-    `You've used this period's Pulse allowance. Replies continue. Want help weighing a less capable model that uses less included usage against a larger plan? Plan details: {homeUrl}`,
-    `The included Pulse usage has been reached. I can keep working with you. Would comparing Edge with a lighter, less capable model help? Plan details: {homeUrl}`,
-    `Your monthly Pulse allowance is spent. This chat remains open. Want future turns on a lower-usage model, or an overview of Edge? Plan details: {homeUrl}`,
-    `This period's Pulse usage is at the included amount. I can still help. Would you like to discuss Edge and a less capable, lower-usage model? Plan details: {homeUrl}`,
-    `You've reached the included monthly Pulse usage. Replies stay on. Want me to explain the lighter-model and higher-allowance choices? Plan details: {homeUrl}`,
-    `Pulse usage is at its monthly allowance. I remain available. Would a lighter model help stretch your included usage, or should we compare Edge? Plan details: {homeUrl}`,
-    `The monthly Pulse allowance is used. This chat remains open. Want to keep the current model, try a less capable, lower-usage one, or compare Edge? Plan details: {homeUrl}`,
-    `You've used Pulse's included allowance for this month. I can keep replying. Would you like help comparing Edge with a lower-usage model? Plan details: {homeUrl}`,
+    `You've used this month's included Pulse allowance. Murph is paused for this usage period. The allowance resets next period.`,
+    `Your included Pulse usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
+    `This month's Pulse allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
+    `You've reached the included Pulse allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
+    `Pulse usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
+    `The included Pulse allowance is spent for this period. Murph is paused for the current usage period.`,
+    `You've used the monthly Pulse allowance. Murph is paused right now. The included allowance resets next period.`,
+    `Your Pulse allowance has reached its included amount. Murph is paused for this usage period.`,
+    `This month's included Pulse usage is used. Murph is paused right now. A new allowance begins next period.`,
+    `You've reached the Pulse usage amount for this month. Murph is paused for the current period.`,
+    `This month's Pulse allowance is fully used. Murph is paused right now. The allowance resets next period.`,
+    `Pulse's included usage is at its monthly limit. Murph is paused for this usage period.`,
+    `You've used this period's Pulse allowance. Murph is paused right now. The monthly allowance will reset.`,
+    `The included Pulse usage has been reached. Murph is paused for the current usage period.`,
+    `Your monthly Pulse allowance is spent. Murph is paused right now. The next allowance begins next period.`,
+    `This period's Pulse usage is at the included amount. Murph is paused for this usage period.`,
+    `You've reached the included monthly Pulse usage. Murph is paused right now. The allowance resets next period.`,
+    `Pulse usage is at its monthly allowance. Murph is paused for the current period.`,
+    `The monthly Pulse allowance is used. Murph is paused right now. The included allowance will reset.`,
+    `You've used Pulse's included allowance for this month. Murph is paused for this usage period.`,
   ],
   "linq.ai_usage.thread_limit_reached": [
-    `This chat has reached its included Murph usage for the month. I can keep replying.`,
-    `The included Murph usage for this chat is used for the month, and replies continue.`,
-    `This chat reached its monthly included Murph usage. I am still available.`,
-    `That's the included Murph usage for this chat this month. The conversation stays open.`,
-    `This chat is at its included Murph usage for the month. I can keep helping.`,
-    `The monthly included Murph usage for this chat is used. Replies remain available.`,
-    `This chat hit its included usage amount for the month. I can still reply.`,
-    `Included Murph usage is at its monthly amount for this chat. The chat continues.`,
-    `This month's included Murph usage for the chat is used, and replies stay on.`,
-    `Heads up, this chat reached its monthly included usage. I am still here.`,
-    `The chat's included Murph usage is at its monthly amount. I can keep responding.`,
-    `This chat's monthly included usage is used. The conversation remains open.`,
-    `This chat reached its included Murph usage. I am ready to keep going.`,
-    `The chat is through its included Murph usage for the month, but replies continue.`,
-    `The included Murph usage for this chat is used this month. I can still help.`,
-    `This chat is at its included Murph usage for the month. Replies remain on.`,
-    `This chat's included usage is used for the period. I can keep replying.`,
-    `This chat hit its monthly included Murph amount. The conversation continues.`,
-    `The chat's monthly included usage is reached. I can keep working with you.`,
-    `Included Murph usage is used for this chat this month. I am still available.`,
+    `This chat has reached its included Murph usage for the month. AI usage is paused until the chat's allowance resets.`,
+    `The included Murph usage for this chat is used for the month. AI usage is paused until the allowance resets.`,
+    `This chat reached its monthly included Murph usage. AI usage is paused until the chat's allowance resets.`,
+    `That's the included Murph usage for this chat this month. AI usage is paused until the allowance resets.`,
+    `This chat is at its included Murph usage for the month. AI usage is paused until the chat's allowance resets.`,
+    `The monthly included Murph usage for this chat is used. AI usage is paused until the allowance resets.`,
+    `This chat hit its included usage amount for the month. AI usage is paused until the chat's allowance resets.`,
+    `Included Murph usage is at its monthly amount for this chat. AI usage is paused until the allowance resets.`,
+    `This month's included Murph usage for the chat is used. AI usage is paused until the chat's allowance resets.`,
+    `This chat reached its monthly included usage. AI usage is paused until the allowance resets.`,
+    `The chat's included Murph usage is at its monthly amount. AI usage is paused until the chat's allowance resets.`,
+    `This chat's monthly included usage is used. AI usage is paused until the allowance resets.`,
+    `This chat reached its included Murph usage. AI usage is paused until the chat's allowance resets.`,
+    `The chat is through its included Murph usage for the month. AI usage is paused until the allowance resets.`,
+    `The included Murph usage for this chat is used this month. AI usage is paused until the chat's allowance resets.`,
+    `This chat is at its included Murph usage for the month. AI usage is paused until the allowance resets.`,
+    `This chat's included usage is used for the period. AI usage is paused until the chat's allowance resets.`,
+    `This chat hit its monthly included Murph amount. AI usage is paused until the allowance resets.`,
+    `The chat's monthly included usage is reached. AI usage is paused until the chat's allowance resets.`,
+    `Included Murph usage is used for this chat this month. AI usage is paused until the allowance resets.`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

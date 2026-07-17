@@ -137,7 +137,6 @@ const SLEEP_METRIC_EVIDENCE = [
   { metricKey: "sleep-score", summaryField: "sleepScore", sourceKind: "sleep-summary" },
   { metricKey: "deep-sleep-minutes", summaryField: "deepMinutes", sourceKind: "sleep-summary" },
   { metricKey: "rem-sleep-minutes", summaryField: "remMinutes", sourceKind: "sleep-summary" },
-  { metricKey: "hrv-rmssd", summaryField: "hrv", sourceKind: "sleep-summary" },
   { metricKey: "spo2", summaryField: "spo2", sourceKind: "sleep-summary" },
   { metricKey: "lowest-spo2", summaryField: "lowestSpo2", sourceKind: "sleep-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableSleepSummary>>[];
@@ -145,6 +144,8 @@ const SLEEP_METRIC_EVIDENCE = [
 const RECOVERY_METRIC_EVIDENCE = [
   { metricKey: "readiness-score", summaryField: "readinessScore", sourceKind: "wearable-summary" },
   { metricKey: "resting-heart-rate", summaryField: "restingHeartRate", sourceKind: "wearable-summary" },
+  // Recovery is the sole daily MetricPoint owner; sleep retains HRV in its
+  // presentation summary without projecting a duplicate point.
   { metricKey: "hrv-rmssd", summaryField: "hrv", sourceKind: "wearable-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableRecoverySummary>>[];
 
@@ -271,12 +272,6 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
   });
 }
 
-// Precedence suppresses RAW OBSERVATION points only. Summary points are
-// never filtered against each other: when two summary kinds emit the same
-// key for a day (sleep and recovery both resolve hrv-rmssd), both points
-// stay, and the metric selector's established sourcePriority chooses
-// between them at selection time — table order here must never decide
-// data retention.
 function applyWearableSummaryMetricPrecedence(
   points: readonly MetricPoint[],
   suppressionEvidence: readonly WearableMetricSuppressionEvidence[],

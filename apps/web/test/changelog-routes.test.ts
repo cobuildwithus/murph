@@ -24,7 +24,7 @@ describe("changelog routes", () => {
   it("publishes every item from the two newest editions with canonical links", async () => {
     const response = await getChangelogFeed(
       new Request(
-        "https://join.example.test/api/changelog?from=2026-07-14&to=2026-07-16",
+        "https://join.example.test/api/changelog?from=2026-07-15&to=2026-07-17",
       ),
     );
     const body = await response.json();
@@ -35,31 +35,39 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(10);
+    expect(items).toHaveLength(26);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      "2026-07-15",
-      "2026-07-15",
-      "2026-07-15",
-      "2026-07-15",
-      "2026-07-15",
-      "2026-07-15",
-      "2026-07-14",
-      "2026-07-14",
-      "2026-07-14",
-      "2026-07-14",
+      ...Array.from({ length: 13 }, () => "2026-07-16"),
+      ...Array.from({ length: 13 }, () => "2026-07-15"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
+        "sleep-support-that-stays",
+        "conversation-subscription-actions",
+        "usage-top-ups",
+        "group-owned-murph-style",
+        "context-aware-follow-through",
+        "murph-safe-product-search",
+        "scheduled-replies-keep-context",
+        "onboarding-asks-before-it-prescribes",
+        "whoop-apple-health-fallback",
+        "phone-calls-in-plan-usage",
+        "less-repeated-work-behind-everyday-screens",
+        "home-experiment-history-compact",
+        "biomarker-pages-restored",
         "affirmative-reactions-as-replies",
         "reaction-first-group-permissions",
+        "family-member-plan-management",
+        "leave-a-group-yourself",
         "exercise-library-250-more-visual-guides",
         "fresh-messages-stay-foreground",
         "pulse-trial-two-weeks",
+        "replies-read-like-texting",
+        "model-settings-refresh",
+        "experiment-cards-honest-colors",
+        "voice-previews-pick-the-voice",
+        "signup-and-email-linking-fixes",
         "billing-settings-handoff",
-        "plan-usage-percentage",
-        "personal-group-awareness",
-        "appointment-scheduling-brief",
-        "apple-health-chat-handoff",
       ]),
     );
     for (const item of items) {

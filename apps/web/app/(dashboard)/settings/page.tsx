@@ -8,6 +8,10 @@ import { CustomizeMurphSettings } from "@/src/components/settings/customize-murp
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
+import type {
+  HostedUsageTopUpOffer,
+  HostedUsageTopUpReturn,
+} from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
@@ -30,10 +34,17 @@ import {
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { readHostedPersonalUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
+import { readHostedUsageCreditProjection } from "@/src/lib/hosted-execution/usage-credits";
+import {
+  getHostedUsageCreditOfferDefinition,
+  type HostedUsageCreditOfferCode,
+} from "@/src/lib/hosted-onboarding/usage-credit-offers";
+import { readHostedActiveUsageCreditPurchaseForPayer } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -43,8 +54,13 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 type SettingsSearchParams = {
   addEmail?: string | string[] | undefined;
+  addUsage?: string | string[] | undefined;
+  usageCheckout?: string | string[] | undefined;
+  usagePurchase?: string | string[] | undefined;
   voice?: string | string[] | undefined;
 };
+
+const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 export default async function SettingsPage({
   searchParams,
@@ -54,8 +70,13 @@ export default async function SettingsPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
+  const openUsageTopUp =
+    readOnlySearchParamValue(resolvedSearchParams.addUsage) === "true";
   const openVoiceLink =
     readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
+  const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
+    resolvedSearchParams,
+  );
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
 
@@ -64,43 +85,29 @@ export default async function SettingsPage({
   }
 
   const prisma = getPrisma();
-  const [
-    settingsSnapshot,
-    freshPrivySession,
-    familyOwner,
-    familyAccess,
-    secureApprovalStatus,
-    usageStatus,
-  ] =
-    authenticatedMember
-      ? await Promise.all([
-          readHostedAccountSettingsPageSnapshot({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          getHostedPrivySession().catch(() => null),
-          readHostedFamilyOwnerSnapshotForMember({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedFamilyAccessForMember({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedSecureApprovalStatus({
-            privyUserId: session?.privyUserId,
-          }),
-          readHostedPersonalAiUsageStatus({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-        ])
-      : [null, null, null, null, { status: "unavailable" } as const, null];
+  const settingsData = authenticatedMember
+    ? await readSettingsPageData({
+        memberId: authenticatedMember.id,
+        prisma,
+        privyUserId: session?.privyUserId,
+      })
+    : null;
+  const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
+  const freshPrivySession = settingsData?.freshPrivySession ?? null;
+  const familyOwner = settingsData?.familyOwner ?? null;
+  const familyAccess = settingsData?.familyAccess ?? null;
+  const secureApprovalStatus =
+    settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
+  const usageStatus = settingsData?.usageStatus ?? null;
+  const usageCreditProjection = settingsData?.usageCreditProjection ?? null;
+  const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
+  const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
+  const usageTopUpOffers = projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
@@ -194,7 +201,14 @@ export default async function SettingsPage({
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          usageCreditBalanceUsdMicros={
+            usageCreditProjection?.balanceUsdMicros.toString() ?? null
+          }
           usageStatus={usageStatus}
+          usageTopUpActivePurchase={usageTopUpActivePurchase}
+          usageTopUpInitialOpen={openUsageTopUp}
+          usageTopUpOffers={usageTopUpOffers}
+          usageTopUpPurchaseReturn={usageTopUpPurchaseReturn}
         />
       </section>
 
@@ -294,8 +308,118 @@ export default async function SettingsPage({
   );
 }
 
+async function readSettingsPageData(input: {
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+  privyUserId: string | null | undefined;
+}) {
+  const { memberId, prisma } = input;
+  // The Privy reads are network calls with no database cost, so they overlap
+  // the database reads below.
+  const freshPrivySessionPromise = getHostedPrivySession().catch(() => null);
+  const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
+    privyUserId: input.privyUserId,
+  });
+
+  // The database-backed reads run sequentially on purpose: several of them
+  // fan out parallel queries internally, and running the helpers concurrently
+  // let one settings render exhaust the shared connection pool.
+  const settingsSnapshot = await readHostedAccountSettingsPageSnapshot({
+    memberId,
+    prisma,
+  });
+  const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
+    memberId,
+    prisma,
+  });
+  const familyAccess = await readHostedFamilyAccessForMember({
+    memberId,
+    prisma,
+  });
+  const usageStatus = await readHostedPersonalAiUsageStatus({
+    memberId,
+    prisma,
+  });
+  const usageCreditProjection = await readHostedUsageCreditProjection({
+    beneficiaryMemberId: memberId,
+    prisma,
+  });
+  const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
+    memberId,
+    prisma,
+  }).catch(() => []);
+  const usageTopUpActivePurchase = await readHostedActiveUsageCreditPurchaseForPayer({
+    payerMemberId: memberId,
+    prisma,
+  }).catch(() => null);
+
+  return {
+    familyAccess,
+    familyOwner,
+    freshPrivySession: await freshPrivySessionPromise,
+    secureApprovalStatus: await secureApprovalStatusPromise,
+    settingsSnapshot,
+    usageCreditProjection,
+    usageStatus,
+    usageTopUpActivePurchase,
+    usageTopUpOfferCodes,
+  };
+}
+
 function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function readOnlySearchParamValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+
+  return value.length === 1 ? value[0] : undefined;
+}
+
+function readUsageTopUpPurchaseReturn(
+  searchParams: SettingsSearchParams,
+): HostedUsageTopUpReturn | null {
+  const kind = readOnlySearchParamValue(searchParams.usageCheckout);
+  const purchaseId = readOnlySearchParamValue(searchParams.usagePurchase);
+
+  if (
+    (kind !== "success" && kind !== "cancel") ||
+    typeof purchaseId !== "string" ||
+    !HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN.test(purchaseId)
+  ) {
+    return null;
+  }
+
+  return {
+    kind,
+    purchaseId,
+  };
+}
+
+function projectHostedUsageTopUpOffers(
+  offerCodes: readonly HostedUsageCreditOfferCode[],
+): HostedUsageTopUpOffer[] {
+  return offerCodes.map((offerCode) => {
+    const offer = getHostedUsageCreditOfferDefinition(offerCode);
+
+    return {
+      amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
+      offerCode: offer.code,
+    };
+  });
+}
+
+function formatUsageTopUpAmount(amountUsdCents: number): string {
+  const wholeDollars = Math.floor(amountUsdCents / 100);
+  const cents = amountUsdCents % 100;
+
+  return cents === 0
+    ? `$${wholeDollars}`
+    : `$${wholeDollars}.${String(cents).padStart(2, "0")}`;
 }

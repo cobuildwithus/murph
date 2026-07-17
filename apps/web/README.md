@@ -5,7 +5,7 @@ Hosted integration control plane for Vercel deployments.
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
-device-sync control-plane authority, the hosted AI usage ledger,
+device-sync control-plane authority, the hosted AI usage and usage-credit ledgers,
 hosted computer-use browser run/checkpoint state, and the hosted mailbox,
 latest workspace checkpoint pointer, and redacted runtime logs/status
 projection.
@@ -65,6 +65,26 @@ parked local item, committed snapshot, approved row, or in-flight reconciliation
 can depend on it. Disable and redeploy the producer gate before rollback, but do
 not roll web below this floor without a separate migration or a forward runtime
 that removes the dependency.
+
+## Direct-login deferred-checkpoint deployment compatibility
+
+A completed direct-login handoff now means "the user completed takeover; the
+profile checkpoint is pending until an authorized resume," rather than "the
+profile checkpoint already finished." That persisted semantic change is
+necessary for Done to return before Kernel stop/save/replacement work. A prior
+web bundle will instead reuse the old task browser, mark the run running, and
+consume `pendingHandoffId` without performing the deferred checkpoint.
+
+The first production web deployment containing the deferred-checkpoint claim is
+therefore the rollback floor while any matching active row can exist. Record the
+production alias at that head and confirm prior web functions have drained before
+treating the rollout as established. Do not roll below the floor until a database
+check proves there is no active `awaiting_user` run whose pending direct-login
+handoff has non-null `completedAt` and status `completed` or `checkpointing`.
+After deferred writes stop, waiting one full one-hour active-run TTL before that
+zero-row check provides the bounded drain condition. This is a web-only rollout;
+it does not require a coordinated Cloudflare deployment.
+
 When a valid `idle_shutdown` checkpoint matches the locked workspace version,
 web commits it even if a newer durable conversation row is pending. The same CAS
 commits the request snapshot, redacted watermarks, and wake projection as one
@@ -107,7 +127,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - signed hosted user crypto root envelopes plus append-only crypto audit rows
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
-- immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- immutable hosted AI usage rows plus append-only purchased usage-credit entries
+  and their bounded member balance projection in Postgres
 - event-id keyed Linq first-contact classifier decisions with no classifier
   prompt/response bodies; the legacy rejected-message-text column is an ignored
   deploy-skew compatibility column and is scrubbed by migration
@@ -115,7 +136,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - member-bound hosted phone-call rows for web-owned Retell starts and signed
   Retell function/webhook results
 - Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
-- hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
+- hosted Stripe receipt/retry state, subscription reconciliation, one-time
+  usage-credit reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
 ## Non-goals
@@ -190,6 +212,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
+- `HostedUsageCreditPurchase` owns the immutable payer, beneficiary, offer,
+  frozen Checkout request, and reconciliation state for one intentional
+  top-up. `HostedUsageCreditEntry` is the append-only credit source of truth;
+  `HostedMember` holds only its bounded balance/version projection.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
@@ -207,7 +233,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
   prerequisites. After the reservation commits, a pointer-only web Workflow is
   armed within the same 40-second aggregate deadline and before Retell dispatch,
   so the durable row remains blocking authority while the bounded Workflow
-  reconciles ambiguous starts, provider-id binding failures, and unsafe cleanup.
+  reconciles ambiguous starts, provider-id binding failures, unsafe cleanup,
+  and terminal provider usage after callback loss.
   Immediately before Retell dispatch, web advances the reservation epoch; a
   reconciliation attempt may mutate only the exact epoch it read, preventing an
   older no-match result from releasing a newly dispatched call. Recovery resolves
@@ -265,11 +292,22 @@ is active.
   do not reflect commit order. Timestamps remain audit metadata. Unmarked
   direct-login and pre-migration rows retain the existing timestamp reply proof
   during the bounded active-run drain and are never reclassified from mutable
-  handoff timestamps. Browser publication and handoff conversion or completion
-  commit in one transaction. If both idempotent terminal-write attempts
-  return an error, Murph treats the outcome as unknown and leaves the handoff
-  checkpointing until durable state can be reread or safely reclaimed; it does
-  not provision or delete another task browser in that request. Every
+  handoff timestamps. For a direct `login` Live View handoff, Done durably
+  completes the handoff and returns to the conversation while the existing task
+  browser remains the sole profile writer. The next resume that proves a newer
+  mailbox item must first claim that exact completed handoff as `checkpointing`
+  under the member lock. Only the claim owner may stop the browser so Kernel
+  saves the profile, remove a stale deterministic replacement, create and
+  publish the replacement, and atomically mark the handoff completed while the
+  run becomes `running`. An overlapping open or start request returns a retryable
+  checkpoint-in-progress result without calling Kernel. A failed or ambiguous
+  replacement retains the `checkpointing` owner; stale-owner recovery can clean
+  a deterministic orphan and retry without another login or Done click. Managed
+  Auth browser publication and handoff conversion or
+  completion commit in one transaction. If both idempotent terminal-write
+  attempts return an error, Murph treats the outcome as unknown and leaves the
+  handoff checkpointing until durable state can be reread or safely reclaimed;
+  it does not provision or delete another task browser in that request. Every
   nonterminal Managed Auth row remains on the provider-aware recovery path,
   including when its inter-request claim is yielded to `open`; generic
   completion and open/resume logic cannot replace, terminally expire, or
@@ -322,9 +360,18 @@ Required for production migrations:
 
 - `DIRECT_DATABASE_URL`
 
-Required for the hosted device-sync lane:
+Required for live Labs discovery:
 
 - `JUNCTION_API_KEY`
+
+This is the same canonical Junction credential used by hosted device sync.
+Labs discovery keeps the key server-only, targets the code-owned production US
+origin, and serves authenticated `POST /api/labs` plus signed
+`POST /api/internal/hosted-execution/labs/tool` through one stateless service.
+No catalog, query, or ZIP is persisted.
+
+Required for the hosted device-sync lane in addition:
+
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -423,6 +470,39 @@ explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
 
+## Murph Safe public product data
+
+`/search` exposes the public Murph Safe product-evidence experience. Its browser
+search calls `POST /api/public/v1/products/search`; server-rendered product
+details use the same service as
+`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
+is available at `/api/public/v1/openapi.json`, and the current schema id is
+`murph.public-products.v1`.
+
+The public catalog includes current supplement and branded-food sources and
+excludes generic food origins. Search and detail DTOs are bounded normalized
+projections; product tests join only through the selected row's exact
+`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
+echoed, persisted, analyzed, or logged.
+
+Before a production build, configure these Production-scoped server values:
+
+- `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
+- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
+- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `HOSTED_WEB_VERCEL_PROJECT_ID`
+- optional `HOSTED_WEB_VERCEL_TEAM_ID`
+- `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
+
+The exact-id custom rules must be the first active rules after the optional
+companion diagnostics rule. Search is an exact POST path with a fixed-window
+per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
+while excluding search, plus the public web-detail prefix, at 120 requests per
+60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+configuration and fails on disabled firewall, order, condition, algorithm,
+key, limit, window, action, or id drift. It never downloads environment values
+or prints the provider token or response body.
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
@@ -465,6 +545,9 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
 - `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -513,20 +596,29 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. The allowance is an advisory product and billing signal, not a runtime gate for an otherwise active member.
-- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` remains a thresholded suggestion. An opted-in `subscriptionActionQuote` instead returns current terms for an explicit request, even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and purchased usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
+- Purchased usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then append-only credit grants in order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement.
+- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Usage-credit Checkout accepts only an authenticated payer buying for the same personal beneficiary, a server-owned offer code, and a single-use client request key. It uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an amount, Price, payer, beneficiary, or grant.
+- A browser return never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout, line-item, PaymentIntent, and Charge facts and commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
+- The purchase schema separates payer from beneficiary so the accounting owner can later support a synthetic group-container member. Group funding, group checkout authorization, and group contribution presentation are not implemented.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
-- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Model-work admission reads the hosted member-access owner; runtime usage is recorded through the hosted platform after it exists.
+- Web applies the composed access-and-usage gate in runtime reconciliation and
+  mailbox fetch/payload routes before exhausted work reaches the runner.
+  Temporal owns only the resulting blocked orchestration facts; Cloudflare
+  receives no billing or credit projection. Runtime usage is recorded after it
+  exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.
-- Pulse Trial uses the same allowance system with a phase-aware 4.50 USD advisory threshold. Paid phase is authoritative for the normal Pulse allowance, while stale or malformed trial entitlement still fails member-access admission before any calendar fallback.
+- Pulse Trial uses the same enforced allowance system with a phase-aware 4.50 USD threshold. Trial members cannot buy usage credit; paid phase is authoritative for normal Pulse allowance, while stale or malformed trial entitlement fails admission before any calendar fallback.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
 Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
 the removed Stripe meter path. The hosted allowance owner reads web-owned spend
-for projection and notices; it does not deny otherwise-authorized model calls.
+and the local credit projection for admission, projection, and notices.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
@@ -560,11 +652,11 @@ works locally without a second terminal.
   stdout pipe, stderr pipe, and output-tail buffers, so operator logs never
   contain the live `whsec_...`.
 
-#### Full local test-mode checkout
+#### Full local test-mode Checkout
 
-The local hosted signup flow uses real Stripe Checkout against Stripe's test
-environment; it does not use an in-process fake checkout service. To complete
-the flow without moving real money:
+The local hosted signup and usage-credit flows use real Stripe Checkout against
+Stripe's test environment; they do not use an in-process fake checkout service.
+To complete either flow without moving real money:
 
 1. Configure test-mode Stripe values in `.tmp/.env.hosted-local-stripe`,
    `apps/web/.env.local`, or shell env:
@@ -572,14 +664,18 @@ the flow without moving real money:
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD=price_...`
 2. Install and log in to the Stripe CLI once with `stripe login`.
 3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
    orchestrator starts `stripe listen` and injects the captured
    `STRIPE_WEBHOOK_SECRET` into the web process.
-4. Use a real hosted onboarding invite and continue to checkout. The dev-only
-   `/join/<inviteCode>?preview=checkout` URL is only a UI preview; pressing its
-   checkout button still calls the real checkout API.
-6. On the Stripe-hosted Checkout page, use Stripe's interactive test card
+4. Use a real hosted onboarding invite for subscription Checkout, or sign in as
+   an active paid Pulse/Edge member and open **Add usage** in Settings. The
+   dev-only `/join/<inviteCode>?preview=checkout` URL is only a UI preview;
+   pressing its checkout button still calls the real checkout API.
+5. On the Stripe-hosted Checkout page, use Stripe's interactive test card
    `4242 4242 4242 4242` with any future expiration date and any three-digit
    CVC. Stripe test cards are valid only in test environments.
 
@@ -792,11 +888,11 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 `PrismaPg`. The adapter owns external-pool disposal so `$disconnect()` retains
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
-transactions between backend connections. Pool limits remain five clients,
-five seconds for connection acquisition, and 30 seconds for idle retirement;
-tune those values only from measured pool and database pressure. Connection
-failure logs expose only a fixed failure category and numeric total, idle, and
-waiting counts.
+transactions between backend connections. The default pool limit is 15 clients
+per module runtime, with five seconds for connection acquisition and 30 seconds
+for idle retirement; tune those values only from measured pool and database
+pressure. Connection failure logs expose only a fixed failure category and
+numeric total, idle, and waiting counts.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
@@ -1135,6 +1231,12 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 
+Authenticated Settings usage-credit surfaces:
+
+- `POST /api/settings/billing/usage-credit/checkout`
+- `GET /api/settings/billing/usage-credit/purchases/:purchaseId`
+- `POST /api/settings/billing/usage-credit/purchases/:purchaseId/expire`
+
 The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
@@ -1142,9 +1244,11 @@ The onboarding lane is intentionally thin:
   successful hosted completion issues a strict opaque v2 app session whose
   database row stores a dedicated-key HMAC over its bearer, session id, member,
   Privy identity, and expiry. Legacy unsigned cookies are rejected.
-- Stripe Checkout is subscription-only. `invoice.paid` remains the normal
-  positive entitlement source, with one metadata-gated exception: a valid
-  Pulse Trial Checkout completion can activate Pulse in `trial` phase.
+- Hosted onboarding Checkout uses subscription mode. `invoice.paid` remains
+  the normal positive entitlement source, with one metadata-gated exception: a
+  valid Pulse Trial Checkout completion can activate Pulse in `trial` phase.
+  The separate authenticated Settings usage-credit flow uses one-time payment
+  mode and never changes entitlement.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
@@ -1159,15 +1263,22 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted checkout is always Stripe subscription mode.
+- Hosted onboarding Checkout uses Stripe subscription mode. The only current
+  one-time Checkout is the fixed personal usage-credit catalog in Settings.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
 - `checkout.session.completed` normally binds refs only, except for the
   Pulse Trial offer (`pulse_trial_7d`) when metadata, member ownership, and
-  the expanded/retrieved subscription prove an active seven-day trial.
+  the expanded/retrieved subscription prove an active policy-bound trial.
 - `customer.subscription.*` does not newly activate access and cannot promote
   a Pulse Trial to paid before the accepted paid invoice.
-- Chargebacks, disputes, and refunds suspend hosted access pending manual review.
+- Subscription chargebacks, disputes, and refunds suspend hosted access pending
+  manual review. Matching usage-credit financial reversals are intercepted
+  before subscription handling. Live financial-state changes append capped
+  signed `refund_adjustment` or `dispute_adjustment` entries against unused
+  credit, with positive entries restoring only value previously revoked.
+  Reconciliation failures remain in the durable Stripe retry lane and never
+  silently suspend the subscription.
 - No-card Pulse Trial signup is the default checkout-stage path when billing is
   configured and messaging setup is complete. Set
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.

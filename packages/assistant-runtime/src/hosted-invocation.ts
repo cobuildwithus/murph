@@ -10,10 +10,6 @@ import {
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
 export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
-export {
-  consumeHostedCliRuntimeBridgeOffInvocationViolation,
-  stopHostedCliRuntimeBridge,
-} from "./hosted-runtime/cli-runtime-bridge.ts";
 import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
@@ -62,6 +58,7 @@ export interface HostedWorkspaceInvocationInput {
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
+  waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
 
 export async function runHostedWorkspaceInvocation(
@@ -79,6 +76,7 @@ export async function runHostedWorkspaceInvocation(
     snapshotArchiveBuilder: input.snapshotArchiveBuilder,
     snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
     vaultRoot: input.vaultRoot,
+    waitForBackgroundAssistantWork: input.waitForBackgroundAssistantWork,
   });
 
   try {

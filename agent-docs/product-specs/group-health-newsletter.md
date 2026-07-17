@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 Status: Implemented
 
 ## Current State
@@ -28,7 +28,8 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Who can set up / edit / stop it | **Any member.** One shared automation per group; last-write-wins. |
 | Delivery shape | **One shared email thread** to all participants; addresses visible; reply-all; Murph present in-thread; a new thread each week. |
 | Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
-| Newsletter content opt-in | A reaction to the newsletter join offer grants the disclosed default scope: profile name, email, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. The customize link lets a member share more or less. |
+| Newsletter content opt-in | Liking the newsletter permission offer opts into the disclosed default snapshot: profile name, email, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. It grants membership only when needed; the customize link lets a member share more or less. |
+| New-group requested permissions | On first hosted-group creation, Murph normally requests the reusable core set: email, steps, broad activity, workout summaries, sleep duration, sleep timing, resting heart rate, and HRV. An explicit creator choice may narrow or change the health scopes; email remains the server-standard request, and every member may deselect any requested permission. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** (self-service, in chat or by replying in the thread). Leaves challenge/health-sharing intact. Forward-only. |
@@ -38,9 +39,9 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
 | Chat delivery | If the group wants delivery in the group chat, use a normal scheduled group-chat update automation. The `group-health-newsletter` slug and email machinery are only for email delivery. |
-| Join offers | Lead with **react to this message to join**, state the exact `{{share_scope}}`, and include the customize link. Reacting grants the disclosed snapshot; the link is the fine-tune path. |
+| Permission offers | Lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. Liking opts into the disclosed snapshot and grants membership only when needed; the link is the fine-tune path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
-| Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link before joining. |
+| Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each vault-share delivery can carry **the 7 most recent records per projection kind**, matching count-based receiver retention. |
 
 ## Canonical Objects
@@ -55,7 +56,15 @@ There is deliberately **no separate "newsletter" permission.** Email sharing is 
 
 It rides the existing `HostedVaultShare` table (`apps/web/prisma/schema.prisma`) and grant/revoke control plane (`apps/web/src/lib/hosted-vault-share/share-grant-store.ts`). No schema migration is required beyond registering the kind. Grant caps apply as-is.
 
-It is **default-checked at group creation**: this feature introduces default-requested projections (previously group creation seeded none — callers passed an explicit list), adding `group-email.v0` to the group's `joinPolicyJson` requested set at creation (`apps/web/src/lib/hosted-groups/group-store.ts` / `join-policy.ts`) so any new group collects email permission up front. A member can uncheck it at join to decline. Because email is collected at join, setting up a newsletter later requires **no re-approval**.
+It is **default-checked at group creation**: the server adds `group-email.v0`
+to the group's `joinPolicyJson` requested set at creation
+(`apps/web/src/lib/hosted-groups/group-store.ts` / `join-policy.ts`). The
+creation-time assistant policy normally adds the reusable core health scopes:
+`steps-days.v0`, `activity-days.v0`, `workout-days.v0`,
+`sleep-duration-days.v0`, `sleep-times.v0`, `resting-heart-rate-days.v0`, and
+`hrv-days.v0`. A member can uncheck any item at join to decline. This gives
+common newsletters and challenges one upfront, customizable consent step while
+avoiding a blanket request for every selectable projection.
 
 ### Newsletter automation — the schedule + config
 

@@ -87,6 +87,7 @@ export interface HostedWorkspaceInvocationOptions {
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
+  waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
 
 export function buildHostedExecutionJobRuntime(input: {
@@ -242,6 +243,7 @@ export async function runHostedWorkspaceInvocation(
         job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
       signal: options.signal ?? null,
       vaultRoot: path.join(warmRoot, "durable", "vault"),
+      waitForBackgroundAssistantWork: options.waitForBackgroundAssistantWork,
     });
     return assertHostedExecutionRunnerJobResult(result, job);
   } finally {

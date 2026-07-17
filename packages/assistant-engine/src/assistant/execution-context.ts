@@ -6,6 +6,13 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  AutomationAssistantTargetOverride,
+  AutomationContinuityPolicy,
+  AutomationSchedule,
+  AutomationStatus,
+  AutomationSupportKind,
+} from '@murphai/contracts'
+import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
@@ -33,6 +40,10 @@ import type {
 import type {
   HostedPlanUsageStatus,
 } from '@murphai/hosted-execution/plan-usage'
+import type {
+  HostedRuntimeLabsToolRequest,
+  HostedRuntimeLabsToolResponse,
+} from '@murphai/hosted-execution/labs'
 import type {
   HostedRuntimeSubscriptionControlRequest,
   HostedRuntimeSubscriptionToolResponse,
@@ -64,9 +75,125 @@ export interface AssistantHostedDeviceConnectProvider {
   provider: string
 }
 
-export interface AssistantHostedDeviceConnectRequest {
-  messagingReturnTarget?: 'imessage' | 'telegram' | null
+export type AssistantHostedDeviceToolRequest =
+  | {
+      action: 'list_accounts'
+      provider?: string | null
+      sourceProvider?: string | null
+    }
+  | {
+      action: 'connect'
+      provider: string
+    }
+  | {
+      accountId: string
+      action: 'reconcile'
+    }
+
+export interface AssistantHostedDeviceAccountSummary {
+  accountId: string
+  displayName: string | null
+  lastErrorCode: string | null
+  lastSyncCompletedAt: string | null
   provider: string
+  status: 'active' | 'disconnected' | 'reauthorization_required'
+}
+
+export type AssistantHostedDeviceToolResponse =
+  | {
+      accounts: readonly AssistantHostedDeviceAccountSummary[]
+      action: 'list_accounts'
+      provider: string | null
+      sourceProvider: string | null
+    }
+  | {
+      action: 'connect'
+      link: AssistantHostedDeviceConnectLink
+    }
+  | {
+      accountId: string
+      action: 'reconcile'
+      occurredAt: string
+      status: 'queued'
+    }
+
+export interface AssistantHostedDeviceTool {
+  request(
+    request: AssistantHostedDeviceToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<AssistantHostedDeviceToolResponse>
+}
+
+export interface AssistantHostedLabsTool {
+  request(
+    request: HostedRuntimeLabsToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLabsToolResponse>
+}
+
+export type AssistantHostedAutomationToolRequest =
+  | {
+      action: 'save'
+      activeUntil?: string | null
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      automationId?: string
+      continuityPolicy?: AutomationContinuityPolicy
+      instructions: string
+      schedule: AutomationSchedule
+      slug?: string
+      status?: AutomationStatus
+      summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
+      tags?: readonly string[]
+      title: string
+    }
+  | {
+      action: 'patch'
+      activeUntil?: string | null
+      assistantTargetOverride?: AutomationAssistantTargetOverride | null
+      continuityPolicy?: AutomationContinuityPolicy
+      instructions?: string
+      lookup: string
+      retargetToCurrentConversation?: boolean
+      schedule?: AutomationSchedule
+      slug?: string
+      status?: AutomationStatus
+      summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
+      tags?: readonly string[]
+      title?: string
+    }
+  | {
+      action: 'reconcile'
+      desiredAutomationIds: readonly string[]
+      supportSeriesId: string
+    }
+
+export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'patch' | 'save'
+      automationId: string
+      created: boolean
+      lookupId: string
+      routeBinding: 'current_conversation' | 'preserved'
+      status: AutomationStatus
+    }
+  | {
+      action: 'reconcile'
+      archivedCount: number
+      matchedCount: number
+      missingDesiredAutomationIds: readonly string[]
+      supportSeriesId: string
+      unchangedCount: number
+    }
+
+export interface AssistantHostedAutomationTool {
+  request(
+    request: AssistantHostedAutomationToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<AssistantHostedAutomationToolResponse>
 }
 
 export interface AssistantUsageRecorder {
@@ -172,22 +299,22 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  automationTool?: AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
+  deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupTool?: AssistantHostedGroupTool | null
+  labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
-  issueDeviceConnectLink?(
-    input: AssistantHostedDeviceConnectRequest,
-  ): Promise<AssistantHostedDeviceConnectLink>
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   generatedImageUploaderRequired?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -222,6 +349,7 @@ export function normalizeAssistantExecutionContext(
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
     hosted?.actionApprovalPort,
   )
+  const automationTool = normalizeAssistantAutomationTool(hosted?.automationTool)
   const assistantConfigurationTool = normalizeAssistantConfigurationTool(
     hosted?.assistantConfigurationTool,
   )
@@ -236,6 +364,7 @@ export function normalizeAssistantExecutionContext(
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
   )
+  const deviceTool = normalizeAssistantDeviceTool(hosted?.deviceTool)
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted?.dynamicContextPrompts,
   )
@@ -247,6 +376,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.personalizationTool,
   )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
@@ -266,6 +396,7 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(automationTool ? { automationTool } : {}),
       ...(typeof hosted?.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
@@ -273,15 +404,11 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
-      ...(typeof hosted?.issueDeviceConnectLink === 'function'
-        ? {
-            issueDeviceConnectLink: hosted.issueDeviceConnectLink,
-          }
-        : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupTool ? { groupTool } : {}),
+      ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
@@ -308,6 +435,7 @@ export function normalizeAssistantExecutionContext(
             deviceConnectProviders,
           }
         : {}),
+      ...(deviceTool ? { deviceTool } : {}),
       ...(dynamicContextPrompts.length > 0
         ? {
             dynamicContextPrompts,
@@ -350,6 +478,30 @@ function normalizeAssistantDynamicContextPrompts(
 function normalizeAssistantActionApprovalPort(
   input: AssistantHostedExecutionContext['actionApprovalPort'] | undefined,
 ): AssistantHostedActionApprovalPort | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantAutomationTool(
+  input: AssistantHostedExecutionContext['automationTool'] | undefined,
+): AssistantHostedAutomationTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantDeviceTool(
+  input: AssistantHostedExecutionContext['deviceTool'] | undefined,
+): AssistantHostedDeviceTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }
@@ -458,6 +610,18 @@ function normalizeAssistantConfigurationTool(
 function normalizeAssistantGroupTool(
   input: AssistantHostedExecutionContext['groupTool'] | undefined,
 ): AssistantHostedGroupTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantLabsTool(
+  input: AssistantHostedExecutionContext['labsTool'] | undefined,
+): AssistantHostedLabsTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

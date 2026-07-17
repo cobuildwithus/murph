@@ -24,7 +24,6 @@ import type {
 import {
   assertContractId,
   compareIsoTimestampsAscending,
-  COMPANION_HRV_RMSSD_METHOD_VERSION,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
@@ -657,6 +656,25 @@ function normalizeDayKeyInput(value: unknown): string | undefined {
     : undefined;
 }
 
+function isDateOnlyFloatingProviderDayInput(
+  dayKey: string | undefined,
+  dataOrigin: unknown,
+): boolean {
+  const normalizedDayKey = normalizeDayKeyInput(dayKey);
+  if (
+    !normalizedDayKey
+    || !dataOrigin
+    || typeof dataOrigin !== "object"
+    || Array.isArray(dataOrigin)
+  ) {
+    return false;
+  }
+
+  const origin = dataOrigin as UnknownRecord;
+  return origin.timestampSemantics === "floating"
+    && origin.observedAtRaw === normalizedDayKey;
+}
+
 function normalizeRequiredRole(value: unknown, label: string): string {
   const candidate = String(value ?? "").trim();
 
@@ -1274,7 +1292,10 @@ function normalizeDeviceEventInputs(
     const preservesProviderDayWithoutTimeZone = Boolean(
       inputDayKey &&
         !inputTimeZone &&
-        isJunctionSleepStageExternalRefInput(eventInput.externalRef),
+        (
+          isJunctionSleepStageExternalRefInput(eventInput.externalRef)
+          || isDateOnlyFloatingProviderDayInput(inputDayKey, eventInput.dataOrigin)
+        ),
     );
     const seed = buildNormalizedEventSeed({
       kind,
@@ -1677,56 +1698,6 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
-function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
-  const externalRef = record.externalRef;
-  const admissionId = externalRef?.resourceId;
-
-  return record.kind === "observation"
-    && externalRef?.system === "whoop"
-    && externalRef.resourceType === "ble-hrv-rmssd"
-    && externalRef.facet === "hrv-rmssd"
-    && typeof admissionId === "string"
-    && /^[a-f0-9]{64}$/u.test(admissionId)
-    && externalRef.version === `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${admissionId}`
-    && record.dataOrigin?.aggregatorProvider === "murph-companion"
-    && record.dataOrigin.sourceProviderSlug === "whoop"
-    && record.dataOrigin.sourceType === "ble-pulse-interval"
-    && record.dataOrigin.normalizerVersion === "companion-hrv-rmssd-normalizer.v1";
-}
-
-function isWhoopCompanionHrvRmssdTemporalReplay(
-  existing: EventRecord,
-  incoming: EventRecord,
-): boolean {
-  if (
-    !isWhoopCompanionHrvRmssdAdmissionEvent(existing)
-    || !isWhoopCompanionHrvRmssdAdmissionEvent(incoming)
-  ) {
-    return false;
-  }
-
-  const {
-    id: _existingId,
-    rawRefs: _existingRawRefs,
-    lifecycle: _existingLifecycle,
-    recordedAt: _existingRecordedAt,
-    dayKey: _existingDayKey,
-    timeZone: _existingTimeZone,
-    ...existingContent
-  } = existing;
-  const {
-    id: _incomingId,
-    rawRefs: _incomingRawRefs,
-    lifecycle: _incomingLifecycle,
-    recordedAt: _incomingRecordedAt,
-    dayKey: _incomingDayKey,
-    timeZone: _incomingTimeZone,
-    ...incomingContent
-  } = incoming;
-
-  return stableStringify(existingContent) === stableStringify(incomingContent);
-}
-
 function deviceEventContentFingerprint(record: EventRecord): string {
   return createHash("sha256").update(deviceEventContentKey(record)).digest("hex");
 }
@@ -1928,7 +1899,6 @@ async function indexLatestEventsByExternalRef(
         if (!parsed.success) {
           return;
         }
-
         const entry = { relativePath, record: parsed.data };
         maxRevisionById.set(
           entry.record.id,
@@ -2473,6 +2443,48 @@ function eventSpineRevisionsAreComplete(
     && revisions.size === maxRevision;
 }
 
+function whoopSleepTypeProviderBaselineRevision(
+  index: EventExternalRefIndex,
+  refKey: string,
+  eventId: string,
+  incoming: EventRecord,
+): number | null {
+  if (
+    incoming.kind !== "sleep_session"
+    || incoming.externalRef?.system !== "whoop"
+    || incoming.externalRef.resourceType !== "sleep"
+    || (incoming.sleepType !== "main_sleep" && incoming.sleepType !== "nap")
+  ) {
+    return null;
+  }
+
+  const ownersByFingerprint = index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
+  const earliestRevisionFor = (record: EventRecord): number | null => {
+    const revisions = ownersByFingerprint
+      ?.get(deviceEventContentFingerprint(record))
+      ?.get(eventId);
+    // Exact device replays do not append revisions. Use the earliest match as
+    // the provider baseline because later matching revisions may be supported
+    // user edits that retained source=device.
+    let baselineRevision: number | null = null;
+    for (const revision of revisions ?? []) {
+      baselineRevision = Math.min(baselineRevision ?? revision, revision);
+    }
+    return baselineRevision;
+  };
+
+  const typedBaselineRevision = earliestRevisionFor(incoming);
+  if (typedBaselineRevision !== null) {
+    return typedBaselineRevision;
+  }
+
+  // Before sleepType normalization shipped, the provider-authored row had the
+  // same content without this field. Keep that one-time legacy fallback only
+  // after complete typed history fails to match.
+  const { sleepType: _sleepType, ...withoutSleepType } = incoming;
+  return earliestRevisionFor(withoutSleepType);
+}
+
 function resolveDeviceEventIdentity(
   entry: PreparedDeviceEventEntry,
   context: DeviceEventIdentityContext,
@@ -2787,21 +2799,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
-      // The admission digest owns this observation's immutable identity. Vault
-      // timezone metadata is mutable, so an at-least-once replay must preserve
-      // the first canonical placement rather than turning the retained payload
-      // into a permanent immutable-reference conflict. Compare with the stored
-      // provider delivery when available so later user-authored revisions stay
-      // intact while an exact provider replay remains a no-op.
-      if (isWhoopCompanionHrvRmssdTemporalReplay(
-        indexedProviderMatch?.indexedRecord ?? latest,
-        entry.record,
-      )) {
-        skippedDuplicateCount += 1;
-        records.push(latest);
-        continue;
-      }
-
       throw new VaultError(
         "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
         "Immutable device event externalRef already exists with different content; nothing was imported.",
@@ -2825,13 +2822,42 @@ async function reconcileDeviceEventEntriesByExternalRef(
         records.push(latest);
         continue;
       }
-      if (sourceVersionComparison === 0) {
+      const sleepTypeBaselineRevision = sourceVersionComparison === 0
+        ? whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, entry.record)
+        : null;
+      const hasSleepTypeProviderBaseline = sleepTypeBaselineRevision !== null;
+      if (
+        sourceVersionComparison === 0
+        && !hasSleepTypeProviderBaseline
+      ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
           `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
             `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
             `"${externalRef.version}"; nothing was imported.`,
         );
+      }
+      if (
+        hasSleepTypeProviderBaseline
+        && (
+          isDeletedEventSpineRecord(latest)
+          || eventSpineRevision(latest)
+            !== sleepTypeBaselineRevision
+          || matchedEntries.some((match) =>
+            hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+          )
+        )
+      ) {
+        // sleepType is provider normalization metadata. Never resurrect a
+        // deleted event or replace a newer canonical revision merely to
+        // backfill it; preserving this row also lets unrelated snapshot
+        // resources commit.
+        skippedDuplicateCount += 1;
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
+        records.push(latest);
+        continue;
       }
     }
 

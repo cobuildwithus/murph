@@ -1,14 +1,18 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
+Status: Implemented current-state contract
 
 ## Goal
 
-Give a member one honest view of their current included AI usage, then let a
-private Murph conversation carry out the smallest billing action the member
-clearly chooses. Settings and Murph's read-only plan-usage tool consume the same
-web-owned projection. Stripe and the existing web billing services remain the
-only billing system.
+Give a member one honest view of their current included AI usage, block new
+usage-bearing work when included and purchased capacity are both exhausted,
+and let a private Murph conversation carry out the smallest billing action the
+member clearly chooses. Settings and Murph's read-only plan-usage tool consume
+the same web-owned projection. Stripe and the existing web billing services
+remain the payment system; Murph owns allowance and purchased usage capacity.
+The personal top-up implementation contract lives in
+`agent-docs/product-specs/hosted-usage-topups.md`.
 
 ## Ownership
 
@@ -16,6 +20,12 @@ only billing system.
 hosted usage ledger. It also selects any billing action shown to the member.
 The projection is a read: it does not write a forecast, query Stripe, create a
 usage period, or change billing state.
+
+Purchased credit stays separate from the included-allowance period. The
+append-only credit ledger is canonical, and the compact member balance/version
+is its bounded admission and Settings projection. The plan-usage response may
+recommend the authenticated Settings top-up handoff, but it cannot create
+Checkout or grant credit.
 
 `@murphai/hosted-execution/plan-usage` owns the strict transport contract.
 Cloudflare carries that contract over the existing signed `web-control.worker`
@@ -47,17 +57,16 @@ The available projection keeps these access states distinct:
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
 | Direct trial | Pulse Trial | Trial | Start Pulse |
-| Direct paid Pulse | Pulse | Monthly | Upgrade to Edge |
-| Direct paid Edge | Edge | Monthly | None |
+| Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
+| Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
 | Sponsored member | Family | Monthly | None |
 
 An active sponsored member keeps their assigned Family tier when the local
 Family billing projection is absent, invalid, or lacks a period containing the
 usage timestamp. Only a valid paid Family projection supplies period bounds;
 otherwise the shared allowance resolver uses its existing UTC calendar-month
-fallback, just as it does for direct paid plans. Because included usage is
-advisory rather than an exact prepaid meter, already-accounted fallback usage
-is not moved between periods later.
+fallback, just as it does for direct paid plans. Already-accounted fallback
+usage is not moved between periods later.
 
 Synthetic group-thread allowance is not personal plan usage. It returns the
 unavailable reason `group_not_supported` before exposing personal usage facts.
@@ -65,11 +74,13 @@ Inactive hosted access and a trial awaiting conversion also return explicit
 unavailable states.
 
 Usage is cost-weighted included capacity across models and modalities. It is
-not a token count, cash balance, or exact prepaid meter. Used and remaining
-percentages are bounded integers that sum to 100. An exhausted period reports
-100% used. Member-facing usage progress in Settings, Home, assistant replies,
-and outbound limit notices uses these percentages; internal currency-denominated
-accounting must not appear as a used-versus-allowance display.
+not a token count or cash balance. Used and remaining included percentages are
+bounded integers that sum to 100. An included period reports 100% used even
+while purchased credit still keeps effective capacity positive. Settings shows
+that carryover credit separately as usage credit; it never folds it into the
+plan percentage or exposes the internal included allowance value. The
+operation that crosses effective capacity may finish, but subsequent
+usage-bearing work blocks and accepted conversation input remains pending.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
@@ -78,12 +89,13 @@ the projection omits it.
 
 ## Actions
 
-`apps/web` may return `recommendedAction` only when the period is exhausted,
-the forecast projects exhaustion, or at least 80% is used. Trial access may
-recommend **Start Pulse now** with the current monthly price. Paid Pulse may
-recommend **Upgrade to Edge** with the current monthly price. Both labels are
-derived from the web billing-plan catalog. Edge and Family do not get a
-recommendation from this surface.
+`apps/web` may return `recommendedAction` only when included usage is
+exhausted, the forecast projects exhaustion, or at least 80% of included usage
+is used. Trial access may recommend **Start Pulse now** with the
+current monthly price. An eligible direct paid Pulse or Edge member may receive
+**Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
+Edge upgrade remains on the plan card. Family and group contexts do not receive
+a top-up recommendation.
 
 An opted-in `subscriptionActionQuote` answers a different question: what are
 the current terms for the exact start-now or upgrade choice the member asked
@@ -93,11 +105,14 @@ not a URL. It may be null when the action is ineligible. It is neither a
 recommendation nor consent, and it does not weaken the explicit-confirmation
 rule.
 
-Settings and Home render only `recommendedAction` and still use the existing
-server-authorized billing route. Assistant policy uses a matching
+Home and `murph.plan_usage` render only `recommendedAction`. Settings may expose
+**Add usage** at any utilization for an eligible direct paid member, using the
+same server-projected offers. Subscription actions still use the existing
+server-authorized billing route; **Add usage** uses the authenticated one-time
+Checkout route described in the top-up spec. Assistant policy uses a matching
 `subscriptionActionQuote` only to disclose current terms before seeking an
 explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
-upgrade a plan, or claim that a billing change happened.
+upgrade a plan, grant credit, or claim that a billing change happened.
 
 An explicit request in a private conversation to manage billing, or to perform
 a Family account change outside `murph.family_plan`'s status, checkout, and
@@ -171,17 +186,19 @@ Sol; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 
-Included usage is advisory. Reaching 100% does not deny otherwise-authorized
-assistant or system work, and the plan-usage projection is never model-work
-admission. Admission reads only the hosted member-access owner, where inactive,
-suspended, malformed or expired trial entitlement, and existing abuse controls
-still fail closed.
+The web-owned allowance gate is the single model-work admission owner. It
+combines current included capacity with the compact purchased-credit
+projection. When both reach zero, subsequent assistant or eligible system work
+is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
+expired trial entitlement, and existing abuse controls remain separate
+fail-closed reasons. The read-only plan-usage projection remains an
+included-period view and must not be treated as the gate result.
 
-Usage accounting may create a period-scoped notice candidate after the included
-amount is reached. A message-triggered record carries its originating Linq or
-Telegram target through the current invocation and signed usage-record seam.
-Every rendered limit notice states the exhausted allowance as 100% used before
-the channel-specific follow-up copy.
+Usage accounting may create a period-scoped notice candidate when the
+operation consumes the last effective capacity. A message-triggered record
+carries its originating Linq or Telegram target through the current invocation
+and signed usage-record seam. Every rendered limit notice states the included
+allowance as 100% used before the channel-specific follow-up copy.
 Before claiming delivery, web re-authorizes a personal target against current
 member routing or an external Linq target against persisted thread authority.
 An omitted target means no accepted conversation and permits the legacy
@@ -193,7 +210,7 @@ the delivery owner permits at most one completed notice.
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
 only from the projection's thresholded `recommendedAction`. A notice code, plan
 label, incomplete billing row, or legacy state must not independently imply
-**Start Pulse** or **Upgrade to Edge**. A requested
+**Start Pulse**, **Upgrade to Edge**, or **Add usage**. A requested
 `subscriptionActionQuote` may disclose current terms below that threshold, but
 it must not be presented as a recommendation. The explicit Settings handoff
 above remains navigation rather than an action and must not be presented as a
@@ -218,18 +235,20 @@ Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` returns
 `group_not_supported`, and any group-thread usage notice stays neutral: no
 account link, personal plan, model choice, upgrade, top-up, or payer identity.
-The advisory notice may use only the exact originating external-thread target
+The notice may use only the exact originating external-thread target
 after web re-authorizes its persisted thread authority; no personal-home
 fallback is valid for an accepted group conversation.
 
 ## Non-Goals
 
-This feature adds one nullable action claim to the existing mailbox row. It
-adds no new table, second usage ledger, persisted forecast, queue, cron,
-trial-ending webhook, automatic nudge, group balance, top-up flow, automatic
-model switch, custom checkout page, App Clip, or mini app. It does not add a
-general Stripe API tool: the action contract exposes only the three current
-web-owned billing operations above, and every payment handoff is Stripe-hosted.
+The subscription-action surface adds one nullable action claim to the existing
+mailbox row. The composed usage system adds no second admission gate, persisted
+forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
+balance, automatic model switch, custom card form, App Clip, or mini app. It
+does not add a general Stripe API tool: the subscription action contract
+exposes only the three current web-owned operations above, and personal usage
+top-ups remain an authenticated Stripe-hosted Settings handoff. Group and
+Family funding remain unimplemented.
 
 ## Deployment
 

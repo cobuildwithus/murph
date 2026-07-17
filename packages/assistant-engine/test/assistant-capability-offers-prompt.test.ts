@@ -117,9 +117,12 @@ describe('assistant capability-offers prompt contract', () => {
     )
   })
 
-  it('names newsletter mechanics inside hosted-group guidance', () => {
+  it('names newsletter and new-group permission mechanics inside hosted-group guidance', () => {
     const section = getPromptSection(
-      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        hostedRuntime: true,
+      }))
         .stableRouteCapabilityPrompt,
       HOSTED_GROUPS_HEADER,
     )
@@ -131,12 +134,16 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
-    expect(section).toContain('normal `vault-cli automation` surface')
+    expect(section).toContain('Create the newsletter cron through `murph.automation`')
     expect(section).toContain('start with "Like this message" and say what it does')
     expect(section).not.toContain('lead with reacting to this message')
     expect(section).toContain('when the current group is adding a sharing permission')
     expect(section).toContain('permission opt-in, not joining or rejoining')
     expect(section).toContain('secondary customize link')
+    expect(section).toContain(
+      "After read_current, use the group-chat skill's core permissions only for `status=none`",
+    )
+    expect(section).toContain('existing groups use workflow scopes')
     expect(section).toContain('grants membership only when needed')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',

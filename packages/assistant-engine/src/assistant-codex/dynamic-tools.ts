@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import {
-  assistantPersonalityScoreSchema,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
   assistantVoiceOptions,
@@ -135,6 +134,27 @@ export type {
   AssistantStyleTurnSettingsOverlay,
 } from './dynamic-tools/assistant-style.js'
 import {
+  executeAutomationDynamicTool,
+  MURPH_AUTOMATION_TOOL,
+  readAutomationDynamicToolRequest,
+  type AutomationDynamicToolRequest,
+} from './dynamic-tools/automation.js'
+export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
+import {
+  executeDeviceDynamicTool,
+  MURPH_DEVICE_TOOL,
+  readDeviceDynamicToolRequest,
+  type DeviceDynamicToolRequest,
+} from './dynamic-tools/device.js'
+export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
+import {
+  executeLabsDynamicTool,
+  MURPH_LABS_TOOL,
+  readLabsDynamicToolRequest,
+  type LabsDynamicToolRequest,
+} from './dynamic-tools/labs.js'
+export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -173,7 +193,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation when genuinely reply-critical work would otherwise leave the user waiting. Use it before long tasks with multiple substantive tool steps, research, long vault scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not delay the reply or trigger an update by itself. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -402,7 +422,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start or upgrade suggestion only when recommendedAction is non-null and relevant to the member's request. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.`,
+    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start, upgrade, or add-usage suggestion only when recommendedAction is non-null and relevant to the member's request. When recommendedAction.kind is add_usage, explain that its personal Settings handoff lets the member choose a one-time usage-credit amount and provide ${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription. Do not select an amount, invoke murph.subscription, initiate Checkout, or claim that payment or credit completed; recommendedAction authorizes only that first-party browser handoff. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool changes neither billing nor usage credit. It exposes only the server-authorized personal add-usage handoff; it is not a group balance, group-funding, Checkout, or payment surface. Never ask a group for money, claim a shared balance, or name a payer.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -432,7 +452,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes.',
+    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -605,7 +625,7 @@ export const MURPH_GROUP_TOOL = {
   name: 'group',
   description:
     'Use action="ask" only from a personal direct conversation when the member wants an answer from one of their joined group Murphs. Supply the bounded natural-language question and, only when useful for choosing among multiple groups, the visible groupLabel the member would recognize. For this action, the runtime resolves membership and every internal target automatically; never supply or ask the member for membership, group, runtime, mailbox, session, callback, or route identifiers. The result is asynchronous, so an accepted request will return to the personal conversation later. ' +
-    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A group offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer consents to share, then includes {{join_url}} only as the customize path. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Liking grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. Do not use a fixed script. In an authenticated connected group-chat turn, use action="read_own_assistant_style" when the current sender asks about their own private Murph tone, voice, humor, push, or detail settings. Use action="update_own_assistant_style" to change only the fields that current sender explicitly requests. The runtime, not the model, identifies the sender; these actions never accept a member id or handle. The saved settings apply to that member\'s future private Murph conversations and generated voice, not to the shared group room. A null humor, push, or detail restores its default. These actions are unavailable for email ingress or an ambiguous or unrecognized sender. When other group actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A group offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer consents to share, then includes {{join_url}} only as the customize path. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Liking grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. Do not use a fixed script. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -624,8 +644,6 @@ export const MURPH_GROUP_TOOL = {
           'set_chat_avatar',
           'share_contact_card',
           'revoke_own_email_share',
-          'read_own_assistant_style',
-          'update_own_assistant_style',
         ],
       },
       question: {
@@ -641,28 +659,6 @@ export const MURPH_GROUP_TOOL = {
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
           'Optional only for action="ask". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
-      },
-      tone: {
-        type: 'string',
-        enum: [...assistantTonePreferenceValues],
-        description: 'Optional tone for action="update_own_assistant_style".',
-      },
-      voice: {
-        type: 'string',
-        enum: [...assistantVoiceOptionIdValues],
-        description: 'Optional voice for action="update_own_assistant_style".',
-      },
-      humor: {
-        anyOf: [{ type: 'integer', minimum: 0, maximum: 10 }, { type: 'null' }],
-        description: 'Optional humor score for action="update_own_assistant_style"; null restores the default.',
-      },
-      push: {
-        anyOf: [{ type: 'integer', minimum: 0, maximum: 10 }, { type: 'null' }],
-        description: 'Optional coaching push score for action="update_own_assistant_style"; null restores the default.',
-      },
-      detail: {
-        anyOf: [{ type: 'integer', minimum: 0, maximum: 10 }, { type: 'null' }],
-        description: 'Optional detail score for action="update_own_assistant_style"; null restores the default.',
       },
       displayName: {
         type: 'string',
@@ -1006,6 +1002,8 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_AUTOMATION_TOOL,
+  MURPH_DEVICE_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -1023,6 +1021,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_LABS_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -1046,11 +1045,14 @@ export interface MurphDynamicToolAvailability {
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
+  automationAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
+  deviceAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
@@ -1081,12 +1083,15 @@ const defaultOff = (
 const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
+    [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
@@ -1311,21 +1316,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('revoke_own_email_share'),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('read_own_assistant_style'),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('update_own_assistant_style'),
-      detail: assistantPersonalityScoreSchema.nullable().optional(),
-      humor: assistantPersonalityScoreSchema.nullable().optional(),
-      push: assistantPersonalityScoreSchema.nullable().optional(),
-      tone: z.enum(assistantTonePreferenceValues).optional(),
-      voice: z.enum(assistantVoiceOptionIdValues).optional(),
     })
     .strict(),
   z
@@ -1661,6 +1651,9 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | AutomationDynamicToolRequest
+  | DeviceDynamicToolRequest
+  | LabsDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -1839,6 +1832,30 @@ export function readMurphDynamicToolRequest(
       namespace: request.namespace,
       tool: request.tool,
     }
+  }
+
+  const automationRequest = readAutomationDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (automationRequest) {
+    return automationRequest
+  }
+
+  const deviceRequest = readDeviceDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (deviceRequest) {
+    return deviceRequest
+  }
+
+  const labsRequest = readLabsDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (labsRequest) {
+    return labsRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2252,6 +2269,12 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
+    case 'invalid-automation-arguments':
+      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-device-arguments':
+      return toolTextResult(false, 'invalid device arguments')
+    case 'invalid-labs-arguments':
+      return toolTextResult(false, 'invalid labs arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2319,6 +2342,48 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation': {
+      const automationTool = input.hostedToolContext?.automationTool ?? null
+      if (!automationTool) {
+        return toolTextResult(
+          false,
+          'automation management is unavailable for this turn',
+        )
+      }
+      return await executeAutomationDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        automationTool,
+        request: input.request,
+      })
+    }
+    case 'device': {
+      const deviceTool = input.hostedToolContext?.deviceTool ?? null
+      if (!deviceTool) {
+        return toolTextResult(
+          false,
+          'device management is unavailable for this turn',
+        )
+      }
+      return await executeDeviceDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        deviceTool,
+        request: input.request,
+      })
+    }
+    case 'labs': {
+      const labsTool = input.hostedToolContext?.labsTool ?? null
+      if (!labsTool) {
+        return toolTextResult(
+          false,
+          'lab catalog discovery is unavailable for this turn',
+        )
+      }
+      return await executeLabsDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        labsTool,
+        request: input.request,
+      })
+    }
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
@@ -4363,44 +4428,11 @@ function parseGroupArguments(
       request: { action: 'post_join_offer', joinOffer },
     }
   }
-  if (parsed.data.action === 'update_own_assistant_style') {
-    const personality = {
-      ...(parsed.data.detail === undefined ? {} : { detail: parsed.data.detail }),
-      ...(parsed.data.humor === undefined ? {} : { humor: parsed.data.humor }),
-      ...(parsed.data.push === undefined ? {} : { push: parsed.data.push }),
-    }
-    const style = {
-      ...(Object.keys(personality).length === 0 ? {} : { personality }),
-      ...(parsed.data.tone === undefined ? {} : { tone: parsed.data.tone }),
-      ...(parsed.data.voice === undefined ? {} : { voice: parsed.data.voice }),
-    }
-    if (Object.keys(style).length === 0) {
-      return {
-        ok: false,
-        validationDigest: buildDynamicToolValidationDigest({
-          error: new z.ZodError([{
-            code: z.ZodIssueCode.custom,
-            message: 'update_own_assistant_style requires at least one setting',
-            path: [],
-          }]),
-          rawInput: value,
-          schemaName: 'murph.group.input',
-          schemaRootKeys: ['action'],
-          toolName: 'murph.group',
-        }),
-      }
-    }
-    return {
-      ok: true,
-      request: { action: 'update_own_assistant_style', style },
-    }
-  }
   if (
     parsed.data.action === 'list_memberships'
     || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'
-    || parsed.data.action === 'read_own_assistant_style'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }

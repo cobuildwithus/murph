@@ -19,7 +19,7 @@ import {
   runRawCli,
 } from './cli-test-helpers.js'
 
-const DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS = 120_000
+const DEVICE_CONTROL_PLANE_TEST_TIMEOUT_MS = 120_000
 
 interface DeviceTestState {
   lastConnectBody: Record<string, unknown> | null
@@ -192,95 +192,31 @@ test('device connect rejects Junction as a public connect target', async () => {
   }
 })
 
-test('device connect uses hosted CLI bridge in hosted runtime without local daemon credentials', async () => {
+test('hosted device connect fails closed before local daemon access', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-connect-'))
-  const bridgeToken = 'bridge-token'
-  let requestBody: unknown = null
-  let authorization: string | undefined
-
-  const server = createServer((request, response) => {
-    authorization = request.headers.authorization
-    const chunks: Buffer[] = []
-    request.on('data', (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    })
-    request.on('end', () => {
-      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({
-        authorizationUrl: 'https://withmurph.ai/device/connect/dc_opaque',
-        connectUrl: 'https://withmurph.ai/device/connect/dc_opaque',
-        expiresAt: '2026-05-03T20:15:00.000Z',
-        provider: 'whoop',
-        providerLabel: 'WHOOP',
-      }))
-    })
-  })
 
   try {
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected a TCP listening address for hosted bridge test.')
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    const result = await runInProcessJsonCli(createVaultCli(), [
+      'device',
+      'connect',
+      'whoop',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'invalid_option')
+      assert.match(result.envelope.error.message ?? '', /root hosted device tool/u)
     }
-
-    const result = requireData(
-      await runCli<{
-        status: 'ok'
-        kind: 'device_connect_link'
-        backend: 'hosted'
-        provider: string
-        providerLabel: string
-        authorizationUrl: string
-        connectUrl: string
-        expiresAt: string
-        baseUrl?: string
-        state?: string
-        openedBrowser?: boolean
-      }>(['device', 'connect', 'whoop', '--vault', vaultRoot], {
-        env: {
-          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-          MURPH_HOSTED_RUNTIME_PROCESS: '1',
-          MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
-          MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
-          OURA_CLIENT_ID: '',
-          OURA_CLIENT_SECRET: '',
-          STRAVA_CLIENT_ID: '',
-          STRAVA_CLIENT_SECRET: '',
-          WHOOP_CLIENT_ID: '',
-          WHOOP_CLIENT_SECRET: '',
-        },
-      }),
-    )
-
-    assert.equal(authorization, `Bearer ${bridgeToken}`)
-    assert.deepEqual(requestBody, { connectTarget: 'whoop' })
-    assert.equal(result.status, 'ok')
-    assert.equal(result.kind, 'device_connect_link')
-    assert.equal(result.backend, 'hosted')
-    assert.equal(result.provider, 'whoop')
-    assert.equal(result.providerLabel, 'WHOOP')
-    assert.equal(result.authorizationUrl, 'https://withmurph.ai/device/connect/dc_opaque')
-    assert.equal(result.connectUrl, 'https://withmurph.ai/device/connect/dc_opaque')
-    assert.equal(result.baseUrl, undefined)
-    assert.equal(result.state, undefined)
-    assert.equal(result.openedBrowser, undefined)
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
+    vi.unstubAllEnvs()
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('device connect rejects explicit base URLs in hosted runtime', async () => {
+test('hosted device connect service requires the root tool', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-connect-base-url-'))
 
   try {
@@ -292,8 +228,8 @@ test('device connect rejects explicit base URLs in hosted runtime', async () => 
         vault: vaultRoot,
       }),
       (error: unknown) => {
-        assert.equal((error as { code?: string }).code, 'HOSTED_DEVICE_BASE_URL_UNSUPPORTED')
-        assert.match(error instanceof Error ? error.message : '', /hosted bridge/u)
+        assert.equal((error as { code?: string }).code, 'invalid_option')
+        assert.match(error instanceof Error ? error.message : '', /root hosted device tool/u)
         return true
       },
     )
@@ -303,7 +239,7 @@ test('device connect rejects explicit base URLs in hosted runtime', async () => 
   }
 })
 
-test('device connect CLI rejects explicit base URLs in hosted runtime before local daemon access', async () => {
+test('hosted device connect CLI ignores explicit local daemon targets and fails closed', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-connect-cli-base-url-'))
   let requestPath: string | null = null
 
@@ -348,8 +284,8 @@ test('device connect CLI rejects explicit base URLs in hosted runtime before loc
 
     assert.equal(result.envelope.ok, false)
     if (!result.envelope.ok) {
-      assert.equal(result.envelope.error.code, 'HOSTED_DEVICE_BASE_URL_UNSUPPORTED')
-      assert.match(result.envelope.error.message ?? '', /hosted bridge/u)
+      assert.equal(result.envelope.error.code, 'invalid_option')
+      assert.match(result.envelope.error.message ?? '', /root hosted device tool/u)
     }
     assert.equal(requestPath, null)
   } finally {
@@ -367,7 +303,7 @@ test('device connect CLI rejects explicit base URLs in hosted runtime before loc
   }
 })
 
-test('hosted device services reject env-selected control-plane targets', async () => {
+test('hosted device services require the root tool before local control-plane access', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-env-base-url-'))
   const services = createIntegratedDeviceSyncServices()
 
@@ -376,208 +312,58 @@ test('hosted device services reject env-selected control-plane targets', async (
     vi.stubEnv('DEVICE_SYNC_BASE_URL', 'http://127.0.0.1:1')
     vi.stubEnv('DEVICE_SYNC_CONTROL_TOKEN', 'control-token-for-tests')
 
-    const expectHostedBaseUrlRejection = async (
+    const expectRootToolRejection = async (
       run: () => Promise<unknown>,
     ) => {
       await assert.rejects(
         run,
         (error: unknown) => {
-          assert.equal((error as { code?: string }).code, 'HOSTED_DEVICE_BASE_URL_UNSUPPORTED')
-          assert.match(error instanceof Error ? error.message : '', /DEVICE_SYNC_BASE_URL/u)
+          assert.equal((error as { code?: string }).code, 'invalid_option')
+          assert.match(error instanceof Error ? error.message : '', /root hosted device tool/u)
           return true
         },
       )
     }
 
-    await expectHostedBaseUrlRejection(() => services.listProviders({ vault: vaultRoot }))
-    await expectHostedBaseUrlRejection(() => services.connect({
+    await expectRootToolRejection(() => services.listProviders({ vault: vaultRoot }))
+    await expectRootToolRejection(() => services.connect({
       provider: 'whoop',
       vault: vaultRoot,
     }))
-    await expectHostedBaseUrlRejection(() => services.listAccounts({ vault: vaultRoot }))
-    await expectHostedBaseUrlRejection(() => services.showAccount({
+    await expectRootToolRejection(() => services.listAccounts({ vault: vaultRoot }))
+    await expectRootToolRejection(() => services.showAccount({
       accountId: 'acct_whoop_01',
       vault: vaultRoot,
     }))
-    await expectHostedBaseUrlRejection(() => services.reconcileAccount({
+    await expectRootToolRejection(() => services.reconcileAccount({
       accountId: 'acct_whoop_01',
       vault: vaultRoot,
     }))
-    await expectHostedBaseUrlRejection(() => services.disconnectAccount({
+    await expectRootToolRejection(() => services.disconnectAccount({
       accountId: 'acct_whoop_01',
       vault: vaultRoot,
     }))
-    await expectHostedBaseUrlRejection(() => services.daemonStatus({ vault: vaultRoot }))
-    await expectHostedBaseUrlRejection(() => services.daemonStart({ vault: vaultRoot }))
-    await expectHostedBaseUrlRejection(() => services.daemonStop({ vault: vaultRoot }))
+    await expectRootToolRejection(() => services.daemonStatus({ vault: vaultRoot }))
+    await expectRootToolRejection(() => services.daemonStart({ vault: vaultRoot }))
+    await expectRootToolRejection(() => services.daemonStop({ vault: vaultRoot }))
   } finally {
     vi.unstubAllEnvs()
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('device account list service uses hosted CLI bridge in hosted runtime without local daemon credentials', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-list-'))
-  const bridgeToken = 'bridge-token'
-  let requestPath: string | null = null
-  let requestBody: unknown = null
-  let authorization: string | undefined
-
-  const server = createServer((request, response) => {
-    authorization = request.headers.authorization
-    requestPath = request.url ?? null
-    const chunks: Buffer[] = []
-    request.on('data', (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    })
-    request.on('end', () => {
-      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({
-        accounts: [
-          {
-            accessTokenExpiresAt: '2026-05-04T00:00:00.000Z',
-            connectedAt: '2026-05-03T20:00:00.000Z',
-            createdAt: '2026-05-03T20:00:00.000Z',
-            displayName: 'WHOOP',
-            externalAccountId: 'external_whoop',
-            id: 'dsc_whoop',
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastSyncCompletedAt: '2026-05-03T21:00:00.000Z',
-            lastSyncErrorAt: null,
-            lastSyncStartedAt: '2026-05-03T21:00:00.000Z',
-            lastWebhookAt: null,
-            metadata: {},
-            nextReconcileAt: '2026-05-04T03:00:00.000Z',
-            provider: 'whoop',
-            scopes: ['read:recovery'],
-            sources: [
-              {
-                displayName: 'Garmin',
-                firstSeenAt: '2026-05-03T20:00:00.000Z',
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                lastSeenAt: '2026-05-03T21:00:00.000Z',
-                resourceCount: 2,
-                sourceProviderSlug: 'garmin',
-                status: 'connected',
-              },
-            ],
-            setupExpiresAt: null,
-            setupPhase: null,
-            status: 'active',
-            updatedAt: '2026-05-03T21:00:00.000Z',
-          },
-        ],
-        provider: 'whoop',
-        sourceProvider: 'garmin',
-      }))
-    })
-  })
-
+test('hosted device provider list returns only the static catalog', async () => {
   try {
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected a TCP listening address for hosted account list test.')
-    }
-
     vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
-    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', bridgeToken)
-    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
+    const result = await createIntegratedDeviceSyncServices().listProviders({})
 
-    const result = await createIntegratedDeviceSyncServices().listAccounts({
-      provider: 'whoop',
-      sourceProvider: 'garmin',
-      vault: vaultRoot,
-    })
-
-    assert.equal(authorization, `Bearer ${bridgeToken}`)
-    assert.equal(requestPath, '/device/accounts/list')
-    assert.deepEqual(requestBody, { provider: 'whoop', sourceProvider: 'garmin' })
     assert.equal(result.baseUrl, undefined)
     assert.equal(result.local, undefined)
-    assert.equal(result.provider, 'whoop')
-    assert.equal(result.sourceProvider, 'garmin')
-    assert.equal(result.accounts.length, 1)
-    assert.equal(result.accounts[0]?.provider, 'whoop')
-    assert.equal(result.accounts[0]?.status, 'active')
-    assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, 'garmin')
+    assert.equal(result.providers.length > 0, true)
+    assert.equal(result.providers.every((provider) => provider.source === 'catalog'), true)
+    assert.equal(result.providers.every((provider) => provider.localConfigured === false), true)
   } finally {
     vi.unstubAllEnvs()
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('device account reconcile service uses hosted CLI bridge in hosted runtime', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-reconcile-'))
-  const bridgeToken = 'bridge-token'
-  let requestPath: string | null = null
-  let requestBody: unknown = null
-
-  const server = createServer((request, response) => {
-    requestPath = request.url ?? null
-    const chunks: Buffer[] = []
-    request.on('data', (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    })
-    request.on('end', () => {
-      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({
-        connectionId: 'dsc_whoop',
-        occurredAt: '2026-07-15T12:00:00.000Z',
-        status: 'queued',
-      }))
-    })
-  })
-
-  try {
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected a TCP listening address for hosted account reconcile test.')
-    }
-
-    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
-    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', bridgeToken)
-    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
-
-    assert.deepEqual(await createIntegratedDeviceSyncServices().reconcileAccount({
-      accountId: 'dsc_whoop',
-      vault: vaultRoot,
-    }), {
-      accountId: 'dsc_whoop',
-      backend: 'hosted',
-      occurredAt: '2026-07-15T12:00:00.000Z',
-      status: 'queued',
-    })
-    assert.equal(requestPath, '/device/accounts/reconcile')
-    assert.deepEqual(requestBody, { accountId: 'dsc_whoop' })
-  } finally {
-    vi.unstubAllEnvs()
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
@@ -614,8 +400,8 @@ test('device account list rejects an explicit base URL in hosted runtime', async
         vault: vaultRoot,
       }),
       (error: unknown) => {
-        assert.equal((error as { code?: string }).code, 'HOSTED_DEVICE_BASE_URL_UNSUPPORTED')
-        assert.match(error instanceof Error ? error.message : '', /hosted bridge/u)
+        assert.equal((error as { code?: string }).code, 'invalid_option')
+        assert.match(error instanceof Error ? error.message : '', /root hosted device tool/u)
         return true
       },
     )
@@ -725,163 +511,6 @@ deviceControlPlaneTest(
     }
   },
 )
-
-test('device connect in hosted runtime fails bounded when bridge is unavailable', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-missing-bridge-'))
-
-  try {
-    const result = await runCli([
-      'device',
-      'connect',
-      'whoop',
-      '--vault',
-      vaultRoot,
-    ], {
-      env: {
-        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-        MURPH_HOSTED_RUNTIME_PROCESS: '1',
-        OURA_CLIENT_ID: '',
-        OURA_CLIENT_SECRET: '',
-        STRAVA_CLIENT_ID: '',
-        STRAVA_CLIENT_SECRET: '',
-        WHOOP_CLIENT_ID: '',
-        WHOOP_CLIENT_SECRET: '',
-      },
-    })
-
-    assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE')
-      assert.doesNotMatch(result.error.message ?? '', /DEVICE_SYNC_PROVIDER_CONFIG_REQUIRED/u)
-    }
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
-
-test('device connect in hosted runtime reports bridge request timeouts distinctly', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-timeout-'))
-  const bridgeToken = 'bridge-token'
-
-  const server = createServer((_request, response) => {
-    response.writeHead(408, { 'content-type': 'application/json' })
-    response.end(JSON.stringify({
-      error: {
-        code: 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT',
-        message: 'Hosted CLI bridge request timed out.',
-      },
-    }))
-  })
-
-  try {
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected a TCP listening address for hosted bridge timeout test.')
-    }
-
-    const result = await runCli([
-      'device',
-      'connect',
-      'whoop',
-      '--vault',
-      vaultRoot,
-    ], {
-      env: {
-        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-        MURPH_HOSTED_RUNTIME_PROCESS: '1',
-        MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
-        MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
-        OURA_CLIENT_ID: '',
-        OURA_CLIENT_SECRET: '',
-        STRAVA_CLIENT_ID: '',
-        STRAVA_CLIENT_SECRET: '',
-        WHOOP_CLIENT_ID: '',
-        WHOOP_CLIENT_SECRET: '',
-      },
-    })
-
-    assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_TIMEOUT')
-      assert.equal(result.error.message, 'Hosted CLI bridge request timed out.')
-    }
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
-
-test('device connect in hosted runtime preserves generic bridge failures as bounded errors', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-failed-'))
-  const bridgeToken = 'bridge-token'
-
-  const server = createServer((_request, response) => {
-    response.writeHead(502, { 'content-type': 'application/json' })
-    response.end(JSON.stringify({
-      error: {
-        code: 'HOSTED_CLI_BRIDGE_REQUEST_FAILED',
-        message: 'Hosted CLI bridge request failed.',
-      },
-    }))
-  })
-
-  try {
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected a TCP listening address for hosted bridge failure test.')
-    }
-
-    const result = await runCli([
-      'device',
-      'connect',
-      'whoop',
-      '--vault',
-      vaultRoot,
-    ], {
-      env: {
-        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-        MURPH_HOSTED_RUNTIME_PROCESS: '1',
-        MURPH_HOSTED_CLI_BRIDGE_TOKEN: bridgeToken,
-        MURPH_HOSTED_CLI_BRIDGE_URL: `http://127.0.0.1:${address.port}/`,
-        OURA_CLIENT_ID: '',
-        OURA_CLIENT_SECRET: '',
-        STRAVA_CLIENT_ID: '',
-        STRAVA_CLIENT_SECRET: '',
-        WHOOP_CLIENT_ID: '',
-        WHOOP_CLIENT_SECRET: '',
-      },
-    })
-
-    assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.equal(result.error.code, 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED')
-      assert.equal(result.error.message, 'Hosted CLI bridge request failed.')
-    }
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
 
 test('device provider and account list do not start the managed daemon when local credentials are absent', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-catalog-'))
@@ -1443,7 +1072,7 @@ deviceControlPlaneTest(
       await rm(vaultRoot, { recursive: true, force: true })
     }
   },
-  DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS,
+  DEVICE_CONTROL_PLANE_TEST_TIMEOUT_MS,
 )
 
 async function readJsonBody(

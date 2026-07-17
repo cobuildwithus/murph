@@ -29,6 +29,8 @@ export type HostedLinqAssignableHomeLine = {
   phoneNumber: string;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  proactiveConversationCount: number | null;
+  proactiveConversationDayUtc: Date | null;
 };
 
 export type HostedLinqContactCardLine = {
@@ -45,6 +47,8 @@ type HostedLinqAssignableHomeLineRow = {
   phoneNumberEncrypted: string | null;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  proactiveConversationCount: number | null;
+  proactiveConversationDayUtc: Date | null;
 };
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
@@ -291,6 +295,8 @@ export async function listHostedLinqAssignableHomeLines(input: {
       phoneNumberEncrypted: true,
       phoneNumberHint: true,
       phoneNumberLookupKey: true,
+      proactiveConversationCount: true,
+      proactiveConversationDayUtc: true,
     },
   });
 
@@ -304,6 +310,51 @@ export async function listHostedLinqAssignableHomeLines(input: {
   }
 
   return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
+export async function claimHostedLinqProactiveConversationCapacityTx(input: {
+  dayUtc: Date;
+  limit: number;
+  phoneNumberLookupKey: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (!Number.isInteger(input.limit) || input.limit <= 0) {
+    return false;
+  }
+
+  const incremented = await input.prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey: input.phoneNumberLookupKey,
+      proactiveConversationCount: {
+        lt: input.limit,
+      },
+      proactiveConversationDayUtc: input.dayUtc,
+    },
+    data: {
+      proactiveConversationCount: {
+        increment: 1,
+      },
+    },
+  });
+  if (incremented.count === 1) {
+    return true;
+  }
+
+  const started = await input.prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey: input.phoneNumberLookupKey,
+      OR: [
+        { proactiveConversationDayUtc: null },
+        { proactiveConversationDayUtc: { not: input.dayUtc } },
+      ],
+    },
+    data: {
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: input.dayUtc,
+    },
+  });
+
+  return started.count === 1;
 }
 
 export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
@@ -348,6 +399,8 @@ function mapHostedLinqAssignableHomeLineRows(
       phoneNumber,
       phoneNumberHint: row.phoneNumberHint,
       phoneNumberLookupKey: row.phoneNumberLookupKey,
+      proactiveConversationCount: row.proactiveConversationCount,
+      proactiveConversationDayUtc: row.proactiveConversationDayUtc,
     }];
   });
 }

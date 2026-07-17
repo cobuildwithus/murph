@@ -159,7 +159,7 @@ expectedSignalDescriptions:
     low: -15
     high: -5
     unit: minutes
-    window: 14 intervention days
+    window: 14 days
     confidence: moderate
     basis: Caffeine sleep meta-analyses and 400 mg timing trials report roughly 8-9 minutes longer sleep-onset latency with caffeine challenges; this protocol estimates the regain for users whose baseline included late or high-dose caffeine.
   protocolProminence: focus
@@ -171,7 +171,7 @@ expectedSignalDescriptions:
     low: 2
     high: 7
     unit: "%"
-    window: 14 intervention days
+    window: 14 days
     confidence: moderate
     basis: Quantitative caffeine sleep syntheses report about 5-7 percentage-point lower sleep efficiency after caffeine challenges; athlete late-caffeine synthesis reported about 4.9 points lower with sensitivity limitations.
   protocolProminence: focus
@@ -184,7 +184,7 @@ expectedSignalDescriptions:
     low: 5
     high: 12
     unit: minutes
-    window: 14 intervention days
+    window: 14 days
     confidence: low
     basis: A caffeine sleep meta-analysis reported about 11.4 fewer deep-sleep minutes after caffeine; consumer wearables estimate stages indirectly, so use same-device trends beside duration and efficiency.
   protocolProminence: focus
@@ -197,7 +197,7 @@ expectedSignalDescriptions:
     low: -2
     high: 0
     unit: bpm
-    window: 14 intervention days
+    window: 14 days
     confidence: low
     basis: Direct caffeine-curfew resting-heart-rate trials were not extracted; this is an indirect autonomic and sleep-continuity estimate for users whose late caffeine was causing nighttime arousal.
   protocolProminence: context
@@ -210,7 +210,7 @@ expectedSignalDescriptions:
     low: -4
     high: 0
     unit: mmHg systolic
-    window: 14 intervention days
+    window: 14 days
     confidence: low
     basis: Blood-pressure effects are acute and user-specific; no direct 14-day curfew blood-pressure trial was extracted, so this range is a safety-context estimate for sensitive or late-dosing users.
   protocolProminence: context
@@ -219,7 +219,7 @@ expectedSignalDescriptions:
   expected: Could stabilize
   estimatedChange:
     kind: mixed_or_contextual
-    window: 14 intervention days
+    window: 14 days
     confidence: low
     basis: Caffeine-HRV evidence is heterogeneous, and overnight RMSSD depends on sleep stage, illness, alcohol, stress, and device window.
   protocolProminence: context

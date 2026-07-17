@@ -1,7 +1,9 @@
 import {
-  readHostedRuntimeAiAccessDecision,
-  type HostedRuntimeAiAccessDecision,
-} from "../hosted-onboarding/member-access";
+  checkHostedAiUsageGate,
+  readHostedAiUsageGate,
+  resolveHostedAiUsageGate,
+  type HostedAiUsageGateDecisionWithSource,
+} from "../hosted-execution/usage-allowance";
 import {
   hostedMailboxSystemItemKindNeedsAiUsageGate,
 } from "../hosted-mailbox/ai-usage-gate";
@@ -9,20 +11,26 @@ import {
 export type HostedRuntimeUsageGateCheck =
   | { status: "allowed" }
   | {
-    decision: Extract<HostedRuntimeAiAccessDecision, { allowed: false }>;
+    decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }>;
     status: "denied";
   };
 
 export async function resolveHostedRuntimeAiUsageGate(input: {
-  // Retained so reconciliation can distinguish side-effecting workflow reads
-  // from status reads. Admission itself is always a write-free access read.
+  // "mutating" is authoritative turn admission and owns usage-period
+  // bookkeeping. "read_first" stays write-free on allow and confirms denials
+  // through that owner. "read_only" never writes and is for status surfaces.
   mode: "mutating" | "read_first" | "read_only";
   now?: Date | string;
-  prisma?: Parameters<typeof readHostedRuntimeAiAccessDecision>[0]["prisma"];
+  prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
-  const decision = await readHostedRuntimeAiAccessDecision({
+  const readGate = input.mode === "read_only"
+    ? readHostedAiUsageGate
+    : input.mode === "mutating"
+      ? resolveHostedAiUsageGate
+      : checkHostedAiUsageGate;
+  const decision = await readGate({
     memberId: input.userId,
     now,
     prisma: input.prisma,

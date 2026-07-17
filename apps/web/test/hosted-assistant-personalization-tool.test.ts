@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertActiveHostedMemberAccessAllowed: vi.fn(),
-  assertHostedMemberAssistantPersonalizationEligible: vi.fn(),
+  assertHostedLinqRouteEgressAuthority: vi.fn(),
+  findUniqueHostedThreadContainer: vi.fn(),
   getPrisma: vi.fn(),
-  lockHostedMemberRow: vi.fn(),
-  lockHostedMemberSponsoredAccessRows: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
+  readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx: vi.fn(),
+  requireHostedRuntimeActiveAccess: vi.fn(),
+  requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   scheduleMailboxWake: vi.fn(),
   transaction: vi.fn(),
   upsertHostedMemberAssistantPreferencesTx: vi.fn(),
@@ -16,8 +17,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
-  assertHostedMemberAssistantPersonalizationEligible:
-    mocks.assertHostedMemberAssistantPersonalizationEligible,
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
 }));
@@ -26,22 +25,19 @@ vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
   upsertHostedMemberAssistantPreferencesTx:
     mocks.upsertHostedMemberAssistantPreferencesTx,
 }));
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
+  requireHostedRuntimeActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx,
 }));
-vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/src/lib/hosted-onboarding/shared")
-  >();
-  return {
-    ...actual,
-    lockHostedMemberRow: mocks.lockHostedMemberRow,
-    lockHostedMemberSponsoredAccessRows: mocks.lockHostedMemberSponsoredAccessRows,
-  };
-});
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxConversationWakeByAssistantInputId:
+    mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx:
     mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+}));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
+  assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -53,14 +49,39 @@ describe("hosted assistant personalization tool owner adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
+    const tx = {
+      hostedThreadContainer: {
+        findUnique: mocks.findUniqueHostedThreadContainer,
+      },
+      tx: true,
+    };
     mocks.transaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
-    mocks.getPrisma.mockReturnValue({ $transaction: mocks.transaction });
-    mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
-    mocks.assertHostedMemberAssistantPersonalizationEligible.mockResolvedValue(undefined);
-    mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
+    mocks.getPrisma.mockReturnValue({
+      $transaction: mocks.transaction,
+      hostedThreadContainer: tx.hostedThreadContainer,
+    });
+    mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({
+      containerMemberId: "member_group_runtime",
+    });
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue(null);
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue({
+      eventId: "evt_direct_style",
+      kind: "conversation.message",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "telegram_direct_style",
+          schema: "murph.hosted-telegram-message.v1",
+          threadId: "telegram_direct_thread",
+        },
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      userId: "member_personalization_1",
+    });
+    mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
       personality: {
         detail: null,
@@ -107,14 +128,12 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
-      memberId: "member_personalization_1",
-      prisma: { $transaction: mocks.transaction },
-    });
-    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).toHaveBeenCalledWith({
-      memberId: "member_personalization_1",
-      prisma: { $transaction: mocks.transaction },
-    });
+    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_personalization_1",
+      {
+        prisma: expect.objectContaining({ $transaction: mocks.transaction }),
+      },
+    );
   });
 
   it("rejects reads when canonical hosted access is inactive", async () => {
@@ -123,13 +142,12 @@ describe("hosted assistant personalization tool owner adapter", () => {
       httpStatus: 403,
       message: "Hosted access is required.",
     });
-    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(accessError);
+    mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(accessError);
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_inactive",
       request: { action: "read" },
     })).rejects.toBe(accessError);
-    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
   });
 
@@ -161,18 +179,17 @@ describe("hosted assistant personalization tool owner adapter", () => {
       httpStatus: 403,
       message: "Hosted access is required.",
     });
-    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(accessError);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockRejectedValue(accessError);
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       authority: { assistantInputId: "ain_11111111111111111111111111111111" },
       memberId: "member_personalization_inactive",
       request: { action: "update", tone: "casual" },
     })).rejects.toBe(accessError);
-    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
-      memberId: "member_personalization_inactive",
-      prisma: { tx: true },
-    });
-    expect(mocks.assertHostedMemberAssistantPersonalizationEligible).not.toHaveBeenCalled();
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_personalization_inactive",
+      { prisma: expect.objectContaining({ tx: true }) },
+    );
     expect(
       mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
@@ -180,33 +197,386 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 
-  it("locks every active-access owner before rechecking update eligibility", async () => {
+  it("checks runtime access before resolving causal input authority", async () => {
     await handleHostedRuntimeAssistantPersonalizationTool({
       authority: { assistantInputId: "ain_55555555555555555555555555555555" },
       memberId: "member_personalization_1",
       request: { action: "update", tone: "casual" },
     });
 
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!,
-    );
     expect(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
+      mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0]!,
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+        .mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("keeps a group style update bound to the synthetic room runtime", async () => {
+    const routeAuthority = {
+      channel: "linq",
+      containerMemberId: "member_group_runtime",
+      threadId: "linq_group_chat",
+    } as const;
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue({
+      eventId: "evt_group_style",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "linq_group_chat",
+          threadIsDirect: false,
+        },
+        routeAuthority,
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      userId: "member_group_runtime",
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_66666666666666666666666666666666" },
+      memberId: "member_group_runtime",
+      request: { action: "update", tone: "casual", voice: "warm" },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "saved" },
+    });
+
+    expect(mocks.readHostedMailboxConversationWakeByAssistantInputId).toHaveBeenCalledWith({
+      assistantInputId: "ain_66666666666666666666666666666666",
+      memberId: "member_group_runtime",
+      prisma: expect.objectContaining({ tx: true }),
+    });
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma: expect.objectContaining({ tx: true }),
+    });
     expect(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.assertHostedMemberAssistantPersonalizationEligible.mock.invocationCallOrder[0]!,
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).toHaveBeenCalledWith({
+      assistantInputId: "ain_66666666666666666666666666666666",
+      memberId: "member_group_runtime",
+      prisma: expect.objectContaining({ tx: true }),
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_group_runtime",
+        preferences: { tone: "casual", voice: "warm" },
+      }),
+    );
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_preferences_1",
+    });
+  });
+
+  it("writes all personality dials only to the synthetic room runtime", async () => {
+    const routeAuthority = {
+      channel: "linq",
+      containerMemberId: "member_group_runtime",
+      threadId: "linq_group_chat",
+    } as const;
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      buildLinqStyleWake({ routeAuthority }),
+    );
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["detail", "humor", "push"],
+      assistantPersonality: {
+        detail: 7,
+        humor: 10,
+        push: 8,
+      },
+      assistantTone: "formal",
+      assistantVoice: "upbeat",
+      dispatch: { mailboxItemId: "mailbox_group_personality" },
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_67676767676767676767676767676767" },
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_personality",
+        personality: {
+          detail: 7,
+          humor: 10,
+          push: 8,
+        },
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "update_personality",
+      result: {
+        outcomes: {
+          detail: "saved",
+          humor: "saved",
+          push: "saved",
+        },
+        settings: {
+          detail: { source: "custom", value: 7 },
+          humor: { source: "custom", value: 10 },
+          push: { source: "custom", value: 8 },
+        },
+      },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma: expect.objectContaining({ tx: true }),
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_group_runtime",
+      occurredAt: expect.any(String),
+      preferenceCausalSeq: "42",
+      preferences: {
+        personality: {
+          detail: 7,
+          humor: 10,
+          push: 8,
+        },
+      },
+      prisma: expect.objectContaining({ tx: true }),
+    });
+    expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_group_personality",
+    });
+  });
+
+  it.each([
+    {
+      label: "a missing accepted wake",
+      wake: null,
+    },
+    {
+      label: "a direct Linq wake",
+      wake: buildLinqStyleWake({ threadIsDirect: true }),
+    },
+    {
+      label: "missing route authority",
+      wake: buildLinqStyleWake({ routeAuthority: null }),
+    },
+    {
+      label: "route authority for another container",
+      wake: buildLinqStyleWake({
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_other_group_runtime",
+          threadId: "linq_group_chat",
+        },
+      }),
+    },
+    {
+      label: "route authority for another chat",
+      wake: buildLinqStyleWake({
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_group_runtime",
+          threadId: "linq_other_group_chat",
+        },
+      }),
+    },
+  ])("rejects a synthetic room update with $label", async ({ wake }) => {
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(wake);
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_68686868686868686868686868686868" },
+      memberId: "member_group_runtime",
+      request: { action: "update", tone: "casual" },
+    })).rejects.toThrow("input authority is invalid");
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "the current route assertion fails",
+      prepareRoute: () => {
+        mocks.assertHostedLinqRouteEgressAuthority.mockRejectedValue(
+          new Error("route authority is stale"),
+        );
+      },
+    },
+    {
+      label: "the current route resolves to another container",
+      prepareRoute: () => {
+        mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({
+          containerMemberId: "member_other_group_runtime",
+        });
+      },
+    },
+  ])("rejects a synthetic room update when $label", async ({ prepareRoute }) => {
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      buildLinqStyleWake(),
+    );
+    prepareRoute();
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_69696969696969696969696969696969" },
+      memberId: "member_group_runtime",
+      request: { action: "update", tone: "casual" },
+    })).rejects.toThrow();
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledOnce();
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group style update whose accepted input came from group email", async () => {
+    mocks.findUniqueHostedThreadContainer.mockResolvedValue({
+      memberId: "member_group_runtime",
+    });
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue({
+      eventId: "evt_group_email_style",
+      kind: "conversation.message",
+      message: {
+        channel: "email",
+        identityId: null,
+        rawMessageKey: "email-group-style",
+        threadIsDirect: false,
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      userId: "member_group_runtime",
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_77777777777777777777777777777777" },
+      memberId: "member_group_runtime",
+      request: { action: "update_personality", personality: { humor: 10 } },
+    })).rejects.toThrow("input authority is invalid");
+
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("never lets a non-direct Linq input mutate a person runtime", async () => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue({
+      eventId: "evt_person_bound_group_style",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "linq_group_chat",
+          threadIsDirect: false,
+        },
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_personalization_1",
+          threadId: "linq_group_chat",
+        },
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      userId: "member_personalization_1",
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_78787878787878787878787878787878" },
+      memberId: "member_personalization_1",
+      request: { action: "update", tone: "casual" },
+    })).rejects.toThrow("input authority is invalid");
+
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("never lets a group-email input mutate a person runtime", async () => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue({
+      eventId: "evt_person_bound_group_email_style",
+      kind: "conversation.message",
+      message: {
+        assistantStyleSettingsAuthorized: true,
+        channel: "email",
+        identityId: null,
+        rawMessageKey: "email-person-bound-group-style",
+        threadIsDirect: false,
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      userId: "member_personalization_1",
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_79797979797979797979797979797979" },
+      memberId: "member_personalization_1",
+      request: { action: "update", voice: "warm" },
+    })).rejects.toThrow("input authority is invalid");
+
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "direct Linq",
+      wake: buildLinqStyleWake({
+        routeAuthority: null,
+        threadIsDirect: true,
+        userId: "member_personalization_1",
+      }),
+    },
+    {
+      label: "authorized direct email",
+      wake: {
+        eventId: "evt_direct_email_style",
+        kind: "conversation.message",
+        message: {
+          assistantStyleSettingsAuthorized: true,
+          channel: "email",
+          identityId: null,
+          rawMessageKey: "email-direct-style",
+          threadIsDirect: true,
+        },
+        occurredAt: "2026-07-16T00:00:00.000Z",
+        userId: "member_personalization_1",
+      },
+    },
+  ])("preserves $label style updates for a person runtime", async ({ wake }) => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(wake);
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a" },
+      memberId: "member_personalization_1",
+      request: { action: "update", tone: "casual" },
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "saved" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).toHaveBeenCalledOnce();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_personalization_1",
+        preferences: { tone: "casual" },
+      }),
     );
   });
 
@@ -302,26 +672,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
       },
     });
 
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
-      { tx: true },
-      "member_personalization_1",
-    );
-    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!,
-    );
     expect(
-      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
+      mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0]!,
-    );
-    expect(
-      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.assertHostedMemberAssistantPersonalizationEligible
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
         .mock.invocationCallOrder[0]!,
     );
     expect(
@@ -329,7 +683,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_99999999999999999999999999999999",
       memberId: "member_personalization_1",
-      prisma: { tx: true },
+      prisma: expect.objectContaining({ tx: true }),
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
       causalOrigin: "turn",
@@ -344,7 +698,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
           push: null,
         },
       },
-      prisma: { tx: true },
+      prisma: expect.objectContaining({ tx: true }),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
@@ -413,14 +767,14 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
       memberId: "member_personalization_1",
-      prisma: { tx: true },
+      prisma: expect.objectContaining({ tx: true }),
     });
     expect(
       mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_22222222222222222222222222222222",
       memberId: "member_personalization_1",
-      prisma: { tx: true },
+      prisma: expect.objectContaining({ tx: true }),
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -429,7 +783,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         memberId: "member_personalization_1",
         preferenceCausalSeq: "42",
         preferences: { voice: "warm" },
-        prisma: { tx: true },
+        prisma: expect.objectContaining({ tx: true }),
       }),
     );
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
@@ -485,9 +839,41 @@ describe("hosted assistant personalization tool owner adapter", () => {
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_44444444444444444444444444444444",
       memberId: "member_personalization_1",
-      prisma: { tx: true },
+      prisma: expect.objectContaining({ tx: true }),
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 });
+
+function buildLinqStyleWake(input: {
+  routeAuthority?: {
+    channel: "linq";
+    containerMemberId: string;
+    threadId: string;
+  } | null;
+  threadIsDirect?: boolean;
+  userId?: string;
+} = {}) {
+  const routeAuthority = input.routeAuthority === undefined
+    ? {
+        channel: "linq" as const,
+        containerMemberId: "member_group_runtime",
+        threadId: "linq_group_chat",
+      }
+    : input.routeAuthority;
+  return {
+    eventId: "evt_group_style",
+    kind: "conversation.message" as const,
+    message: {
+      channel: "linq" as const,
+      linqMessage: {
+        chatId: "linq_group_chat",
+        threadIsDirect: input.threadIsDirect ?? false,
+      },
+      ...(routeAuthority === null ? {} : { routeAuthority }),
+    },
+    occurredAt: "2026-07-16T00:00:00.000Z",
+    userId: input.userId ?? "member_group_runtime",
+  };
+}

@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 
 import {
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
-import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
@@ -14,9 +11,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
-  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -43,7 +40,19 @@ import {
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import type { AutomationRoute } from "@murphai/contracts";
+import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
+  automationRouteSchema,
+  buildAutomationSupportSeriesTag,
+  type AutomationRoute,
+} from "@murphai/contracts";
+import {
+  patchAutomation,
+  reconcileAutomationSupportSeries,
+  showAutomation,
+  upsertAutomation,
+} from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -56,7 +65,9 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import {
   type AssistantCurrentDeliveryRoute,
+  getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
@@ -130,6 +141,7 @@ import type {
 } from "./email-delivery-context.ts";
 import type {
   HostedRuntimePlatform,
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -202,6 +214,23 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
+const HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS = [
+  30_000,
+  120_000,
+  600_000,
+] as const;
+const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY =
+  "murphManagedAutomationSetupRetryAttempt";
+const HOSTED_MANAGED_AUTOMATION_SETUP_TRANSIENT_ERROR_CODES = new Set([
+  "EAGAIN",
+  "EAI_AGAIN",
+  "EBUSY",
+  "ECONNRESET",
+  "EINTR",
+  "EMFILE",
+  "ENFILE",
+  "ETIMEDOUT",
+]);
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
@@ -213,7 +242,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
-  currentDeliveryRouteScope?: HostedAssistantCurrentDeliveryRouteScope | null;
+  deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
@@ -226,13 +255,6 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
-}
-
-export interface HostedAssistantCurrentDeliveryRouteScope {
-  run<T>(
-    route: AssistantCurrentDeliveryRoute | null,
-    operation: (routeGrant: string) => Promise<T>,
-  ): Promise<T>;
 }
 
 export type HostedWorkspaceRuntimeAssistantPhase = (
@@ -266,22 +288,11 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         if (emailIngressPresent) {
           return await input.groupToolPort.request({ action: request.action });
         }
-        const selfOptOut = resolveHostedGroupToolCurrentSenderContext({
+        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
-        );
-      }
-      if (
-        request.action === "read_own_assistant_style"
-        || request.action === "update_own_assistant_style"
-      ) {
-        const currentSender = resolveHostedGroupToolCurrentSenderContext({
-          linqDeliveryContexts: input.linqDeliveryContexts,
-        });
-        return await input.groupToolPort.request(
-          currentSender ? { ...request, currentSender } : request,
         );
       }
       if (
@@ -334,12 +345,6 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
-    case "read_own_assistant_style":
-    case "update_own_assistant_style":
-      return {
-        action: request.action,
-        result: { style: null, status: "unavailable", unavailableReason },
-      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -351,13 +356,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   }
 }
 
-function resolveHostedGroupToolCurrentSenderContext(input: {
+function resolveHostedGroupToolSelfOptOutContext(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolCurrentSenderContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolCurrentSenderContext>();
+}): HostedRuntimeGroupToolSelfOptOutContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
   // Hosted email reply aliases authenticate the route, not the human From
-  // header. Only the accepted Linq sender can become participant-self
-  // authority for opt-out or personal style actions.
+  // header. Do not turn parsed From into self-opt-out authority.
   for (const context of input.linqDeliveryContexts) {
     if (context.threadIsDirect !== false) {
       continue;
@@ -444,23 +448,6 @@ function readHostedInitialAssistantInputIds(
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): AssistantAutomationOperationScope {
-  const runWithRoute = async <T>(
-    route: AssistantCurrentDeliveryRoute | null,
-    turnEnvironment: AssistantTurnEnvironment | null,
-    operation: (turnEnvironment: AssistantTurnEnvironment | null) => Promise<T>,
-  ): Promise<T> => input.currentDeliveryRouteScope
-    ? await input.currentDeliveryRouteScope.run(
-        route,
-        async (routeGrant) => await operation({
-          ...turnEnvironment,
-          env: {
-            ...turnEnvironment?.env,
-            [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: routeGrant,
-          },
-        }),
-      )
-    : await operation(turnEnvironment);
-
   return {
     async runAutoReplyGroup<T>(scopeInput: {
       executionContext: AssistantExecutionContext;
@@ -477,21 +464,23 @@ function createHostedAssistantAutomationOperationScope(
         vaultRoot: input.restored.vaultRoot,
       });
       const route = durableContext.route;
-      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
+      const groupScopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
         emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
         groupEmailIngress:
-          route?.channel === "email" && route.threadIsDirect === false,
+          normalizeAssistantRouteString(route?.channel)?.toLowerCase() === "email"
+          && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
       });
-      return await runWithRoute(
+      const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
+        executionContext: groupScopedExecutionContext,
         route,
+        vaultRoot: input.restored.vaultRoot,
+      });
+      return await scopeInput.operation(
+        scopedExecutionContext,
         scopeInput.turnEnvironment,
-        async (turnEnvironment) => await scopeInput.operation(
-          scopedExecutionContext,
-          turnEnvironment,
-        ),
       );
     },
   };
@@ -507,6 +496,9 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
 }> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  if (input.inputIds.length === 0) {
+    return { linqDeliveryContexts, route: null };
+  }
   for (const inputId of input.inputIds) {
     try {
       const event = await readAssistantInputEvent({
@@ -517,9 +509,10 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         conversation: event?.conversation ?? null,
         replyTarget: event?.replyTarget ?? null,
       });
-      if (route) {
-        routes.push(route);
+      if (!route || typeof route.threadIsDirect !== "boolean") {
+        return { linqDeliveryContexts: [], route: null };
       }
+      routes.push(route);
       const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
         event,
         memberId: input.memberId,
@@ -532,8 +525,11 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
     }
   }
   const route = resolveUnambiguousCurrentDeliveryRoute(routes);
+  if (!route || typeof route.threadIsDirect !== "boolean") {
+    return { linqDeliveryContexts: [], route: null };
+  }
   return {
-    linqDeliveryContexts: route ? linqDeliveryContexts : [],
+    linqDeliveryContexts,
     route,
   };
 }
@@ -597,6 +593,241 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   };
 }
 
+type HostedAssistantAutomationTool = NonNullable<
+  NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+>;
+
+function scopeHostedAutomationToolToAssistantOperation(input: {
+  executionContext: AssistantExecutionContext;
+  route: AssistantCurrentDeliveryRoute | null;
+  vaultRoot: string;
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted;
+  if (!hosted) {
+    return input.executionContext;
+  }
+
+  const { automationTool: _unscopedAutomationTool, ...hostedWithoutAutomation } = hosted;
+  void _unscopedAutomationTool;
+  const automationTool = input.route
+    && typeof input.route.threadIsDirect === "boolean"
+    && !(
+      normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
+      && input.route.threadIsDirect === false
+    )
+    ? createHostedAssistantAutomationTool({
+        route: input.route,
+        vaultRoot: input.vaultRoot,
+      })
+    : null;
+
+  return {
+    hosted: {
+      ...hostedWithoutAutomation,
+      ...(automationTool ? { automationTool } : {}),
+    },
+  };
+}
+
+function createHostedAssistantAutomationTool(input: {
+  route: AssistantCurrentDeliveryRoute;
+  vaultRoot: string;
+}): HostedAssistantAutomationTool {
+  const currentRoute = automationRouteSchema.parse(
+    resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
+  );
+
+  return {
+    async request(request, context) {
+      context?.signal?.throwIfAborted();
+      if (request.action === "reconcile") {
+        const result = await reconcileAutomationSupportSeries({
+          desiredAutomationIds: request.desiredAutomationIds,
+          supportSeriesTag: buildAutomationSupportSeriesTag(
+            request.supportSeriesId,
+          ),
+          vaultRoot: input.vaultRoot,
+        });
+        context?.signal?.throwIfAborted();
+        return {
+          action: "reconcile",
+          archivedCount: result.archivedCount,
+          matchedCount: result.matchedCount,
+          missingDesiredAutomationIds: result.missingDesiredAutomationIds,
+          supportSeriesId: request.supportSeriesId,
+          unchangedCount: result.unchangedCount,
+        };
+      }
+      if (request.action === "save") {
+        assertActiveHostedAutomationRoute({
+          route: currentRoute,
+          status: request.status ?? "active",
+        });
+        const result = await upsertAutomation({
+          ...(request.activeUntil === undefined
+            ? {}
+            : { activeUntil: request.activeUntil }),
+          ...(request.assistantTargetOverride === undefined
+            ? {}
+            : { assistantTargetOverride: request.assistantTargetOverride }),
+          ...(request.automationId ? { automationId: request.automationId } : {}),
+          continuityPolicy: request.continuityPolicy ?? "preserve",
+          instructions: request.instructions,
+          route: currentRoute,
+          schedule: request.schedule,
+          ...(request.slug ? { slug: request.slug } : {}),
+          status: request.status ?? "active",
+          ...(request.summary === undefined ? {} : { summary: request.summary }),
+          ...(request.supportKind === undefined
+            ? {}
+            : { supportKind: request.supportKind }),
+          ...(
+            request.supportSeriesId === undefined && request.tags === undefined
+              ? {}
+              : {
+                  tags: normalizeHostedAutomationSupportTags({
+                    supportSeriesId: request.supportSeriesId,
+                    tags: request.tags,
+                  }),
+                }
+          ),
+          title: request.title,
+          vaultRoot: input.vaultRoot,
+        });
+        return buildHostedAutomationToolResponse({
+          action: "save",
+          result,
+          routeBinding: "current_conversation",
+        });
+      }
+
+      const existing = await showAutomation({
+        automationId: request.lookup,
+        slug: request.lookup,
+        vaultRoot: input.vaultRoot,
+      });
+      if (!existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+      context?.signal?.throwIfAborted();
+      const route = request.retargetToCurrentConversation === true
+        ? currentRoute
+        : existing.route;
+      assertActiveHostedAutomationRoute({
+        route,
+        status: request.status ?? existing.status,
+      });
+      const result = await patchAutomation({
+        ...(request.activeUntil === undefined
+          ? {}
+          : { activeUntil: request.activeUntil }),
+        ...(request.assistantTargetOverride === undefined
+          ? {}
+          : { assistantTargetOverride: request.assistantTargetOverride }),
+        ...(request.continuityPolicy === undefined
+          ? {}
+          : { continuityPolicy: request.continuityPolicy }),
+        ...(request.instructions === undefined
+          ? {}
+          : { instructions: request.instructions }),
+        lookup: request.lookup,
+        ...(request.retargetToCurrentConversation === true
+          ? { route: currentRoute }
+          : {}),
+        ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
+        ...(request.slug === undefined ? {} : { slug: request.slug }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+        ...(request.summary === undefined ? {} : { summary: request.summary }),
+        ...(request.supportKind === undefined
+          ? {}
+          : { supportKind: request.supportKind }),
+        ...(
+          request.supportSeriesId === undefined && request.tags === undefined
+            ? {}
+            : {
+                tags: normalizeHostedAutomationSupportTags({
+                  existingTags: existing.tags,
+                  supportSeriesId: request.supportSeriesId,
+                  tags: request.tags,
+                }),
+              }
+        ),
+        ...(request.title === undefined ? {} : { title: request.title }),
+        vaultRoot: input.vaultRoot,
+      });
+      return buildHostedAutomationToolResponse({
+        action: "patch",
+        result,
+        routeBinding: request.retargetToCurrentConversation === true
+          ? "current_conversation"
+          : "preserved",
+      });
+    },
+  };
+}
+
+function normalizeHostedAutomationSupportTags(input: {
+  existingTags?: readonly string[];
+  supportSeriesId?: string;
+  tags?: readonly string[];
+}): string[] {
+  if (
+    input.tags?.some((tag) =>
+      tag === AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG
+      || tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+    )
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Reserved automation support tags must be set through supportSeriesId.",
+    );
+  }
+
+  const existingSupportSeriesTag = input.existingTags?.find((tag) =>
+    tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+  );
+  const supportSeriesTag = input.supportSeriesId === undefined
+    ? existingSupportSeriesTag
+    : buildAutomationSupportSeriesTag(input.supportSeriesId);
+  const tags = [...(input.tags ?? input.existingTags ?? [])]
+    .filter((tag) => !tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX));
+  return supportSeriesTag === undefined ? tags : [...tags, supportSeriesTag];
+}
+
+function assertActiveHostedAutomationRoute(input: {
+  route: AutomationRoute;
+  status: "active" | "archived" | "paused";
+}): void {
+  if (input.status !== "active") {
+    return;
+  }
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(
+    input.route,
+    "hosted",
+  );
+  if (issue) {
+    throw new VaultCliError("invalid_option", issue.message);
+  }
+}
+
+function buildHostedAutomationToolResponse(input: {
+  action: "patch" | "save";
+  result: Awaited<ReturnType<typeof upsertAutomation>>;
+  routeBinding: "current_conversation" | "preserved";
+}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+  return {
+    action: input.action,
+    automationId: input.result.record.automationId,
+    created: input.result.created,
+    lookupId: input.result.record.slug,
+    routeBinding: input.routeBinding,
+    status: input.result.record.status,
+  };
+}
+
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
@@ -613,7 +844,7 @@ export async function runHostedWorkspaceAssistantPhase(
     userId: input.request.userId,
   });
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
-  const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
+  const deviceTool = resolveHostedWorkspaceDeviceTool({
     deviceConnectProviders,
     input,
   });
@@ -633,9 +864,9 @@ export async function runHostedWorkspaceAssistantPhase(
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
       input,
-      issueLinkAvailable: issueDeviceConnectLink !== undefined,
+      issueLinkAvailable: deviceTool !== undefined && deviceConnectProviders.length > 0,
       stage: "context",
-      status: issueDeviceConnectLink ? "available" : "unavailable",
+      status: deviceTool ? "available" : "unavailable",
     }).catch(() => undefined);
   }
   const executionTargetHydrateStartedAt = Date.now();
@@ -678,8 +909,12 @@ export async function runHostedWorkspaceAssistantPhase(
           userEnv: input.runtime.userEnv,
         }),
         deviceConnectProviders,
+        ...(deviceTool ? { deviceTool } : {}),
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
+          : {}),
+        ...(input.runtime.platform.labsToolPort
+          ? { labsTool: input.runtime.platform.labsToolPort }
           : {}),
         ...(input.runtime.platform.assistantPersonalizationToolPort
           ? {
@@ -698,7 +933,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.subscriptionToolPort
           ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
           : {}),
-        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
@@ -1530,8 +1764,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     return null;
   }
 
+  let result: Awaited<ReturnType<typeof applyMurphManagedAutomations>>;
   try {
-    const result = await applyMurphManagedAutomations({
+    result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       ...(input.defaultRoute !== undefined
@@ -1539,93 +1774,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
         : {}),
       routeValidationProfile: "hosted",
       runtimeEnv: input.input.runtimeEnv,
+      shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.input.restored.vaultRoot,
     });
-    const changed = result.created + result.updated;
-    const shouldRetryStableKey =
-      result.stableKeyRetryNeeded === true &&
-      (input.retryStableKeyFailure || changed > 0);
-    if (
-      result.stableKeyRetryNeeded === true &&
-      result.stableKeyFailure !== undefined
-    ) {
-      const failure = buildHostedRuntimeFailureDiagnostics(
-        result.stableKeyFailure,
-        "Hosted managed automation stable-key setup failed.",
-      );
-      await writeHostedRuntimeLogBestEffort({
-        entry: {
-          ...buildHostedRuntimeLogContextFields({
-            attemptId: input.input.request.attemptId,
-            leaseGeneration: input.input.request.leaseGeneration,
-            workspaceVersion: input.input.request.workspaceVersion,
-          }),
-          component: "runtime",
-          errorCode: failure.errorCode,
-          eventCode: "runner.error",
-          level: "warn",
-          phase: "error",
-          redactedJson: {
-            ...failure.redactedJson,
-            murphManagedAutomationCreated: result.created,
-            murphManagedAutomationFailed: true,
-            murphManagedAutomationSkipped: result.skipped,
-            murphManagedAutomationUpdated: result.updated,
-          },
-        },
-        platform: input.input.runtime.platform,
-      });
-    }
-    if (
-      changed === 0 &&
-      !shouldRetryStableKey
-    ) {
-      return null;
-    }
-
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields({
-          attemptId: input.input.request.attemptId,
-          leaseGeneration: input.input.request.leaseGeneration,
-          workspaceVersion: input.input.request.workspaceVersion,
-        }),
-        component: "runtime",
-        eventCode: "assistant.pass_finished",
-        level: "info",
-        phase: "invoke",
-        redactedJson: {
-          murphManagedAutomationCreated: result.created,
-          murphManagedAutomationSkipped: result.skipped,
-          ...(result.stableKeyRetryNeeded === true
-            ? { murphManagedAutomationFailed: true }
-            : {}),
-          murphManagedAutomationUpdated: result.updated,
-        },
-      },
-      platform: input.input.runtime.platform,
-    });
-
-    return {
-      checkpointReason: "assistant_runtime_commit",
-      ...(shouldRetryStableKey
-        ? {
-            nextWakeAt: new Date(
-              resolveHostedAssistantPhaseNowMs(input.input)
-                + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
-            ).toISOString(),
-          }
-        : {}),
-      progressed: true,
-      redactedStatus: {
-        murphManagedAutomationCreated: result.created,
-        ...(result.stableKeyRetryNeeded === true
-          ? { murphManagedAutomationFailed: true }
-          : {}),
-        murphManagedAutomationSkipped: result.skipped,
-        murphManagedAutomationUpdated: result.updated,
-      },
-    };
   } catch (error) {
     const failure = buildHostedRuntimeFailureDiagnostics(
       error,
@@ -1650,8 +1801,192 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
       platform: input.input.runtime.platform,
     });
+    return buildHostedManagedAutomationFailureResult({
+      error,
+      input: input.input,
+      redactedStatus: {
+        murphManagedAutomationFailed: true,
+      },
+    });
+  }
+
+  if (result.yielded === true) {
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: new Date(
+        resolveHostedAssistantPhaseNowMs(input.input)
+          + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+      ).toISOString(),
+      progressed: true,
+      redactedStatus: {
+        murphManagedAutomationCreated: result.created,
+        murphManagedAutomationSkipped: result.skipped,
+        murphManagedAutomationUpdated: result.updated,
+        murphManagedAutomationYielded: true,
+      },
+    };
+  }
+
+  if (result.stableKeyRetryNeeded === true) {
+    const stableKeyFailure = result.stableKeyFailure ?? new Error(
+      "Hosted managed automation stable-key setup requested a retry without a failure.",
+    );
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      stableKeyFailure,
+      "Hosted managed automation stable-key setup failed.",
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    const changed = result.created + result.updated;
+    const retryable = isHostedManagedAutomationSetupRetryableError(
+      stableKeyFailure,
+    );
+    if (retryable || input.retryStableKeyFailure || changed > 0) {
+      const retryAttempt = readHostedManagedAutomationSetupRetryAttempt(
+        input.input,
+      );
+      if (!retryable && changed === 0 && retryAttempt === 0) {
+        return null;
+      }
+      return buildHostedManagedAutomationFailureResult({
+        error: stableKeyFailure,
+        input: input.input,
+        redactedStatus: {
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      });
+    }
     return null;
   }
+
+  const changed = result.created + result.updated;
+  const retryAttempt = readHostedManagedAutomationSetupRetryAttempt(input.input);
+  if (changed === 0 && retryAttempt === 0) {
+    return null;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "runtime",
+      eventCode: "assistant.pass_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        murphManagedAutomationCreated: result.created,
+        murphManagedAutomationFailed: false,
+        [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: 0,
+        murphManagedAutomationSetupRetryExhausted: false,
+        murphManagedAutomationSetupRetryable: false,
+        murphManagedAutomationSkipped: result.skipped,
+        murphManagedAutomationUpdated: result.updated,
+      },
+    },
+    platform: input.input.runtime.platform,
+  });
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    progressed: true,
+    redactedStatus: {
+      murphManagedAutomationCreated: result.created,
+      murphManagedAutomationFailed: false,
+      [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: 0,
+      murphManagedAutomationSetupRetryExhausted: false,
+      murphManagedAutomationSetupRetryable: false,
+      murphManagedAutomationSkipped: result.skipped,
+      murphManagedAutomationUpdated: result.updated,
+    },
+  };
+}
+
+function buildHostedManagedAutomationFailureResult(input: {
+  error: unknown;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  redactedStatus: Record<string, boolean | number>;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const retryable = isHostedManagedAutomationSetupRetryableError(input.error);
+  const previousRetryAttempt = readHostedManagedAutomationSetupRetryAttempt(
+    input.input,
+  );
+  const retryDelayMs = retryable
+    ? HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS[previousRetryAttempt]
+    : undefined;
+  const retryAttempt = retryDelayMs === undefined
+    ? previousRetryAttempt
+    : previousRetryAttempt + 1;
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(retryDelayMs === undefined
+      ? {}
+      : {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input.input) + retryDelayMs,
+          ).toISOString(),
+        }),
+    progressed: true,
+    redactedStatus: {
+      ...input.redactedStatus,
+      [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: retryAttempt,
+      murphManagedAutomationSetupRetryExhausted:
+        retryable && retryDelayMs === undefined,
+      murphManagedAutomationSetupRetryable: retryable,
+    },
+  };
+}
+
+function readHostedManagedAutomationSetupRetryAttempt(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): number {
+  const attempt = readHostedRuntimeRedactedNumber(
+    input.workspace?.redactedStatus,
+    HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY,
+  );
+  return Number.isSafeInteger(attempt) && attempt > 0
+    ? Math.min(
+        attempt,
+        HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS.length,
+      )
+    : 0;
+}
+
+function isHostedManagedAutomationSetupRetryableError(error: unknown): boolean {
+  if (error instanceof VaultCliError) {
+    return error.context?.retryable === true;
+  }
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = error.code;
+  return typeof code === "string"
+    && HOSTED_MANAGED_AUTOMATION_SETUP_TRANSIENT_ERROR_CODES.has(code);
 }
 
 function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
@@ -6264,56 +6599,134 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
+type HostedAssistantDeviceTool = NonNullable<
+  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
+>;
+
+function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): NonNullable<AssistantExecutionContext["hosted"]>["issueDeviceConnectLink"] | undefined {
+}): HostedAssistantDeviceTool | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
-  if (!deviceSyncPort || input.deviceConnectProviders.length === 0) {
+  if (!deviceSyncPort) {
     return undefined;
   }
 
-  return async ({ messagingReturnTarget, provider }) => {
-    await writeHostedDeviceConnectRuntimeLog({
-      deviceConnectProviders: input.deviceConnectProviders,
-      input: input.input,
-      issueLinkAvailable: true,
-      messagingReturnTarget,
-      provider,
-      stage: "request",
-      status: "requested",
-    });
+  return {
+    async request(request, context) {
+      context?.signal?.throwIfAborted();
+      if (request.action === "list_accounts") {
+        const provider = normalizeAssistantRouteString(request.provider);
+        const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
+        const snapshot = await deviceSyncPort.fetchSnapshot({
+          includeCredentialMaterial: false,
+          ...(provider ? { provider } : {}),
+          signal: context?.signal ?? null,
+          ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
+        });
+        return {
+          accounts: snapshot.connections.map(({ connection, localState }) => ({
+            accountId: connection.id,
+            displayName: connection.displayName,
+            lastErrorCode: localState.lastErrorCode,
+            lastSyncCompletedAt: localState.lastSyncCompletedAt,
+            provider: connection.provider,
+            status: connection.status,
+          })),
+          action: request.action,
+          provider,
+          sourceProvider,
+        };
+      }
 
-    try {
-      const result = await deviceSyncPort.createConnectLink({
-        connectTarget: provider,
-        ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+      if (request.action === "reconcile") {
+        if (!deviceSyncPort.reconcileAccount) {
+          throw new VaultCliError(
+            "device_reconcile_unavailable",
+            "Device account reconciliation is not available right now.",
+          );
+        }
+        const result = await deviceSyncPort.reconcileAccount({
+          connectionId: request.accountId,
+          signal: context?.signal ?? null,
+        });
+        return {
+          accountId: result.connectionId,
+          action: request.action,
+          occurredAt: result.occurredAt,
+          status: result.status,
+        };
+      }
+
+      const provider = resolveHostedDeviceToolConnectProvider({
+        configuredProviders: input.deviceConnectProviders,
+        requestedProvider: request.provider,
       });
+      const messagingReturnTarget = input.input.deviceSyncMessagingReturnTarget ?? null;
       await writeHostedDeviceConnectRuntimeLog({
         deviceConnectProviders: input.deviceConnectProviders,
-        expiresAtPresent: Boolean(result.expiresAt),
-        input: input.input,
-        issueLinkAvailable: true,
-        messagingReturnTarget,
-        provider: result.provider,
-        stage: "request",
-        status: "issued",
-      });
-      return result;
-    } catch (error) {
-      await writeHostedDeviceConnectRuntimeLog({
-        deviceConnectProviders: input.deviceConnectProviders,
-        error,
         input: input.input,
         issueLinkAvailable: true,
         messagingReturnTarget,
         provider,
         stage: "request",
-        status: "failed",
+        status: "requested",
       });
-      throw error;
-    }
+
+      try {
+        const result = await deviceSyncPort.createConnectLink({
+          connectTarget: provider,
+          ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+        });
+        await writeHostedDeviceConnectRuntimeLog({
+          deviceConnectProviders: input.deviceConnectProviders,
+          expiresAtPresent: Boolean(result.expiresAt),
+          input: input.input,
+          issueLinkAvailable: true,
+          messagingReturnTarget,
+          provider: result.provider,
+          stage: "request",
+          status: "issued",
+        });
+        return {
+          action: request.action,
+          link: result,
+        };
+      } catch (error) {
+        await writeHostedDeviceConnectRuntimeLog({
+          deviceConnectProviders: input.deviceConnectProviders,
+          error,
+          input: input.input,
+          issueLinkAvailable: true,
+          messagingReturnTarget,
+          provider,
+          stage: "request",
+          status: "failed",
+        });
+        throw error;
+      }
+    },
   };
+}
+
+function resolveHostedDeviceToolConnectProvider(input: {
+  configuredProviders: readonly { provider: string }[];
+  requestedProvider: string;
+}): string {
+  const requestedKey = normalizeHostedDeviceSyncConnectTargetKey(
+    input.requestedProvider,
+  );
+  const target = input.configuredProviders.find(
+    ({ provider }) =>
+      normalizeHostedDeviceSyncConnectTargetKey(provider) === requestedKey,
+  );
+  if (!target) {
+    throw new VaultCliError(
+      "device_connect_provider_unavailable",
+      "That device provider is not available to connect.",
+    );
+  }
+  return target.provider;
 }
 
 function shouldWriteHostedDeviceConnectContextLog(input: {

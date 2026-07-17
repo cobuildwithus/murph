@@ -798,6 +798,8 @@ function hostedAssistantReplyTargetsSignupWelcomeRecipient(
     && replyActorId === welcomeActorId;
 }
 
+const HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX = "signup-welcome:";
+
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
@@ -807,12 +809,13 @@ function isHostedSignupWelcomeDeliveryPayload(
 function isHostedSignupWelcomeDeliveryIdempotencyKey(
   idempotencyKey: string | null | undefined,
 ): boolean {
-  const prefix = "signup-welcome:";
   const normalized = idempotencyKey?.trim() ?? "";
-  if (!normalized.startsWith(prefix)) {
+  if (!normalized.startsWith(HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX)) {
     return false;
   }
-  const tokenTarget = normalized.slice(prefix.length);
+  const tokenTarget = normalized.slice(
+    HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX.length,
+  );
   return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
@@ -2992,6 +2995,11 @@ function createHostedAssistantLinqSendDependency(input: {
     const directRecipientPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.directRecipientPhoneNumber);
+    const originalParticipantRecipientPhoneNumber =
+      request.targetKind === "participant"
+        ? normalizeHostedLinqDirectRecipient(request.target)
+          ?? directRecipientPhoneNumber
+        : null;
     const fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
@@ -3118,6 +3126,7 @@ function createHostedAssistantLinqSendDependency(input: {
           attemptedAt,
           answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
+          directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
@@ -3141,6 +3150,7 @@ function createHostedAssistantLinqSendDependency(input: {
         attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
+        directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
         idempotencyKey,
         intentId: input.intentId ?? null,
@@ -3421,6 +3431,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  directRecipientPhoneNumber?: string | null;
   failedAt?: Date | null;
   failureCode?: string | null;
   failureReason?: string | null;
@@ -3440,6 +3451,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
       ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
       : {}),
     attemptedAt: input.attemptedAt.toISOString(),
+    ...(input.targetKind === "participant"
+      ? { directRecipientPhoneNumber: input.directRecipientPhoneNumber ?? null }
+      : {}),
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
     failureReason: input.failureReason ?? null,
@@ -3463,7 +3477,11 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
 }): Promise<void> {
   if (shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(input.outcome)) {
-    await recordHostedAssistantLinqDeliveryOutcomeRequired(input);
+    try {
+      await recordHostedAssistantLinqDeliveryOutcomeRequired(input);
+    } catch (error) {
+      throw markHostedDeliveryMayHaveSucceeded(error);
+    }
     return;
   }
 
@@ -3473,7 +3491,23 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
-  return Boolean(outcome.acceptedAt && outcome.answeredMailboxItemIds?.length);
+  if (!outcome.acceptedAt) {
+    return false;
+  }
+  if (outcome.answeredMailboxItemIds?.length) {
+    return true;
+  }
+  if (outcome.targetKind !== "participant") {
+    return false;
+  }
+
+  if (isHostedSignupWelcomeDeliveryIdempotencyKey(outcome.idempotencyKey)) {
+    return true;
+  }
+
+  return (outcome.idempotencyKey?.trim() ?? "").startsWith(
+    HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX,
+  );
 }
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {

@@ -377,7 +377,7 @@ expectedSignalDescriptions:
     description: "A calmer, less uncomfortable night may reduce quiet-wake minutes, but controlled sleep effects remain unclear."
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    expected: Background signal
+    expected: Small or no change
     expectedDirection: mixed_or_contextual
     estimatedChange:
       kind: absolute
@@ -388,7 +388,7 @@ expectedSignalDescriptions:
       confidence: low
       basis: "No extracted study directly anchors N3 or wearable deep-sleep minutes for this protocol; the range reflects a noisy same-device context signal around otherwise null or mixed sleep findings."
     protocolProminence: context
-    description: "Deep-sleep minutes remain a noisy context signal when sleep findings are null, mixed, or unmeasured."
+    description: "Red light has no proven effect on deep sleep; a shift of a few minutes either way is usually normal night-to-night variation."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v2"
   startIntent:

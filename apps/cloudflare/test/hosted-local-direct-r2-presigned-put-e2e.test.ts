@@ -65,6 +65,8 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       `direct-r2-presigned-put/${userId}/${randomUUID()}-changed-metadata.bin`;
     const negativeMissingChecksumObjectKey =
       `direct-r2-presigned-put/${userId}/${randomUUID()}-missing-checksum.bin`;
+    const negativeWrongBodyObjectKey =
+      `direct-r2-presigned-put/${userId}/${randomUUID()}-wrong-body.bin`;
     const metadata = {
       encryptedsha256: payload.sha256Hex,
       schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -188,10 +190,28 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       });
       expect(missingChecksumResponse.ok).toBe(false);
 
+      const wrongBodyPutUrl = await createHostedR2PresignedPutUrl({
+        checksumSha256Base64: payload.sha256Base64,
+        contentType: directR2ContentType,
+        environment,
+        expiresSeconds: 300,
+        key: negativeWrongBodyObjectKey,
+        metadata,
+      });
+      const wrongBodyBytes = payload.bytes.slice(0);
+      new Uint8Array(wrongBodyBytes)[0] ^= 0xff;
+      const wrongBodyResponse = await putPresignedObject({
+        headers: requestHeaders,
+        payload: wrongBodyBytes,
+        url: wrongBodyPutUrl.url,
+      });
+      expect(wrongBodyResponse.ok).toBe(false);
+
       for (const negativeObjectKey of [
         negativeMissingMetadataObjectKey,
         negativeChangedMetadataObjectKey,
         negativeMissingChecksumObjectKey,
+        negativeWrongBodyObjectKey,
       ]) {
         const negativeHeadUrl = await createHostedR2PresignedHeadUrl({
           environment,
@@ -209,6 +229,7 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       await deletePresignedObjectBestEffort(environment, negativeMissingMetadataObjectKey);
       await deletePresignedObjectBestEffort(environment, negativeChangedMetadataObjectKey);
       await deletePresignedObjectBestEffort(environment, negativeMissingChecksumObjectKey);
+      await deletePresignedObjectBestEffort(environment, negativeWrongBodyObjectKey);
     }
   }, directR2PresignedPutTimeoutMs);
 });

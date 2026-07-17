@@ -18,9 +18,6 @@ import type {
   HostedRuntimeLogLevel,
   HostedRuntimeLogPhase,
   HostedRuntimeRedactedJson,
-  HostedRuntimeRedactedObject,
-  HostedRuntimeRedactedScalar,
-  HostedRuntimeRedactedValue,
   HostedWorkspaceCheckpointReason,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -29,6 +26,7 @@ import type {
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
+  parseHostedRuntimeRedactedJson,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
@@ -49,122 +47,9 @@ export {
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
 };
 
-const FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES = [
-  "address",
-  "authorization",
-  "body",
-  "cookie",
-  "email",
-  "header",
-  "message",
-  "path",
-  "payload",
-  "phone",
-  "prompt",
-  "raw",
-  "secret",
-  "text",
-  "token",
-] as const;
-const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
-  "authorizationHeaderValue",
-  "assistantContextSnapshotRefreshAttempted",
-  "assistantContextSnapshotRefreshed",
-  "bodyJson",
-  "executionContextHosted",
-  "failureAssistantProviderErrorBodyMessage",
-  "failureAssistantProviderErrorMessage",
-  "failureAssistantProviderErrorStatusText",
-  "messageContent",
-  "messageText",
-  "payload",
-  "payloadValue",
-  "providerHttpStatusText",
-  "providerRequestBodyFieldNames",
-  "routePlanningActiveExperimentContextElapsedMs",
-  "routePlanningAssistantContextSnapshotElapsedMs",
-  "routePlanningAnyBootstrapContextPrepared",
-  "routePlanningBootstrapContextPrepared",
-  "routePlanningPrimarySystemPromptElapsedMs",
-  "safeErrorMessage",
-  "tokenPreview",
-]);
-const BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES = new Set([
-  "assistantContextSnapshotRefreshAttempted",
-  "assistantContextSnapshotRefreshed",
-]);
-const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
-  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
-const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
-  "routePlanningActiveExperimentContextElapsedMs",
-  "routePlanningAssistantContextSnapshotElapsedMs",
-  "routePlanningCliBootstrapElapsedMs",
-  "routePlanningElapsedMs",
-  "routePlanningFallbackInstructionsElapsedMs",
-  "routePlanningMeasuredElapsedMs",
-  "routePlanningMemoryOverviewElapsedMs",
-  "routePlanningPrimaryInstructionsElapsedMs",
-  "routePlanningPrimarySystemPromptElapsedMs",
-  "routePlanningResumeBindingElapsedMs",
-  "routePlanningSlowestStageElapsedMs",
-  "routePlanningSupportedExperimentProtocolsElapsedMs",
-  "routePlanningTargetCapabilitiesElapsedMs",
-  "routePlanningUnaccountedElapsedMs",
-  "routePlanningVaultOverviewElapsedMs",
-]);
-const ROUTE_PLANNING_STAGE_VALUES = new Set([
-  "active_experiment_context",
-  "assistant_context_snapshot",
-  "cli_bootstrap",
-  "fallback_instructions",
-  "memory_overview",
-  "primary_instructions",
-  "resume_binding",
-  "supported_experiment_protocols",
-  "target_capabilities",
-]);
-const ROUTE_PLANNING_REDACTED_KEY_NAMES = new Set([
-  ...ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES,
-  "routePlanningAnyBootstrapContextPrepared",
-  "routePlanningBootstrapContextPrepared",
-  "routePlanningSlowestStage",
-]);
-const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
-  "Available",
-  "Bytes",
-  "Code",
-  "Codes",
-  "Count",
-  "Counts",
-  "Index",
-  "Indexes",
-  "Kind",
-  "Kinds",
-  "Length",
-  "Lengths",
-  "Ordinal",
-  "Ordinals",
-  "Present",
-  "Seq",
-  "Seqs",
-  "Size",
-  "Sizes",
-  "Status",
-  "Statuses",
-  "Type",
-  "Types",
-] as const;
-const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
-const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
-const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
-  "codexActionToolSummaries",
-  "deliveryErrorSummaries",
-]);
-const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
@@ -882,7 +767,10 @@ export async function recordHostedRuntimeLogTx(input: {
         HOSTED_RUNTIME_LOG_PHASES,
         "Hosted runtime log phase",
       ),
-      redactedJson: toNullablePrismaJson(sanitizeHostedRuntimeLogRedactedJson(input.redacted)),
+      redactedJson: toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
+        input.redacted,
+        "Hosted runtime log redactedJson",
+      )),
       userId: requireNonEmptyString(input.userId, "Hosted runtime log userId"),
       workspaceVersion: normalizeNullableBigInt(
         input.workspaceVersion,
@@ -1016,229 +904,13 @@ function normalizeHostedRuntimeLogLimit(value: number): number {
   return Math.min(value, 50);
 }
 
-function sanitizeHostedRuntimeLogRedactedJson(
-  value: HostedRuntimeRedactedJson | null | undefined,
-): HostedRuntimeRedactedJson | null {
-  return sanitizeHostedRuntimeRedactedJson(value, "Hosted runtime log redactedJson");
-}
-
 function sanitizeHostedRuntimeRedactedJson(
   value: Record<string, unknown> | null | undefined,
   label: string,
   reservedKeys?: ReadonlySet<string>,
 ): HostedRuntimeRedactedJson | null {
-  if (!value) {
-    return null;
-  }
-
-  const output: HostedRuntimeRedactedJson = {};
-  const entries = Object.entries(value);
-
-  const ordinaryEntryCount = reservedKeys
-    ? entries.filter(([key]) => !reservedKeys.has(key)).length
-    : entries.length;
-  if (ordinaryEntryCount > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
-    throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
-    );
-  }
-
-  for (const [key, entry] of entries) {
-    assertAllowedHostedRuntimeRedactedKey(key, `${label}.${key}`);
-    output[key] = parseHostedRuntimeRedactedValue(entry, `${label}.${key}`, key);
-  }
-
-  return Object.keys(output).length === 0 ? null : output;
-}
-
-function parseHostedRuntimeRedactedValue(
-  value: unknown,
-  label: string,
-  key: string,
-): HostedRuntimeRedactedValue {
-  if (BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES.has(key)) {
-    return parseHostedRuntimeRedactedBoolean(value, label);
-  }
-  if (ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)) {
-    return parseHostedRuntimeRedactedElapsedMs(value, label);
-  }
-  if (key === "routePlanningSlowestStage") {
-    return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
-      throw new TypeError(
-        `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH} redacted values.`,
-      );
-    }
-
-    if (value.some((entry) => entry && typeof entry === "object")) {
-      if (!HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS.has(key)) {
-        throw new TypeError(`${label} must be a shallow redacted scalar or scalar array.`);
-      }
-
-      return value.map((entry, index) =>
-        parseHostedRuntimeRedactedObject(entry, `${label}[${index}]`));
-    }
-
-    return value.map((entry, index) =>
-      parseHostedRuntimeRedactedScalar(entry, `${label}[${index}]`));
-  }
-
-  return parseHostedRuntimeRedactedScalar(value, label);
-}
-
-function parseHostedRuntimeRedactedBoolean(
-  value: unknown,
-  label: string,
-): boolean {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  throw new TypeError(`${label} must be a boolean.`);
-}
-
-function parseHostedRuntimeRedactedElapsedMs(
-  value: unknown,
-  label: string,
-): number | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (value >= 0) {
-      return value;
-    }
-  }
-
-  throw new TypeError(`${label} must be a nonnegative finite number or null.`);
-}
-
-function parseHostedRuntimeRedactedRoutePlanningStage(
-  value: unknown,
-  label: string,
-): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value === "string" && ROUTE_PLANNING_STAGE_VALUES.has(value)) {
-    return value;
-  }
-
-  throw new TypeError(`${label} must be a known route-planning stage or null.`);
-}
-
-function parseHostedRuntimeRedactedObject(
-  value: unknown,
-  label: string,
-): HostedRuntimeRedactedObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a redacted object.`);
-  }
-
-  const entries = Object.entries(value);
-  if (entries.length > HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS) {
-    throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS} fields.`,
-    );
-  }
-
-  const output: HostedRuntimeRedactedObject = {};
-  for (const [key, entry] of entries) {
-    assertAllowedHostedRuntimeRedactedKey(key, `${label}.${key}`);
-    output[key] = BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES.has(key)
-      ? parseHostedRuntimeRedactedBoolean(entry, `${label}.${key}`)
-      : parseHostedRuntimeRedactedScalar(entry, `${label}.${key}`);
-  }
-
-  return output;
-}
-
-function parseHostedRuntimeRedactedScalar(
-  value: unknown,
-  label: string,
-): HostedRuntimeRedactedScalar {
-  if (value === null || typeof value === "boolean" || typeof value === "number") {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError(`${label} must be a finite redacted value.`);
-    }
-
-    return value;
-  }
-
-  if (typeof value === "string") {
-    assertSafeHostedRuntimeRedactedString(value, label);
-
-    return value;
-  }
-
-  throw new TypeError(`${label} must be a shallow redacted scalar or scalar array.`);
-}
-
-function assertAllowedHostedRuntimeRedactedKey(key: string, label: string): void {
-  if (isSafeHostedRuntimeDiagnosticTextRedactedKey(key)) {
-    return;
-  }
-  if (key.startsWith("routePlanning") && !ROUTE_PLANNING_REDACTED_KEY_NAMES.has(key)) {
-    throw new TypeError(`${label} is not an allowed route-planning diagnostic key.`);
-  }
-
-  const normalized = key.toLowerCase();
-
-  for (const forbidden of FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES) {
-    if (
-      normalized.includes(forbidden)
-      && !isSafeHostedRuntimeRedactedMetadataKey(key)
-    ) {
-      throw new TypeError(`${label} is not allowed in hosted runtime redacted JSON.`);
-    }
-  }
-}
-
-function isSafeHostedRuntimeDiagnosticTextRedactedKey(key: string): boolean {
-  return SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES.has(key)
-    || SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN.test(key);
-}
-
-function isSafeHostedRuntimeRedactedMetadataKey(key: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/u.test(key)
-    && SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES.some((suffix) =>
-      key.endsWith(suffix)
-    );
-}
-
-function assertSafeHostedRuntimeRedactedString(value: string, label: string): void {
-  if (value.length > HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH) {
-    throw new TypeError(
-      `${label} must be at most ${HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH} characters.`,
-    );
-  }
-
-  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
-    throw new TypeError(`${label} must not contain a local filesystem path.`);
-  }
-
-  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
-    throw new TypeError(`${label} must not contain an email address.`);
-  }
-
-  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
-    throw new TypeError(`${label} must not contain a phone number.`);
-  }
-
-  if (
-    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
-      .test(value)
-    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
-    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
-    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
-  ) {
-    throw new TypeError(`${label} must not contain secret-shaped content.`);
-  }
+  const parsed = parseHostedRuntimeRedactedJson(value, label, reservedKeys);
+  return parsed && Object.keys(parsed).length > 0 ? parsed : null;
 }
 
 function normalizeNullableHostedRuntimeLogString(
@@ -1251,7 +923,7 @@ function normalizeNullableHostedRuntimeLogString(
     return null;
   }
 
-  assertSafeHostedRuntimeRedactedString(normalized, label);
+  parseHostedRuntimeRedactedJson({ value: normalized }, label);
 
   if (normalized.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)) {
     throw new TypeError(`${label} must be a bounded opaque identifier or code.`);

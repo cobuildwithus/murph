@@ -3,9 +3,15 @@
 Configure these fields on the published Retell agent version. Murph stores the final analysis result,
 not the raw transcript.
 
-Subscribe the Retell webhook to `call_ended` and `call_analyzed` only, pointing at
+Subscribe the Retell webhook to `call_ended`, `call_analyzed`, and
+`transfer_ended` only, pointing at
 `/api/retell/webhook`. Murph verifies the raw `X-Retell-Signature`, updates the existing
 `HostedPhoneCall` row idempotently, and runs result handling only once when analysis first lands.
+Signed terminal callbacks also record Retell's provider-reported aggregate call
+cost in the web-owned included-usage ledger. A `call_transfer` observation stays
+pending until `transfer_ended` so the immutable usage row includes transfer-leg
+cost. The pre-armed reconciliation workflow retrieves terminal usage when the
+callbacks do not arrive.
 For local development, `RETELL_WEBHOOK_PUBLIC_BASE_URL` may point individual created calls at
 the local public tunnel without changing the published agent or workspace webhook configuration.
 
@@ -32,5 +38,6 @@ follow_up
 ```
 
 Privacy baseline: Retell stores basic attributes only; Murph stores the call brief and final result.
-Do not persist raw Retell transcripts, webhook bodies, function bodies, recordings, or audio in
-Murph.
+For usage, Murph stores only the bounded aggregate cost and duration. Do not
+persist raw Retell transcripts, webhook bodies, function bodies, recordings,
+audio, transfer destinations, or product-level cost labels in Murph.

@@ -33,6 +33,29 @@ import {
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
+test("Junction sleep normalization preserves explicit session identity without guessing unknown types", () => {
+  const sleep = [
+    { id: "main", type: "long_sleep" },
+    { id: "nap", type: "nap" },
+    { id: "unknown", type: "other" },
+    { id: "missing" },
+  ].map((entry, index) => ({
+    ...entry,
+    source: { provider: "oura", type: "wearable" },
+    start: `2026-03-${String(10 + index).padStart(2, "0")}T01:00:00.000Z`,
+    end: `2026-03-${String(10 + index).padStart(2, "0")}T02:00:00.000Z`,
+  }));
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-03-16T10:00:00.000Z",
+    summaries: { sleep },
+  });
+  const sessionTypes = payload.events
+    ?.filter((event) => event.kind === "sleep_session")
+    .map((event) => event.fields?.sleepType);
+
+  assert.deepEqual(sessionTypes, ["main_sleep", "nap", undefined, undefined]);
+});
+
 function buildCompanionHrvRmssdSnapshotEntry(
   observation: Parameters<typeof serializeCompanionHrvRmssdObservation>[0],
 ) {
@@ -41,6 +64,24 @@ function buildCompanionHrvRmssdSnapshotEntry(
       .update(serializeCompanionHrvRmssdObservation(observation))
       .digest("hex"),
     observation,
+  };
+}
+
+type CompanionHrvRmssdObservation = Parameters<
+  typeof serializeCompanionHrvRmssdObservation
+>[0];
+
+function buildCompanionOvernightHrvObservation(
+  overrides: Partial<CompanionHrvRmssdObservation> = {},
+): CompanionHrvRmssdObservation {
+  return {
+    schema: COMPANION_HRV_RMSSD_SCHEMA,
+    nightDate: "2026-07-10",
+    rmssdMs: 48.25,
+    completedWindowCount: 96,
+    acceptedWindowCount: 72,
+    methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    ...overrides,
   };
 }
 
@@ -2716,23 +2757,16 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
         },
       },
     },
-    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "323e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-13T10:00:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good",
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    })],
+    companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(
+      buildCompanionOvernightHrvObservation({ nightDate: "2026-07-13" }),
+    ),
   });
 
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const sdnn = observations.filter((event) => event.fields?.metric === "hrv-sdnn");
-  const rmssd = observations.filter((event) => event.fields?.metric === "hrv-rmssd");
+  const companionPrv = observations.filter((event) =>
+    event.fields?.metric === "whoop-ble-overnight-prv-rmssd"
+  );
 
   assert.equal(sdnn.length, 2);
   assert.deepEqual(sdnn.map((event) => event.fields?.value).sort((left, right) =>
@@ -2740,51 +2774,70 @@ test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP 
   ), [64, 66]);
   assert.ok(sdnn.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health-kit"));
   assert.ok(sdnn.every((event) => event.externalRef?.facet === "hrv"));
-  assert.equal(rmssd.length, 1);
-  assert.equal(rmssd[0]?.fields?.value, 48.25);
-  assert.equal(rmssd[0]?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(companionPrv.length, 1);
+  assert.equal(companionPrv[0]?.fields?.value, 48.25);
+  assert.equal(companionPrv[0]?.dataOrigin?.sourceProviderSlug, "whoop");
   assert.equal(observations.some((event) => event.fields?.metric === "hrv"), false);
 });
 
-test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance", () => {
+test("Junction normalizer maps companion WHOOP overnight PRV to one estimated daily summary", () => {
+  const observation = buildCompanionOvernightHrvObservation();
+  const snapshotEntry = buildCompanionHrvRmssdSnapshotEntry(observation);
   const payload = normalizeJunctionSnapshot({
     accountId: "junction-account-hash-1",
     importedAt: "2026-07-10T13:46:00.000Z",
-    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T13:45:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good",
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    })],
+    companionHrvRmssd: snapshotEntry,
   });
 
-  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
-  assert.equal(event?.title, "WHOOP BLE spot RMSSD");
-  assert.equal(event?.occurredAt, "2026-07-10T13:45:00.000Z");
+  const event = payload.events?.find((entry) =>
+    entry.fields?.metric === "whoop-ble-overnight-prv-rmssd"
+  );
+  assert.equal(event?.title, "Estimated WHOOP BLE scheduled overnight PRV (RMSSD)");
+  assert.equal(event?.occurredAt, "2026-07-10T12:00:00.000Z");
+  assert.equal(event?.dayKey, "2026-07-10");
+  assert.equal(event?.timeZone, undefined);
   assert.equal(event?.fields?.value, 48.25);
   assert.equal(event?.fields?.unit, "ms");
-  assert.equal(event?.fields?.observationGrain, "derived_fact");
+  assert.equal(event?.fields?.observationGrain, "summary");
   assert.equal(event?.externalRef?.system, "whoop");
-  assert.equal(event?.externalRef?.resourceType, "ble-hrv-rmssd");
+  assert.equal(event?.externalRef?.resourceType, "companion-overnight-hrv-rmssd");
+  assert.equal(event?.externalRef?.resourceId, "2026-07-10");
+  assert.equal(event?.externalRef?.facet, "whoop-ble-overnight-prv-rmssd");
   assert.match(
     event?.externalRef?.version ?? "",
-    /^rmssd-pulse-interval-v1:[a-f0-9]{64}$/u,
+    /^prv-rmssd-5m-mean-scheduled-0000-0800-local-v1:[a-f0-9]{64}$/u,
+  );
+  assert.equal(
+    event?.externalRef?.version,
+    `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${snapshotEntry.admissionId}`,
   );
   assert.equal(event?.externalRefUpdatePolicy, "immutable");
   assert.equal(event?.dataOrigin?.aggregatorProvider, "murph-companion");
   assert.equal(event?.dataOrigin?.sourceProviderSlug, "whoop");
   assert.equal(event?.dataOrigin?.sourceType, "ble-pulse-interval");
+  assert.equal(event?.dataOrigin?.observedAtRaw, "2026-07-10");
+  assert.equal(event?.dataOrigin?.timestampSemantics, "floating");
+  assert.equal(event?.dataOrigin?.originConfidence, "medium");
+  assert.equal(
+    event?.dataOrigin?.normalizerVersion,
+    "companion-overnight-hrv-rmssd-normalizer.v1",
+  );
   assert.equal(payload.provenance?.companionHrvRmssdObservations, 1);
   assert.equal(payload.samples?.length ?? 0, 0);
+  assert.deepEqual(payload.evidenceParts?.[0]?.content, observation);
+  assertJsonOmits(payload.evidenceParts?.[0]?.content, [
+    "captureStartedAt",
+    "captureDurationMs",
+    "captureEndUtcOffsetMinutes",
+    "acceptedCoverageMs",
+    "rrIntervals",
+    "packetTimestamps",
+    "windowRmssdMs",
+    "deviceIdentifier",
+  ]);
 });
 
-test("companion WHOOP spot RMSSD imports idempotently into the canonical vault", async () => {
+test("companion WHOOP overnight RMSSD replay keeps its phone-owned night across vault timezone changes", async () => {
   const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd");
 
   try {
@@ -2793,18 +2846,9 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       timezone: "America/New_York",
       vaultRoot,
     });
-    const observation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+    const observation = buildCompanionOvernightHrvObservation({
+      nightDate: "2026-11-01",
+    });
     const input = {
       provider: "junction" as const,
       vaultRoot,
@@ -2814,11 +2858,11 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       normalizerVersion: "junction-normalizer.v1",
       snapshot: {
         accountId: "junction-account-hash-1",
-        importedAt: "2026-07-10T13:46:00.000Z",
-        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
+        importedAt: "2026-11-01T13:46:00.000Z",
+        companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(observation),
       },
     };
-    const admissionId = input.snapshot.companionHrvRmssd[0].admissionId;
+    const admissionId = input.snapshot.companionHrvRmssd.admissionId;
 
     const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       input,
@@ -2835,7 +2879,7 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
 
     for (const changedObservation of [
       { ...observation, rmssdMs: 49 },
-      { ...observation, intervalCount: 73 },
+      { ...observation, acceptedWindowCount: 73 },
     ]) {
       await assert.rejects(
         () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
@@ -2843,10 +2887,10 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
             ...input,
             snapshot: {
               ...input.snapshot,
-              companionHrvRmssd: [{
+              companionHrvRmssd: {
                 admissionId,
                 observation: changedObservation,
-              }],
+              },
             },
           },
           { corePort: coreRuntime },
@@ -2863,27 +2907,27 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       ),
     )).flat());
     const hrvRecords = records.filter((record) =>
-      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+      storedExternalRefResourceType(record) === "companion-overnight-hrv-rmssd"
     );
 
     assert.equal(hrvRecords.length, 1);
     assert.equal(replay.applied, false);
-    assert.deepEqual(replay.events, []);
+    assert.equal(replay.events[0]?.id, first.events[0]?.id);
     assert.equal(hrvRecords[0]?.id, first.events[0]?.id);
     assert.equal(storedObservationValue(hrvRecords[0]), 48.25);
-    assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
-    assert.equal(hrvRecords[0]?.timeZone, "America/New_York");
+    assert.equal(hrvRecords[0]?.occurredAt, "2026-11-01T12:00:00.000Z");
+    assert.equal(hrvRecords[0]?.dayKey, "2026-11-01");
     assert.equal(
       storedExternalRefResourceId(hrvRecords[0]),
-      admissionId,
+      "2026-11-01",
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });
 
-test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused capture id distinct", async () => {
-  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-readmission");
+test("companion WHOOP overnight RMSSD keeps one immutable fact per night", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-nightly");
 
   try {
     await coreRuntime.initializeVault({
@@ -2891,52 +2935,45 @@ test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused c
       timezone: "UTC",
       vaultRoot,
     });
-    const firstObservation = {
-      schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "223e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T13:45:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
-      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
-    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
-    const changedObservation = {
-      ...firstObservation,
-      observedAt: "2026-08-11T13:45:00.000Z",
-      rmssdMs: 51.5,
-    };
-    const admissionIdFor = (observation: typeof firstObservation) => createHash("sha256")
-      .update(serializeCompanionHrvRmssdObservation(observation))
-      .digest("hex");
-    const firstAdmissionId = admissionIdFor(firstObservation);
-    const changedAdmissionId = admissionIdFor(changedObservation);
-    const inputFor = (observation: typeof firstObservation, admissionId: string) => ({
+    const firstObservation = buildCompanionOvernightHrvObservation();
+    const changedSameNight = buildCompanionOvernightHrvObservation({ rmssdMs: 51.5 });
+    const nextNight = buildCompanionOvernightHrvObservation({
+      nightDate: "2026-07-11",
+      rmssdMs: 50.75,
+    });
+    const inputFor = (observation: CompanionHrvRmssdObservation) => ({
       provider: "junction" as const,
       vaultRoot,
-      connectionId: "conn-junction-companion-readmission",
+      connectionId: "conn-junction-companion-nightly",
       sourceKind: "webhook" as const,
       deliveryMode: "full_payload" as const,
       normalizerVersion: "junction-normalizer.v1",
       snapshot: {
-        accountId: "junction-account-hash-readmission",
-        importedAt: observation.observedAt,
-        companionHrvRmssd: [{ admissionId, observation }],
+        accountId: "junction-account-hash-nightly",
+        importedAt: `${observation.nightDate}T13:00:00.000Z`,
+        companionHrvRmssd: buildCompanionHrvRmssdSnapshotEntry(observation),
       },
     });
 
     const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(firstObservation, firstAdmissionId),
+      inputFor(firstObservation),
       { corePort: coreRuntime },
     );
     const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(firstObservation, firstAdmissionId),
+      inputFor(firstObservation),
       { corePort: coreRuntime },
     );
-    const changed = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      inputFor(changedObservation, changedAdmissionId),
+    await assert.rejects(
+      () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        inputFor(changedSameNight),
+        { corePort: coreRuntime },
+      ),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+    );
+    const next = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(nextNight),
       { corePort: coreRuntime },
     );
 
@@ -2944,21 +2981,22 @@ test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused c
       [...new Set([
         ...first.eventShardPaths,
         ...replay.eventShardPaths,
-        ...changed.eventShardPaths,
+        ...next.eventShardPaths,
       ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
     )).flat());
     const hrvRecords = records.filter((record) =>
-      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+      storedExternalRefResourceType(record) === "companion-overnight-hrv-rmssd"
     );
 
+    assert.equal(replay.applied, false);
     assert.equal(hrvRecords.length, 2);
     assert.deepEqual(
       hrvRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
-      [48.25, 51.5],
+      [48.25, 50.75],
     );
     assert.deepEqual(
       hrvRecords.map(storedExternalRefResourceId).sort(),
-      [firstAdmissionId, changedAdmissionId].sort(),
+      ["2026-07-10", "2026-07-11"],
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

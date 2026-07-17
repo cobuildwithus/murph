@@ -876,6 +876,8 @@ describe("device sync settings routes", () => {
       "dsc_junction_123",
     );
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.diagnoseBackfill).toHaveBeenCalledWith(expect.objectContaining({
       account: expect.objectContaining({
         credential: {
@@ -1004,6 +1006,8 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "timeseries",
       now: "2026-04-03T12:00:00.000Z",
@@ -1134,6 +1138,8 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_junction_123");
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "refresh",
       now: "2026-04-03T12:00:00.000Z",
@@ -1221,6 +1227,7 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(409);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -1266,6 +1273,7 @@ describe("device sync settings routes", () => {
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/source-start",
     });
+    expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
   it("starts a hosted connect source flow through Junction by source id", async () => {
@@ -1335,6 +1343,124 @@ describe("device sync settings routes", () => {
         connectSourceId: "whoop",
         connectTarget: "whoop",
         sourceProviderSlug: "whoop_v2",
+      },
+    );
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith({
+      where: {
+        status: { not: "disconnected" },
+        OR: [
+          { provider: "whoop" },
+          {
+            provider: "junction",
+            sources: {
+              some: {
+                sourceProviderSlug: "whoop_v2",
+                status: { not: "disconnected" },
+              },
+            },
+          },
+        ],
+      },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+  });
+
+  it("rejects a new member when current WHOOP capacity is full", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+    mocks.findManyDeviceConnections.mockResolvedValueOnce(
+      Array.from({ length: 10 }, (_, index) => ({ userId: `member_existing_${index}` })),
+    );
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/whoop/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "whoop" }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
+  it("allows a new member to take the tenth current WHOOP slot", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+    mocks.findManyDeviceConnections.mockResolvedValueOnce(
+      Array.from({ length: 9 }, (_, index) => ({ userId: `member_existing_${index}` })),
+    );
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/whoop/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "whoop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "whoop",
+      "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
+      {
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        sourceProviderSlug: null,
+      },
+    );
+  });
+
+  it("allows an existing WHOOP member to reconnect when capacity is full", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      { userId: "member_123" },
+      ...Array.from({ length: 9 }, (_, index) => ({ userId: `member_existing_${index}` })),
+    ]);
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/whoop/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "whoop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "whoop",
+      "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
+      {
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        sourceProviderSlug: null,
       },
     );
   });

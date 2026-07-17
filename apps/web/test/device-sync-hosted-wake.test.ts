@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
+    createSdkSignInSession: vi.fn(),
     createSignal: vi.fn(),
     ensureSdkConnection: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => {
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     hasPendingDirtyConnection: vi.fn(),
-    inspectCompanionHrvCaptureReceipt: vi.fn(),
+    inspectCompanionHrvNightReceipt: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
     requireHostedCloudflareCallbackRequest: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => {
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
+    resumeSdkSignInSession: vi.fn(),
     sha256Hex: vi.fn(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
@@ -137,16 +139,12 @@ function createHostedEnv(overrides: Partial<{
 
 function buildCompanionHrvRmssdObservation() {
   return {
-    schema: "murph.companion.hrv-rmssd.v1" as const,
-    captureId: "123e4567-e89b-42d3-a456-426614174000",
-    observedAt: "2026-07-10T13:45:00.000Z",
-    durationMs: 60_000 as const,
-    rmssdMs: 48.25,
-    intervalCount: 72,
-    acceptedIntervalCount: 68,
-    successivePairCount: 63,
-    quality: "good" as const,
-    methodVersion: "rmssd-pulse-interval-v1" as const,
+    schema: "murph.companion.overnight-prv-rmssd.v1" as const,
+    methodVersion: "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1" as const,
+    nightDate: "2026-07-10",
+    rmssdMs: 52.75,
+    completedWindowCount: 96,
+    acceptedWindowCount: 72,
   };
 }
 
@@ -316,7 +314,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
-    inspectCompanionHrvCaptureReceipt = mocks.inspectCompanionHrvCaptureReceipt;
+    inspectCompanionHrvNightReceipt = mocks.inspectCompanionHrvNightReceipt;
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
@@ -440,6 +438,7 @@ describe("hosted device-sync wakes", () => {
           },
         };
       }),
+      createSdkSignInSession: mocks.createSdkSignInSession,
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
@@ -472,9 +471,28 @@ describe("hosted device-sync wakes", () => {
         };
       }),
       ensureSdkConnection: mocks.ensureSdkConnection,
+      resumeSdkSignInSession: mocks.resumeSdkSignInSession,
       startConnection: vi.fn(),
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
+    mocks.createSdkSignInSession.mockResolvedValue({
+      account: buildHostedConnection({
+        id: "dsc_junction_123",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      environment: "sandbox",
+      signInToken: "junction-sign-in-token",
+    });
+    mocks.resumeSdkSignInSession.mockResolvedValue({
+      account: buildHostedConnection({
+        id: "dsc_junction_123",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      environment: "sandbox",
+      signInToken: "junction-sign-in-token",
+    });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(true);
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
@@ -499,7 +517,7 @@ describe("hosted device-sync wakes", () => {
     }));
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.hasPendingDirtyConnection.mockResolvedValue(false);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("missing");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("missing");
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty: buildDirtyConnectionRecord(),
       shouldRequestWake: true,
@@ -560,6 +578,139 @@ describe("hosted device-sync wakes", () => {
 
     expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
     expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
+  });
+
+  it("uses explicit companion connect intent as the only lifecycle-changing SDK path", async () => {
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
+      ownerId: "user-123",
+      provider: "junction",
+    });
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each(["resume", null] as const)(
+    "resumes the one active companion SDK connection for intent %s without ensuring it",
+    async (connectionIntent) => {
+      mocks.listConnectionsForUser.mockResolvedValueOnce([
+        buildHostedConnection({
+          id: "dsc_junction_active",
+          provider: "junction",
+          setupPhase: "source_confirmed",
+        }),
+      ]);
+      const ingress = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+      );
+
+      await expect(
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+      ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+      expect(mocks.resumeSdkSignInSession).toHaveBeenCalledWith({
+        accountId: "dsc_junction_active",
+        ownerId: "user-123",
+        provider: "junction",
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves legacy first-connect behavior only when no provider row exists", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", null),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
+      ownerId: "user-123",
+      provider: "junction",
+    });
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects explicit resume when no provider row exists without ensuring one", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["resume", null] as const)(
+    "requires an explicit reconnect for terminal companion state with intent %s",
+    async (connectionIntent) => {
+      mocks.listConnectionsForUser.mockResolvedValueOnce([
+        buildHostedConnection({
+          id: "dsc_junction_terminal",
+          provider: "junction",
+          setupPhase: "source_confirmed",
+          status: "disconnected",
+        }),
+      ]);
+      const ingress = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+      );
+
+      await expect(
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+      ).rejects.toMatchObject({
+        code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+        httpStatus: 409,
+        retryable: false,
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+      expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects ambiguous active companion SDK connections without minting or ensuring", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      buildHostedConnection({
+        id: "dsc_junction_active_1",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      buildHostedConnection({
+        id: "dsc_junction_active_2",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    ]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
   });
 
   it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {
@@ -1975,175 +2126,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
-  it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
-    const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/settings/device-sync"),
-    );
-    mocks.listConnectionsForUser.mockResolvedValue([
-      buildHostedConnection({
-        displayName: "Oura acct_sensitive",
-      }),
-    ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      {
-        id: "src_123",
-        connectionId: "dsc_123",
-        sourceInstanceKey: "jxn_hidden",
-        sourceProviderSlug: "oura",
-        displayName: null,
-        status: "connected",
-        resourceAvailabilitySummary: {
-          heartrate: true,
-          sourceInstanceKeyFallback: true,
-        },
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        firstSeenAt: "2026-03-26T12:00:00.000Z",
-        lastSeenAt: "2026-03-26T12:00:00.000Z",
-        createdAt: "2026-03-26T12:00:00.000Z",
-        updatedAt: "2026-03-26T12:00:00.000Z",
-      },
-    ]);
-
-    await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
-      providers: [],
-      connections: [
-        {
-          id: buildPublicConnectionId("dsc_123"),
-          provider: "oura",
-          displayName: "Oura",
-          status: "active",
-          scopes: ["heartrate"],
-          accessTokenExpiresAt: null,
-          metadata: {},
-          connectedAt: "2026-03-26T12:00:00.000Z",
-          setupExpiresAt: null,
-          setupPhase: null,
-          lastWebhookAt: null,
-          lastSyncStartedAt: null,
-          lastSyncCompletedAt: null,
-          lastSyncErrorAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          nextReconcileAt: null,
-          createdAt: "2026-03-26T12:00:00.000Z",
-          updatedAt: "2026-03-26T12:00:00.000Z",
-        },
-      ],
-      connectionSources: [
-        {
-          connectionId: buildPublicConnectionId("dsc_123"),
-          firstSeenAt: "2026-03-26T12:00:00.000Z",
-          lastSeenAt: "2026-03-26T12:00:00.000Z",
-          resourceCount: 1,
-          sourceProviderSlug: "oura",
-          status: "connected",
-        },
-      ],
-    });
-  });
-
-  it("projects reconnect-needed source errors without exposing raw source error codes", async () => {
-    const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/settings/device-sync"),
-    );
-    mocks.listConnectionsForUser.mockResolvedValue([
-      buildHostedConnection({
-        id: "dsc_junction_whoop",
-        displayName: "Junction",
-        provider: "junction",
-      }),
-    ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      {
-        id: "src_whoop",
-        connectionId: "dsc_junction_whoop",
-        sourceInstanceKey: "jxn_hidden",
-        sourceProviderSlug: "whoop_v2",
-        displayName: null,
-        status: "error",
-        resourceAvailabilitySummary: {
-          activity: true,
-          sleep: true,
-          workouts: true,
-        },
-        lastErrorCode: "TOKEN_REFRESH_FAILED",
-        lastErrorMessage: "Upstream token refresh failed.",
-        firstSeenAt: "2026-04-01T08:00:00.000Z",
-        lastSeenAt: "2026-06-09T08:50:48.000Z",
-        createdAt: "2026-04-01T08:00:00.000Z",
-        updatedAt: "2026-06-09T08:50:48.000Z",
-      },
-    ]);
-
-    const result = await controlPlane.listConnections("user-123");
-
-    expect(result.connectionSources).toEqual([
-      {
-        connectionId: buildPublicConnectionId("dsc_junction_whoop"),
-        firstSeenAt: "2026-04-01T08:00:00.000Z",
-        lastSeenAt: "2026-06-09T08:50:48.000Z",
-        requiresReconnect: true,
-        resourceCount: 3,
-        sourceProviderSlug: "whoop_v2",
-        status: "error",
-      },
-    ]);
-    expect(JSON.stringify(result.connectionSources)).not.toContain("TOKEN_REFRESH_FAILED");
-  });
-
-  it("projects historical-data reconnect-required source errors as connection-reset recovery", async () => {
-    const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/settings/device-sync"),
-    );
-    mocks.listConnectionsForUser.mockResolvedValue([
-      buildHostedConnection({
-        id: "dsc_junction_garmin",
-        displayName: "Junction",
-        provider: "junction",
-      }),
-    ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      {
-        id: "src_garmin",
-        connectionId: "dsc_junction_garmin",
-        sourceInstanceKey: "jxn_hidden",
-        sourceProviderSlug: "garmin",
-        displayName: null,
-        status: "error",
-        resourceAvailabilitySummary: {
-          activity: true,
-          sleep: true,
-          workouts: true,
-        },
-        lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
-        lastErrorMessage: "Historical data requires reconnecting this source.",
-        firstSeenAt: "2026-04-01T08:00:00.000Z",
-        lastSeenAt: "2026-07-09T08:50:48.000Z",
-        createdAt: "2026-04-01T08:00:00.000Z",
-        updatedAt: "2026-07-09T08:50:48.000Z",
-      },
-    ]);
-
-    const result = await controlPlane.listConnections("user-123");
-
-    expect(result.connectionSources).toEqual([
-      {
-        connectionId: buildPublicConnectionId("dsc_junction_garmin"),
-        firstSeenAt: "2026-04-01T08:00:00.000Z",
-        lastSeenAt: "2026-07-09T08:50:48.000Z",
-        recoveryKind: "connection_reset",
-        resourceCount: 3,
-        sourceProviderSlug: "garmin",
-        status: "error",
-      },
-    ]);
-    expect(JSON.stringify(result.connectionSources)).not.toContain("requiresReconnect");
-    expect(JSON.stringify(result.connectionSources)).not.toContain(
-      DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
-    );
-  });
-
   it("resolves browser status reads through the opaque browser connection id", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
@@ -2622,9 +2604,9 @@ describe("hosted device-sync wakes", () => {
     await acceptTestCompanionHrvRmssdObservation();
 
     expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledWith({
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledWith({
       connectionIds: ["dsc_junction_123"],
+      nightDate: "2026-07-10",
       now: "2026-07-10T13:46:00.000Z",
       resource: expect.objectContaining({
         resource: "companion_hrv_rmssd",
@@ -2666,8 +2648,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.sha256Hex).toHaveBeenCalledWith(staged);
     expect(stagedPayload?.companionAdmissionId).toBe("a".repeat(64));
     expect(JSON.parse(staged)).toEqual(expect.objectContaining({
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      rmssdMs: 48.25,
+      nightDate: "2026-07-10",
+      rmssdMs: 52.75,
     }));
     expect(staged).not.toContain("rrIntervals");
     expect(staged).not.toContain("rawBleBytes");
@@ -2685,6 +2667,29 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("accepts the oldest entry in a three-night outbox when the local date trails UTC", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-11T06:00:00.000Z",
+      observation: {
+        ...buildCompanionHrvRmssdObservation(),
+        nightDate: "2026-07-08",
+      },
+    })).resolves.toBeUndefined();
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_junction_123",
+      userId: "user-123",
+    }));
+  });
+
   it("accepts a retained exact HRV retry before freshness and connection-liveness gates", async () => {
     mocks.listConnectionsForUser.mockResolvedValue([
       buildHostedConnection({
@@ -2693,13 +2698,13 @@ describe("hosted device-sync wakes", () => {
         status: "disconnected",
       }),
     ]);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("exact");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("exact");
 
     await expect(acceptTestCompanionHrvRmssdObservation({
       acceptedAt: "2026-07-20T13:46:00.000Z",
     })).resolves.toBeUndefined();
 
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledTimes(1);
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
@@ -2713,7 +2718,7 @@ describe("hosted device-sync wakes", () => {
         status: "disconnected",
       }),
     ]);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("conflict");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("conflict");
 
     await expect(acceptTestCompanionHrvRmssdObservation({
       acceptedAt: "2026-07-20T13:46:00.000Z",
@@ -2722,7 +2727,7 @@ describe("hosted device-sync wakes", () => {
         rmssdMs: 49.25,
       },
     })).rejects.toMatchObject({
-      code: "COMPANION_HRV_CAPTURE_CONFLICT",
+      code: "COMPANION_HRV_NIGHT_CONFLICT",
       httpStatus: 409,
       retryable: false,
     });
@@ -2732,9 +2737,9 @@ describe("hosted device-sync wakes", () => {
   });
 
   it.each([
-    ["stale", "2026-07-20T13:46:00.000Z"],
-    ["future", "2026-07-10T13:39:59.000Z"],
-  ])("rejects unseen %s HRV work at first admission", async (_label, acceptedAt) => {
+    ["stale", "2026-07-06"],
+    ["future", "2026-07-12"],
+  ])("rejects an unseen %s HRV night at first admission", async (_label, nightDate) => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
@@ -2742,13 +2747,18 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
 
-    await expect(acceptTestCompanionHrvRmssdObservation({ acceptedAt })).rejects.toMatchObject({
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      observation: {
+        ...buildCompanionHrvRmssdObservation(),
+        nightDate,
+      },
+    })).rejects.toMatchObject({
       code: "COMPANION_REQUEST_INVALID",
       httpStatus: 400,
       retryable: false,
     });
 
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledTimes(1);
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
   });

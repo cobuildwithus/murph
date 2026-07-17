@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
@@ -15,6 +16,11 @@ import {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
+  experimentSessionMetricIsDeclared,
+  resolveWearableCanonicalMetricKey,
+  validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
@@ -170,10 +176,34 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("hrv")?.key, "hrv-rmssd");
   assert.equal(resolveMetricDefinition("hrv_sdnn")?.key, "hrv-sdnn");
   assert.equal(resolveMetricDefinition("sdnn")?.biomarkerKey, "biomarker:hrv-sdnn");
+  assert.equal(resolveMetricDefinition("whoop-ble-overnight-prv-rmssd")?.biomarkerKey, null);
+  assert.equal(
+    resolveMetricDefinition("whoop-ble-overnight-prv-rmssd")?.displayName,
+    "WHOOP BLE scheduled overnight PRV",
+  );
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_hours")?.key, "total-sleep-minutes");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
   assert.equal(resolveMetricDefinition("sleep_midpoint_variability")?.key, "sleep-midpoint-variability-minutes");
+  assert.equal(resolveMetricDefinition("sleep-quality")?.key, "subjective-sleep-quality");
+  assert.equal(resolveMetricDefinition("sleep_quality")?.key, "subjective-sleep-quality");
+  assert.equal(
+    resolveMetricDefinition("subjective_sleep_quality_next_morning")?.key,
+    "subjective-sleep-quality",
+  );
+  assert.equal(resolveMetricDefinition("sleep_score")?.key, "sleep-score");
+  assert.equal(resolveMetricDefinition("bedtime_delay_minutes")?.key, "bedtime-delay");
+  assert.equal(resolveMetricDefinition("estimated_sleep_onset_minutes")?.key, "sleep-onset-latency");
+  assert.equal(
+    resolveMetricDefinition("estimated_sleep_onset_latency_minutes")?.key,
+    "sleep-onset-latency",
+  );
+  assert.equal(resolveMetricDefinition("daytime_sleepiness")?.key, "daytime-sleepiness");
+  assert.equal(resolveMetricDefinition("pre_sleep_arousal")?.key, "pre-sleep-arousal");
+  assert.equal(
+    resolveMetricDefinition("wake_after_sleep_onset_minutes")?.key,
+    "wake-after-sleep-onset",
+  );
   for (const [alias, expectedKey] of [
     ["daily-steps", "steps"],
     ["step-count-per-day", "steps"],
@@ -210,6 +240,73 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:egfr")?.key, "egfr");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:systolic-blood-pressure")?.key, "systolic-blood-pressure");
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:sleep-quality")?.key,
+    "subjective-sleep-quality",
+  );
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:bedtime-delay")?.key,
+    "bedtime-delay",
+  );
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:sleep-onset-latency")?.key,
+    "sleep-onset-latency",
+  );
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:daytime-sleepiness")?.key,
+    "daytime-sleepiness",
+  );
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:pre-sleep-arousal")?.key,
+    "pre-sleep-arousal",
+  );
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:wake-after-sleep-onset")?.key,
+    "wake-after-sleep-onset",
+  );
+  assert.deepEqual(resolveExperimentSessionMetricSpec("wake_after_sleep_onset_minutes"), {
+    aliases: [
+      "wake-after-sleep-onset",
+      "wake_after_sleep_onset",
+      "wake-after-sleep-onset-minutes",
+      "wake_after_sleep_onset_minutes",
+      "waso",
+      "waso-minutes",
+    ],
+    biomarkerKey: "biomarker:wake-after-sleep-onset",
+    canonicalUnit: "minutes",
+    displayName: "Wake after sleep onset",
+    key: "wake-after-sleep-onset",
+    maximum: 720,
+    minimum: 0,
+    valuePrecision: 0,
+    valueType: "number",
+  });
+  assert.equal(
+    resolveExperimentSessionMetricSpecForBiomarker("biomarker:wake-after-sleep-onset")?.key,
+    "wake-after-sleep-onset",
+  );
+  assert.equal(
+    resolveExperimentSessionMetricSpec("bedtime_delay_minutes")?.key,
+    "bedtime-delay",
+  );
+  assert.equal(
+    resolveExperimentSessionMetricSpecForBiomarker("biomarker:bedtime-delay")?.key,
+    "bedtime-delay",
+  );
+  assert.deepEqual(validateExperimentSessionMetricValue({
+    fieldId: "bedtime_delay_minutes",
+    value: 721,
+  }), {
+    success: false,
+    message: "bedtime_delay_minutes must be between 0 and 720 minutes.",
+  });
+  assert.equal(
+    resolveExperimentSessionMetricSpec("soreness_score")?.key,
+    "muscle-soreness-score",
+  );
+  assert.equal(resolveWearableCanonicalMetricKey("sleep-latency-minutes"), "sleepLatencyMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("sleep_latency_minutes"), "sleepLatencyMinutes");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
@@ -222,6 +319,61 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     selectionPolicy: { kind: "latest-valid", staleAfterDays: 90 },
     valuePrecision: 1,
   });
+});
+
+test("requires exactly one session capture field for a subjective primary metric", () => {
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:sleep-quality",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:sleep-quality",
+    issue: "uncapturable_primary_biomarker",
+    matchingSessionFieldIds: [],
+    metricKey: "subjective-sleep-quality",
+    requiresSessionField: true,
+  });
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:sleep-quality",
+    sessionFields: ["sleep_quality_0_10"],
+  }), {
+    canonicalBiomarkerKey: "biomarker:sleep-quality",
+    issue: null,
+    matchingSessionFieldIds: ["sleep_quality_0_10"],
+    metricKey: "subjective-sleep-quality",
+    requiresSessionField: true,
+  });
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:sleep-quality",
+    sessionFields: ["sleep_quality_0_10", "subjective_sleep_quality"],
+  }), {
+    canonicalBiomarkerKey: "biomarker:sleep-quality",
+    issue: "uncapturable_primary_biomarker",
+    matchingSessionFieldIds: ["sleep_quality_0_10", "subjective_sleep_quality"],
+    metricKey: "subjective-sleep-quality",
+    requiresSessionField: true,
+  });
+  assert.equal(experimentSessionMetricIsDeclared({
+    biomarkerKey: "biomarker:sleep-quality",
+    sessionFields: ["sleep_quality_0_10", "subjective_sleep_quality"],
+  }), false);
+
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:resting-heart-rate",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:resting-heart-rate",
+    issue: null,
+    matchingSessionFieldIds: [],
+    metricKey: "resting-heart-rate",
+    requiresSessionField: false,
+  });
+  assert.equal(
+    assessExperimentPrimaryMetricCapture({
+      primaryBiomarkerKey: "biomarker:not-a-real-metric",
+      sessionFields: [],
+    }).issue,
+    "unsupported_primary_biomarker",
+  );
 });
 
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {

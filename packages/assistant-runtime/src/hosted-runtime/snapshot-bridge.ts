@@ -134,6 +134,7 @@ export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
+  waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
 
 export function createHostedWorkspaceRuntimeBridgeJobOptions(
@@ -150,6 +151,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
 
   return {
     createCheckpointSnapshot: async (checkpointInput, context) => {
+      await input.waitForBackgroundAssistantWork(context?.signal ?? null);
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
         platform: input.platform,
         readCurrentLease,

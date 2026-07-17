@@ -3,7 +3,11 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
-import type { AutomationRoute, AutomationSchedule } from '@murphai/contracts'
+import type {
+  AutomationRoute,
+  AutomationSchedule,
+  AutomationSupportKind,
+} from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
@@ -16,6 +20,7 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
+  activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: {
     model?: string | null
@@ -31,12 +36,14 @@ type MockAutomationRecord = {
   slug?: string
   status: 'active' | 'paused' | 'archived'
   summary?: string | null
+  supportKind?: AutomationSupportKind | null
   tags: string[]
   title: string
   updatedAt: string
 }
 
 const cronMocks = vi.hoisted(() => ({
+  archiveAutomationIfActiveUntilElapsed: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   buildExperimentFinalResultsSeeds: vi.fn(),
@@ -48,9 +55,12 @@ const cronMocks = vi.hoisted(() => ({
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
+  persistDueExperimentOutcomes: vi.fn(),
+  prepareExperimentLifecycleAutomations: vi.fn(),
   renderAutoLoggedFoodMealNote: vi.fn(),
   readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
+  runExperimentLifecycleDeliveryAuthorityPrecondition: vi.fn(),
   runExperimentLifecycleOutcomePrecondition: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -61,7 +71,16 @@ const cronMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  archiveAutomationIfActiveUntilElapsed:
+    cronMocks.archiveAutomationIfActiveUntilElapsed,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
+  isVaultError: (error: unknown) => Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.startsWith('VAULT_'),
+  ),
   loadVault: cronMocks.loadVault,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
@@ -69,6 +88,11 @@ vi.mock('@murphai/core', () => ({
 
 vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
   buildExperimentFinalResultsSeeds: cronMocks.buildExperimentFinalResultsSeeds,
+  persistDueExperimentOutcomes: cronMocks.persistDueExperimentOutcomes,
+  prepareExperimentLifecycleAutomations:
+    cronMocks.prepareExperimentLifecycleAutomations,
+  runExperimentLifecycleDeliveryAuthorityPrecondition:
+    cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition:
     cronMocks.runExperimentLifecycleOutcomePrecondition,
 }))
@@ -194,7 +218,50 @@ beforeEach(() => {
   cronMocks.automationsByVault.clear()
   cronMocks.scheduledLogsByVault.clear()
   cronMocks.nextAutomationId = 1
+  cronMocks.archiveAutomationIfActiveUntilElapsed
+    .mockReset()
+    .mockImplementation(async (input: {
+      expectedUpdatedAt?: string
+      lookup: string
+      now?: Date
+      vaultRoot: string
+    }) => {
+      const record = getVaultAutomationStore(input.vaultRoot).find(
+        (candidate) =>
+          candidate.automationId === input.lookup ||
+          candidate.slug === input.lookup,
+      )
+      if (!record) {
+        const error = new Error('Automation was not found.') as Error & { code: string }
+        error.code = 'VAULT_AUTOMATION_MISSING'
+        throw error
+      }
+      const activeUntilMs = record.activeUntil
+        ? Date.parse(record.activeUntil)
+        : Number.NaN
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== record.updatedAt ||
+        record.status !== 'active' ||
+        !Number.isFinite(activeUntilMs) ||
+        (input.now ?? new Date()).getTime() < activeUntilMs
+      ) {
+        return { archived: false, record }
+      }
+      record.status = 'archived'
+      record.updatedAt = (input.now ?? new Date()).toISOString()
+      return { archived: true, record }
+    })
   cronMocks.buildExperimentFinalResultsSeeds.mockReset().mockResolvedValue([])
+  cronMocks.persistDueExperimentOutcomes
+    .mockReset()
+    .mockResolvedValue({ processedCount: 0 })
+  cronMocks.prepareExperimentLifecycleAutomations
+    .mockReset()
+    .mockResolvedValue({ processedCount: 0, seeds: [] })
+  cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
+    .mockReset()
+    .mockResolvedValue({ kind: 'continue' })
   cronMocks.runExperimentLifecycleOutcomePrecondition
     .mockReset()
     .mockResolvedValue({ kind: 'continue' })
@@ -276,6 +343,7 @@ beforeEach(() => {
   })
   cronMocks.setScheduledLogStatus.mockReset().mockImplementation(
     async (input: {
+      activeUntil?: string | null
       scheduledLogId: string
       status: ScheduledLogQueryRecord['status']
       vaultRoot: string
@@ -353,6 +421,7 @@ beforeEach(() => {
     })
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
+      activeUntil?: string | null
       automationId?: string
       assistantTargetOverride?: MockAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
@@ -376,6 +445,10 @@ beforeEach(() => {
         const existing = records[existingIndex] as MockAutomationRecord
         const updated: MockAutomationRecord = {
           ...existing,
+          activeUntil:
+            input.activeUntil === undefined
+              ? existing.activeUntil ?? null
+              : input.activeUntil,
           assistantTargetOverride:
             input.assistantTargetOverride === undefined
               ? existing.assistantTargetOverride ?? null
@@ -398,6 +471,7 @@ beforeEach(() => {
       }
 
       const created: MockAutomationRecord = {
+        activeUntil: input.activeUntil ?? null,
         automationId: `automation-${cronMocks.nextAutomationId++}`,
         assistantTargetOverride: input.assistantTargetOverride ?? null,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
@@ -507,6 +581,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const job = await upsertAssistantCronAutomation({
+      activeUntil: '2026-04-30T17:30:00.000Z',
       firstOccurrencePolicy: 'after-current-local-day',
       instructions: 'Check setup progress.',
       now: new Date('2026-04-08T15:00:00.000Z'),
@@ -536,6 +611,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(job.state.nextRunAt).toBe('2026-04-09T17:30:00.000Z')
     expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
       automationId: job.jobId,
+      activeUntil: '2026-04-30T17:30:00.000Z',
       instructions: 'Check setup progress.',
       route: {
         channel: 'telegram',
@@ -1990,6 +2066,77 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('runs a paused canonical job manually without reactivating or rescheduling it', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-paused-canonical-manual-run-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'paused manual check-in')
+    await setAssistantCronJobEnabled(vaultRoot, canonicalJob.jobId, false)
+    const pausedUpdatedAt = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )?.updatedAt
+    cronMocks.upsertAutomation.mockClear()
+    const context = {
+      decision: {
+        kind: 'send_message' as const,
+        privateSummary: 'Prepared the explicitly requested manual check-in.',
+        text: 'Here is your manual check-in.',
+      },
+      deliveryOutcome: {
+        delivery: {
+          channel: 'telegram' as const,
+          sentAt: '2026-04-08T08:00:00.000Z',
+          target: 'room-1',
+          targetKind: 'thread' as const,
+        },
+        intentId: 'outbox_paused_manual_check_in',
+        kind: 'sent' as const,
+        media: [],
+        session: { sessionId: 'session-paused-manual-check-in' },
+      },
+      response: 'Here is your manual check-in.',
+    }
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeCommit?: (value: typeof context) => Promise<void>
+      beforeDelivery?: (value: typeof context) => Promise<void>
+    }) => {
+      await input.beforeDelivery?.(context)
+      await input.beforeCommit?.(context)
+      return {
+        ...context,
+        session: { sessionId: 'session-paused-manual-check-in' },
+      }
+    })
+
+    const result = await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'delivered',
+      reason: 'sent',
+      status: 'succeeded',
+    })
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.job.enabled).toBe(false)
+    expect(result.job.state.nextRunAt).toBeNull()
+    expect(result.job.state.lastSucceededAt).toBe('2026-04-08T08:00:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)).toMatchObject({
+      status: 'paused',
+      updatedAt: pausedUpdatedAt,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outboxAutomationAuthority: null,
+      }),
+    )
+    expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
   it('blocks enable toggles while a canonical delivery confirmation is pending', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-pending-enable-',
@@ -2159,6 +2306,79 @@ describe('assistant cron runtime orchestration', () => {
       }),
     )
   })
+
+  it.each([
+    [
+      'reminder',
+      'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so',
+      'Do not ask a proactive repair, accountability, reflection, or follow-up question.',
+    ],
+    [
+      'check_in',
+      'Ask at most one narrow check-in or repair question about the current plan.',
+      'Do not expand into a review, digest, or new coaching agenda.',
+    ],
+    [
+      'review',
+      'Conduct only the bounded review',
+      'Do not record or apply that decision until the user replies in a later turn.',
+    ],
+    [
+      'weekly_digest',
+      'Provide only the agreed weekly summary shape from current evidence.',
+      'Do not append a surprise accountability, repair, or coaching question.',
+    ],
+  ] as const)(
+    'passes the exact accepted %s support scope into the provider turn',
+    async (supportKind, expectedScope, expectedBoundary) => {
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-${supportKind}-scope-`,
+      )
+      const canonicalJob = await createCanonicalJob(
+        vaultRoot,
+        `${supportKind}-scope`,
+      )
+      const canonicalAutomation = findCanonicalAutomation(
+        vaultRoot,
+        canonicalJob.jobId,
+      )
+      expect(canonicalAutomation).toBeDefined()
+      if (!canonicalAutomation) {
+        throw new Error('Expected the canonical automation to exist.')
+      }
+      canonicalAutomation.supportKind = supportKind
+      canonicalAutomation.tags.push(
+        'system:support-series:habit:reg_sleep_support',
+      )
+
+      await runAssistantCronJobNow({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      })
+
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instructions: expect.stringContaining(
+            `Persisted support kind: ${supportKind}.`,
+          ),
+        }),
+      )
+      const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+        | { instructions?: string }
+        | undefined
+      expect(providerInput?.instructions).toContain(expectedScope)
+      expect(providerInput?.instructions).toContain(expectedBoundary)
+      if (supportKind === 'review') {
+        expect(providerInput?.instructions).toContain(
+          "ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision",
+        )
+        expect(providerInput?.instructions).not.toContain('request or record')
+      }
+      expect(providerInput?.instructions).toContain(
+        'this overrides any broader repair or follow-up option above',
+      )
+    },
+  )
 
   it('runs retained Linq overnight maintenance without entering its audience', async () => {
     const { vaultRoot } = await createRuntimeContext(
@@ -4062,6 +4282,241 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('does not invoke the provider when lifecycle consent is revoked before a progress wake', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-revoked-progress-consent-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: null,
+      automationId: 'automation-revoked-progress-consent',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Share the experiment progress milestone only with current consent.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
+      slug: 'revoked-progress-consent',
+      status: 'active',
+      summary: null,
+      tags: [
+        'experiment',
+        'progress-card',
+        'milestone',
+        'system:support-series:experiment-lifecycle:exp_progress_revoked',
+      ],
+      title: 'Revoked progress consent',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.runExperimentLifecycleOutcomePrecondition.mockResolvedValueOnce({
+      kind: 'skip',
+      reason: 'scheduled summary was not explicitly enabled',
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-revoked-progress-consent',
+    )?.status).toBe('archived')
+  })
+
+  it('blocks delivery when lifecycle consent is revoked while a progress response is generated', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-progress-consent-revoked-during-provider-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: null,
+      automationId: 'automation-progress-consent-revoked-during-provider',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Share progress only while scheduled-summary consent remains current.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
+      slug: 'progress-consent-revoked-during-provider',
+      status: 'active',
+      summary: null,
+      tags: [
+        'experiment',
+        'progress-card',
+        'milestone',
+        'system:support-series:experiment-lifecycle:exp_progress_revoked_late',
+      ],
+      title: 'Progress consent revoked during provider',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.runExperimentLifecycleOutcomePrecondition
+      .mockResolvedValueOnce({ kind: 'continue' })
+    cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
+      .mockResolvedValueOnce({
+        kind: 'skip',
+        reason: 'scheduled summary was not explicitly enabled',
+      })
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+      }) => {
+        await notificationInput.beforeDelivery?.({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Prepared progress update.',
+            text: 'Here is your progress update.',
+          },
+          deliveryOutcome: null,
+          response: 'Here is your progress update.',
+        })
+        deliveryAttempted = true
+        throw new Error('Delivery should have been blocked after consent changed.')
+      },
+    )
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(
+      cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
+    ).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(deliveryAttempted).toBe(false)
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-progress-consent-revoked-during-provider',
+    )?.status).toBe('archived')
+  })
+
+  it('rechecks generic plan support authority after delivery and before durable commit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-generic-support-revoked-before-commit-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: null,
+      automationId: 'automation-generic-support-revoked-before-commit',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the accepted sleep-plan check-in only while it remains authorized.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
+      slug: 'generic-support-revoked-before-commit',
+      status: 'active',
+      summary: null,
+      tags: [
+        'assistant',
+        'scheduled',
+        'system:support-series:habit:reg_sleep_support',
+      ],
+      title: 'Generic support revoked before commit',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.runExperimentLifecycleOutcomePrecondition
+      .mockResolvedValueOnce({ kind: 'continue' })
+    cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
+      .mockResolvedValueOnce({ kind: 'continue' })
+      .mockResolvedValueOnce({
+        kind: 'skip',
+        reason: 'habit support owner status is paused',
+      })
+    let deliveryAttempted = false
+    let commitCompleted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+      }) => {
+        const context = {
+          decision: {
+            kind: 'send_message' as const,
+            privateSummary: 'Prepared the accepted sleep-plan check-in.',
+            text: 'How did the wind-down plan go?',
+          },
+          deliveryOutcome: null,
+          response: 'How did the wind-down plan go?',
+        }
+        await notificationInput.beforeDelivery?.(context)
+        deliveryAttempted = true
+        await notificationInput.beforeCommit?.(context)
+        commitCompleted = true
+        return {
+          ...context,
+          session: { sessionId: 'session-generic-support-revocation' },
+        }
+      },
+    )
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(
+      cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
+    ).toHaveBeenCalledTimes(2)
+    expect(deliveryAttempted).toBe(true)
+    expect(commitCompleted).toBe(false)
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-generic-support-revoked-before-commit',
+    )?.status).toBe('archived')
+  })
+
   it('retries final-results lifecycle cleanup before stale one-shot expiry', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:59:50.000Z'))
@@ -4267,6 +4722,153 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+  })
+
+  it('retries a finite required one-shot after a direct non-retryable delivery failure', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-required-direct-delivery-retry-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'required direct delivery retry',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Deliver the bounded final check-in.',
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      vault: vaultRoot,
+    })
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the required-delivery automation fixture.')
+    }
+    automation.activeUntil = '2026-04-15T09:00:00.000Z'
+    automation.tags.push('system:assistant-require-send')
+    const deliveryError = Object.assign(
+      new Error('Hosted Linq egress authority assertion request failed.'),
+      {
+        code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal
+      .mockRejectedValueOnce(deliveryError)
+      .mockResolvedValueOnce({
+        deliveryOutcome: {
+          delivery: {
+            channel: 'telegram',
+            sentAt: '2026-04-08T09:10:30.000Z',
+            target: 'room-1',
+            targetKind: 'thread',
+          },
+          intentId: 'outbox_required_direct_delivery_retry',
+          kind: 'sent',
+          media: [],
+          session: { sessionId: 'session-required-direct-delivery-retry' },
+        },
+        response: 'Here is the bounded final check-in.',
+        session: { sessionId: 'session-required-direct-delivery-retry' },
+      })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 1, processed: 1, succeeded: 0 })
+
+    const failedStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const failedRecord = failedStore.jobs.find(
+      (record) => record.jobId === canonicalJob.jobId,
+    )
+    expect(failedRecord?.state).toMatchObject({
+      consecutiveFailures: 1,
+      lastFailedAt: '2026-04-08T09:10:00.000Z',
+      pendingOccurrenceAt: '2026-04-08T09:00:00.000Z',
+      retryAfterAt: '2026-04-08T09:10:30.000Z',
+    })
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'active',
+    )
+
+    vi.setSystemTime(new Date('2026-04-08T09:10:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'archived',
+    )
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+  })
+
+  it.each([
+    ['ambiguous delivery', 'ASSISTANT_DELIVERY_AMBIGUOUS'],
+    ['confirmation-pending delivery', 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'],
+    ['retry-exhausted delivery', 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED'],
+  ])('does not replace a terminal %s with a fresh required-send intent', async (
+    _label,
+    code,
+  ) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      `assistant-cron-runtime-required-direct-terminal-${code.toLowerCase()}-`,
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: `required direct terminal ${code}`,
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Deliver the bounded final check-in.',
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      vault: vaultRoot,
+    })
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the required-delivery automation fixture.')
+    }
+    automation.activeUntil = '2026-04-15T09:00:00.000Z'
+    automation.tags.push('system:assistant-require-send')
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(Object.assign(
+      new Error(`Terminal delivery outcome: ${code}`),
+      {
+        code,
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    ))
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 1, processed: 1, succeeded: 0 })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'archived',
+    )
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+
+    vi.setSystemTime(new Date('2026-04-08T09:10:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
   })
 
   it('keeps hosted control-plane 5xx delivery failures retryable for scheduled canonical reminders', async () => {
@@ -4872,6 +5474,61 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('archives recurring automations exactly at activeUntil across a DST fallback', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-01T05:59:59.999Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-active-until-dst-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-11-01T06:00:00.000Z',
+      automationId: 'automation-active-until-dst',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-10-31T13:00:00.000Z',
+      instructions: 'Send a bounded daily check-in.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      slug: 'active-until-dst',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'DST-bounded reminder',
+      updatedAt: '2026-10-31T13:00:00.000Z',
+    })
+
+    await expect(processDueAssistantCronJobsLocal({ vault: vaultRoot })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+
+    vi.setSystemTime(new Date('2026-11-01T06:00:00.000Z'))
+    await expect(processDueAssistantCronJobsLocal({ vault: vaultRoot })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(findCanonicalAutomation(vaultRoot, 'automation-active-until-dst')?.status)
+      .toBe('archived')
+  })
+
   it('runs stale canonical one-shot scheduled-log cron jobs instead of expiring them', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
@@ -5261,6 +5918,192 @@ describe('assistant cron runtime orchestration', () => {
     expect(current.state.lastSucceededAt).toBeNull()
   })
 
+  it('does not deliver or overwrite an automation paused after its occurrence was claimed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-paused-after-claim-',
+    )
+    await createCanonicalJob(vaultRoot, 'paused-after-claim')
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    cronMocks.upsertAutomation.mockClear()
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+      }) => {
+        const current = findCanonicalAutomation(vaultRoot, claimed.job.jobId)
+        if (!current) {
+          throw new Error('Expected claimed automation to remain present.')
+        }
+        current.status = 'paused'
+        current.updatedAt = '2026-04-08T10:20:01.000Z'
+        await notificationInput.beforeDelivery?.({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Prepared a reminder.',
+            text: 'Prepared reminder text.',
+          },
+          deliveryOutcome: null,
+          response: 'Prepared reminder text.',
+        })
+        deliveryAttempted = true
+        throw new Error('Delivery should have been blocked by the authority check.')
+      },
+    )
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'canonical_source_inactive',
+      status: 'skipped',
+    })
+    expect(deliveryAttempted).toBe(false)
+    expect(findCanonicalAutomation(vaultRoot, claimed.job.jobId)?.status).toBe('paused')
+    expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('does not deliver or overwrite an automation edited after its occurrence was claimed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-edited-after-claim-',
+    )
+    await createCanonicalJob(vaultRoot, 'edited-after-claim')
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    cronMocks.upsertAutomation.mockClear()
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+      }) => {
+        const current = findCanonicalAutomation(vaultRoot, claimed.job.jobId)
+        if (!current) {
+          throw new Error('Expected claimed automation to remain present.')
+        }
+        current.instructions = 'Use the newly edited reminder instructions.'
+        current.updatedAt = '2026-04-08T10:20:01.000Z'
+        await notificationInput.beforeDelivery?.({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Prepared the stale reminder.',
+            text: 'Prepared stale reminder text.',
+          },
+          deliveryOutcome: null,
+          response: 'Prepared stale reminder text.',
+        })
+        deliveryAttempted = true
+        throw new Error('Delivery should have been blocked by the authority check.')
+      },
+    )
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'canonical_source_changed',
+      status: 'skipped',
+    })
+    expect(result.removedAfterRun).toBe(false)
+    expect(deliveryAttempted).toBe(false)
+    expect(findCanonicalAutomation(vaultRoot, claimed.job.jobId)).toMatchObject({
+      instructions: 'Use the newly edited reminder instructions.',
+      status: 'active',
+      updatedAt: '2026-04-08T10:20:01.000Z',
+    })
+    expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('does not deliver and clears runtime state when an automation is removed after claim', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-removed-after-claim-',
+    )
+    await createCanonicalJob(vaultRoot, 'removed-after-claim')
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    cronMocks.upsertAutomation.mockClear()
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+      }) => {
+        const records = getVaultAutomationStore(vaultRoot)
+        const index = records.findIndex(
+          (record) => record.automationId === claimed.job.jobId,
+        )
+        expect(index).toBeGreaterThanOrEqual(0)
+        records.splice(index, 1)
+        await notificationInput.beforeDelivery?.({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Prepared the removed reminder.',
+            text: 'Prepared removed reminder text.',
+          },
+          deliveryOutcome: null,
+          response: 'Prepared removed reminder text.',
+        })
+        deliveryAttempted = true
+        throw new Error('Delivery should have been blocked by the authority check.')
+      },
+    )
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'canonical_source_inactive',
+      status: 'skipped',
+    })
+    expect(result.removedAfterRun).toBe(true)
+    expect(deliveryAttempted).toBe(false)
+    expect(findCanonicalAutomation(vaultRoot, claimed.job.jobId)).toBeUndefined()
+    expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(runtimeStore.jobs.some((record) => record.jobId === claimed.job.jobId))
+      .toBe(false)
+  })
+
   it('finalizes a canonical cron run when its own claim becomes stale during execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -5402,6 +6245,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        scheduledOccurrenceAt: '2026-04-08T10:00:00.000Z',
         sessionId: null,
         threadId: 'thread-1',
       }),
@@ -7100,6 +7944,10 @@ describe('assistant cron runtime orchestration', () => {
           kind: 'linq',
           fromPhoneNumber: '+15550001111',
         },
+        outboxAutomationAuthority: {
+          automationId: 'automation-linq-pinned-mixed-route',
+          expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
+        },
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -7199,6 +8047,14 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outboxAutomationAuthority: {
+          automationId: 'automation-kl-pending-sent',
+          expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
+        },
+      }),
+    )
 
     const pending = await getAssistantCronJob(vaultRoot, 'automation-kl-pending-sent')
     expect(pending.state.lastSucceededAt).toBeNull()
@@ -7235,6 +8091,386 @@ describe('assistant cron runtime orchestration', () => {
     expect(sent.state.lastError).toBeNull()
     expect(sent.state.consecutiveFailures).toBe(0)
     expect(sent.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+  })
+
+  it('retries required one-shot delivery past the generic stale window and archives only after sent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const firstIntentId = 'outbox_final_review_failed'
+    const secondIntentId = 'outbox_final_review_sent'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued final review.',
+        text: 'Here are your final results.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: firstIntentId,
+        session: { sessionId: 'session-default' },
+      },
+      response: 'Here are your final results.',
+      session: { sessionId: 'session-default' },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-required-final-retry-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-04-15T09:00:00.000Z',
+      automationId: 'automation-required-final-retry',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Deliver the saved experiment outcome.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'required-final-retry',
+      status: 'active',
+      summary: null,
+      tags: [
+        'assistant',
+        'scheduled',
+        'experiment',
+        'final-results',
+        'system:assistant-require-send',
+      ],
+      title: 'Required final review',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: firstIntentId,
+        lastError: {
+          code: 'LINQ_API_REQUEST_FAILED',
+          message: 'Final review delivery failed.',
+        },
+        sentAt: null,
+        status: 'failed',
+        updatedAt: '2026-04-08T10:05:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    const retryable = await getAssistantCronJob(
+      vaultRoot,
+      'automation-required-final-retry',
+    )
+    expect(retryable.state).toMatchObject({
+      consecutiveFailures: 1,
+      lastFailedAt: '2026-04-08T10:05:00.000Z',
+      nextRunAt: '2026-04-08T10:05:30.000Z',
+    })
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-required-final-retry',
+    )?.status).toBe('active')
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: firstIntentId,
+        lastError: { message: 'Final review delivery failed.' },
+        sentAt: null,
+        status: 'failed',
+        updatedAt: '2026-04-08T10:05:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 0 })
+
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued final review retry.',
+        text: 'Here are your final results.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: secondIntentId,
+        session: { sessionId: 'session-default' },
+      },
+      response: 'Here are your final results.',
+      session: { sessionId: 'session-default' },
+    })
+    vi.setSystemTime(new Date('2026-04-08T10:05:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining(
+          'Do not interpret the absence of a user reply to that attempt as silence',
+        ),
+      }),
+    )
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: secondIntentId,
+        lastError: null,
+        sentAt: '2026-04-08T10:06:00.000Z',
+        status: 'sent',
+        updatedAt: '2026-04-08T10:06:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-required-final-retry',
+    )?.status).toBe('archived')
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      label: 'revoked automation authority',
+      status: 'failed' as const,
+    },
+    {
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      label: 'ambiguous failed',
+      status: 'failed' as const,
+    },
+    {
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      label: 'abandoned',
+      status: 'abandoned' as const,
+    },
+    {
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      label: 'confirmation-pending',
+      status: 'failed' as const,
+    },
+    {
+      code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      label: 'retry-exhausted',
+      status: 'failed' as const,
+    },
+  ])('consumes a required-send occurrence after a terminal $label outbox outcome', async ({
+    code,
+    label,
+    status,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const queuedIntentId = `outbox_required_terminal_${code.toLowerCase()}_${status}`
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued bounded final review.',
+        text: 'Here are your final results.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: queuedIntentId,
+        session: { sessionId: 'session-default' },
+      },
+      response: 'Here are your final results.',
+      session: { sessionId: 'session-default' },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      `assistant-cron-runtime-required-terminal-${label}-`,
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: `required terminal ${label}`,
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Deliver the bounded final check-in.',
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      vault: vaultRoot,
+    })
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the required-delivery automation fixture.')
+    }
+    automation.activeUntil = '2026-04-15T09:00:00.000Z'
+    automation.tags.push('system:assistant-require-send')
+
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: queuedIntentId,
+        lastError: {
+          code,
+          message: `Terminal ${label} delivery.`,
+        },
+        sentAt: null,
+        status,
+        updatedAt: '2026-04-08T09:11:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
+      'archived',
+    )
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+
+    vi.setSystemTime(new Date('2026-04-08T09:11:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry required delivery without a finite activeUntil boundary', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const intentId = 'outbox_unbounded_required_delivery'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued required reminder.',
+        text: 'Required reminder.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId,
+        session: { sessionId: 'session-default' },
+      },
+      response: 'Required reminder.',
+      session: { sessionId: 'session-default' },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-unbounded-required-delivery-',
+    )
+    const job = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'unbounded required delivery',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Send the bounded reminder.',
+      schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
+      vault: vaultRoot,
+    })
+    const automation = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!automation) {
+      throw new Error('Expected required-delivery automation fixture.')
+    }
+    automation.tags.push('system:assistant-require-send')
+
+    await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      vault: vaultRoot,
+    })
+    await reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId,
+        lastError: { message: 'Required delivery failed.' },
+        sentAt: null,
+        status: 'failed',
+        updatedAt: '2026-04-08T09:11:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })
+
+    expect(findCanonicalAutomation(vaultRoot, job.jobId)?.status).toBe('archived')
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+  })
+
+  it('archives a required one-shot when abandoned at its activeUntil boundary', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:10:00.000Z'))
+    const queuedIntentId = 'outbox_final_review_abandoned_at_boundary'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued bounded final review.',
+        text: 'Here are your final results.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: queuedIntentId,
+        session: { sessionId: 'session-default' },
+      },
+      response: 'Here are your final results.',
+      session: { sessionId: 'session-default' },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-required-final-boundary-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-04-08T10:00:00.000Z',
+      automationId: 'automation-required-final-boundary',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Deliver a bounded saved outcome.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
+      slug: 'required-final-boundary',
+      status: 'active',
+      summary: null,
+      tags: ['experiment', 'final-results', 'system:assistant-require-send'],
+      title: 'Bounded required final review',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      vault: vaultRoot,
+    })
+    await reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: queuedIntentId,
+        lastError: null,
+        sentAt: null,
+        status: 'abandoned',
+        updatedAt: '2026-04-08T10:00:00.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })
+
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      'automation-required-final-boundary',
+    )?.status).toBe('archived')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
   })
 
   it('repairs pending canonical cron delivery when the outbox intent is already terminal', async () => {

@@ -1,16 +1,19 @@
 # Product Specs Index
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the billing-gated Edge assistant-model choice, downgrade behavior, and deployment compatibility contract. | Active |
-| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned advisory included-usage projection shared by Settings and the read-only assistant tool, including forecast, server-selected action, and group privacy boundaries. | Active |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary. | Active |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned included-usage projection and enforced combined-capacity blocking, including forecast, server-selected actions, group privacy boundaries, and the eligible personal `add_usage` handoff. | Active |
+| `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 Stripe Checkout packs and a Murph-owned webhook-fulfilled usage-credit ledger for direct paid Pulse/Edge members, with group funding kept as future scope. | Active |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
+| `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding for a private broad-assistant relationship: brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, and finite completion. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
@@ -18,12 +21,12 @@ Last verified: 2026-07-15
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Private outcome cards now, plus target-state sharing levels, contribution rules, cohort summaries, and social guardrails for the protocol outcome network. | Active |
 | `agent-docs/product-specs/captures.md` | Dated media-capture primitive for lightweight private evidence over time. | Active |
-| `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion for broad Apple Health sync, closed WHOOP Recovery/Strain metadata enrichment, and authorization-gated direct WHOOP spot HRV. | Active |
+| `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion for broad Apple Health sync, closed WHOOP Recovery/Strain metadata enrichment, and an authorization- and validation-gated beta WHOOP 5/MG overnight PRV estimate. | Active |
 | `agent-docs/product-specs/query-metric-universality.md` | Invariant that every metric-bearing canonical event yields a query metric point through one generic rule; summary pipeline becomes presentation + precedence, never a gatekeeper. | Specified |
-| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec: Privy login, Connect Apple Health, Junction sync, bounded WHOOP metadata enrichment, and strict derived spot-RMSSD ingress over one active member-owned Junction connection. | Active |
+| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and strict six-field overnight-PRV ingress over one active member-owned Junction connection. | Active |
 | `agent-docs/product-specs/habitat.md` | Habitat: progressive member life-context — domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, and environment/workspace v1 indicators. | Specified |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
-| `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |
+| `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks, owned independently by a person's private Murph or a hosted group's synthetic room runtime. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 | `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |

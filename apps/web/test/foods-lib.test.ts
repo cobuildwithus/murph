@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createFoodsQueries } from "../src/lib/foods";
+import {
+  createFoodsQueries,
+  createPublicFoodsQueries,
+} from "../src/lib/foods";
 import {
   createProductLabelsQueries,
   normalizeProductLabelsConnectionString,
@@ -942,5 +945,219 @@ describe("foods query helpers", () => {
     ]);
     expect(calls[1]?.text).toContain("product_tests.food_id");
     expect(calls[1]?.values).toEqual([["fdc:790"]]);
+  });
+
+  it("keeps public food search compact, branded-only, and testing-aggregate-only", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              canonicalKey: "fdc:123",
+              dataOrigin: "usda_branded",
+              dataOriginId: "123",
+              dataOriginUrl: "https://example.test/food/123",
+              importedAt: "2026-07-16T12:00:00.000Z",
+              name: "Greek Yogurt",
+              brand: "Example Dairy",
+              upc: "123456789012",
+              observationCount: 4,
+              sourceCount: 2,
+              latestReportDate: "2026-06-01",
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.searchPublicFoods({
+      q: "Greek Yogurt",
+      limit: 5,
+    })).resolves.toEqual([
+      {
+        id: "fdc:123",
+        dataOrigin: "usda_branded",
+        dataOriginId: "123",
+        dataOriginUrl: "https://example.test/food/123",
+        importedAt: "2026-07-16T12:00:00.000Z",
+        name: "Greek Yogurt",
+        brand: "Example Dairy",
+        upc: "123456789012",
+        testing: {
+          status: "known_product_tests",
+          observationCount: 4,
+          sourceCount: 2,
+          latestReportDate: "2026-06-01",
+        },
+      },
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.values).toEqual(["Greek Yogurt", false, 5, null]);
+    expect(calls[0]?.text).toContain("'usda_foundation'");
+    expect(calls[0]?.text).toContain("'usda_sr_legacy'");
+    expect(calls[0]?.text).toContain("'usda_fndds'");
+    expect(calls[0]?.text).toContain("COUNT(DISTINCT product_tests.id)");
+    expect(calls[0]?.text).not.toContain("labels.label");
+  });
+
+  it("resolves a bare public food GTIN exactly before ranked search", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "fdc:456",
+              canonicalKey: "fdc:456",
+              dataOrigin: "usda_branded",
+              dataOriginId: "456",
+              dataOriginUrl: null,
+              importedAt: "2026-07-16T12:00:00.000Z",
+              name: "Peanut Butter",
+              brand: "Example Foods",
+              upc: "123456789012",
+              observationCount: 0,
+              sourceCount: 0,
+              latestReportDate: null,
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const result = await queries.searchPublicFoods({
+      q: "123-456 789012",
+      limit: 5,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).not.toContain("websearch_to_tsquery");
+    expect(calls[0]?.values).toEqual([
+      ["123456789012", "0123456789012", "00123456789012"],
+    ]);
+  });
+
+  it("excludes generic food origins from exact public records", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return { rows: [] as T[] };
+      },
+    });
+
+    await expect(queries.getPublicFoodRecordById({
+      id: "fdc:123",
+    })).resolves.toBeNull();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toContain("labels.id = $1");
+    expect(calls[0]?.text).toContain("labels.off_market = false");
+    expect(calls[0]?.text).toContain("labels.data_origin NOT IN");
+    expect(calls[0]?.text).toContain("fdc_release_date::text AS \"releaseDate\"");
+    expect(calls[0]?.text).toContain("last_seen_at");
+    expect(calls[0]?.values).toEqual(["fdc:123"]);
+  });
+
+  it("bounds public food evidence in SQL and preserves exact totals and screening", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: Array.from({ length: 20 }, (_, index) => ({
+            productId: "fdc:123",
+            productTestId: `test-${index + 1}`,
+            observationTotal: 21,
+            servingGrams: 30,
+            sourceKey: "example_laboratory_report",
+            sourceName: "Example Laboratory Report",
+            sourceUrl: "https://example.test/report",
+            sourceReportTitle: "Example product testing",
+            reportDate: "2026-06-01",
+            sourceResultId: `result-${index + 1}`,
+            testedProductName: "Greek Yogurt",
+            testedProductBrand: "Example Dairy",
+            testedProductUpc: "123456789012",
+            testedSourceProductId: "source-product-123",
+            matchMethod: "exact_upc",
+            contaminantKey: `analyte_${index + 1}`,
+            contaminantName: `Analyte ${index + 1}`,
+            resultOperator: "eq",
+            resultValue: index === 1 ? 2 : 0.5,
+            resultUnit: "ppm",
+            resultBasis: "product_mass",
+            normalizedValue: index === 1 ? 2 : 0.5,
+            normalizedUnit: "ppm",
+            normalizedBasis: "product_mass",
+            labName: "Example Lab",
+            testMethod: "Example Method",
+            importedAt: "2026-07-16T12:00:00.000Z",
+            thresholdId: "example-threshold",
+            thresholdValue: 1,
+            thresholdUnit: "ppm",
+            thresholdBasis: "product_mass",
+            thresholdNormalizedValue: 1,
+            thresholdNormalizedUnit: "ppm",
+            thresholdNormalizedBasis: "product_mass",
+            thresholdAuthorityName: "Example Authority",
+            thresholdName: "Example screening threshold",
+            thresholdUrl: "https://example.test/threshold",
+            concernLevelIfExceeded: "medium",
+          })) as T[],
+        };
+      },
+    });
+
+    const evidence = await queries.getPublicFoodEvidence({
+      id: "fdc:123",
+    });
+
+    expect(evidence).toMatchObject({
+      status: "known_product_tests",
+      total: 21,
+      returned: 20,
+      truncated: true,
+    });
+    expect(evidence.observations[0]).toMatchObject({
+      id: "test-1",
+      sourceResultId: "result-1",
+      labName: "Example Lab",
+      testMethod: "Example Method",
+      screening: {
+        comparison: "does_not_exceed",
+        threshold: {
+          authority: "Example Authority",
+          name: "Example screening threshold",
+        },
+      },
+      alert: null,
+    });
+    expect(evidence.observations[1]?.screening?.comparison).toBe("exceeds");
+    expect(evidence.observations[1]?.alert?.concernLevel).toBe("medium");
+    expect(evidence.alerts).toHaveLength(1);
+
+    expect(calls).toHaveLength(1);
+    const query = calls[0]?.text ?? "";
+    expect(query).toContain("DISTINCT ON (product_tests.id)");
+    expect(query).toContain("(COUNT(*) OVER ())::integer AS observation_total");
+    expect(query).toContain("bounded_observations AS MATERIALIZED");
+    expect(query).toContain("WHERE observation_rank <= 20");
+    expect(query).toContain("product_tests.lab_name AS \"labName\"");
+    expect(query).toContain("product_tests.test_method AS \"testMethod\"");
+    expect(query).toContain("product_tests.source_result_id AS \"sourceResultId\"");
+    expect(query).toContain("product_tests.food_id");
+    expect(query).not.toContain("labels.canonical_key = $2");
+    expect(query.indexOf("bounded_observations AS MATERIALIZED")).toBeLessThan(
+      query.indexOf("FROM contaminant_thresholds threshold_rows"),
+    );
+    expect(calls[0]?.values).toEqual(["fdc:123"]);
   });
 });

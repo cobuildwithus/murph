@@ -15,6 +15,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeRepeatableEnumFlagOption } from '@murphai/vault-usecases'
 import {
   localDateSchema,
+  timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 
@@ -30,6 +31,15 @@ const wearableWindowDaysOptionSchema = z
   .default(7)
   .describe(
     'Rolling local-day window size for recent versus prior summary comparisons.',
+  )
+const wearableSleepPatternWindowDaysOptionSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(366)
+  .default(28)
+  .describe(
+    'Calendar-day sleep-pattern window. Defaults to 28 days and may be at most 366.',
   )
 const repeatableProviderOptionSchema = z
   .array(z.string().min(1))
@@ -249,6 +259,83 @@ export const wearablesSourcesListResultSchema = z.object({
   count: z.number().int().nonnegative(),
 })
 
+const wearableSleepNumericPatternSchema = z.object({
+  average: z.number().nullable(),
+  count: z.number().int().nonnegative(),
+  median: z.number().nullable(),
+  standardDeviation: z.number().nonnegative().nullable(),
+})
+
+const wearableSleepClockPatternSchema = z.object({
+  count: z.number().int().nonnegative(),
+  medianLocalMinutes: z.number().min(0).max(1_440).nullable(),
+  medianLocalTime: z.string().regex(/^\d{2}:\d{2}$/u).nullable(),
+  standardDeviationMinutes: z.number().nonnegative().nullable(),
+})
+
+const wearableSleepSourceFreshnessSchema = z.object({
+  lastSleepEvidenceDate: localDateSchema,
+  provider: z.string().min(1),
+  stalenessVsNewestDays: z.number().int().nonnegative(),
+  stalenessVsNowDays: z.number().int().nonnegative(),
+})
+
+const wearableSleepPatternSummarySchema = z.object({
+  allSourcesStale: z.boolean(),
+  asOfDate: localDateSchema,
+  asOfInstant: z.string().min(1),
+  awakeMinutes: wearableSleepNumericPatternSchema,
+  bedtime: wearableSleepClockPatternSchema,
+  conflictingNightCount: z.number().int().nonnegative(),
+  coveragePercent: z.number().min(0).max(100),
+  expectedNightCount: z.number().int().nonnegative(),
+  excludedNapOnlyDateCount: z.number().int().nonnegative(),
+  reportingTimeZoneFallbackNightCount: z.number().int().nonnegative(),
+  from: localDateSchema,
+  lateArrivingNightCount: z.number().int().nonnegative(),
+  latestRecordedAt: nullableTimestampSchema,
+  latestSleepEndAt: nullableTimestampSchema,
+  latestNightAgeDays: z.number().int().nonnegative().nullable(),
+  latestNightDate: localDateSchema.nullable(),
+  midpoint: wearableSleepClockPatternSchema,
+  missingNightCount: z.number().int().nonnegative(),
+  notes: z.array(z.string()),
+  overlappingNightCount: z.number().int().nonnegative(),
+  providerMix: z.boolean(),
+  providers: z.array(z.string().min(1)),
+  reportingTimeZone: timeZoneSchema.nullable(),
+  reportingTimeZoneSource: z.enum(['canonical', 'none', 'user_filter', 'vault_metadata']),
+  sameDateSessionSuppressedCount: z.number().int().nonnegative(),
+  sessionDurationMinutes: wearableSleepNumericPatternSchema,
+  sleepLatencyMinutes: wearableSleepNumericPatternSchema,
+  sourceFreshness: z.array(wearableSleepSourceFreshnessSchema),
+  staleAfterDays: z.number().int().nonnegative(),
+  suppressedExactDuplicateCount: z.number().int().nonnegative(),
+  timeZones: z.array(timeZoneSchema),
+  timingTimeZoneMode: z.literal('per_night_canonical_with_reporting_fallback'),
+  timingOmittedNightCount: z.number().int().nonnegative(),
+  to: localDateSchema,
+  totalSleepMinutes: wearableSleepNumericPatternSchema,
+  unknownSleepTypeNightCount: z.number().int().nonnegative(),
+  validNightCount: z.number().int().nonnegative(),
+  wakeTime: wearableSleepClockPatternSchema,
+  weekdayWeekendMidpointDriftMinutes: z.number().nonnegative().nullable(),
+  weekdayWeekendMidpointSampleCounts: z.object({
+    weekday: z.number().int().nonnegative(),
+    weekend: z.number().int().nonnegative(),
+  }),
+})
+
+const wearableSleepPatternFiltersResultSchema = wearableSurfaceFiltersSchema.extend({
+  timeZone: timeZoneSchema.nullable(),
+  windowDays: z.number().int().positive().max(366),
+})
+
+export const wearablesSleepPatternResultSchema = z.object({
+  filters: wearableSleepPatternFiltersResultSchema,
+  summary: wearableSleepPatternSummarySchema,
+})
+
 const wearableMetricSummaryKindSchema = z.enum([
   'activity',
   'bodyState',
@@ -356,6 +443,7 @@ type WearablesLatestResult = z.infer<typeof wearablesLatestResultSchema>
 type WearablesMetricLatestResult = z.infer<typeof wearablesMetricLatestResultSchema>
 type WearablesMetricTrendResult = z.infer<typeof wearablesMetricTrendResultSchema>
 type WearablesDriftResult = z.infer<typeof wearablesDriftResultSchema>
+type WearablesSleepPatternResult = z.infer<typeof wearablesSleepPatternResultSchema>
 
 interface WearablesLatestInput {
   requestId: string | null
@@ -372,6 +460,11 @@ interface WearablesMetricInput extends WearablesLatestInput {
 }
 
 interface WearablesDriftInput extends WearablesLatestInput {
+  windowDays?: number
+}
+
+interface WearablesSleepPatternInput extends WearablesLatestInput {
+  timeZone?: string
   windowDays?: number
 }
 
@@ -439,6 +532,21 @@ function withWearableComparisonOptions() {
     to: localDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     windowDays: wearableWindowDaysOptionSchema,
+  })
+}
+
+function withWearableSleepPatternOptions() {
+  return withBaseOptions({
+    date: localDateSchema
+      .optional()
+      .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
+    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    provider: repeatableProviderOptionSchema,
+    timeZone: timeZoneSchema
+      .optional()
+      .describe('Optional IANA fallback for nights whose provider did not report a canonical time zone. The vault time zone is used when omitted.'),
+    windowDays: wearableSleepPatternWindowDaysOptionSchema,
   })
 }
 
@@ -642,6 +750,42 @@ export function registerWearablesCommands(
       })
 
       return wearablesSleepListResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  sleep.command('pattern', {
+    description:
+      'Summarize recent sleep regularity, timing, duration, missingness, provider mix, and source freshness without treating wearable gaps as proof of no sleep.',
+    args: emptyArgsSchema,
+    options: withWearableSleepPatternOptions(),
+    examples: [
+      {
+        description: 'Inspect a 28-day sleep pattern using the vault time zone when providers omit one.',
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use `wearables sleep pattern` for longitudinal sleep questions. Check summary.notes before interpreting missing dates, mixed providers, stale sources, naps, or clock timing.',
+    output: wearablesSleepPatternResultSchema,
+    async run({ options }) {
+      const showWearableSleepPattern = requireAdditiveWearablesQueryMethod<
+        WearablesSleepPatternResult,
+        WearablesSleepPatternInput
+      >(services.query, 'showWearableSleepPattern')
+      const result = await showWearableSleepPattern({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        date: options.date,
+        from: options.from,
+        to: options.to,
+        providers: normalizeWearableProviders(options.provider),
+        timeZone: options.timeZone,
+        windowDays: options.windowDays,
+      })
+
+      return wearablesSleepPatternResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 

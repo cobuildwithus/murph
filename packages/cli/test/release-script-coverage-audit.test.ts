@@ -137,6 +137,7 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__isRetryableSocketErrorTest = isRetryableSocketError;',
     'module.exports.__mainTest = main;',
     'module.exports.__mainWithRetryTest = mainWithRetry;',
+    'module.exports.__markedResponseDurationFailureTest = markedResponseDurationFailure;',
     'module.exports.__modelAttestationTurnNonceTest = modelAttestationTurnNonce;',
     'module.exports.__modelAttestationForSnapshotTest = modelAttestationForSnapshot;',
     'module.exports.__prepareRuntimeConfigTest = prepareRuntimeConfig;',
@@ -456,6 +457,7 @@ function loadReviewGptOpenTargetHarness(
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const markedResponseDurationFailure = moduleRecord.exports.__markedResponseDurationFailureTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
   const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
@@ -473,6 +475,7 @@ function loadReviewGptOpenTargetHarness(
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof markedResponseDurationFailure !== 'function' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
     typeof modelConfirmationFailure !== 'function' ||
@@ -508,6 +511,15 @@ function loadReviewGptOpenTargetHarness(
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
     },
+    markedResponseDurationFailure: (
+      targetModel: string,
+      responseMarker: string,
+      responseElapsedMs: number,
+    ) => String(Reflect.apply(markedResponseDurationFailure, undefined, [{
+      responseElapsedMs,
+      responseMarker,
+      targetModel,
+    }])),
     modelAttestationForSnapshot: (
       targetModel: string,
       snapshot: ReviewGptAssistantSnapshot,
@@ -918,8 +930,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.108')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.108')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.109')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.109')
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -981,8 +993,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 10 * 60 * 1000;',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
     )
+    expect(reviewGptDriver).toContain(
+      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS;',
+    )
+    expect(reviewGptDriver).toContain("status: 'response-too-fast'")
+    expect(reviewGptDriver).toContain('markedResponseDurationFailure({')
     expect(reviewGptDriver).toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
       'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
@@ -990,6 +1007,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
+    expect(reviewGptReadme).toContain(
+      'A marked concrete-model response that completes in under 10 minutes fails closed as untrusted',
+    )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
@@ -1020,6 +1040,29 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver.slice(timeoutPartialStart, timeoutPartialStart + 300)).not.toContain(
       'modelVerification',
     )
+    const responseDurationGuardStart = reviewGptDriver.indexOf(
+      'const responseDurationFailure = markedResponseDurationFailure({',
+    )
+    const responseAttestationStart = reviewGptDriver.indexOf(
+      'const modelAttestation = modelAttestationForSnapshot(',
+      responseDurationGuardStart,
+    )
+    expect(responseDurationGuardStart).toBeGreaterThan(-1)
+    expect(responseAttestationStart).toBeGreaterThan(responseDurationGuardStart)
+    const tooFastBranchStart = reviewGptDriver.indexOf(
+      "} else if (responseResult?.status === 'response-too-fast') {",
+    )
+    const tooFastBranchEnd = reviewGptDriver.indexOf('} else {', tooFastBranchStart)
+    const tooFastBranch = reviewGptDriver.slice(tooFastBranchStart, tooFastBranchEnd)
+    expect(tooFastBranchStart).toBeGreaterThan(-1)
+    expect(tooFastBranchEnd).toBeGreaterThan(tooFastBranchStart)
+    expect(tooFastBranch).toContain(
+      'writeCapturedResponseFile(responseFile, responseResult.responseText);',
+    )
+    expect(tooFastBranch).toContain('throw new Error(responseResult.responseDurationFailure')
+    expect(tooFastBranch).not.toContain('writeCompletedResponseArtifacts')
+    expect(tooFastBranch).not.toContain('modelVerification')
+    expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
         '  });',
@@ -1247,7 +1290,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toMatch(/Keep that line and baseline\s+immutable/u)
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
-    expect(prReviewGptLoop).toContain('Browser, model, capture, and attachment')
+    expect(prReviewGptLoop).toContain(
+      'A marked concrete-model response that completes in under 10 minutes',
+    )
+    expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
     expect(prReviewGptLoop).toContain('source additions by at least 25 percent')
     expect(prReviewGptLoop).toContain('The retrospective is')
@@ -1815,6 +1861,34 @@ describe('monorepo release flow coverage audit', () => {
     expect(
       harness.modelAttestationForSnapshot('gpt-5.6-sol', prePromptSnapshot, true),
     ).toMatchObject({ evidence: null })
+  })
+
+  it('fails closed marked concrete-model responses below ten minutes', () => {
+    const harness = loadReviewGptOpenTargetHarness(1)
+
+    expect(
+      harness.markedResponseDurationFailure('gpt-5.6-sol', 'ROUND_OUTCOME:', 37_000),
+    ).toContain('after 37s, below the 10m minimum')
+    expect(
+      harness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        10 * 60 * 1000 - 1,
+      ),
+    ).toContain('The response is untrusted and was not attested.')
+    expect(
+      harness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        10 * 60 * 1000,
+      ),
+    ).toBe('')
+    expect(
+      harness.markedResponseDurationFailure('gpt-5.6-sol', '', 37_000),
+    ).toBe('')
+    expect(
+      harness.markedResponseDurationFailure('current', 'ROUND_OUTCOME:', 37_000),
+    ).toBe('')
   })
 
   it('writes private model evidence atomically and invalidates it before validation', () => {
@@ -2989,7 +3063,7 @@ exit 1
     }
   })
 
-  it('keeps live agent-builder routing independent of the retired Fable lane', () => {
+  it('keeps live agent-builder routing independent of the retired Fable implementation lane', () => {
     const liveAgentBuilderDocs = [
       'AGENTS.md',
       'CLAUDE.md',
@@ -3000,6 +3074,56 @@ exit 1
     for (const workflowDoc of liveAgentBuilderDocs) {
       expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
     }
+  })
+
+  it('requires the Claude Code UI double-check at website UI completion', () => {
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+
+    expect(completionWorkflow).toContain('## Claude Code UI Double-Check')
+    expect(completionWorkflow).toContain(
+      'claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p',
+    )
+    expect(completionWorkflow).toContain(
+      'claude --model opus --permission-mode plan --no-session-persistence -p',
+    )
+    expect(completionWorkflow).toContain('run the same packet once')
+    expect(completionWorkflow).toContain(
+      'Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap.',
+    )
+    expect(completionWorkflow).toContain('stop making Claude requests')
+    expect(completionWorkflow).toContain(
+      'An already-completed task-scoped `frontend-review` satisfies the substitute',
+    )
+    expect(completionWorkflow).toContain(
+      'run the required `frontend-review` pass now',
+    )
+    expect(completionWorkflow).toContain(
+      'without claiming that the Claude Code double-check passed',
+    )
+    expect(completionWorkflow).toContain(
+      'neither model route can return a usable review for a non-credit reason',
+    )
+    expect(completionWorkflow).toContain(
+      'do not claim this double-check passed',
+    )
+    expect(completionWorkflow).toContain('does not replace `frontend-review`')
+    expect(completionWorkflow).toContain(
+      'agent-docs/prompts/frontend-review.md',
+    )
+    expect(completionWorkflow).toContain('tiny copy-only fast path')
+    expect(completionWorkflow).toContain(
+      'excluding unrelated working-tree content',
+    )
+    expect(completionWorkflow).toContain(
+      'untrusted evidence, not reviewer instructions',
+    )
+    expect(completionWorkflow).not.toContain(
+      'Fable model, authentication, credits, or invocation is unavailable',
+    )
+    expect(completionWorkflow).not.toContain('--dangerously-skip-permissions')
   })
 
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
@@ -3439,7 +3563,21 @@ exit 1
     mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
       recursive: true,
     })
+    mkdirSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+      ),
+      { recursive: true },
+    )
     mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'assistant-deliveries'), {
+      recursive: true,
+    })
+    mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
@@ -3454,6 +3592,18 @@ exit 1
       '{"sessionId":"asst_test"}\n',
       'utf8',
     )
+    writeFileSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+        'transient.pdf',
+      ),
+      'assistant runtime staging\n',
+      'utf8',
+    )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
     writeFileSync(
       path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
@@ -3463,6 +3613,26 @@ exit 1
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.pdf'),
+      'ordinary pre-existing vault file\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.zip'),
+      'globally excluded archive\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.pdf'),
+      'generic export\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.zip'),
+      'globally excluded archive\n',
       'utf8',
     )
 
@@ -3486,7 +3656,7 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 3')
+      expect(output).toContain('Vault files: 5')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -3508,15 +3678,44 @@ exit 1
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.pdf`,
+      )
+      expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.zip`,
+      )
+      expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.zip`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
+      )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/.runtime/operations/assistant/generated-deliveries/transient.pdf`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )
+      const manifest = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', zipPath, `${bundleDir}/bundle-manifest.json`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ))
+      expect(manifest).toMatchObject({
+        counts: {
+          totalFiles: 6,
+          vaultFiles: 5,
+        },
+        excludes: expect.arrayContaining(['.runtime/**']),
+      })
+      expect(manifest.excludes).toContain('*.zip')
+      expect(manifest.excludes).not.toContain('exports/assistant-deliveries/**')
     } finally {
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })

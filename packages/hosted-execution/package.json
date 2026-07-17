@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -78,6 +78,10 @@
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"
     },
+    "./labs": {
+      "types": "./dist/labs.d.ts",
+      "default": "./dist/labs.js"
+    },
     "./subscription": {
       "types": "./dist/subscription.d.ts",
       "default": "./dist/subscription.js"
@@ -93,10 +97,6 @@
     "./browser-vault": {
       "types": "./dist/browser-vault.d.ts",
       "default": "./dist/browser-vault.js"
-    },
-    "./cli-runtime-bridge": {
-      "types": "./dist/cli-runtime-bridge.d.ts",
-      "default": "./dist/cli-runtime-bridge.js"
     },
     "./env": {
       "types": "./dist/env.d.ts",

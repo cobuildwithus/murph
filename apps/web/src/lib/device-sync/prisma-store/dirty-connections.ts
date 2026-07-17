@@ -79,10 +79,10 @@ const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
-const COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
-const COMPANION_HRV_CAPTURE_RECEIPT_MAX_PER_CONNECTION = 1_024;
+const COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
-export type CompanionHrvCaptureReceiptInspection = "conflict" | "exact" | "missing";
+export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
 
 interface DirtyPayloadHydrationBudget {
   exhausted: boolean;
@@ -111,22 +111,22 @@ export class PrismaHostedDirtyConnectionStore {
     this.prisma = prisma;
   }
 
-  async inspectCompanionHrvCaptureReceipt(input: {
-    captureId: string;
+  async inspectCompanionHrvNightReceipt(input: {
     connectionIds: readonly string[];
+    nightDate: string;
     now: string;
     resource: HostedDeviceSyncDirtyResource;
     userId: string;
-  }): Promise<CompanionHrvCaptureReceiptInspection> {
+  }): Promise<CompanionHrvNightReceiptInspection> {
     const connectionIds = [...new Set(input.connectionIds)];
     if (connectionIds.length === 0) {
       return "missing";
     }
-    if (readCompanionHrvDirtyResourceCaptureId(input.resource) !== input.captureId) {
+    if (readCompanionHrvDirtyResourceNightDate(input.resource) !== input.nightDate) {
       throw createCompanionHrvResourceInvalidError();
     }
 
-    const cutoff = resolveCompanionHrvCaptureReceiptCutoff(input.now);
+    const cutoff = resolveCompanionHrvNightReceiptCutoff(input.now);
     await this.prisma.deviceSyncCompanionCaptureReceipt.deleteMany({
       where: {
         connectionId: { in: connectionIds },
@@ -136,9 +136,9 @@ export class PrismaHostedDirtyConnectionStore {
     });
 
     const receiptIds = connectionIds.map((connectionId) =>
-      createCompanionHrvCaptureReceiptId({
-        captureId: input.captureId,
+      createCompanionHrvNightReceiptId({
         connectionId,
+        nightDate: input.nightDate,
       })
     );
     const receipts = await this.prisma.deviceSyncCompanionCaptureReceipt.findMany({
@@ -223,12 +223,60 @@ export class PrismaHostedDirtyConnectionStore {
     const prisma = input.tx;
     const dirtyAt = new Date(input.dirtyAt);
 
-    const existing = await prisma.deviceSyncDirtyConnection.findUnique({
+    let existing = await prisma.deviceSyncDirtyConnection.findUnique({
       where: {
         connectionId: input.connectionId,
       },
     });
-    const companionCaptureClaims = await claimCompanionHrvCaptureReceipts({
+    const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
+      (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
+    );
+    let preparedDirtyPayloadRows = input.precomputedDirtyPayloadRows;
+    if (
+      hasCompanionNightResource
+      && input.resourceBatch.payloadResources.length > 0
+      && !preparedDirtyPayloadRows
+    ) {
+      preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
+        connectionId: input.connectionId,
+        dirtyRevision: resolveDirtyPayloadRevision({
+          existing,
+          resourceBatch: input.resourceBatch,
+        }),
+        provider: input.provider,
+        resources: input.resourceBatch.payloadResources,
+        traceId: input.traceId,
+        userId: input.userId,
+        prisma,
+      });
+    }
+    if (hasCompanionNightResource && existing) {
+      // Companion replay receipts reference the parent connection. Lock the
+      // dirty marker first so account deletion and ingress retain one lock
+      // order without holding that lock during payload encryption.
+      const locked = await lockDirtyConnectionForCompanionReceipt({
+        connectionId: input.connectionId,
+        tx: prisma,
+      });
+      if (!locked) {
+        throw createDirtyStateContentionError("update");
+      }
+      existing = await prisma.deviceSyncDirtyConnection.findUnique({
+        where: {
+          connectionId: input.connectionId,
+        },
+      });
+      if (
+        !existing
+        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision({
+          existing,
+          resourceBatch: input.resourceBatch,
+        })
+      ) {
+        throw createDirtyStateContentionError("update");
+      }
+    }
+    const companionNightClaims = await claimCompanionHrvNightReceipts({
       claimedAt: dirtyAt,
       connectionId: input.connectionId,
       resources: input.resourceBatch.payloadResources,
@@ -237,15 +285,15 @@ export class PrismaHostedDirtyConnectionStore {
     });
     const resourceBatch = filterDirtyResourceBatch(
       input.resourceBatch,
-      companionCaptureClaims,
+      companionNightClaims,
     );
     const precomputedDirtyPayloadRows = filterPreparedDirtyPayloadRows(
-      input.precomputedDirtyPayloadRows,
-      companionCaptureClaims,
+      preparedDirtyPayloadRows,
+      companionNightClaims,
     );
 
     if (
-      companionCaptureClaims.some((claimed) => !claimed)
+      companionNightClaims.some((claimed) => !claimed)
       && Object.keys(resourceBatch.allResources).length === 0
     ) {
       if (!existing) {
@@ -357,6 +405,27 @@ export class PrismaHostedDirtyConnectionStore {
     const dirtyWindowStart = resolveDirtyWindowStart(resourceBatch.allResources);
     const dirtyWindowEnd = resolveDirtyWindowEnd(resourceBatch.allResources);
     const nextDirtyRevision = existing.dirtyRevision + 1n;
+    // Compression and encryption are the expensive preparation. Complete them
+    // before taking the dirty-marker row lock, but keep the foreign-key-backed
+    // payload insert after the compare-and-swap to preserve account-deletion
+    // lock order.
+    const payloadRowsForCreate = resourceBatch.payloadResources.length === 0
+      ? undefined
+      : precomputedDirtyPayloadRows ?? (await prepareDirtyPayloadRows({
+          connectionId: input.connectionId,
+          dirtyRevision: nextDirtyRevision,
+          provider: input.provider,
+          resources: resourceBatch.payloadResources,
+          traceId: input.traceId,
+          userId: input.userId,
+          prisma,
+        }));
+    if (
+      payloadRowsForCreate
+      && payloadRowsForCreate.dirtyRevision !== nextDirtyRevision
+    ) {
+      throw createDirtyStateContentionError("update");
+    }
     const updated = await prisma.deviceSyncDirtyConnection.updateMany({
       where: {
         connectionId: input.connectionId,
@@ -389,7 +458,7 @@ export class PrismaHostedDirtyConnectionStore {
       connectionId: input.connectionId,
       dirtyRevision: nextDirtyRevision,
       provider: input.provider,
-      precomputed: precomputedDirtyPayloadRows,
+      precomputed: payloadRowsForCreate,
       resources: resourceBatch.payloadResources,
       traceId: input.traceId,
       tx: prisma,
@@ -930,20 +999,33 @@ function createDirtyPayloadId(input: {
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;
 }
 
-async function claimCompanionHrvCaptureReceipts(input: {
+async function lockDirtyConnectionForCompanionReceipt(input: {
+  connectionId: string;
+  tx: HostedPrismaTransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
+    SELECT connection_id AS "connectionId"
+    FROM device_sync_dirty_connection
+    WHERE connection_id = ${input.connectionId}
+    FOR UPDATE
+  `);
+  return rows.length === 1;
+}
+
+async function claimCompanionHrvNightReceipts(input: {
   claimedAt: Date;
   connectionId: string;
   resources: readonly HostedDeviceSyncDirtyResource[];
   tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<boolean[]> {
-  const captureIds = input.resources.map(readCompanionHrvDirtyResourceCaptureId);
-  if (captureIds.every((captureId) => captureId === null)) {
+  const nightDates = input.resources.map(readCompanionHrvDirtyResourceNightDate);
+  if (nightDates.every((nightDate) => nightDate === null)) {
     return input.resources.map(() => true);
   }
 
   const cutoff = new Date(
-    input.claimedAt.getTime() - COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS,
+    input.claimedAt.getTime() - COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS,
   );
   await input.tx.deviceSyncCompanionCaptureReceipt.deleteMany({
     where: {
@@ -962,15 +1044,15 @@ async function claimCompanionHrvCaptureReceipts(input: {
   const claims: boolean[] = [];
 
   for (const [index, resource] of input.resources.entries()) {
-    const captureId = captureIds[index] ?? null;
-    if (!captureId) {
+    const nightDate = nightDates[index] ?? null;
+    if (!nightDate) {
       claims.push(true);
       continue;
     }
 
-    const receiptId = createCompanionHrvCaptureReceiptId({
-      captureId,
+    const receiptId = createCompanionHrvNightReceiptId({
       connectionId: input.connectionId,
+      nightDate,
     });
     const envelopeHash = sha256Hex(buildStrictDirtyResourceIdentity(resource));
     const existingReceipt = await input.tx.deviceSyncCompanionCaptureReceipt.findUnique({
@@ -987,13 +1069,13 @@ async function claimCompanionHrvCaptureReceipts(input: {
         || existingReceipt.envelopeHash !== envelopeHash
         || existingReceipt.userId !== input.userId
       ) {
-        throw createCompanionHrvCaptureConflictError();
+        throw createCompanionHrvNightConflictError();
       }
       claims.push(false);
       continue;
     }
-    if (retainedReceiptCount >= COMPANION_HRV_CAPTURE_RECEIPT_MAX_PER_CONNECTION) {
-      throw createCompanionHrvCaptureReceiptCapacityError();
+    if (retainedReceiptCount >= COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION) {
+      throw createCompanionHrvNightReceiptCapacityError();
     }
 
     const created = await input.tx.deviceSyncCompanionCaptureReceipt.createMany({
@@ -1026,7 +1108,7 @@ async function claimCompanionHrvCaptureReceipts(input: {
       || receipt.envelopeHash !== envelopeHash
       || receipt.userId !== input.userId
     ) {
-      throw createCompanionHrvCaptureConflictError();
+      throw createCompanionHrvNightConflictError();
     }
 
     if (created.count === 1) {
@@ -1078,29 +1160,29 @@ function filterDirtyResourceBatch(
   };
 }
 
-function createCompanionHrvCaptureReceiptId(input: {
-  captureId: string;
+function createCompanionHrvNightReceiptId(input: {
   connectionId: string;
+  nightDate: string;
 }): string {
   return `dscr_${sha256Hex([
     input.connectionId,
     COMPANION_HRV_RMSSD_RESOURCE,
-    input.captureId,
+    input.nightDate,
   ].join("\0")).slice(0, 40)}`;
 }
 
-function createCompanionHrvCaptureConflictError(): Error {
+function createCompanionHrvNightConflictError(): Error {
   return deviceSyncError({
-    code: "COMPANION_HRV_CAPTURE_CONFLICT",
-    message: "Companion HRV captureId was already accepted with different content.",
+    code: "COMPANION_HRV_NIGHT_CONFLICT",
+    message: "A different overnight HRV summary was already accepted for this night.",
     retryable: false,
     httpStatus: 409,
   });
 }
 
-function createCompanionHrvCaptureReceiptCapacityError(): Error {
+function createCompanionHrvNightReceiptCapacityError(): Error {
   return deviceSyncError({
-    code: "COMPANION_HRV_CAPTURE_RECEIPT_CAPACITY_REACHED",
+    code: "COMPANION_HRV_NIGHT_RECEIPT_CAPACITY_REACHED",
     message: "Companion HRV replay receipts are at capacity. Retry after older receipts expire.",
     retryable: true,
     httpStatus: 429,
@@ -1116,15 +1198,15 @@ function createCompanionHrvResourceInvalidError(): Error {
   });
 }
 
-function resolveCompanionHrvCaptureReceiptCutoff(now: string): Date {
+function resolveCompanionHrvNightReceiptCutoff(now: string): Date {
   const nowMs = Date.parse(now);
   if (!Number.isFinite(nowMs)) {
     throw createCompanionHrvResourceInvalidError();
   }
-  return new Date(nowMs - COMPANION_HRV_CAPTURE_RECEIPT_RETENTION_MS);
+  return new Date(nowMs - COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS);
 }
 
-function readCompanionHrvDirtyResourceCaptureId(
+function readCompanionHrvDirtyResourceNightDate(
   resource: HostedDeviceSyncDirtyResource,
 ): string | null {
   if (resource.payload?.resource !== COMPANION_HRV_RMSSD_RESOURCE) {
@@ -1134,7 +1216,7 @@ function readCompanionHrvDirtyResourceCaptureId(
   try {
     return parseSerializedCompanionHrvRmssdObservation(
       resource.payload.companionObservationJson,
-    ).captureId;
+    ).nightDate;
   } catch {
     return null;
   }

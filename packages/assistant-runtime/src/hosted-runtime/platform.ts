@@ -83,6 +83,10 @@ import type {
   HostedRuntimeSubscriptionToolResponse,
 } from "@murphai/hosted-execution/subscription";
 import type {
+  HostedRuntimeLabsToolRequest,
+  HostedRuntimeLabsToolResponse,
+} from "@murphai/hosted-execution/labs";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -287,6 +291,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
   answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: string;
+  directRecipientPhoneNumber?: string | null;
   failedAt?: string | null;
   failureCode?: string | null;
   failureReason?: string | null;
@@ -421,6 +426,13 @@ export interface HostedRuntimeFamilyPlanToolPort {
 
 export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
+}
+
+export interface HostedRuntimeLabsToolPort {
+  request(
+    request: HostedRuntimeLabsToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLabsToolResponse>;
 }
 
 export interface HostedRuntimeSubscriptionToolPort {
@@ -599,6 +611,7 @@ export interface HostedRuntimePlatform {
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
+  labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;

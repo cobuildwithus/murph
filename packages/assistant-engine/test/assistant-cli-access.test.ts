@@ -1,12 +1,9 @@
 import path from "node:path";
 
 import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,7 +17,7 @@ import {
 } from "../src/assistant-skill-assets.js";
 
 describe("prepareAssistantDirectCliEnv", () => {
-  it("aliases the hosted runtime marker from the bridge owner", () => {
+  it("aliases the hosted runtime marker from the hosted environment owner", () => {
     expect(HOSTED_RUNTIME_PROCESS_ENV_MARKER).toBe(HOSTED_RUNTIME_PROCESS_ENV);
   });
 
@@ -87,9 +84,6 @@ describe("prepareAssistantDirectCliEnv", () => {
       HTTP_PROXY: "http://platform-proxy.example.test:8080",
       HTTPS_PROXY: "http://platform-proxy.example.test:8080",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
-      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: "route-grant-current-turn",
-      [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
       MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
@@ -126,9 +120,6 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
     expect(env.VAULT).toBe("/tmp/murph-vault");
-    expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
-    expect(env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]).toBe("route-grant-current-turn");
-    expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
     expect(env.MURPH_ASSISTANT_ACTIVE_SESSION_ID).toBeUndefined();
     expect(env.MURPH_ASSISTANT_ACTIVE_TURN_ID).toBeUndefined();
     expect(env.MURPH_PRODUCT_BASE_URL).toBeUndefined();

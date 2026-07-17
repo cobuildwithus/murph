@@ -61,7 +61,6 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 - **Imports**: `@/*` → `apps/web/*`, e.g. `@/src/components/ui/button`, `@/src/lib/utils`
 - **Icons**: `lucide-react` is the default import (matches existing usage). Reserve Lucide Animated (`pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`) for icons that specifically need motion — loaders, hover affordances, etc.
 - **Transitions**: View Transitions API (`<ViewTransition>` from `next/navigation`), not Framer Motion
-- **shadcn MCP**: `.mcp.json` (registry access for agents)
 - **shadcn skill**: `.agents/skills/shadcn/` — **invoke this skill (`Skill(shadcn)` or `/shadcn`) before any shadcn work.** It loads project registry config, current style (`base-nova` = base UI), installed components, and the correct docs endpoint (`components/base/[name]`). Do not rely on general shadcn knowledge — the project is on base UI, and components have evolved past what a model may remember.
 
 ### Commands
@@ -82,7 +81,7 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend work has no separate model requirement. Still run the required browser verification and `frontend-review` pass.
+- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser-verification and completion-review requirements, including `frontend-review` when it applies.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.

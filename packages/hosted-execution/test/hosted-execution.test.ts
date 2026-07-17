@@ -48,6 +48,10 @@ import {
   shouldScheduleBrowserVaultRefresh,
 } from "../src/browser-vault.ts";
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+  isHostedRuntimeProcessEnv,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -461,6 +465,21 @@ describe("hosted execution coverage gaps", () => {
     );
   });
 
+  it("exposes stable hosted runtime environment contracts", () => {
+    expect(HOSTED_RUNTIME_PROCESS_ENV).toBe("MURPH_HOSTED_RUNTIME_PROCESS");
+    expect(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV).toBe(
+      "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND",
+    );
+    expect(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV).toBe(
+      "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
+    );
+    expect(
+      isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
+    ).toBe(true);
+    expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
+    expect(isHostedRuntimeProcessEnv({})).toBe(false);
+  });
+
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
@@ -514,7 +533,6 @@ describe("hosted execution coverage gaps", () => {
       "./auth",
       "./browser-vault",
       "./bundles",
-      "./cli-runtime-bridge",
       "./clinical-records",
       "./clinical-records-boundary",
       "./computer-use",
@@ -524,6 +542,7 @@ describe("hosted execution coverage gaps", () => {
       "./env",
       "./hosted-codex-subscription-auth",
       "./hosted-email",
+      "./labs",
       "./legacy-dashboard-replica",
       "./orchestration-control",
       "./parsers",
@@ -561,6 +580,8 @@ describe("hosted execution coverage gaps", () => {
     const legacyDashboardReplicaCompatibilityModule =
       await import("@murphai/hosted-execution/dashboard-replica");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
+    const labsModule =
+      await import("@murphai/hosted-execution/labs") as Record<string, unknown>;
     const subscriptionModule =
       await import("@murphai/hosted-execution/subscription") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
@@ -617,6 +638,8 @@ describe("hosted execution coverage gaps", () => {
     expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(false);
     expect(subscriptionModule.parseHostedSubscriptionControlRequest).toBeTypeOf("function");
     expect(subscriptionModule.parseHostedRuntimeSubscriptionToolResponse).toBeTypeOf("function");
+    expect(labsModule.parseHostedRuntimeLabsToolRequest).toBeTypeOf("function");
+    expect(labsModule.parseHostedRuntimeLabsToolResponse).toBeTypeOf("function");
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
@@ -645,6 +668,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
+      "HOSTED_RUNTIME_LABS_TOOL_PATH",
       "HOSTED_RUNTIME_LATENCY_TRACE_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH",
@@ -678,6 +702,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/subscription/tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_LABS_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/labs/tool",
     );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",

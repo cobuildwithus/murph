@@ -29,6 +29,39 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Creating a hosted group
+
+Before any permission-bearing `create_join_link` or `post_join_offer`, call
+`read_current`. Only when it returns `status="none"`, request one reusable core
+set so members do not have to revisit consent for the most common future
+newsletter and challenge uses:
+
+- `group-email.v0`
+- `steps-days.v0`
+- `activity-days.v0`
+- `workout-days.v0`
+- `sleep-duration-days.v0`
+- `sleep-times.v0`
+- `resting-heart-rate-days.v0`
+- `hrv-days.v0`
+
+Pass the set as `requestedVaultShareProjectionScopes` on `create_join_link`, or
+as `projectionScopes` when creation uses `post_join_offer`. This is a permission
+request, not automatic sharing. On the join page, every item stays individually
+selectable. On a like-to-consent offer, liking grants exactly the disclosed
+snapshot and `{{join_url}}` remains the secondary path to share more or less.
+
+Follow an explicit request from the group creator for narrower or different
+health scopes. `group-email.v0` remains the server's standard new-group request,
+and each member may deselect it. Otherwise use the core set even if the first
+idea in the room is one particular challenge; the hosted group is reusable
+beyond that first activity. Do not request every available projection by
+default.
+
+When `read_current` returns an existing group, do not add the core set to that
+group's requested policy. Use only the exact workflow or additive scopes needed
+for the current request.
+
 ## Additive permissions
 
 When the room adds a sharing permission to a group that already exists, default
@@ -63,24 +96,26 @@ other people. `already_left` means there was no current membership to remove.
 For `owner_cannot_leave`, explain that the group's owner cannot leave their own
 group. Never claim success after `unavailable`.
 
-## A sender's own Murph style
+## Room style settings
 
-An authenticated Linq speaker may inspect or change their own private Murph
-style without leaving the room. When that speaker asks for their tone, voice,
-Humor, Push, or Detail, use `murph.group` with
-`action="read_own_assistant_style"`. When they explicitly request a change,
-use `action="update_own_assistant_style"` with only the requested fields.
-Humor, Push, and Detail are integer scores from 0 through 10; null restores the
-default.
+Tone, Voice, Humor, Push, and Detail in this room belong to the synthetic group
+Murph runtime. They are shared room settings, not the visible sender's personal
+Murph settings. Never resolve `Sender:` to a private member, read or write a
+participant's preferences, or send a personal Settings link as a way to
+configure the room.
 
-The runtime binds these actions to the accepted inbound sender. Never pass,
-infer, ask for, or accept a member id or handle, and never use the action to
-change another participant. The result changes that sender's future private
-Murph conversations and generated voice; it does not tune this room or the
-reply already running. If the tool reports `unavailable`, say the change did
-not complete. Do not replace it with a personal settings link in the group.
-These actions are unavailable for group-email replies and ambiguous or
-unrecognized senders.
+In an authenticated hosted Linq group turn, use `murph.personalization` to read
+or update the room's Tone and Voice, and use `murph.assistant_style` to show,
+set, or reset the room's Humor, Push, and Detail. Persist only an explicit
+ongoing room request; a request such as “be brief on this answer” applies only
+to the current reply. Trust the tool's effective result, confirm it briefly,
+and do not claim a change when the tool fails or reports no authoritative
+state. A saved change starts on a later group turn and does not restyle the
+reply already running.
+
+Model and reasoning controls remain unavailable in a group. Group email may
+reflect the room's saved style, but it cannot change that style; continue the
+mutation from the authenticated group chat.
 
 ## The decision ladder
 
@@ -215,10 +250,12 @@ messages are expected; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
-- Do not say an update is saved, scheduled, changed, or active until its
-  `vault-cli automation` command succeeds. If it fails, correct the command or
-  tell the group plainly that the requested change did not complete; never
-  turn a failed command into a confirmation.
+- Do not say an update is saved, scheduled, changed, or active until
+  `murph.automation` returns success. In a privileged local route where the
+  prompt explicitly grants `vault-cli automation`, a successful canonical
+  command is equivalent. If the available owning action fails, correct the
+  request or tell the group plainly that the change did not complete; never
+  turn a failed action into a confirmation.
 
 ## Group health newsletter
 
@@ -234,15 +271,17 @@ edit it, or stop it. One automation per group wins; apply later requests to
 the same stable slug.
 
 When a group asks for a newsletter, do not create it immediately with invented
-defaults. First send one short setup message that gets the essentials: what the
-group wants to call it, when it should go out (Sunday morning is the suggested
-default), whether it should arrive by email or right here in the group chat,
-and any tone preference if they care. For an email health newsletter, also
-propose the default reaction-share scope: name, email, sleep duration, activity
-minutes, workout summaries, resting heart rate, and HRV. Let the group widen
-or narrow that set. If they already gave some of that, or say "just set it up,"
-do not re-interrogate them. Use the current group's non-blank `displayName` from
-`murph.group action="read_current"` as the newsletter name before inventing a
+defaults. First call `murph.group action="read_current"`, then send one short
+setup message that gets the essentials: what the group wants to call it, when
+it should go out (Sunday morning is the suggested default), whether it should
+arrive by email or right here in the group chat, and any tone preference if
+they care. For an email health newsletter, the Creating a hosted group core set
+takes precedence when `read_current` returns `status="none"`. For an existing
+group, propose only the newsletter reaction-share scope: name, email, sleep
+duration, activity minutes, workout summaries, resting heart rate, and HRV. Let
+the group widen or narrow that set. If they already gave some of that, or say
+"just set it up," do not re-interrogate them. Use the existing group's non-blank
+`displayName` from `read_current` as the newsletter name before inventing a
 generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name
@@ -263,19 +302,19 @@ shared vault projections and needs no email grant.
 Create a new newsletter under the developer prompt's shared automation action
 rules using:
 
-- the group's chosen name as the positional `<title>`
-- Use exactly `--slug group-health-newsletter`. Any other slug will not be able to send
+- `title`: the group's chosen name
+- `slug`: exactly `group-health-newsletter`. Any other slug will not be able to send
   because scheduled newsletter send authority resolves only this automation slug.
-- `--schedule-kind cron`
-- `--schedule-cron "0 9 * * 0"` unless the group chose another schedule
-- `--continuity-policy fresh`
-- instructions that say this is the group health newsletter, include the
+- `schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }` unless the
+  group chose another schedule
+- `continuityPolicy`: `fresh`
+- `instructions`: say this is the group health newsletter, include the
   exact chosen name, chosen tone, and any optional custom note, and explicitly
   require the scheduled run to read and follow
   `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing, and
   require every email subject to start with that exact name instead of a generic
   newsletter label. Future notification turns may not read this skill, so keep
-  that complete naming rule in the saved instructions.
+  that complete naming rule in the saved instructions
 
 For changes or stopping, follow the developer prompt's shared automation
 action rules and apply only the requested fields to `group-health-newsletter`.

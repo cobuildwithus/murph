@@ -190,8 +190,10 @@ export interface AssistantNotificationInput
       | 'onProviderRequestStarted'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'outboxAutomationAuthority'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
+      | 'scheduledOccurrenceAt'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -199,6 +201,7 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  beforeDelivery?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
@@ -282,11 +285,10 @@ export async function sendAssistantNotificationLocal(
             }
           : result
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
-      if (
-        resolveAssistantConversationScope(
-          sharedPlan.conversationPolicy.audience,
-        ) === 'unverified-external'
-      ) {
+      const conversationScope = resolveAssistantConversationScope(
+        sharedPlan.conversationPolicy.audience,
+      )
+      if (conversationScope === 'unverified-external') {
         throw new VaultCliError(
           'ASSISTANT_AUDIENCE_UNVERIFIED',
           'Notification audience could not be verified as direct or group.',
@@ -333,9 +335,15 @@ export async function sendAssistantNotificationLocal(
 
       const turnId = createAssistantTurnId()
       const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const hostedDeviceTool =
+        !isAssistantNotificationMaintenanceExactSkip(input) &&
+        conversationScope === 'direct'
+          ? executionContext?.hosted?.deviceTool ?? null
+          : null
       const hostedToolContext =
-        hostedNewsletterTool
+        hostedNewsletterTool || hostedDeviceTool
           ? createAssistantHostedToolContext({
+              deviceTool: hostedDeviceTool,
               newsletterTool: hostedNewsletterTool,
               messageInput,
               newsletterOutbox: {
@@ -545,6 +553,14 @@ export async function sendAssistantNotificationLocal(
 
         const responseText = normalizeRequiredText(decision.text, 'notification response')
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
+        await runAssistantNotificationBeforeDelivery(input, {
+          decision: {
+            ...decision,
+            text: responseText,
+          },
+          deliveryOutcome: null,
+          response: responseText,
+        })
 
         const state = createAssistantRuntimeStateService(input.vault)
         const createNotificationReceipt = async (session: AssistantSession): Promise<void> => {
@@ -763,6 +779,17 @@ async function sendAssistantExactTextNotificationLocal(input: {
   const state = createAssistantRuntimeStateService(input.input.vault)
   throwIfAssistantNotificationAborted(input.input.abortSignal)
 
+  const exactTextDecision: AssistantNotificationDecision = {
+    kind: 'send_message',
+    privateSummary: 'Sent required exact notification text.',
+    text: responseText,
+  }
+  await runAssistantNotificationBeforeDelivery(input.input, {
+    decision: exactTextDecision,
+    deliveryOutcome: null,
+    response: responseText,
+  })
+
   const createExactTextReceipt = async (session: AssistantSession): Promise<void> => {
     await state.turns.createReceipt({
       deliveryRequested: true,
@@ -797,11 +824,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   if (input.input.deferCommitUntilDeliveryAccepted === true) {
     try {
       await runAssistantNotificationBeforeCommit(input.input, {
-        decision: {
-          kind: 'send_message',
-          privateSummary: 'Sent required exact notification text.',
-          text: responseText,
-        },
+        decision: exactTextDecision,
         deliveryOutcome,
         response: responseText,
       })
@@ -893,9 +916,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
 
   return {
     decision: {
-      kind: 'send_message',
-      privateSummary: 'Sent required exact notification text.',
-      text: responseText,
+      ...exactTextDecision,
     },
     deliveryOutcome: {
       ...deliveryOutcome,
@@ -914,6 +935,15 @@ function resolveAssistantNotificationNewsletterSendResult(input: {
     return input.current
   }
   return input.next
+}
+
+async function runAssistantNotificationBeforeDelivery(
+  input: AssistantNotificationInput,
+  context: AssistantNotificationCommitContext,
+): Promise<void> {
+  throwIfAssistantNotificationAborted(input.abortSignal)
+  await input.beforeDelivery?.(context)
+  throwIfAssistantNotificationAborted(input.abortSignal)
 }
 
 async function runAssistantNotificationBeforeCommit(
@@ -1201,6 +1231,7 @@ function buildAssistantNotificationMessageInput(
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
+    outboxAutomationAuthority: input.outboxAutomationAuthority ?? null,
     participantId: input.participantId,
     persistUserPromptOnFailure: false,
     profile: input.profile,
@@ -1212,6 +1243,7 @@ function buildAssistantNotificationMessageInput(
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
@@ -1267,6 +1299,7 @@ async function deliverAssistantNotificationMessage(input: {
     media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({
+    automationAuthority: input.input.outboxAutomationAuthority ?? null,
     turnId: input.turnId,
     message: input.message,
     dedupeToken: input.dedupeToken,

@@ -1,6 +1,11 @@
 import { ACTIVITY_METRICS } from "./definitions/activity.ts";
 import { BODY_METRICS } from "./definitions/body.ts";
 import { FUNCTION_METRICS } from "./definitions/function.ts";
+import {
+  EXPERIMENT_SESSION_METRICS,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
+} from "./experiment-session-metrics.ts";
 import { LAB_METRICS } from "./definitions/labs.ts";
 import { PROXY_METRICS } from "./definitions/proxy.ts";
 import { RECOVERY_METRICS } from "./definitions/recovery.ts";
@@ -17,6 +22,7 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   ...VITAL_METRICS,
   ...ACTIVITY_METRICS,
   ...SLEEP_METRICS,
+  ...EXPERIMENT_SESSION_METRICS,
   ...BODY_METRICS,
   ...FUNCTION_METRICS,
   ...PROXY_METRICS,
@@ -67,6 +73,85 @@ export function resolveMetricInputKey(value: string): string {
 
 export function resolveMetricDefinitionForBiomarker(biomarkerKey: string): MetricDefinition | null {
   return PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
+}
+
+export type ExperimentPrimaryMetricCaptureIssue =
+  | "missing_primary_biomarker"
+  | "unsupported_primary_biomarker"
+  | "uncapturable_primary_biomarker";
+
+export interface ExperimentPrimaryMetricCaptureAssessment {
+  canonicalBiomarkerKey: string | null;
+  issue: ExperimentPrimaryMetricCaptureIssue | null;
+  matchingSessionFieldIds: string[];
+  metricKey: string | null;
+  requiresSessionField: boolean;
+}
+
+/**
+ * Resolve the primary metric and, for subjective/session-owned metrics, prove
+ * that the run declares exactly one canonical capture field. Multiple aliases
+ * are ambiguous just like a missing field: either shape would make active-run
+ * logging and outcome analysis disagree about the source of truth.
+ */
+export function assessExperimentPrimaryMetricCapture(input: {
+  primaryBiomarkerKey: string | null | undefined;
+  sessionFields: readonly string[] | null | undefined;
+}): ExperimentPrimaryMetricCaptureAssessment {
+  const normalizedBiomarkerKey = input.primaryBiomarkerKey?.trim().toLowerCase() ?? "";
+  if (!normalizedBiomarkerKey) {
+    return {
+      canonicalBiomarkerKey: null,
+      issue: "missing_primary_biomarker",
+      matchingSessionFieldIds: [],
+      metricKey: null,
+      requiresSessionField: false,
+    };
+  }
+
+  const slug = normalizedBiomarkerKey.split(":").at(-1) ?? normalizedBiomarkerKey;
+  const candidateBiomarkerKey = normalizedBiomarkerKey.startsWith("biomarker:")
+    ? normalizedBiomarkerKey
+    : `biomarker:${slug}`;
+  const definition =
+    resolveMetricDefinitionForBiomarker(candidateBiomarkerKey) ??
+    resolveMetricDefinition(slug);
+  if (!definition) {
+    return {
+      canonicalBiomarkerKey: candidateBiomarkerKey,
+      issue: "unsupported_primary_biomarker",
+      matchingSessionFieldIds: [],
+      metricKey: null,
+      requiresSessionField: false,
+    };
+  }
+
+  const canonicalBiomarkerKey = definition.biomarkerKey ?? candidateBiomarkerKey;
+  const sessionMetric = resolveExperimentSessionMetricSpecForBiomarker(
+    canonicalBiomarkerKey,
+  );
+  if (!sessionMetric) {
+    return {
+      canonicalBiomarkerKey,
+      issue: null,
+      matchingSessionFieldIds: [],
+      metricKey: definition.key,
+      requiresSessionField: false,
+    };
+  }
+
+  const matchingSessionFieldIds = (input.sessionFields ?? []).filter(
+    (fieldId) => resolveExperimentSessionMetricSpec(fieldId)?.key === sessionMetric.key,
+  );
+  return {
+    canonicalBiomarkerKey,
+    issue: matchingSessionFieldIds.length === 1
+      ? null
+      : "uncapturable_primary_biomarker",
+    matchingSessionFieldIds,
+    metricKey: definition.key,
+    requiresSessionField: true,
+  };
 }
 
 export function createCustomMetricDefinition(metricKey: string, unit: string | null = null): MetricDefinition {

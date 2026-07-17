@@ -15,6 +15,7 @@ const routingMocks = vi.hoisted(() => ({
 }));
 
 const noticeMocks = vi.hoisted(() => ({
+  projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
 }));
@@ -28,6 +29,11 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-message", () => ({
+  projectHostedAiUsageLimitNoticeForDelivery:
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -95,6 +101,9 @@ describe("recordHostedAiUsageRecords", () => {
     vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) => input.message,
+    );
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
       status: "sent",
@@ -130,6 +139,10 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate(),
     );
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValueOnce(
+      "You hit your monthly Murph AI limit.\n\n" +
+      "Add usage: https://www.withmurph.ai/settings?addUsage=true#subscription",
+    );
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -162,13 +175,22 @@ describe("recordHostedAiUsageRecords", () => {
         claimToken: {
           periodStart: "2026-03-01T00:00:00.000Z",
           sentAt: expect.any(String),
+          usageCreditLedgerVersion: "0",
         },
         memberId: "member_123",
-        message: "You hit your monthly Murph AI limit.",
+        message:
+          "You hit your monthly Murph AI limit.\n\n" +
+          "Add usage: https://www.withmurph.ai/settings?addUsage=true#subscription",
         noticeCode: "edge_usage_limit_reached",
         occurredAt: "2026-03-29T12:00:05.000Z",
         prisma,
         sourceEventId: "turn_123.attempt-1",
+      });
+    expect(noticeMocks.projectHostedAiUsageLimitNoticeForDelivery)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "member_123",
+        message: "You hit your monthly Murph AI limit.",
+        prisma,
       });
   });
 
@@ -567,52 +589,6 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
     consoleWarnSpy.mockRestore();
-  });
-
-  it("retries notice delivery when later over-limit usage produces another candidate", async () => {
-    const hostedAiUsageUpsert = vi.fn(
-      async (args: { create: Record<string, unknown> }) => args.create,
-    );
-    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
-    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    allowanceMocks.accountHostedAiUsageForAllowanceTx
-      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
-        sourceUsageId: "turn_123.attempt-1",
-      }))
-      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
-        sourceUsageId: "turn_123.request-1.attempt-1",
-      }));
-    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
-      .mockRejectedValueOnce(new Error("provider unavailable"))
-      .mockResolvedValueOnce({ status: "sent" });
-
-    try {
-      await recordHostedAiUsageRecordsAndSendLimitNotices({
-        accountAllowance: true,
-        prisma: prisma as never,
-        trustedUserId: "member_123",
-        usage: [BASE_USAGE_RECORD],
-      });
-      await recordHostedAiUsageRecordsAndSendLimitNotices({
-        accountAllowance: true,
-        prisma: prisma as never,
-        trustedUserId: "member_123",
-        usage: [{
-          ...BASE_USAGE_RECORD,
-          providerRequestOrdinal: 1,
-          usageId: "turn_123.request-1.attempt-1",
-        }],
-      });
-    } finally {
-      consoleWarnSpy.mockRestore();
-    }
-
-    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .toHaveBeenCalledTimes(2);
-    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .toHaveBeenLastCalledWith(expect.objectContaining({
-        sourceEventId: "turn_123.request-1.attempt-1",
-      }));
   });
 
   it("does not account allowance when accounting is disabled", async () => {
@@ -1250,6 +1226,7 @@ function buildUsageLimitNoticeCandidate(overrides: Partial<{
   periodEnd: Date;
   periodStart: Date;
   sourceUsageId: string;
+  usageCreditLedgerVersion: bigint;
 }> = {}) {
   return {
     crossedAt: new Date("2026-03-29T12:00:05.000Z"),
@@ -1257,6 +1234,7 @@ function buildUsageLimitNoticeCandidate(overrides: Partial<{
     periodEnd: overrides.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
     periodStart: overrides.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
     sourceUsageId: overrides.sourceUsageId ?? "turn_123.attempt-1",
+    usageCreditLedgerVersion: overrides.usageCreditLedgerVersion ?? 0n,
     userNotice: {
       code: overrides.noticeCode ?? "edge_usage_limit_reached",
       message: overrides.noticeMessage ?? "You hit your monthly Murph AI limit.",

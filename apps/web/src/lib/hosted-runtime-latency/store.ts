@@ -357,16 +357,21 @@ export async function recordHostedIngressProviderStarted(input: {
       userId: input.authenticatedUserId,
     },
   });
-  const rowMatches = await Promise.all(rows.map(async (row) => ({
-    assistantInputId: row.assistantInputId,
-    matched: await updateHostedIngressProviderStartedLocked(prisma, {
-      at,
-      phaseBreakdown: input.phaseBreakdown,
-      providerRequestOrdinal,
-      runtimeAttemptId,
-      traceId: row.id,
-    }),
-  })));
+  // Sequential on purpose: each locked update opens its own transaction, so
+  // running rows in parallel pins one pooled connection per matched trace.
+  const rowMatches: Array<{ assistantInputId: string | null; matched: boolean }> = [];
+  for (const row of rows) {
+    rowMatches.push({
+      assistantInputId: row.assistantInputId,
+      matched: await updateHostedIngressProviderStartedLocked(prisma, {
+        at,
+        phaseBreakdown: input.phaseBreakdown,
+        providerRequestOrdinal,
+        runtimeAttemptId,
+        traceId: row.id,
+      }),
+    });
+  }
   const matchedIds = new Set(rowMatches
     .filter((row) => row.matched)
     .map((row) => row.assistantInputId)
@@ -419,14 +424,19 @@ export async function recordHostedIngressAssistantMilestone(input: {
     at,
     milestone: input.milestone,
   });
-  const rowMatches = await Promise.all(rows.map(async (row) => ({
-    assistantInputId: row.assistantInputId,
-    matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
-      phaseBreakdown,
-      runtimeAttemptId,
-      traceId: row.id,
-    }),
-  })));
+  // Sequential on purpose: each locked update opens its own transaction, so
+  // running rows in parallel pins one pooled connection per matched trace.
+  const rowMatches: Array<{ assistantInputId: string | null; matched: boolean }> = [];
+  for (const row of rows) {
+    rowMatches.push({
+      assistantInputId: row.assistantInputId,
+      matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
+        phaseBreakdown,
+        runtimeAttemptId,
+        traceId: row.id,
+      }),
+    });
+  }
   const matchedIds = new Set(rowMatches
     .filter((row) => row.matched)
     .map((row) => row.assistantInputId)

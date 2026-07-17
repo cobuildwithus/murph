@@ -76,7 +76,10 @@ import {
   readHostedLinqHomeLineAuthority,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineFromPoolTx,
+  startOfUtcDay,
 } from "./linq-home-routing";
+import { claimHostedLinqProactiveConversationCapacityTx } from "./linq-line-store";
+import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -835,6 +838,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
   }
 
+  const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
+  const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
   const member = existingMember
     ?? (participantContact.kind === "phone"
       ? await ensureHostedMemberForPhoneTx({
@@ -847,8 +852,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
           prisma: input.prisma,
         }));
 
-  const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
-  let assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
   if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
     const memberPhone = normalizePhoneNumber(participantPhoneNumber);
     if (!memberPhone) {
@@ -860,9 +863,32 @@ export async function planHostedOnboardingLinqWebhook(input: {
       prisma: input.prisma,
     });
     const existingAssignedPhone = normalizePhoneNumber(refreshedRouting?.linqRecipientPhone);
-    if (existingAssignedPhone) {
-      assignedPhone = existingAssignedPhone;
-    } else {
+    if (existingAssignedPhone && existingAssignedPhone !== assignedPhone) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+        httpStatus: 503,
+        message: "Hosted Linq home routing changed while the fallback route was resolving.",
+        retryable: true,
+      });
+    }
+
+    const selectedLine = bindingResult.selectedLine;
+    if (
+      !selectedLine
+      || selectedLine.phoneNumber !== assignedPhone
+      || !await claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc: startOfUtcDay(new Date()),
+        limit: resolveHostedLinqSignupWelcomeDailyLimit(selectedLine),
+        phoneNumberLookupKey: selectedLine.phoneNumberLookupKey,
+        prisma: input.prisma,
+      })
+    ) {
+      return buildHomeLineCapacityExhaustedPlan(
+        "ignored-home-line-capacity-exhausted",
+      );
+    }
+
+    if (!existingAssignedPhone) {
       await upsertHostedMemberHomeLinqRecipientPhoneTx({
         clearPending: true,
         ...(bindingResult.homeLineAssignedAt === null
@@ -1006,13 +1032,16 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
     prisma: input.prisma,
   });
 
-  return reservationResult.kind === "reserved"
-    ? {
-        homeLineAssignedAt: reservationResult.reservation.assignedAt,
-        kind: "bind",
-        recipientPhone: reservationResult.reservation.line.phoneNumber,
-      }
-    : reservationResult;
+  if (reservationResult.kind !== "reserved") {
+    return reservationResult;
+  }
+
+  return {
+    homeLineAssignedAt: reservationResult.reservation.assignedAt,
+    kind: "bind",
+    recipientPhone: reservationResult.reservation.line.phoneNumber,
+    selectedLine: reservationResult.reservation.line,
+  };
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {

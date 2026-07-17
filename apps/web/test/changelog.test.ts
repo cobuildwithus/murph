@@ -22,6 +22,42 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("keeps internal provider branding out of published changelog copy", () => {
+    const copy = listChangelogEditions().flatMap((edition) => [
+      edition.title,
+      edition.summary,
+      ...edition.items.flatMap((item) => [
+        item.title,
+        item.summary,
+        item.details ?? "",
+        item.tryIt?.label ?? "",
+        item.tryIt?.prompt ?? "",
+      ]),
+    ]).join("\n");
+
+    expect(copy).not.toMatch(/junction/iu);
+  });
+
+  it("preserves historical changelog identities and relevance tags", () => {
+    const itemsById = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+    const expectedTags = {
+      "device-history-import-self-heals": ["wearables", "junction", "reliability"],
+      "garmin-junction-sleep-records": ["wearables", "garmin", "junction", "sleep"],
+      "junction-direct-provider-link": ["wearables", "junction", "connect"],
+      "junction-history-self-heals": ["wearables", "junction", "sync"],
+      "junction-hourly-reconcile": ["wearables", "junction", "whoop", "oura", "garmin"],
+      "junction-meal-imports": ["nutrition", "junction", "meals"],
+      "junction-source-reconnect": ["wearables", "settings"],
+      "whoop-junction-local-day": ["wearables", "whoop", "junction", "data"],
+    } as const;
+
+    for (const [id, relevanceTags] of Object.entries(expectedTags)) {
+      expect(itemsById.get(id)?.relevanceTags).toEqual(relevanceTags);
+    }
+  });
+
   it("applies independent feature and improvement candidate limits", () => {
     const items = queryChangelogItems({
       featureLimit: 1,
@@ -79,8 +115,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-15");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-09");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-16");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-10");
   });
 
   it("resolves only known canonical edition cursors", () => {

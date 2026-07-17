@@ -439,7 +439,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const hostedGroupRuntime =
+    conversationScope === 'group' && input.executionContext?.hosted != null
+  const hostedGroupStyleSettingsAvailable =
+    hostedGroupRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.personalizationTool != null &&
+    input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const privateInteractiveProviderTurn =
+    privateInteractiveAudience &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' || outputOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -451,11 +462,25 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : []
   const assistantStyleSettingsAvailable =
-    privateInteractiveAudience &&
-    input.input.assistantStyleSettingsAuthorized !== false &&
-    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
+    (
+      (
+        privateInteractiveAudience &&
+        input.input.assistantStyleSettingsAuthorized !== false &&
+        (
+          resolvedChannel !== 'email'
+          || input.input.assistantStyleSettingsAuthorized === true
+        )
+      )
+      || hostedGroupStyleSettingsAvailable
+    ) &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const groupAssistantStylePreferencesApply =
+    hostedGroupRuntime &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
+  const assistantVoicePreferenceApplies =
+    privateInteractiveAudience || hostedGroupRuntime
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -498,6 +523,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : null
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
+    hostedRuntime: input.executionContext?.hosted != null,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
@@ -544,6 +570,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             conversationScope,
+            hostedRuntime: input.executionContext?.hosted != null,
+            scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
           }, {
             toolSchemaHash,
           })
@@ -551,16 +579,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
+            assistantHostedAutomationAvailable:
+              input.hostedToolContext?.automationTool != null,
             assistantHostedDeviceConnectAvailable:
               privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantHostedLabsAvailable:
+              privateInteractiveProviderTurn &&
+              input.hostedToolContext?.labsTool != null,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantToolNameAliases,
             assistantPersonality:
-              assistantStyleSettingsAvailable
+              assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
                 ? preferenceContext.assistantPersonality
                 : null,
             assistantStyleSettingsAvailable,
@@ -629,6 +662,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
+        automationAvailable:
+          input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
@@ -636,9 +671,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
         connectedAppsAvailable:
           input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
+        deviceAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.deviceTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
+        labsAvailable:
+          privateInteractiveProviderTurn &&
+          input.hostedToolContext?.labsTool != null,
         planUsageAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.planUsageTool != null,
@@ -787,9 +828,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
-      resolveAssistantVoiceOptionElevenLabsVoiceId(
-        preferenceContext.assistantVoice,
-      ),
+      assistantVoicePreferenceApplies
+        ? resolveAssistantVoiceOptionElevenLabsVoiceId(
+            preferenceContext.assistantVoice,
+          )
+        : null,
     voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,
@@ -1079,7 +1122,7 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
     input.executionContext?.hosted?.deviceConnectProviders ?? []
   const assistantHostedDeviceConnectAvailable =
     assistantHostedDeviceConnectProviders.length > 0 &&
-    typeof input.executionContext?.hosted?.issueDeviceConnectLink === 'function'
+    input.executionContext?.hosted?.deviceTool != null
 
   return {
     assistantHostedDeviceConnectAvailable,

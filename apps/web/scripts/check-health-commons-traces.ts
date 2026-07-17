@@ -27,6 +27,16 @@ const requiredExperimentTraceArtifacts = [
 const requiredBrowseTraceArtifacts = [
   "packages/health-commons/generated/web/browse/experiments.json",
 ] as const;
+const requiredBiomarkerOverviewTraceArtifacts = [
+  "packages/health-commons/generated/web/routes/index.json",
+  "packages/health-commons/generated/web/shell/biomarkers/hrv-rmssd.json",
+  "packages/health-commons/generated/web/pages/biomarkers/hrv-rmssd/overview.json",
+] as const;
+const requiredBiomarkerResearchTraceArtifacts = [
+  "packages/health-commons/generated/web/routes/index.json",
+  "packages/health-commons/generated/web/shell/biomarkers/hrv-rmssd.json",
+  "packages/health-commons/generated/web/pages/biomarkers/hrv-rmssd/research.json",
+] as const;
 const requiredMeasurementMethodTraceArtifacts = [
   "packages/health-commons/generated/web/routes/index.json",
   "packages/health-commons/generated/web/bundles/measurement_method/home-standardized-photo-roi-analysis.json",
@@ -42,6 +52,8 @@ const traceFiles = listFiles(distDir).filter((file) => file.endsWith(".nft.json"
 const violations: string[] = [];
 const experimentTraceArtifacts = new Set<string>();
 const browseTraceArtifacts = new Set<string>();
+const biomarkerOverviewTraceArtifacts = new Set<string>();
+const biomarkerResearchTraceArtifacts = new Set<string>();
 const measurementMethodTraceArtifacts = new Set<string>();
 
 for (const traceFile of traceFiles) {
@@ -53,6 +65,12 @@ for (const traceFile of traceFiles) {
   );
   const isExperimentBrowseTrace = relativeTraceFile.endsWith(
     "server/app/(dashboard)/experiments/page.js.nft.json",
+  );
+  const isBiomarkerOverviewTrace = relativeTraceFile.endsWith(
+    "server/app/(dashboard)/biomarkers/[biomarkerId]/page.js.nft.json",
+  );
+  const isBiomarkerResearchTrace = relativeTraceFile.endsWith(
+    "server/app/(dashboard)/biomarkers/[biomarkerId]/research/page.js.nft.json",
   );
   const isMeasurementMethodTrace = relativeTraceFile.includes(
     "server/app/measurement-methods/[measurementMethodId]/",
@@ -89,6 +107,22 @@ for (const traceFile of traceFiles) {
       }
     }
 
+    if (isBiomarkerOverviewTrace) {
+      for (const requiredArtifact of requiredBiomarkerOverviewTraceArtifacts) {
+        if (normalizedTracedFile.endsWith(requiredArtifact)) {
+          biomarkerOverviewTraceArtifacts.add(requiredArtifact);
+        }
+      }
+    }
+
+    if (isBiomarkerResearchTrace) {
+      for (const requiredArtifact of requiredBiomarkerResearchTraceArtifacts) {
+        if (normalizedTracedFile.endsWith(requiredArtifact)) {
+          biomarkerResearchTraceArtifacts.add(requiredArtifact);
+        }
+      }
+    }
+
     if (isMeasurementMethodTrace) {
       for (const requiredArtifact of requiredMeasurementMethodTraceArtifacts) {
         if (normalizedTracedFile.endsWith(requiredArtifact)) {
@@ -113,6 +147,12 @@ const missingExperimentArtifacts = requiredExperimentTraceArtifacts.filter((arti
 const missingBrowseArtifacts = requiredBrowseTraceArtifacts.filter((artifact) =>
   !browseTraceArtifacts.has(artifact)
 );
+const missingBiomarkerOverviewArtifacts = requiredBiomarkerOverviewTraceArtifacts.filter((artifact) =>
+  !biomarkerOverviewTraceArtifacts.has(artifact)
+);
+const missingBiomarkerResearchArtifacts = requiredBiomarkerResearchTraceArtifacts.filter((artifact) =>
+  !biomarkerResearchTraceArtifacts.has(artifact)
+);
 const missingMeasurementMethodArtifacts = requiredMeasurementMethodTraceArtifacts.filter((artifact) =>
   !measurementMethodTraceArtifacts.has(artifact)
 );
@@ -120,6 +160,8 @@ const missingMeasurementMethodArtifacts = requiredMeasurementMethodTraceArtifact
 if (
   missingExperimentArtifacts.length > 0 ||
   missingBrowseArtifacts.length > 0 ||
+  missingBiomarkerOverviewArtifacts.length > 0 ||
+  missingBiomarkerResearchArtifacts.length > 0 ||
   missingMeasurementMethodArtifacts.length > 0
 ) {
   throw new Error([
@@ -127,6 +169,8 @@ if (
     "Public Health Commons routes need compact generated/web artifacts at runtime.",
     ...missingExperimentArtifacts.map((artifact) => `- missing experiment detail trace artifact: ${artifact}`),
     ...missingBrowseArtifacts.map((artifact) => `- missing experiment browse trace artifact: ${artifact}`),
+    ...missingBiomarkerOverviewArtifacts.map((artifact) => `- missing biomarker overview trace artifact: ${artifact}`),
+    ...missingBiomarkerResearchArtifacts.map((artifact) => `- missing biomarker research trace artifact: ${artifact}`),
     ...missingMeasurementMethodArtifacts.map((artifact) => `- missing measurement method trace artifact: ${artifact}`),
   ].join("\n"));
 }

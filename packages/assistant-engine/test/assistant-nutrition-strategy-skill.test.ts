@@ -60,13 +60,13 @@ describe('assistant nutrition strategy skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      "Route by the user's visible outcome and read the primary skill before acting.",
+      "Route by the user's visible outcome and read the primary owner.",
     )
     expect(prompt).toContain(
-      'inspect at most two likely skill files',
+      'inspect at most two candidates; this cap is discovery-only',
     )
     expect(prompt).toContain(
-      'load a secondary skill only when it owns a distinct part of the task',
+      'follow explicit handoffs and load every distinct safety or execution owner',
     )
     expect(prompt).toContain('Do not preload skills or call a discovery CLI just to route.')
   })

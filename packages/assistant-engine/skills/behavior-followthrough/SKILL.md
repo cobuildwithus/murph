@@ -34,22 +34,64 @@ Strong triggers:
 
 Do not use this skill for one-time facts, one-time logs, one-time reminders with user-dictated wording, urgent safety-sensitive answers, medical diagnosis, or protocol selection before the protocol/experiment shape is clear.
 
-For protocol-linked experiments, use `experiment-onboarding` for protocol resolution, safety, run creation, session fields, and outcome mechanics. Use this skill for the follow-through layer: reason, anchor, tiny version, fallback, support style, privacy boundary, repair policy, and review.
+For any multi-day or repeated comparison intended as an experiment, use `experiment-onboarding` for safety, canonical run creation, session fields, and outcome mechanics, whether or not it uses a Commons protocol. Use this skill only for the follow-through layer: reason, anchor, tiny version, fallback, support style, privacy boundary, repair policy, and review. Do not use a habit regimen as a substitute for an experiment run.
 
 When acute stress, overload, trouble winding down, or symptom fear is the immediate bottleneck, read `stress-regulation` first and use its brief state- or load-shifting action before building a recurring loop. Return here only if ongoing support is still useful. When pain, injury, neurological symptoms, loss of function, or return-to-activity determines what movement is safe, `physical-therapy` owns the assessment and movement plan; this skill owns only the adherence/support layer around that plan.
 
 ## Success criteria
 
-Before scheduling or continuing support for a repeated behavior, Murph should have enough of this compact support loop:
+For a repeated-behavior support loop Murph is helping design, satisfy the
+grounding gate below before scheduling or continuing support. Murph should
+then have enough of this compact support loop:
 
 1. Target behavior: the concrete action, not just the desired outcome.
-2. Reason: why the user wants this, in their own words when available.
+2. Reason: why the user wants this, in their own words.
 3. Anchor: when/where/after what the behavior happens.
 4. Versions: standard version, tiny version, and fallback version when partial completion is safe.
 5. Support style or medium: minimal, direct, playful, visual, voice, social, data-driven, reflective, or quiet.
 6. Review/repair: when Murph reviews, and what Murph changes after misses.
 
-If the moment is too lightweight for all six, capture only target behavior, tiny version, anchor, and repair policy.
+If the moment is too lightweight for all six, target behavior, tiny version,
+anchor, and repair policy are enough only to discuss or take a one-time action.
+Do not activate a Murph-designed durable support loop until the grounding gate
+and the support fields that materially affect it are satisfied.
+
+### Grounding gate before a durable loop
+
+This gate applies when Murph is helping choose or design a behavior-change or
+support loop. An exact user-directed recurring reminder or check-in whose
+action and timing are already specified may be created under the normal
+automation, safety, and authorization rules. Do not ask for motivation,
+baseline, or prior attempts unless one would materially change that requested
+automation.
+
+For Murph-designed habit regimens, experiment support loops, recurring
+reminders, or other durable behavior support, first understand enough of the
+user's actual situation to choose well:
+
+- the user selected this outcome as what they want to work on now, or explicitly
+  asked for help with it; a previously stated goal, an assistant recommendation,
+  or a generic request to continue onboarding is not selection
+- the desired outcome and why it matters, in the user's words
+- relevant existing records, connected data, logs, labs, or active plans that
+  could change the behavior or its timing
+- the user's current behavior, routine, and practical baseline
+- what they have already tried and what happened
+- the main conditions that help, disrupt, or compete with follow-through
+
+This is a decision gate, not a demand for exhaustive intake. Reuse visible and
+saved context, read only decision-changing evidence, and ask one genuinely
+missing question per reply. Stop as soon as the behavior choice and support fit
+are grounded. If decision-changing evidence is still being parsed or saved in
+the background, keep learning or return to setup after its result is confirmed;
+do not activate the durable loop unless the user explicitly defers that
+evidence.
+
+When several outcomes are open, Murph may suggest one with a concise rationale,
+but the user chooses the thread before Murph asks its baseline, obstacle,
+prior-attempt, or support-fit questions. If only one outcome is open, confirm
+that the user wants to work on it now. Do not infer authorization from “keep
+going,” “continue,” or another reply that only advances an intake or setup flow.
 
 ## Constraints
 
@@ -80,9 +122,12 @@ Use these lenses privately. Do not turn the reply into a psychology taxonomy.
 
 ## Setup workflow
 
-### 1. Ground lightly
+### 1. Ground the outcome and current pattern
 
 Read only context that could materially change the loop:
+- the user's desired outcome and stated reason
+- current behavior, routines, timing, and practical baseline
+- prior attempts, what helped, what failed, and what changed
 - active experiment and protocol plan
 - recent logs or sessions for this behavior
 - recent conversation about misses, friction, or competing context
@@ -91,6 +136,13 @@ Read only context that could materially change the loop:
 - current route and privacy context for support delivery
 
 Do not perform broad vault archaeology for a simple setup.
+
+Before converting the outcome into a behavior, be able to explain privately
+that the user chose this thread now, what they are trying to change, what their
+current pattern is, what relevant evidence says, what they have already tried,
+and which practical influences are most likely to shape follow-through. Do not
+infer any missing piece from the goal itself. Ask only the missing piece that
+could change the first behavior or support choice.
 
 When `murph-onboarding` returns to a parked desired outcome after the health
 foundation, follow that owner's exact bounded behavioral-fit sequence,
@@ -109,11 +161,17 @@ Examples:
 - "Eat better" -> "add a protein breakfast on weekdays"
 - "Sleep earlier" -> "start phone-off wind-down at 11:15 pm"
 
-If the user gave only an outcome, propose a low-burden behavior and let them edit it.
+After the grounding gate is satisfied, propose a low-burden behavior and let
+the user edit it. A bare outcome by itself is not enough to activate a durable
+support loop.
 
 ### 3. Capture the reason
 
-For a new goal or behavior, get the user's reason in their own words by default. If it is already clear or self-evident, use it without asking. Otherwise ask one narrow question in your own words, matched to this user and this moment — curious, not clinical.
+For a new goal or behavior, get the user's reason in their own words. If it is
+already clear from visible or saved user evidence, use it without asking.
+Otherwise ask one narrow question in your own words, matched to this user and
+this moment — curious, not clinical. Never infer a “self-evident” reason from
+the outcome itself.
 
 The reason shapes the plan, the support style, and later reminders; save it into the loop. Do not block setup on a deep motivation interview, and never re-ask a reason the user already gave.
 
@@ -194,11 +252,19 @@ For accepted non-experiment habit, routine, or ramp plans, do not leave the only
 
 Memory is for durable user preferences or broad context, not the source of truth for the active plan. Knowledge is for synthesized patterns, not the operational state of a short habit plan.
 
-When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
+When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. A compact snapshot or truncated regimen list is navigation only: read the full current regimen note and any linked records before advising, repairing, or closing the plan. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
 
 When creating automations, make instructions context-aware. A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.
 
 Automation instructions may duplicate the compact support loop so scheduled turns have local context, but the habit regimen remains the source of truth.
+
+Every automation owned by a non-experiment habit plan must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is the canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
+
+Support kind also bounds the user-facing message shape. `reminder` authorizes a cue or skip, never a proactive repair/accountability question. `check_in` authorizes one narrow current-state or repair question. `review` authorizes the bounded review and next-decision question. Put that exact authorized shape in the automation instructions; do not let a scheduled turn widen consent because the generic notification policy can generate questions.
+
+Keep the habit support series finite. Prefer bounded one-shot automations. If the user explicitly accepts a recurring automation, set `activeUntil: "<ISO timestamp>"` no later than the accepted review or support-window end; do not create an evergreen recurrence.
+
+When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only `vault-cli automation list --support-series-id habit:<regimenId>` when the plan does not already store the ids needed to reconcile safely. Never infer membership from text or a title.
 
 Automation instructions should include:
 - target behavior
@@ -219,7 +285,7 @@ Automation instructions should not include:
 - sensitive details for shared channels
 - instructions to nag harder after non-response
 
-Prefer bounded support. Never create open-ended nag loops.
+Prefer bounded support. Never create open-ended nag loops. If the user wants ongoing support, agree on a finite window and review point; continuing beyond that window requires fresh consent.
 
 ## Opt-in accountability check-ins
 
@@ -281,7 +347,12 @@ message.
 
 ## Notification decision policy
 
-When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`. If sending, choose whether the message should be a normal cue, an explicitly authorized accountability check-in, or a repair question/proposal.
+When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.
+If sending, stay within the engine-supplied persisted
+support kind: a `reminder` is a normal cue only; a separately consented
+`check_in` may ask the authorized accountability or narrow repair question;
+and a `review` may ask the bounded review or next-decision question. Never
+widen the saved purpose at fire time.
 
 Send a normal cue when:
 - the behavior is still relevant
@@ -291,12 +362,13 @@ Send a normal cue when:
 - the message can be short and grounded
 
 Send an accountability check-in when:
+- the persisted support kind is `check_in`
 - the user explicitly authorized it
 - the relevant action window has ended
 - the completion reconciliation above leaves this occurrence `unknown`
 - one short outcome question is still useful and within the support plan
 
-Send a repair question/proposal when:
+For a consented `check_in` or `review`, send a repair question/proposal when:
 - the same support has been ignored twice
 - multiple planned sessions were missed
 - recent context shows a recurring conflict
@@ -330,7 +402,11 @@ Three or more misses means do not continue by inertia. Offer pause, restart smal
 
 Repeated "later" usually means the window is wrong or the behavior is too large. Convert it into a tiny now, a specific later cue, or a pause.
 
-Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support. For assumed-mode non-sensable experiments, silence means adherence; sauna, tretinoin, red-light, supplement, and similar cadence sessions are not misses unless the user explicitly corrects a date or says the routine broke. Repair policy starts from that correction or routine-break signal, not from absent per-session replies; when correcting a date, edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed` instead of adding a contradictory log, and only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session. For device-observable experiment sessions with activity coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment.
+Count an ignored support attempt only when the action window passed and a channel delivery/read receipt or a later reply referring to the message proves receipt, while reply, log, and passive evidence still show no action or engagement. Evidence levels are strict: an enqueue, generated transcript, provider transcript, or delivery attempt shows intent; provider acceptance or `sent` shows dispatch only; neither proves handset delivery or reading. Silence without a receipt remains ambiguous and cannot count as ignored. Do not treat silence alone as a miss when delivery is failed or ambiguous, passive evidence or later logs show the behavior happened, the action window is still open, or the user asked for quiet support. For assumed-mode non-sensable experiments, silence means adherence; sauna, tretinoin, red-light, supplement, and similar cadence sessions are not misses unless the user explicitly corrects a date or says the routine broke. Repair policy starts from that correction or routine-break signal, not from absent per-session replies; when correcting a date, edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed` instead of adding a contradictory log, and only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session. For device-observable experiment sessions with activity coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment.
+
+## Non-Experiment Closeout
+
+At the bounded review for a habit, routine, or ramp, compare the saved baseline and intended outcome with current user-reported function and reliable passive evidence. Choose one explicit disposition: adopt, modify, pause, complete, stop, or escalate. Update the full canonical habit regimen with the outcome, decision, and date. Keep it active only when the adopted or modified behavior continues; otherwise use the matching `paused`, `completed`, or `stopped` status and save `stoppedOn` when stopped. End linked support rather than leaving a stale active plan or open-ended reminder loop: reconcile `habit:<regimenId>` with the exact desired active automation ids for an adopted or modified plan, or reconcile it with an empty desired-id list to archive the whole series for pause, completion, stop, or an unsupported escalation. Do not claim the behavior caused the result when the evidence only shows an association.
 
 ## Support fit over time
 
@@ -466,6 +542,9 @@ Stop behavior-support setup and handle the more important issue when:
 ## Final check
 
 Before replying or scheduling support, check:
+- Did the user choose this outcome as the thread to work on now?
+- Is the desired outcome, reason, current pattern, relevant evidence, prior
+  attempts, and main follow-through context grounded enough to choose well?
 - Is the target behavior concrete?
 - Is there a safe tiny version or a safe fallback?
 - Is the anchor real?

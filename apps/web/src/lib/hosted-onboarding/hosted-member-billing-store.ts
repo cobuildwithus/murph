@@ -91,9 +91,11 @@ export interface HostedMemberStripeBillingRefWriteInput {
 // perform one retrieve and one update under this lock, so 13 minutes covers
 // both 6-minute provider budgets plus one minute for lock acquisition and local
 // database reconciliation.
+export const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS = 780_000;
+
 const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS = {
   ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  timeout: 780_000,
+  timeout: HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
 } as const;
 
 export class HostedMemberStripeMutationLockBusyError extends Error {

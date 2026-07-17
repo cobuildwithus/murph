@@ -418,6 +418,22 @@ enum HostedStripeEventStatus {
   poisoned
 }
 
+enum HostedUsageCreditPurchaseStatus {
+  created
+  checkout_open
+  payment_pending
+  fulfilled
+  expired
+  payment_failed
+}
+
+enum HostedUsageCreditEntryKind {
+  purchase_grant
+  usage_debit
+  refund_adjustment
+  dispute_adjustment
+}
+
 enum HostedCryptoDomain {
   control
   device
@@ -473,6 +489,8 @@ enum HostedPhoneCallStatus {
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
+  usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
+  usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantTone                  String?                         @map("assistant_tone")
@@ -509,6 +527,9 @@ model HostedMember {
   hostedWorkspace                HostedWorkspace?
   hostedRuntimeLogs              HostedRuntimeLog[]
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
+  usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
+  usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
+  usageCreditEntries             HostedUsageCreditEntry[]
   consentEvents                  HostedConsentEvent[]
   consentGrants                  HostedConsentGrant[]
   vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
@@ -1168,6 +1189,10 @@ model HostedGrowthDailySnapshot {
   coveredMembers     Int      @map("covered_members")
   trialingMembers    Int      @map("trialing_members")
   mrrUsdCents        Int      @map("mrr_usd_cents")
+  // Message volume for the full UTC day before snapshot_date, captured here
+  // because the live source rows are short-lived (mailbox TTL, delivery churn).
+  inboundMessagesPriorDay  Int? @map("inbound_messages_prior_day")
+  outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
 
   @@map("hosted_growth_daily_snapshot")
 }
@@ -1215,6 +1240,78 @@ model HostedStripeEvent {
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
   @@map("hosted_stripe_event")
+}
+
+model HostedUsageCreditPurchase {
+  id                                String                               @id
+  payerMemberId                     String                               @map("payer_member_id")
+  beneficiaryMemberId               String                               @map("beneficiary_member_id")
+  offerCode                         String                               @map("offer_code")
+  cashCurrency                      String                               @map("cash_currency")
+  cashAmountMinor                   Int                                  @map("cash_amount_minor")
+  grantUsdMicros                    BigInt                               @map("grant_usd_micros")
+  remainingCreditUsdMicros          BigInt                               @default(0) @map("remaining_credit_usd_micros")
+  clientRequestKey                  String                               @map("client_request_key")
+  checkoutRequestPolicyVersion      String                               @map("checkout_request_policy_version")
+  status                            HostedUsageCreditPurchaseStatus       @default(created)
+  stripeLiveMode                    Boolean                              @map("stripe_live_mode")
+  stripePriceLookupKey              String                               @map("stripe_price_lookup_key")
+  stripePriceIdEncrypted            String                               @map("stripe_price_id_encrypted")
+  stripeCustomerLookupKey           String                               @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted         String                               @map("stripe_customer_id_encrypted")
+  stripeCheckoutSessionLookupKey    String?                              @unique(map: "hosted_usage_credit_purchase_session_lookup_key") @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted  String?                              @map("stripe_checkout_session_id_encrypted")
+  stripeCheckoutUrlEncrypted        String?                              @map("stripe_checkout_url_encrypted")
+  stripePaymentIntentLookupKey      String?                              @unique(map: "hosted_usage_credit_purchase_payment_intent_lookup_key") @map("stripe_payment_intent_lookup_key")
+  stripePaymentIntentIdEncrypted    String?                              @map("stripe_payment_intent_id_encrypted")
+  stripeChargeLookupKey             String?                              @unique(map: "hosted_usage_credit_purchase_charge_lookup_key") @map("stripe_charge_lookup_key")
+  stripeChargeIdEncrypted           String?                              @map("stripe_charge_id_encrypted")
+  checkoutSuccessUrl                String                               @map("checkout_success_url")
+  checkoutCancelUrl                 String                               @map("checkout_cancel_url")
+  checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
+  paidAt                            DateTime?                            @map("paid_at")
+  terminalAt                        DateTime?                            @map("terminal_at")
+  lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
+  reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
+  createdAt                         DateTime                             @default(now()) @map("created_at")
+  updatedAt                         DateTime                             @updatedAt @map("updated_at")
+  payer                             HostedMember                         @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
+  beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  entries                           HostedUsageCreditEntry[]
+
+  @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
+  @@index([payerMemberId, status, createdAt], map: "hosted_usage_credit_purchase_payer_status_idx")
+  @@index([beneficiaryMemberId, status, createdAt], map: "hosted_usage_credit_purchase_beneficiary_status_idx")
+  @@index([stripePriceLookupKey], map: "hosted_usage_credit_purchase_price_lookup_idx")
+  @@index([stripeCustomerLookupKey], map: "hosted_usage_credit_purchase_customer_lookup_idx")
+  @@map("hosted_usage_credit_purchase")
+}
+
+model HostedUsageCreditEntry {
+  id                       String                     @id
+  beneficiaryMemberId      String                     @map("beneficiary_member_id")
+  beneficiarySequence      BigInt                     @map("beneficiary_sequence")
+  kind                     HostedUsageCreditEntryKind
+  amountUsdMicros          BigInt                     @map("amount_usd_micros")
+  effectiveAt              DateTime                   @map("effective_at")
+  semanticSourceKey        String                     @unique(map: "hosted_usage_credit_entry_semantic_source_key") @map("semantic_source_key")
+  purchaseId               String                     @map("purchase_id")
+  parentGrantEntryId       String?                    @map("parent_grant_entry_id")
+  sourceUsageId            String?                    @map("source_usage_id")
+  sourceReferenceLookupKey String?                    @map("source_reference_lookup_key")
+  createdAt                DateTime                   @default(now()) @map("created_at")
+  beneficiary              HostedMember               @relation(fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  purchase                 HostedUsageCreditPurchase  @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  parentGrant              HostedUsageCreditEntry?    @relation("HostedUsageCreditEntryParentGrant", fields: [parentGrantEntryId], references: [id], onDelete: Restrict)
+  childEntries             HostedUsageCreditEntry[]   @relation("HostedUsageCreditEntryParentGrant")
+
+  @@unique([beneficiaryMemberId, beneficiarySequence], map: "hosted_usage_credit_entry_beneficiary_sequence_key")
+  @@unique([sourceUsageId, parentGrantEntryId], map: "hosted_usage_credit_entry_usage_grant_key")
+  @@index([beneficiaryMemberId, kind, beneficiarySequence], map: "hosted_usage_credit_entry_beneficiary_kind_idx")
+  @@index([purchaseId, beneficiarySequence], map: "hosted_usage_credit_entry_purchase_sequence_idx")
+  @@index([parentGrantEntryId], map: "hosted_usage_credit_entry_parent_grant_idx")
+  @@index([sourceReferenceLookupKey], map: "hosted_usage_credit_entry_source_reference_idx")
+  @@map("hosted_usage_credit_entry")
 }
 
 model HostedConsentEvent {
@@ -1405,6 +1502,8 @@ model HostedLinqLine {
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
   activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
+  proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
+  proactiveConversationCount  Int?      @map("proactive_conversation_count")
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")

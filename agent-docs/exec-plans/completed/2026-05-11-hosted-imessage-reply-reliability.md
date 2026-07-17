@@ -42,7 +42,7 @@ Updated: 2026-05-11
 - Product/process constraints:
   - Prefer clean, simple, composable architecture over new orchestration.
   - Preserve unrelated dirty worktree edits and overlapping active plan rows.
-  - Use Cloudflare and DB Hub MCP evidence for production/runtime state, keeping all identifiers and payloads redacted.
+  - Use Cloudflare and production database evidence for production/runtime state, keeping all identifiers and payloads redacted.
   - Use `review:gpt` as a simplification/review aid where the available tooling permits.
 
 ## Risks and mitigations
@@ -69,7 +69,7 @@ Updated: 2026-05-11
 ## Decisions
 
 - Use the Cloudflare Durable Object alarm as the single scheduler for retry/wake/idle-maintenance ordering, consistent with Cloudflare's one-alarm-per-object model.
-- DB Hub MCP failed to register in this already-running session after a launcher `PATH` issue, so production DB checks in this pass used the same hosted DB URL through a redacted read-only Prisma probe. The wrapper has been fixed for future MCP launches, but this session still has no callable DB Hub tool namespace.
+- The production database inspection tool failed to register in this already-running session after a launcher `PATH` issue, so production DB checks in this pass used the same hosted DB URL through a redacted read-only Prisma probe. The wrapper has been fixed for future launches, but this session still has no callable production database inspection namespace.
 - Keep the fix in the Cloudflare runner scheduling layer: foreground nudges now abort idle-shutdown checkpoint work instead of waiting behind it, while normal hosted reply handling still flows through the existing mailbox/runtime/outbox path.
 - Align the native container `sleepAfter` with `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` so the existing `runnerIdleTtlMs - safetyMarginMs` checkpoint schedule is the actual default T-minus-60 lifecycle point.
 - Keep hosted-local E2E Docker auth isolated from the operator's normal Docker credential config, while symlinking only Docker CLI plugins into the temporary config so Wrangler retains `buildx`.
@@ -117,7 +117,7 @@ Updated: 2026-05-11
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-execution-handoff.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts --no-coverage` passed 55 tests after the web handoff fix.
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-onboarding-telegram-dispatch.test.ts apps/web/test/hosted-onboarding-whatsapp-service.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts apps/web/test/hosted-email-mailbox-ingress-route.test.ts apps/web/test/device-sync-hosted-wake.test.ts --no-coverage` passed 72 tests after the web handoff fix.
 - `pnpm --dir apps/web typecheck:prepared` passed after the web handoff fix.
-- DB Hub and Cloudflare observability now show the latest iMessage mailbox item imported into assistant input and the assistant scanner starting, followed by repeated runner/container lifecycle failures before any pass-finished/outbox evidence. That moves the active failure past Linq/provider ingress and into foreground invocation control/liveness.
+- Production database inspection and Cloudflare observability now show the latest iMessage mailbox item imported into assistant input and the assistant scanner starting, followed by repeated runner/container lifecycle failures before any pass-finished/outbox evidence. That moves the active failure past Linq/provider ingress and into foreground invocation control/liveness.
 - Cloudflare observability also shows heartbeat RPCs and repeated pending-nudge/alarm activity interleaved with active foreground runs. Treating any pending nudge as a foreground liveness abort can starve the reply pass; the current fix preserves idle checkpoint preemption but stops aborting normal foreground assistant work on runner pending-nudge liveness.
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-workspace-entrypoint.test.ts --no-coverage` passed 50 tests after changing foreground liveness behavior.
 - Production logs then showed active workspace invocations being marked stale after a heartbeat window that was shorter than the heartbeat touch timeout. The liveness defaults now use a 5s Cloudflare heartbeat interval and a 30s active-invocation stale window, with a code invariant requiring `staleMs >= 3 * (heartbeatIntervalMs + touchTimeoutMs)`.

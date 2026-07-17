@@ -40,8 +40,11 @@ import {
   type ExperimentProtocolProjectionFields,
 } from "./protocols.ts";
 import {
+  assessExperimentPrimaryMetricCapture,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveExperimentSessionMetricSpec,
+  validateExperimentSessionMetricValue,
   normalizeMetricKey,
   selectMetricSeries,
   selectMetricValue,
@@ -94,7 +97,9 @@ export type ExperimentProgressReadinessReason =
   | "missing_intervention_window"
   | "missing_analysis_plan"
   | "missing_primary_biomarker"
-  | "missing_metric_window";
+  | "missing_metric_window"
+  | "unsupported_primary_biomarker"
+  | "uncapturable_primary_biomarker";
 export type ExperimentFollowupKind = "missed-log" | "weekly-digest";
 export type ExperimentFollowupAction = "notify" | "skip";
 export type ExperimentFollowupReason =
@@ -507,7 +512,12 @@ function buildExperimentSummaryContext(
       frontmatter.runPlan?.interventionStart,
       minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
     ),
-    metricPoints: options.metricPoints ?? buildMetricProjection(vault).metricPoints,
+    metricPoints: [
+      ...(options.metricPoints ?? buildMetricProjection(vault).metricPoints).filter(
+        (point) => point.source.kind !== "intervention-session-field",
+      ),
+      ...buildExperimentSessionMetricPoints(events, frontmatter),
+    ],
     progressPhase,
     summariesByDate,
   };
@@ -1081,6 +1091,18 @@ function buildAnalysisReadiness(
   if (!frontmatter.analysisPlan?.primaryBiomarkerKey) {
     blockingReasons.push("missing_primary_biomarker");
   }
+  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
+  if (primaryBiomarkerKey) {
+    const capture = assessExperimentPrimaryMetricCapture({
+      primaryBiomarkerKey,
+      sessionFields: frontmatter.runPlan?.logging?.sessionFields,
+    });
+    if (capture.issue === "unsupported_primary_biomarker") {
+      blockingReasons.push("unsupported_primary_biomarker");
+    } else if (capture.issue === "uncapturable_primary_biomarker") {
+      blockingReasons.push("uncapturable_primary_biomarker");
+    }
+  }
   if (
     !hasAnalysisMetricWindow(frontmatter)
   ) {
@@ -1088,6 +1110,114 @@ function buildAnalysisReadiness(
   }
 
   return readinessResult(blockingReasons);
+}
+
+function buildExperimentSessionMetricPoints(
+  events: readonly CanonicalEntity[],
+  frontmatter: ExperimentFrontmatter,
+): MetricPoint[] {
+  const declaredSessionFields = new Set(
+    frontmatter.runPlan?.logging?.sessionFields ?? [],
+  );
+  return events.flatMap((event) => {
+    if (event.kind !== "intervention_session") {
+      return [];
+    }
+
+    const eventExperimentId = readStringAttribute(event, "experimentId");
+    const eventExperimentSlug = readStringAttribute(event, "experimentSlug");
+    if (
+      (eventExperimentId === null && eventExperimentSlug === null) ||
+      (eventExperimentId !== null && eventExperimentId !== frontmatter.experimentId) ||
+      (eventExperimentSlug !== null && eventExperimentSlug !== frontmatter.slug)
+    ) {
+      return [];
+    }
+
+    const fields = readRecordAttribute(event, "fields");
+    if (!fields) {
+      return [];
+    }
+
+    const effectiveDate =
+      resolveInterventionSessionLocalDate(event) ??
+      event.date ??
+      extractDate(event.occurredAt);
+    if (!effectiveDate) {
+      return [];
+    }
+
+    const observedAt = event.occurredAt ?? `${effectiveDate}T00:00:00.000Z`;
+    const recordedAt = readStringAttribute(event, "recordedAt") ?? event.occurredAt;
+
+    const seenMetricKeys = new Set<string>();
+    return Object.entries(fields).flatMap(([fieldId, value], resultIndex) => {
+      if (!declaredSessionFields.has(fieldId)) {
+        return [];
+      }
+      const spec = resolveExperimentSessionMetricSpec(fieldId);
+      if (!spec || typeof value !== "number" || !Number.isFinite(value)) {
+        return [];
+      }
+      if (seenMetricKeys.has(spec.key)) {
+        return [];
+      }
+      if (!validateExperimentSessionMetricValue({ fieldId, value }).success) {
+        return [];
+      }
+      seenMetricKeys.add(spec.key);
+
+      return [{
+        schemaVersion: "murph.metric-point.v1",
+        biomarkerKey: spec.biomarkerKey,
+        canonicalUnit: spec.canonicalUnit,
+        canonicalValue: value,
+        comparator: null,
+        confidence: "medium",
+        context: {
+          experimentId: readStringAttribute(event, "experimentId"),
+          experimentSlug: readStringAttribute(event, "experimentSlug"),
+          sessionFieldId: fieldId,
+        },
+        effectiveDate,
+        grain: "day",
+        id: `metric-point:${event.entityId}:session-field:${spec.key}`,
+        metricKey: spec.key,
+        observedAt,
+        provenance: {
+          dataOrigin: null,
+          externalRef: null,
+          labName: null,
+          provider: null,
+          rawRefs: [],
+          sourceLabel: "Experiment session field",
+        },
+        recordedAt,
+        reportedAt: null,
+        source: {
+          family: "event",
+          kind: "intervention-session-field",
+          path: event.path,
+          recordId: event.entityId,
+          resultIndex,
+        },
+        statistic: "value",
+        textValue: null,
+        unit: spec.canonicalUnit,
+        value,
+      } satisfies MetricPoint];
+    });
+  });
+}
+
+function readRecordAttribute(
+  entity: CanonicalEntity,
+  key: string,
+): Record<string, unknown> | null {
+  const value = (entity.attributes as Record<string, unknown>)[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function buildProgressRecommendation(input: {

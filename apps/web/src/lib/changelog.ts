@@ -63,11 +63,184 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-16",
+    publishedOn: "2026-07-16",
+    title: "More follow-through, less friction",
+    summary:
+      "Sleep support now follows a plan instead of handing out one-off tips, you can buy a usage top-up when you run out, and a public product search shows what is actually in a supplement. Supported Pulse and Edge changes work in private chat, each group can have its own Murph style, and onboarding starts from your goals.",
+    items: [
+      {
+        id: "sleep-support-that-stays",
+        kind: "feature",
+        priority: 5,
+        title: "Sleep help that sticks with the plan",
+        summary:
+          "Murph now treats a sleep complaint as an ongoing project: it screens for red flags, reads your recent wearable sleep pattern, and sets up experiments and check-ins you agree to.",
+        details:
+          "Reminders, check-ins, and reviews each need your explicit agreement, run for a finite window, and end with a review instead of trailing off. Concerning patterns route to a clinician conversation rather than self-management.",
+        relevanceTags: ["sleep", "assistant", "experiments", "wearables"],
+        sourcePullRequests: [752],
+        tryIt: {
+          label: "Work on your sleep",
+          prompt: "I keep waking up at 3am and can't fall back asleep. Help me figure out why.",
+        },
+      },
+      {
+        id: "conversation-subscription-actions",
+        kind: "feature",
+        priority: 5,
+        title: "Change your subscription in conversation",
+        summary:
+          "In a private chat, review the current terms, then clearly choose to continue Pulse when your trial ends, start Pulse now, or upgrade an eligible paid Pulse plan to Edge.",
+        details:
+          "Murph confirms only the result returned by the billing system. Any required payment or payment-method step stays on Stripe. Cancellations, Family changes, usage top-ups, and direct trial-to-Edge changes remain outside this chat flow.",
+        relevanceTags: ["billing", "assistant", "subscriptions"],
+        sourcePullRequests: [736],
+      },
+      {
+        id: "usage-top-ups",
+        kind: "feature",
+        priority: 5,
+        title: "Add usage when you need more",
+        summary:
+          "Direct Pulse and Edge members can add $5, $10, or $25 of usage in Settings through Stripe Checkout. Credit carries across monthly resets.",
+        details:
+          "Purchased credit shows separately from the included-usage percentage. If you run out entirely, your messages wait safely and processing resumes once a purchase is verified. Family plans are not eligible yet.",
+        relevanceTags: ["billing", "usage", "plans"],
+        sourcePullRequests: [751],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "Add usage in Settings",
+        },
+      },
+      {
+        id: "group-owned-murph-style",
+        kind: "feature",
+        priority: 5,
+        title: "Give each group its own Murph style",
+        summary:
+          "In an authenticated group iMessage conversation, ask to change Tone, Voice, Humor, Push, or Detail and the room now saves those choices for its own Murph.",
+        details:
+          "The group choices begin with the next reply and never read or overwrite any participant's private Murph settings. Group email remains read-only.",
+        relevanceTags: ["groups", "personalization", "privacy"],
+        sourcePullRequests: [738, 745],
+      },
+      {
+        id: "context-aware-follow-through",
+        kind: "feature",
+        priority: 5,
+        title: "Follow-through checks the context first",
+        summary:
+          "Your private Murph now checks what you have already shared, asks the questions that could change the answer, and can offer reminders or check-ins when they would help.",
+        details:
+          "Accountability check-ins require your explicit agreement; a simple reminder remains a cue. Before asking, Murph checks the relevant conversation and connected evidence, skips known outcomes, treats missing or stale evidence as unknown, and anchors group evidence to the right local occurrence.",
+        relevanceTags: ["assistant", "follow-through", "reminders"],
+        sourcePullRequests: [733, 737, 753],
+      },
+      {
+        id: "murph-safe-product-search",
+        kind: "feature",
+        priority: 4,
+        title: "Look up what is actually in a supplement",
+        summary:
+          "A new public search covers supplements and branded foods, showing label contents, linked product-test results, and what has not been tested, with unknowns stated as unknowns.",
+        details:
+          "Murph Safe names the evidence-checking process; it never stamps a product safe or unsafe. Search terms stay out of URLs, logs, and analytics, and the same records are available through a versioned public API.",
+        relevanceTags: ["supplements", "nutrition", "search"],
+        sourcePullRequests: [765],
+        tryIt: {
+          href: "/search",
+          label: "Search a product",
+        },
+      },
+      {
+        id: "scheduled-replies-keep-context",
+        kind: "improvement",
+        priority: 5,
+        title: "Replies keep their place",
+        summary:
+          "Replying to a scheduled message now carries the notification context you are answering, so Murph can understand a short yes or follow-up without making you restate it.",
+        details:
+          "For established iMessage conversations, Murph also starts waking after a safely stored message while the durable handoff finishes, removing one serial wait without weakening duplicate-reply protection.",
+        relevanceTags: ["assistant", "messaging", "reliability"],
+        sourcePullRequests: [742, 749],
+      },
+      {
+        id: "onboarding-asks-before-it-prescribes",
+        kind: "improvement",
+        priority: 4,
+        title: "Onboarding asks before it prescribes",
+        summary:
+          "Murph now opens by understanding one or two outcomes you care about and saves them as an anchor, instead of turning your first answer into an unsolicited routine.",
+        details:
+          "You choose which thread to work on after the health foundation is gathered. Keeping the assistant warm between turns also trims reply time.",
+        relevanceTags: ["onboarding", "assistant", "performance"],
+        sourcePullRequests: [746],
+      },
+      {
+        id: "whoop-apple-health-fallback",
+        kind: "improvement",
+        priority: 4,
+        title: "WHOOP setup keeps moving through Apple Health",
+        summary:
+          "When direct WHOOP capacity is full, setup now switches to a clear Apple Health path instead of ending in a generic error, with the exact WHOOP menu steps and the Murph iPhone app link.",
+        details:
+          "Members who already have a direct WHOOP connection can still reconnect. The fallback appears only when direct capacity is full.",
+        relevanceTags: ["whoop", "apple-health", "wearables"],
+        sourcePullRequests: [741],
+      },
+      {
+        id: "phone-calls-in-plan-usage",
+        kind: "improvement",
+        priority: 4,
+        title: "Phone calls now count toward plan usage",
+        summary:
+          "The included-usage percentage now reflects outbound phone calls once they finish, including transferred calls, so Settings and chat show a more complete total.",
+        details:
+          "Each finished call is counted once. Earlier calls are not added retroactively, and this does not create per-call billing or overage charges.",
+        relevanceTags: ["phone-calls", "plans", "usage"],
+        sourcePullRequests: [743],
+      },
+      {
+        id: "less-repeated-work-behind-everyday-screens",
+        kind: "improvement",
+        priority: 4,
+        title: "Less repeated work behind everyday screens",
+        summary:
+          "Settings, connected-device status, and growing group views now avoid repeated lookups, as do fresh sign-in checks and the safety checks behind iMessage replies.",
+        details:
+          "Multi-part saves also upload their required pieces together instead of one by one, while still waiting for every piece before confirming success. Permissions and privacy checks remain intact.",
+        relevanceTags: ["dashboard", "performance", "reliability"],
+        sourcePullRequests: [727, 728, 729, 730, 731, 732, 735],
+      },
+      {
+        id: "home-experiment-history-compact",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed experiments take less room on Home",
+        summary:
+          "Finished experiment cards are denser and show every comparable metric change in order, instead of one hand-picked result that could hide a mixed outcome.",
+        relevanceTags: ["experiments", "dashboard"],
+        sourcePullRequests: [758],
+      },
+      {
+        id: "biomarker-pages-restored",
+        kind: "improvement",
+        priority: 3,
+        title: "Biomarker detail pages load again",
+        summary:
+          "The HRV (RMSSD) biomarker page and its research tab render normally in production instead of a 404, with a build check that keeps every published biomarker route intact.",
+        relevanceTags: ["biomarkers", "reliability"],
+        sourcePullRequests: [756],
+      },
+    ],
+  },
+  {
     id: "2026-07-15",
     publishedOn: "2026-07-15",
     title: "A lighter way to say yes",
     summary:
-      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. New Pulse Trials now run for two weeks, and billing questions lead straight to the account controls that own the change.",
+      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. Family owners can change a member's plan person by person, anyone can leave a group on their own, new Pulse Trials run for two weeks, and replies read more like natural texting.",
     items: [
       {
         id: "affirmative-reactions-as-replies",
@@ -92,6 +265,30 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph now defaults to this in-chat consent flow when existing members approve additional permissions.",
         relevanceTags: ["groups", "permissions", "reactions"],
         sourcePullRequests: [661],
+      },
+      {
+        id: "family-member-plan-management",
+        kind: "feature",
+        priority: 4,
+        title: "Manage Family plans person by person",
+        summary:
+          "Each Family member row in Settings now has a Manage action to upgrade someone to Edge or bring them back to Pulse, with the prorated difference applied on the next invoice.",
+        details:
+          "Seat-quantity controls are gone; you manage people, not Stripe inventory. The row shows the pending change until billing confirms it, and Family usage stays attributed to your Family plan during brief billing-data gaps.",
+        relevanceTags: ["family", "billing", "settings"],
+        sourcePullRequests: [671, 672],
+      },
+      {
+        id: "leave-a-group-yourself",
+        kind: "feature",
+        priority: 4,
+        title: "Leave a group on your own",
+        summary:
+          "Non-owner members can ask their private Murph to leave a group, or use the Leave group action on the join page. Leaving ends your sharing with that group's Murph.",
+        details:
+          "It does not remove you from the iMessage thread or erase past messages, and you can rejoin later through the normal join flow.",
+        relevanceTags: ["groups", "privacy"],
+        sourcePullRequests: [676],
       },
       {
         id: "exercise-library-250-more-visual-guides",
@@ -127,7 +324,57 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Every new Pulse Trial now lasts 14 days instead of 10. Trials already created keep the policy and end date they started with.",
         relevanceTags: ["pulse", "billing", "trial"],
-        sourcePullRequests: [],
+        sourcePullRequests: [726],
+      },
+      {
+        id: "replies-read-like-texting",
+        kind: "improvement",
+        priority: 4,
+        title: "Replies read like texting again",
+        summary:
+          "Send a follow-up while Murph is still working and it folds into the reply in progress, and multi-bubble answers now land at a short, readable cadence instead of all at once.",
+        relevanceTags: ["assistant", "imessage", "messaging"],
+        sourcePullRequests: [705, 713],
+      },
+      {
+        id: "model-settings-refresh",
+        kind: "improvement",
+        priority: 4,
+        title: "Model choices are easier to compare and change",
+        summary:
+          "Settings shows Luna, Terra, and Sol as clear cards, Family Edge seats can now pick Sol, and asking Murph to change model or reasoning saves immediately without an approval link.",
+        relevanceTags: ["settings", "models", "family"],
+        sourcePullRequests: [678, 686, 687],
+      },
+      {
+        id: "experiment-cards-honest-colors",
+        kind: "improvement",
+        priority: 3,
+        title: "Experiment cards color results by the biomarker",
+        summary:
+          "Progress cards now color movement by whether it is good for that biomarker, so a higher HRV reads as favorable even when your hypothesis expected a drop.",
+        relevanceTags: ["experiments", "biomarkers"],
+        sourcePullRequests: [699],
+      },
+      {
+        id: "voice-previews-pick-the-voice",
+        kind: "improvement",
+        priority: 3,
+        title: "Voice previews respond to a click anywhere",
+        summary:
+          "In the voice picker, clicking a waveform now plays that preview, and clicking a preview selects that voice, so trying and choosing are one motion.",
+        relevanceTags: ["voice", "settings"],
+        sourcePullRequests: [695, 718],
+      },
+      {
+        id: "signup-and-email-linking-fixes",
+        kind: "improvement",
+        priority: 3,
+        title: "Sign-up and email linking behave",
+        summary:
+          "New members who sign up through the shared dialog now land in the first-visit welcome, and linking an email in Settings only reports success after it actually saves, with a clear retry.",
+        relevanceTags: ["onboarding", "settings", "reliability"],
+        sourcePullRequests: [670, 717],
       },
       {
         id: "billing-settings-handoff",
@@ -1274,7 +1521,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 3,
         title: "Cleaner Garmin sleep-stage imports",
         summary:
-          "Fixed the compact sleep-cycle import from Junction and stopped pulling unrelated provider records alongside it, so Garmin sleep stages land correctly in the vault.",
+          "Fixed the compact sleep-cycle import and stopped pulling unrelated records alongside it, so Garmin sleep stages land correctly in the vault.",
         relevanceTags: ["wearables", "garmin", "sleep"],
         sourcePullRequests: [353, 358],
       },
@@ -1388,17 +1635,17 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-06-29",
     publishedOn: "2026-06-29",
-    title: "Garmin sleep through Junction, and a smoother phone sign-in",
+    title: "Garmin sleep arrives cleanly, and a smoother phone sign-in",
     summary:
-      "Garmin sleep, cycles, and hypnograms imported through Junction now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
+      "Garmin sleep, cycles, and hypnograms now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
     items: [
       {
         id: "garmin-junction-sleep-records",
         kind: "feature",
         priority: 4,
-        title: "Garmin sleep arrives through Junction as real records",
+        title: "Garmin sleep arrives as real records",
         summary:
-          "Garmin sleep, sleep cycles, and hypnograms pushed through Junction now land as full records instead of being dropped as skeleton completion events.",
+          "Garmin sleep, sleep cycles, and hypnograms now land as full records instead of being dropped as skeleton completion events.",
         relevanceTags: ["wearables", "garmin", "junction", "sleep"],
         sourcePullRequests: [336],
       },
@@ -1571,7 +1818,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-26",
     title: "Murph can call you — and the noise level drops everywhere else",
     summary:
-      "Approve a brief and Murph can place an outbound phone call on your behalf. Health records you upload land in your vault, computer handoffs return on the channel that started them, WHOOP and Junction days line up with your calendar, and a wave of polish trims chat noise.",
+      "Approve a brief and Murph can place an outbound phone call on your behalf. Health records you upload land in your vault, computer handoffs return on the channel that started them, wearable records line up with your calendar, and a wave of polish trims chat noise.",
     items: [
       {
         id: "retell-phone-calls",
@@ -1631,9 +1878,9 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "whoop-junction-local-day",
         kind: "improvement",
         priority: 4,
-        title: "WHOOP and Junction days line up with your calendar",
+        title: "Wearable days line up with your calendar",
         summary:
-          "Closed a class of bugs where WHOOP or Junction records could drift into the next calendar day when the provider timestamp crossed UTC midnight — including WHOOP records flowing through Junction. Past records repair on replay.",
+          "Closed a class of bugs where wearable records could drift into the next calendar day when a source timestamp crossed UTC midnight. Past records repair on replay.",
         relevanceTags: ["wearables", "whoop", "junction", "data"],
         sourcePullRequests: [304],
       },
@@ -2618,7 +2865,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-16",
     title: "Devices connect in one tap, Telegram reminders land",
     summary:
-      "Picking a Junction provider skips the picker, scheduled Telegram reminders deliver reliably, and the mobile sidebar dismisses on navigation.",
+      "Picking a specific wearable source skips the picker, scheduled Telegram reminders deliver reliably, and the mobile sidebar dismisses on navigation.",
     items: [
       {
         id: "junction-direct-provider-link",
@@ -2626,7 +2873,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Picking a source skips the picker",
         summary:
-          "Choosing a specific Junction provider like Garmin now starts OAuth directly instead of showing a one-option provider picker first.",
+          "Choosing a specific wearable source like Garmin now starts OAuth directly instead of showing a one-option picker first.",
         relevanceTags: ["wearables", "junction", "connect"],
         sourcePullRequests: [179],
         tryIt: {
@@ -3053,7 +3300,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-09",
     title: "Sidebar contact picker and hourly wearable refresh",
     summary:
-      "Chat opens straight to a channel picker, email verification fits in one dialog, and Junction wearables refresh every hour instead of every six.",
+      "Chat opens straight to a channel picker, email verification fits in one dialog, and an affected wearable import path refreshes every hour instead of every six.",
     items: [
       {
         id: "sidebar-chat-contact-picker",
@@ -3075,7 +3322,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Hourly wearable refresh",
         summary:
-          "Junction-backed wearables — WHOOP, Oura, Garmin and friends — now reconcile every hour instead of every six. Morning sleep and recovery show up sooner.",
+          "An affected connected-wearable import path now reconciles every hour instead of every six. Morning sleep and recovery show up sooner.",
         relevanceTags: ["wearables", "junction", "whoop", "oura", "garmin"],
         sourcePullRequests: [73],
       },

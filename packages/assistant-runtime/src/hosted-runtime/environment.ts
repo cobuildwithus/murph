@@ -7,10 +7,8 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-env";
 import {
-  HOSTED_CLI_BRIDGE_ENV_NAMES,
-  HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 
 import {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
@@ -146,8 +144,6 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
     ...HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES,
-    ...HOSTED_CLI_BRIDGE_ENV_NAMES,
-    ...HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
     // Image-owned Codex model catalog path. Runtime producers must not
     // redirect it through normal forwarded env; projectHostedRuntimeProcessEnv
@@ -197,8 +193,6 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
     ...HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES,
-    ...HOSTED_CLI_BRIDGE_ENV_NAMES,
-    ...HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
     // Platform-owned assistant-engine asset roots — see the forwarded-env
     // deny list note above.

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Decision
 
@@ -101,6 +101,41 @@ input spine used by local automation:
 ```text
 source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / active turn -> accepted-input journal -> Codex
 ```
+
+### Resident Codex And Detached Enrichment Boundary
+
+The container owns one resident Codex App Server and keeps it warm across
+ordinary turns and ordinary workspace invocations. Turn completion, invocation
+completion, and invocation-scoped credential rotation do not replace it. An
+explicit workspace invocation abort or preemption is different: the container
+interrupts the active background-work boundary and synchronously stops the exact
+owned App Server before it releases the job slot for another invocation. A stop
+failure poisons the container rather than allowing a replacement invocation to
+reuse ambiguous process state.
+
+Detached MultiAgent V2 work does not become a process-memory queue. Before the
+root reply, the parent writes the smallest truthful canonical fact or preserves
+the durable raw source and captures the exact record ids or source references.
+The child may perform only optional, idempotent enrichment against that durable
+base. Its terminal lifecycle receipt is advisory; canonical readback is the
+completion proof. If the member was promised the result and no separate durable
+owner exists, the root turn retains the work and uses normal progress updates
+instead of detaching it.
+
+Each root session may admit at most one detached child under Codex's native
+root-plus-one residency cap. Independent roots may retain children concurrently
+inside the same resident App Server. Every child must be a one-shot leaf: no
+root/child interaction, child reuse, nested child, same-root parallel child, or
+background terminal is supported. At the workspace snapshot boundary, the
+runtime waits for every exact resident child and checks every touched root and
+resident child for background terminals before archive construction may
+proceed. Codex admission of a per-session successor is the native fence that
+its completed predecessor was flushed and unloaded, leaving the successor as
+that root's resident child. A routine checkpoint wake cancels only that wait
+and keeps the process plus all resident lifecycle evidence warm for the later
+boundary. A timeout or unsupported lifecycle stops the exact process and fails
+the boundary closed. Explicit invocation abort/preemption cancels the wait and
+enters the synchronous exact-process stop path above.
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
@@ -466,36 +501,63 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload) after the unconditional Temporal signal is accepted. This is a
-latency hint only, not a second durable wake authority: it is Linq-only because
-accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so a racing
-ensure may import an already-consumed row but it stages with a null reply target
-and cannot be answered again. Do not add workflow-side direct-wake flags,
-derived-floor SQL, or lag netting merely to avoid harmless post-delivery no-op
-ensures. There is no direct web-to-Cloudflare message path and no second durable
-wake authority. If the Temporal signal cannot be accepted after the mailbox row
-exists, the failure is logged as a post-commit best-effort handoff failure and
-does not make provider ingress fail; direct Linq ensure is not fired without
-the accepted Temporal signal. The existing Temporal scheduled-reconcile
+message payload) after the committed known checkpoint's owner matches and the
+canonical live active-access check succeeds. Web first awaits the unconditional
+Temporal `signalWithStart`; only after Temporal accepts that durable signal does
+web start the direct ensure. An access failure or Temporal acceptance failure
+starts no direct wake. This is a latency hint only, not a second durable wake
+authority: it is Linq-only because accepted Linq reply delivery stamps
+`consumedAt` on the exact `HostedMailboxItem`, so a later ensure imports an
+already-consumed row with a null reply target and cannot answer it again. Do not
+add workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
+avoid harmless post-delivery no-op ensures. There is no direct web-to-Cloudflare
+message path and no second durable wake authority. Temporal remains the sole
+durable retry and reconciliation owner. The existing
+Temporal scheduled-reconcile
 command also runs one bounded preference-handoff sweep. Web selects live
 `member.preferences.updated` rows above the authoritative system-lane
-`consumed_seq` and reissues their pointer-only `signalWithStart`; the mailbox
-row remains the only work record and repeated sweeps are idempotent. This is a
-narrow backstop for the Settings outcome, not a second queue or a generic
-mailbox-lag scheduler. Other missed post-commit signals still have no web cron
-backstop.
+`consumed_seq` for active person runtimes or synthetic room runtimes with an
+active owner or current participant, then rechecks canonical runtime access and
+reissues their pointer-only `signalWithStart`; the mailbox row remains the only
+work record and repeated sweeps are idempotent. This is a narrow backstop for
+already-committed hosted style writes from personal Settings or runtime-bound
+conversation controls, not a second queue or a generic mailbox-lag scheduler.
+Other missed post-commit signals still have no web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
-process. The web-owned `provider_started` field means the runtime observed a
-local Codex `turn/start`; it is not evidence of an upstream OpenAI request or
-first token. The runtime may also emit metadata-only `assistant_milestone`
-events for Linq typing request start/acceptance and the first locally observed
-Codex output/text. Web accepts those milestones only for the exact staged
-runtime attempt and merges them into the existing phase document under a row
-lock. Emission is queued off the reply path and may retry only the bounded
-staging/trace-row race; it carries no message, prompt, response, reasoning, or
-provider payload. Post-generation delivery guards must never create or
-overwrite the local Codex start milestone.
+process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
+`created_at`; because that default uses transaction-start time, the interval
+from `acceptedAt` includes the remainder of the append transaction and must not
+be labeled row-insert or commit latency. The web-owned `provider_started` field
+means the runtime observed a local Codex `turn/start`; it is not evidence of an
+upstream OpenAI request or first token. The runtime may also emit metadata-only
+`assistant_milestone` events for Linq typing request start/acceptance and the
+first locally observed Codex output/text. Web accepts those milestones only for
+the exact staged runtime attempt and merges them into the existing phase
+document under a row lock. Emission is queued off the reply path and may retry
+only the bounded staging/trace-row race; it carries no message, prompt,
+response, reasoning, or provider payload. Post-generation delivery guards must
+never create or overwrite the local Codex start milestone.
+
+The existing App Server `turn-completed` diagnostic additionally carries
+cumulative, assign-once local offsets from that `turn/start` write to the local
+RPC acknowledgement, the `turn/started` notification that proves Codex core
+began the turn task, the completion notification, and completion-trace emission
+after local drains. The RPC acknowledgement and `turn/started` notification are
+independent deliveries and have no guaranteed arrival order. Its provider
+request ordinal joins those offsets to the existing provider-result and
+reply-dispatched timing entries for the same wake; the existing assistant
+milestones remain the source of truth for first local output/text. The total
+completion offset ends after local dynamic-tool/progress drains; the outer
+provider-result boundary remains the separate assistant turn-timing entry. None
+of these fields is an upstream request-start, response-header, or first-token
+boundary. The offsets retain the existing same-process `Date.now()` clock
+semantics, clamp negative values to zero, and must not be used for strict
+ordering assertions if the wall clock moves during a turn. The existing
+Cloudflare provider-egress GET/101 durations end at the Responses WebSocket
+upgrade handshake; per-turn metadata and generation events live inside frames
+that the interceptor deliberately does not inspect, so those egress logs must
+not be interpreted as model latency or a durable attempt/turn join.
 
 Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
 one UUID correlation id per logical fetch; retries retain that same id. Both
@@ -673,6 +735,22 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
+
+Generated-delivery staging uses an expand-then-produce rollout. The first
+Cloudflare release adds persisted-outbox, hosted-side-effect, retry-read, and
+encrypted-checkpoint compatibility for the exact flat ref
+`.runtime/operations/assistant/generated-deliveries/<filename>`, while initial
+`send_vault_file` preparation continues to reject it so that release cannot
+mint state an older runner would quarantine. Deploy that release with immediate
+container rollout and prove the exact runner fingerprint has converged before a
+later release enables writer guidance or cleanup. Once a producer can persist
+the hidden ref, the compatibility release is the rollback floor while any
+active or retained outbox record or committed checkpoint can contain it.
+Portable support bundles continue to omit all `.runtime/**`; the generic
+`exports/assistant-deliveries/**` path remains ordinary checkpointed vault data
+and receives no path-specific portable-package exclusion. Existing global
+file-type exclusions still apply regardless of directory.
+
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
@@ -1127,10 +1205,13 @@ reference-safe owner-scoped retention primitive.
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
 during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload. Snapshot planning, archive construction, upload, and publication hold
-the vault's canonical-write lock as one transaction. A canonical mutation may
-therefore complete with its receipt before snapshotting starts or begin after
-the published snapshot boundary, but it cannot change the local canonical base
+R2 upload. Before planning begins, the runtime completes the resident-Codex
+background boundary described above; no snapshot may race admitted optional
+enrichment or an unowned background terminal. Snapshot planning, archive
+construction, upload, and publication hold the vault's canonical-write lock as
+one transaction. A canonical mutation may therefore complete with its receipt
+before snapshotting starts or begin after the published snapshot boundary, but
+it cannot change the local canonical base
 between archive collection and publication. `packages/assistant-runtime` owns
 the hosted invocation bridge,
 snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies

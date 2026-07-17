@@ -52,16 +52,17 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("More follow-through, less friction");
     expect(markup).toContain("A lighter way to say yes");
     expect(markup).toContain("Your plan, groups, and next appointment");
     expect(markup).toContain("More control, less waiting");
     expect(markup).toContain("Health help with more context");
     expect(markup).toContain("A cleaner fit on every phone");
     expect(markup).toContain("A Murph that sounds more like you");
-    expect(markup).toContain("Better answers, better instincts");
+    expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-08"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-09"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-07-12#eye-health-playbook"',
     );
@@ -98,9 +99,20 @@ describe("ChangelogPage", () => {
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-06-30"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-01"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
+  });
+
+  it("uses provider-neutral visible copy for the historical wearable visual", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-06-26" }),
+      }),
+    );
+
+    expect(markup).toContain("Wearable record days");
+    expect(markup).not.toContain("WHOOP / Junction days");
   });
 
   it("publishes a canonical URL for each valid archive page", async () => {
@@ -127,7 +139,7 @@ describe("ChangelogPage", () => {
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-08" },
+        alternates: { canonical: "/changelog?edition=2026-07-09" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageTwoCardUrl })],
         }),

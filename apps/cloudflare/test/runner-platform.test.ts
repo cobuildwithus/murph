@@ -428,6 +428,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.subscriptionToolPort?.request).toEqual(expect.any(Function));
   });
 
+  it("attaches the hosted labs port when web-control transport is available", () => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    expect(platform.labsToolPort).toBeDefined();
+    expect(platform.labsToolPort?.request).toEqual(expect.any(Function));
+  });
+
+  it("omits the hosted labs port when web-control transport is unavailable", () => {
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    expect(platform.labsToolPort).toBeUndefined();
+  });
+
   it("rejects oversized workspace snapshot restores before unwrap or fetch", async () => {
     const fetchMock = vi.fn();
     const platform = buildTestHostedExecutionRuntimePlatform({
