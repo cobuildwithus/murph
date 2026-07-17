@@ -12,6 +12,9 @@ import {
   type AutomationRoute,
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
+import {
+  isNormalizedAssistantVaultFileRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   gatewayDeliveryTargetKindValues,
@@ -412,7 +415,7 @@ const assistantVaultFileResponseMediaSchema = z
       .min(1)
       .max(1024)
       .refine(
-        (value) => isSafeAssistantVaultFileRef(value),
+        (value) => isNormalizedAssistantVaultFileRef(value),
         'Assistant vault file refs must be normalized vault-relative paths.',
       ),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -444,25 +447,6 @@ export const assistantResponseMediaSchema = z.union([
   assistantVoiceMemoResponseMediaSchema,
   assistantVaultFileResponseMediaSchema,
 ])
-
-function isSafeAssistantVaultFileRef(value: string): boolean {
-  if (
-    value.startsWith('/')
-    || /^[A-Za-z]:/u.test(value)
-    || value.includes('\\')
-    || /[\u0000-\u001F\u007F]/u.test(value)
-  ) {
-    return false
-  }
-
-  const segments = value.split('/')
-  return segments.every((segment) => (
-    segment.length > 0
-    && segment !== '.'
-    && segment !== '..'
-    && !segment.startsWith('.')
-  ))
-}
 
 export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
 

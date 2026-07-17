@@ -169,6 +169,16 @@ landing; record the chosen posture here so the decision is reviewable.
   download packaging, not live vault state or the separate hosted tar snapshot
   classifier.
 
+- Flat assistant delivery residue under
+  `.runtime/operations/assistant/generated-deliveries/<filename>` is therefore
+  excluded from portable ZIPs but included in encrypted hosted checkpoints.
+  Files under the previously proposed `exports/assistant-deliveries/**` prefix
+  remain ordinary checkpointed vault data and receive no path-specific
+  portable-package exclusion. Existing global archive-file exclusions still
+  apply there as they do everywhere else. Phase one adds no production writer
+  or cleanup lifecycle; writer activation must add bounded file-count and
+  terminal-cleanup proof before it can produce this runtime residue.
+
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
   (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,
   with no compaction. Each record is a small tombstone (~200 bytes) describing

@@ -174,6 +174,17 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   replay reads fail closed, and approval-link retry wakes taking precedence over
   a later parked fallback.
 
+- Generated-delivery compatibility is covered across the shared exact-ref
+  predicate, persisted assistant media schema, hosted side-effect codec,
+  retry-only file reader, assistant runtime checkpoint planning, and portable
+  package boundary. Phase-one tests must prove initial file preparation still
+  rejects the hidden path, all other hidden refs remain closed, active runtime
+  files enter encrypted checkpoints, `.runtime/**` stays out of portable ZIPs,
+  and portable-eligible ordinary `exports/assistant-deliveries/**` files remain
+  in both. Archive-file exclusions must remain global rather than gaining
+  path-specific ownership semantics. Phase two may enable writers only after an
+  immediate deploy proves the phase-one runner fingerprint has converged.
+
 ## Current Gaps
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
