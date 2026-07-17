@@ -1808,6 +1808,10 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('1. **Data sources and wearables.**')
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
+    expect(compact).toContain(
+      'Ask it plainly and stop; the value of the question is obvious, so do not append a justification',
+    )
+    expect(raw).not.toContain('Explain that this prevents duplicate or conflicting suggestions.')
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
