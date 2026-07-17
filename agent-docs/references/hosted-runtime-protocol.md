@@ -431,10 +431,13 @@ original group route; cannot-answer uses fixed non-disclosing copy. Missing
 `deliveryMode` retains the original private-to-group continuation behavior.
 Leave/rejoin and revoke/regrant produce new generations, so old work cannot
 cross either lifecycle boundary. If live authority disappears after an exact
-answer is queued, the runner rewrites that same outbox intent to the fixed
-cannot-answer copy with durable supersession metadata before provider entry;
-the final egress claim permits the structurally bound fixed fallback without
-reviving the private grant.
+answer is queued, its existing outbox intent retains the completion id,
+deterministic delivery key, and authority expiry through terminal disposition.
+The runner rewrites that intent to the fixed cannot-answer copy before provider
+entry. At expiry it uses the outbox-owned deadline even if mailbox retention has
+already removed the request and completion rows; before expiry Web still owns
+live revocation revalidation. The final egress claim permits only the
+structurally bound fixed fallback without reviving the private grant.
 
 Web caps retained permission history at 25 rows per group and retained grant
 generations at 25 per group and 25 per member. Counts run under the canonical

@@ -962,6 +962,8 @@ describe("hosted Linq egress authority", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           answeredMailboxItemIds: [completionId],
+          assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
+          assistantAskFallback: false,
           authorityCheckOnly: false,
           idempotencyKey,
           target: "chat-authorized-group",
@@ -984,6 +986,7 @@ describe("hosted Linq egress authority", () => {
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
       answeredMailboxItemIds: [completionId],
+      assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
       assistantAskFallback: false,
       boundRuntimeMemberId: "member-1",
       idempotencyKey,
@@ -1028,7 +1031,8 @@ describe("hosted Linq egress authority", () => {
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
       answeredMailboxItemIds: [],
-      assistantAskFallback: false,
+      assistantAskCompletionExpiresAt: undefined,
+      assistantAskFallback: undefined,
       boundRuntimeMemberId: "member-1",
       idempotencyKey: "assistant-ask-completion:legacy",
       tx: expect.objectContaining({
@@ -1052,6 +1056,8 @@ describe("hosted Linq egress authority", () => {
         new Request("https://internal.example.test/engagement", {
           body: JSON.stringify({
             answeredMailboxItemIds: ["aask_done_stale"],
+            assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
+            assistantAskFallback: false,
             authorityCheckOnly: false,
             idempotencyKey: "reviewed-assistant-ask-completion:stale",
             target: "chat-authorized-group",
@@ -1084,6 +1090,7 @@ describe("hosted Linq egress authority", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           answeredMailboxItemIds: ["aask_done_safe"],
+          assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
           assistantAskFallback: true,
           authorityCheckOnly: false,
           idempotencyKey: "reviewed-assistant-ask-completion:safe",

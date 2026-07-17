@@ -594,6 +594,7 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
 export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   input: {
     answeredMailboxItemIds: readonly string[];
+    assistantAskCompletionExpiresAt?: string;
     assistantAskFallback?: boolean;
     boundRuntimeMemberId: string;
     idempotencyKey: string | null;
@@ -621,16 +622,41 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   }
 
   const now = input.now ?? new Date();
-  const supportsSafeFallback = input.assistantAskFallback !== undefined;
+  const declaredExpiresAt = input.assistantAskCompletionExpiresAt ?? null;
+  const supportsSafeFallback =
+    input.assistantAskFallback !== undefined
+    && declaredExpiresAt !== null
+    && Number.isFinite(Date.parse(declaredExpiresAt));
+  if (
+    input.assistantAskFallback !== undefined
+    && !supportsSafeFallback
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+  if (input.assistantAskFallback === true) {
+    return;
+  }
   const completionItem = await readHostedMailboxItemById({
     mailboxItemId: completionId,
     prisma: input.tx,
   });
+  if (!completionItem) {
+    if (
+      supportsSafeFallback
+      && isHostedAssistantAskExpired(declaredExpiresAt, now)
+    ) {
+      return { assistantAskFallbackRequired: true };
+    }
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
   if (
-    !completionItem
-    || completionItem.dedupeKey !== completionId
+    completionItem.dedupeKey !== completionId
     || completionItem.kind !== "assistant.ask.completed"
     || completionItem.userId !== input.boundRuntimeMemberId
+    || (
+      supportsSafeFallback
+      && completionItem.expiresAt !== declaredExpiresAt
+    )
   ) {
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
@@ -666,9 +692,6 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
 
-  if (input.assistantAskFallback === true) {
-    return;
-  }
   if (
     supportsSafeFallback
     && isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)

@@ -37,6 +37,10 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredMailboxItemIds = parseAnsweredMailboxItemIds(
     body.answeredMailboxItemIds,
   );
+  const assistantAskCompletionExpiresAt =
+    parseOptionalAssistantAskCompletionExpiresAt(
+      body.assistantAskCompletionExpiresAt,
+    );
   const assistantAskFallback = parseOptionalAssistantAskFallback(
     body.assistantAskFallback,
   );
@@ -110,6 +114,7 @@ export const POST = withJsonError(async (request: Request) => {
     const assistantAskAuthority =
       await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
         answeredMailboxItemIds,
+        assistantAskCompletionExpiresAt,
         assistantAskFallback,
         boundRuntimeMemberId: userId,
         idempotencyKey,
@@ -187,9 +192,11 @@ function parseRequiredAuthorityCheckOnly(value: unknown): boolean {
   });
 }
 
-function parseOptionalAssistantAskFallback(value: unknown): boolean {
+function parseOptionalAssistantAskFallback(
+  value: unknown,
+): boolean | undefined {
   if (value === undefined || value === null) {
-    return false;
+    return undefined;
   }
   if (typeof value === "boolean") {
     return value;
@@ -198,6 +205,29 @@ function parseOptionalAssistantAskFallback(value: unknown): boolean {
     code: "HOSTED_LINQ_EGRESS_ASSISTANT_ASK_FALLBACK_INVALID",
     httpStatus: 400,
     message: "Hosted Linq egress Assistant Ask fallback must be a boolean.",
+    retryable: false,
+  });
+}
+
+function parseOptionalAssistantAskCompletionExpiresAt(
+  value: unknown,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = typeof value === "string" ? value.trim() : "";
+  const parsed = Date.parse(normalized);
+  if (
+    normalized
+    && Number.isFinite(parsed)
+    && new Date(parsed).toISOString() === normalized
+  ) {
+    return normalized;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_ASSISTANT_ASK_COMPLETION_EXPIRY_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress Assistant Ask completion expiry must be a canonical timestamp.",
     retryable: false,
   });
 }

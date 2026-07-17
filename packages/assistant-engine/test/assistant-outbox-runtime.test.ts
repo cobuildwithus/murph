@@ -177,6 +177,13 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-reminder-no-answered-mailbox',
       turnId: 'turn-reminder-no-answered-mailbox',
     })
+    const reviewedCompletionIntent = await createIntent(vaultRoot, {
+      answeredMailboxItemIds: ['aask_done_outbox_proof'],
+      message: 'reviewed completion answer',
+      reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
+      sessionId: 'session-reviewed-completion-proof',
+      turnId: 'turn-reviewed-completion-proof',
+    })
     const groupedAutoReply = await deliverAssistantOutboxMessage({
       answeredMailboxItemIds: groupedMailboxItemIds,
       channel: 'linq',
@@ -201,6 +208,12 @@ describe('assistant outbox runtime', () => {
       .resolves.toMatchObject({
         answeredMailboxItemIds: [],
       })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, reviewedCompletionIntent.intentId),
+    ).resolves.toMatchObject({
+      answeredMailboxItemIds: ['aask_done_outbox_proof'],
+      reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
+    })
     expect(groupedAutoReply.kind).toBe('queued')
     expect(groupedAutoReply.intent.answeredMailboxItemIds).toEqual(
       groupedMailboxItemIds,
@@ -3573,6 +3586,7 @@ async function createIntent(
     message: string
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
+    reviewedAssistantAskCompletionExpiresAt: string | null
     sessionId: string
     threadId: string | null
     threadIsDirect: boolean | null
@@ -3597,6 +3611,8 @@ async function createIntent(
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
+    reviewedAssistantAskCompletionExpiresAt:
+      overrides.reviewedAssistantAskCompletionExpiresAt,
     replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
     threadId: overrides.threadId ?? 'thread-1',

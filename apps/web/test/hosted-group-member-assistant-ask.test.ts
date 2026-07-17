@@ -656,6 +656,7 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
     const deliveryInput = {
       answeredMailboxItemIds: [completionWake.eventId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
       boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       idempotencyKey:
         createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
@@ -688,6 +689,7 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
     const deliveryInput = {
       answeredMailboxItemIds: [completionWake.eventId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
       boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       idempotencyKey:
         createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(

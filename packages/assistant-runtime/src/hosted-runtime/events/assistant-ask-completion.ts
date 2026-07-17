@@ -148,6 +148,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
             input.wake.ask.result,
           ),
         },
+        reviewedAssistantAskCompletionExpiresAt: input.wake.ask.expiresAt,
         sandbox: "read-only",
         turnTrigger: "automation-auto-reply",
       });

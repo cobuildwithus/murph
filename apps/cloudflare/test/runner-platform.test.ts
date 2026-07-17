@@ -4430,12 +4430,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
       responseCount += 1;
       const body = await request.json() as {
+        assistantAskCompletionExpiresAt?: unknown;
         assistantAskFallback?: unknown;
         authorityCheckOnly?: unknown;
       };
       expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
       expect(body.assistantAskFallback).toBe(
         responseCount === 1 ? undefined : false,
+      );
+      expect(body.assistantAskCompletionExpiresAt).toBe(
+        responseCount === 1 ? undefined : "2026-07-16T12:10:00.000Z",
       );
       return new Response(JSON.stringify({
         ...(body.assistantAskFallback === false
@@ -4476,6 +4480,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirect: false,
     });
     await expect(assertLinqRecentInboundEngagement({
+      assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
       assistantAskFallback: false,
       authorityCheckOnly: true,
       target: "chat_456",

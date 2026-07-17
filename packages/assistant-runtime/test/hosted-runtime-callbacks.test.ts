@@ -8013,6 +8013,8 @@ describe("hosted runtime callbacks", () => {
       message: privateAnswer,
       operation: null,
       preparedDispatchToken: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
       updatedAt: "2026-04-08T00:00:00.000Z",
     }) as AssistantOutboxIntent;
     mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
@@ -8104,9 +8106,8 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
     expect(storedIntent).toMatchObject({
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
-      messageSupersession: {
-        code: "ASSISTANT_ASK_COMPLETION_AUTHORITY_SUPERSEDED",
-      },
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
     });
     storedIntent = {
       ...storedIntent,
@@ -8138,6 +8139,228 @@ describe("hosted runtime callbacks", () => {
         "message" in request && request.message === privateAnswer
       ),
     ).toBe(false);
+  });
+
+  it("sends only the fixed completion when mailbox retention deleted an expired reviewed answer", async () => {
+    const completionId = "aask_done_retention_deleted";
+    const expiresAt = "2026-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const privateAnswer = "Private queued answer removed at the retention boundary.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      idempotencyKey,
+      message: privateAnswer,
+      transportIdempotent: true,
+    });
+    let storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      attemptCount: 1,
+      bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: effect.effectId,
+      lastAttemptAt: "2026-04-08T00:10:00.000Z",
+      message: privateAnswer,
+      operation: null,
+      preparedDispatchToken: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      status: "retryable",
+      updatedAt: "2026-04-08T00:10:01.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
+      async ({ intent }) => {
+        storedIntent = intent;
+        return intent;
+      },
+    );
+    const assertRecentInbound = vi.fn(async (request: {
+      assistantAskCompletionExpiresAt?: string | null;
+      assistantAskFallback?: boolean | null;
+      authorityCheckOnly: boolean;
+    }) => {
+      expect(request.assistantAskCompletionExpiresAt).toBe(expiresAt);
+      expect(request.assistantAskFallback).toBe(true);
+      return request.authorityCheckOnly
+        ? {}
+        : { providerDispatchClaimed: true };
+    });
+    mocks.sendLinqMessage.mockResolvedValue({
+      providerMessageId: "linq_message_retention_fallback",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date(expiresAt),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date(expiresAt),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        const delivery = await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          idempotencyKey,
+          message: storedIntent.message,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey,
+            providerMessageId: delivery.providerMessageId,
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () =>
+        new Response(null, { status: 204 })
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(storedIntent.message).toBe(
+      HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+      }),
+      expect.any(Object),
+    );
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: privateAnswer }),
+      expect.any(Object),
+    );
+  });
+
+  it("supersedes a reviewed answer when expiry crosses between preflight and provider entry", async () => {
+    vi.useFakeTimers();
+    const completionId = "aask_done_expired_at_provider_entry";
+    const expiresAt = "2026-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const privateAnswer = "Private answer that expired after preflight.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      idempotencyKey,
+      message: privateAnswer,
+      transportIdempotent: true,
+    });
+    let storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      attemptCount: 0,
+      bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: effect.effectId,
+      lastAttemptAt: null,
+      message: privateAnswer,
+      operation: null,
+      preparedDispatchToken: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
+      async ({ intent }) => {
+        storedIntent = intent;
+        return intent;
+      },
+    );
+    const assertRecentInbound = vi.fn(async (request: {
+      assistantAskFallback?: boolean | null;
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? {}
+      : { providerDispatchClaimed: true });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:14:59.999Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        vi.setSystemTime(new Date(expiresAt));
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          idempotencyKey,
+          message: storedIntent.message,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+        throw new Error("unreachable after expiry supersession");
+      },
+    );
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:14:59.999Z"));
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+      });
+      expect(storedIntent.message).toBe(
+        HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+      );
+      expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+      expect(assertRecentInbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assistantAskFallback: false,
+          authorityCheckOnly: true,
+        }),
+        { signal: null },
+      );
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(["reaction", "voice"] as const)(

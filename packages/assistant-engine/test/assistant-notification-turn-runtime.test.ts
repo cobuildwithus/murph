@@ -757,6 +757,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
       kind: 'require_send_exact_text',
       text: 'Fixed welcome text',
     },
+    reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
     vault: '/vaults/exact',
   })
 
@@ -783,6 +784,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
       deliveryIdempotencyKey: 'signup-welcome:member_exact',
       dispatchMode: undefined,
       message: 'Fixed welcome text',
+      reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
       turnId: 'turn-exact',
     }),
   )

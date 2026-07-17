@@ -191,6 +191,7 @@ export interface AssistantNotificationInput
       | 'onProviderRequestStarted'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'reviewedAssistantAskCompletionExpiresAt'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
       | 'scheduledOccurrenceAt'
@@ -1193,6 +1194,8 @@ function buildAssistantNotificationMessageInput(
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryKind: input.deliveryKind,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
+    reviewedAssistantAskCompletionExpiresAt:
+      input.reviewedAssistantAskCompletionExpiresAt ?? null,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId ?? null,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject ?? null,
@@ -1277,6 +1280,8 @@ async function deliverAssistantNotificationMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+    reviewedAssistantAskCompletionExpiresAt:
+      input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     turnId: input.turnId,
     message: input.message,
     dedupeToken: input.dedupeToken,

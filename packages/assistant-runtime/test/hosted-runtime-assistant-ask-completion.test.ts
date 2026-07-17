@@ -276,6 +276,8 @@ describe("hosted assistant ask completion", () => {
           kind: "require_send_exact_text",
           text: answer,
         },
+        reviewedAssistantAskCompletionExpiresAt:
+          "2099-07-15T12:10:00.000Z",
         sessionId: originSession.sessionId,
         threadId: "conversation-reviewed-exact",
         threadIsDirect: false,

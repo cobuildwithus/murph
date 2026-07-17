@@ -7,6 +7,7 @@ import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
 } from "@murphai/contracts";
 import {
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -124,9 +125,6 @@ const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
-const HOSTED_ASSISTANT_ASK_FALLBACK_SUPERSESSION_CODE =
-  "ASSISTANT_ASK_COMPLETION_AUTHORITY_SUPERSEDED";
-
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
 
 interface HostedAssistantDeliveryBoundaryFields {
@@ -656,6 +654,20 @@ async function preflightHostedAssistantDispatch(input: {
   if (!isHostedReviewedAssistantAskCompletionIntent(input.intent)) {
     return { action: "continue" };
   }
+  const completionExpiresAt =
+    requireHostedReviewedAssistantAskCompletionExpiresAt(input.intent);
+  if (
+    input.intent.message
+      !== HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+    && Date.parse(completionExpiresAt) <= input.now.getTime()
+  ) {
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: input.intent.intentId,
+      now: input.now,
+      vaultRoot: input.vaultRoot,
+    });
+    return { action: "continue" };
+  }
   const target = input.payload.explicitTarget
     ?? input.payload.bindingDeliveryTarget;
   const targetKind = input.payload.explicitTarget
@@ -678,6 +690,7 @@ async function preflightHostedAssistantDispatch(input: {
   const engagement =
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
       answeredMailboxItemIds: input.intent.answeredMailboxItemIds,
+      assistantAskCompletionExpiresAt: completionExpiresAt,
       assistantAskFallback:
         input.intent.message
           === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
@@ -717,6 +730,30 @@ function isHostedReviewedAssistantAskCompletionIntent(
     ) === true;
 }
 
+function requireHostedReviewedAssistantAskCompletionExpiresAt(
+  intent: AssistantOutboxIntent,
+): string {
+  const completionId = intent.answeredMailboxItemIds[0] ?? null;
+  const expiresAt = intent.reviewedAssistantAskCompletionExpiresAt ?? null;
+  if (
+    !completionId
+    || intent.answeredMailboxItemIds.length !== 1
+    || !intent.deliveryIdempotencyKey
+    || createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      completionId,
+    ) !== intent.deliveryIdempotencyKey
+    || !expiresAt
+    || !Number.isFinite(Date.parse(expiresAt))
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_OUTBOX_PROOF_INVALID",
+      "Reviewed Assistant Ask completion outbox proof is invalid.",
+      { retryable: false },
+    );
+  }
+  return expiresAt;
+}
+
 async function persistHostedAssistantAskFallbackSupersession(input: {
   intentId: string;
   now: Date;
@@ -733,6 +770,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
       { retryable: true },
     );
   }
+  requireHostedReviewedAssistantAskCompletionExpiresAt(current);
   if (
     current.message
       === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
@@ -747,10 +785,6 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     intent: {
       ...current,
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
-      messageSupersession: {
-        at: updatedAt,
-        code: HOSTED_ASSISTANT_ASK_FALLBACK_SUPERSESSION_CODE,
-      },
       updatedAt,
     },
     vault: input.vaultRoot,
@@ -3199,9 +3233,18 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: async () => {
+          const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
+            ? await prepareHostedReviewedAssistantAskProviderEntry({
+                intentId: input.intentId ?? null,
+                message: request.message,
+                now: new Date(),
+                vaultRoot: input.vaultRoot ?? null,
+              })
+            : undefined;
           const providerEntry =
             await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
               answeredMailboxItemIds: request.answeredMailboxItemIds,
+              assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
               assistantAskFallback:
                 reviewedAssistantAskCompletion
                   ? request.message
@@ -3331,6 +3374,59 @@ function createHostedAssistantLinqSendDependency(input: {
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
+}
+
+async function prepareHostedReviewedAssistantAskProviderEntry(input: {
+  intentId: string | null;
+  message: string;
+  now: Date;
+  vaultRoot: string | null;
+}): Promise<string> {
+  if (!input.intentId || !input.vaultRoot) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_OUTBOX_MISSING",
+      "Reviewed Assistant Ask completion outbox state is unavailable.",
+      { retryable: true },
+    );
+  }
+  const current = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    input.intentId,
+  );
+  if (!current) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_OUTBOX_MISSING",
+      "Reviewed Assistant Ask completion outbox state is unavailable.",
+      { retryable: true },
+    );
+  }
+  const expiresAt = requireHostedReviewedAssistantAskCompletionExpiresAt(
+    current,
+  );
+  const currentIsFallback = current.message
+    === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
+  if (current.message !== input.message) {
+    throw new VaultCliError(
+      currentIsFallback
+        ? "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY"
+        : "ASSISTANT_ASK_COMPLETION_OUTBOX_CHANGED",
+      "Reviewed Assistant Ask completion outbox changed before provider delivery.",
+      { retryable: true },
+    );
+  }
+  if (!currentIsFallback && Date.parse(expiresAt) <= input.now.getTime()) {
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: input.intentId,
+      now: input.now,
+      vaultRoot: input.vaultRoot,
+    });
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+      { retryable: true },
+    );
+  }
+  return expiresAt;
 }
 
 async function preloadApprovedHostedAssistantVaultFiles(input: {
@@ -3829,6 +3925,7 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
+  assistantAskCompletionExpiresAt?: string;
   assistantAskFallback?: boolean;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber: string | null;
@@ -3861,6 +3958,12 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       ...(input.assistantAskFallback === undefined
         ? {}
         : { assistantAskFallback: input.assistantAskFallback }),
+      ...(input.assistantAskCompletionExpiresAt === undefined
+        ? {}
+        : {
+            assistantAskCompletionExpiresAt:
+              input.assistantAskCompletionExpiresAt,
+          }),
       authorityCheckOnly: input.authorityCheckOnly,
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,

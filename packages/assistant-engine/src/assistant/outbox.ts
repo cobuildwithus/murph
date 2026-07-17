@@ -232,6 +232,7 @@ export type DeliverAssistantOutboxMessageResult =
 export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  reviewedAssistantAskCompletionExpiresAt?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -407,6 +408,8 @@ export async function createAssistantOutboxIntent(
       deliveryTransportIdempotent,
       newsletterAuthorizationProof: input.newsletterAuthorizationProof ?? null,
       answeredMailboxItemIds,
+      reviewedAssistantAskCompletionExpiresAt:
+        input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -1083,6 +1086,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  reviewedAssistantAskCompletionExpiresAt?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1110,6 +1114,8 @@ export async function deliverAssistantOutboxMessage(input: {
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    reviewedAssistantAskCompletionExpiresAt:
+      input.reviewedAssistantAskCompletionExpiresAt ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,

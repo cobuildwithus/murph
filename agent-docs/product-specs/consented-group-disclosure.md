@@ -107,14 +107,16 @@ group.
 - Web revalidates the exact group, personal runtime, membership generation,
   grant generation, permission digest, origin, expiry, and runtime fence at
   admission, immediately before the personal read, and immediately before
-  completion append. Reviewed exact delivery carries that completion mailbox id
-  into the existing outbox, and the final Linq egress transaction repeats the
+  completion append. Reviewed exact delivery atomically carries that completion
+  mailbox id, deterministic delivery key, and authority expiry into the
+  existing outbox. Before expiry the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
-  Missing or malformed anchors are terminal before provider entry. When a
-  structurally bound completion loses live grant/expiry authority after its
-  reviewed answer was queued, the existing outbox intent durably supersedes
-  that answer with the fixed cannot-answer copy and retries before provider
-  entry. An intent that already contains that fixed copy remains deliverable.
+  Missing or malformed outbox proof is terminal before provider entry. When a
+  structurally bound completion loses live grant authority or reaches its
+  outbox-owned expiry after the reviewed answer was queued, the existing intent
+  durably replaces that answer with the fixed cannot-answer copy and retries
+  before provider entry. An intent that already contains that exact fixed copy
+  remains deliverable after retention removes the expired mailbox rows.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
 - One accepted group input owns at most one request targeting one grant and one
@@ -122,8 +124,9 @@ group.
   conflicts. There is no implicit roster fan-out, label matching, fallback
   member, or arbitrary target id.
 - The existing ten-minute Assistant Ask lifetime, deterministic request and
-  completion ids, encrypted mailbox retry, and first-committed-completion rule
-  own durability. Retried work cannot select a new target or permission.
+  completion ids, encrypted mailbox retry, first-committed-completion rule, and
+  outbox-owned queued-delivery deadline own durability. Retried work cannot
+  select a new target or permission.
 - Candidate and reviewer provider usage uses the existing hosted usage ledger.
   Request, claimed attempt, answer/review stage, and provider ordinal form the
   deterministic identity; usage recording is best-effort and cannot change or
@@ -131,9 +134,12 @@ group.
 
 The permission and grant rows are queryable product truth owned by
 `apps/web`/Postgres. The paired `assistant.ask.requested` and
-`assistant.ask.completed` mailbox items remain the only durable operation
-state. The personal vault, group vault, runner, and assistant session do not
-gain another permission store.
+`assistant.ask.completed` mailbox items own the active operation; once an exact
+completion is queued, the existing outbox owns only its pending delivery and
+minimum immutable expiry proof through terminal disposition. Mailbox retention
+may delete expired rows without ordering against that outbox obligation. The
+personal vault, group vault, runner, and assistant session do not gain another
+permission store.
 
 Permission text is bounded to 1,000 code points. Each group may retain at most
 25 permission rows, and grant-generation history is capped at 25 per group and
@@ -209,5 +215,5 @@ both planes have converged and smoke has passed.
 
 Rollback disables and redeploys the Web producer first. Keep compatible
 consumers deployed until every consented request and reviewed-exact completion
-has drained or expired from Web mailboxes and imported runtime state. Prefer a
-forward fix once new work has been produced.
+has drained from Web mailboxes, imported runtime state, and existing outbox
+obligations. Prefer a forward fix once new work has been produced.

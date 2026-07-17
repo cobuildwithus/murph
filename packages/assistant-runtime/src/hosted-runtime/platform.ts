@@ -261,6 +261,7 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
+  assistantAskCompletionExpiresAt?: string | null;
   assistantAskFallback?: boolean | null;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
