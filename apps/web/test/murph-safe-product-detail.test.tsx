@@ -153,6 +153,28 @@ describe("Murph Safe public pages", () => {
     );
     expect(preciseMarkup).toContain("0.00001 ppm");
   });
+
+  test("renders a canonical branded-food nutrient value", () => {
+    const product = makeProductDetail();
+    product.kind = "food";
+    product.nutrition = {
+      basis: "per_100_g",
+      rows: [
+        {
+          amount: { display: "12.4", unit: "g", value: 12.4 },
+          basis: "per_100_g",
+          dailyValuePercent: null,
+          name: "Protein",
+        },
+      ],
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(MurphSafeProductDetail, { product }),
+    );
+
+    expect(markup).toContain("12.4 g");
+  });
 });
 
 function makeProductDetail(): PublicProductDetail {

@@ -88,12 +88,15 @@ function readIngredient(
     return null;
   }
 
-  const children = Array.isArray(value.nestedRows)
-    ? value.nestedRows.slice(0, 50).flatMap((candidate) => {
-        const child = readIngredientChild(candidate);
-        return child ? [child] : [];
-      })
-    : [];
+  const childRows = Array.isArray(value.nestedRows)
+    ? value.nestedRows
+    : Array.isArray(value.ingredients)
+      ? value.ingredients
+      : [];
+  const children = childRows.slice(0, 50).flatMap((candidate) => {
+    const child = readIngredientChild(candidate);
+    return child ? [child] : [];
+  });
 
   return {
     ...readIngredientChildFields(value, name),
@@ -215,11 +218,27 @@ function readNutrition(
     groups.push({ basis: "per_100_g", rows: label.nutrientsPer100g });
   }
 
-  const rows = groups.flatMap((group) =>
+  const sourceRows = groups.flatMap((group) =>
     group.rows.flatMap((candidate) => {
       const row = readNutritionRow(candidate, group.basis);
       return row ? [row] : [];
     }),
+  );
+  const boundedSourceRows = sourceRows.slice(0, 256);
+  const calories = readNonnegativeNumber(label.calories);
+  const hasCaloriesRow = boundedSourceRows.some((row) =>
+    row.name.toLowerCase() === "calories");
+  const caloriesRow: PublicProductDetail["nutrition"]["rows"][number] | null =
+    calories !== null && !hasCaloriesRow
+      ? {
+          name: "Calories",
+          amount: readMeasuredValue(label.calories, "kcal"),
+          dailyValuePercent: null,
+          basis: "per_serving",
+        }
+      : null;
+  const rows = (
+    caloriesRow ? [caloriesRow, ...boundedSourceRows] : boundedSourceRows
   ).slice(0, 256);
 
   if (rows.length === 0) {
@@ -257,7 +276,7 @@ function readNutritionRow(
 
   return {
     name,
-    amount: readMeasuredValue(value.amount, value.unit),
+    amount: readMeasuredValue(value.amount ?? value.value, value.unit),
     dailyValuePercent: readPercent(value.dailyValue),
     basis,
   };

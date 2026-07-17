@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
+import { isRecord } from "../src/lib/primitives";
 import { normalizePublicProductLabel } from "../src/lib/public-products/normalize-label";
 
 describe("normalizePublicProductLabel", () => {
@@ -104,9 +107,9 @@ describe("normalizePublicProductLabel", () => {
         ingredients: "Ingredient one, ingredient two (subingredient A, subingredient B)",
         nutrientsPer100g: [
           {
-            amount: "12.4",
             name: "Protein",
             unit: "g",
+            value: 12.4,
           },
         ],
         servingSize: "45",
@@ -129,6 +132,11 @@ describe("normalizePublicProductLabel", () => {
       grams: 45,
     });
     expect(result.nutrition.basis).toBe("per_100_g");
+    expect(result.nutrition.rows[0]?.amount).toEqual({
+      display: "12.4",
+      unit: "g",
+      value: 12.4,
+    });
     expect(result.unknownCodes).toEqual([
       "FORMULA_REVISION_NOT_TRACKED",
       "INGREDIENTS_STATEMENT_ONLY",
@@ -139,12 +147,20 @@ describe("normalizePublicProductLabel", () => {
     const result = normalizePublicProductLabel({
       kind: "food",
       label: {
+        calories: 190,
         ingredientRows: [
-          { ingredients: ["not", "flattened"], name: "Declared group" },
+          {
+            ingredients: [
+              { name: "Declared child" },
+              "not flattened",
+              { name: "" },
+            ],
+            name: "Declared group",
+          },
           { name: "Second ingredient" },
         ],
         nutrientsPerServing: [
-          { dailyValue: "not established", name: "Calories" },
+          { amount: 4, name: "Protein", unit: "g" },
         ],
         servingSizes: [{ description: "One bar", grams: "40" }],
       },
@@ -155,13 +171,78 @@ describe("normalizePublicProductLabel", () => {
       "Declared group",
       "Second ingredient",
     ]);
+    expect(result.ingredients.active[0]?.children.map((row) => row.name)).toEqual([
+      "Declared child",
+    ]);
     expect(result.nutrition.rows[0]).toEqual({
       name: "Calories",
-      amount: null,
+      amount: { display: "190", unit: "kcal", value: 190 },
       dailyValuePercent: null,
       basis: "per_serving",
     });
     expect(result.serving?.grams).toBe(40);
+  });
+
+  it("does not duplicate an existing case-insensitive Calories row", () => {
+    const result = normalizePublicProductLabel({
+      kind: "food",
+      label: {
+        calories: 190,
+        nutrientsPerServing: [
+          { amount: 180, name: "calories", unit: "kcal" },
+        ],
+      },
+      servingGrams: 40,
+    });
+
+    expect(result.nutrition.rows.filter((row) =>
+      row.name.toLowerCase() === "calories")).toEqual([
+      {
+        name: "calories",
+        amount: { display: "180", unit: "kcal", value: 180 },
+        dailyValuePercent: null,
+        basis: "per_serving",
+      },
+    ]);
+  });
+
+  it("preserves the committed Butter Chicken label hierarchy", async () => {
+    const parsed: unknown = JSON.parse(await readFile(
+      new URL("../sql/foods/plasticlist-brand-site-foods.json", import.meta.url),
+      "utf8",
+    ));
+    if (!Array.isArray(parsed)) {
+      throw new TypeError("Expected curated food fixture rows.");
+    }
+    const record = parsed.find((candidate) =>
+      isRecord(candidate)
+      && candidate.name === "Butter Chicken with Basmati Rice");
+    if (!isRecord(record) || !isRecord(record.label)) {
+      throw new TypeError("Expected the Butter Chicken curated label fixture.");
+    }
+
+    const result = normalizePublicProductLabel({
+      kind: "food",
+      label: record.label,
+      servingGrams: 354,
+    });
+
+    expect(result.ingredients.active.map((row) => row.name)).toEqual([
+      "Chicken and sauce",
+      "Cooked basmati rice",
+    ]);
+    expect(result.ingredients.active[0]?.children.map((row) => row.name)).toContain(
+      "Cooked chicken",
+    );
+    expect(result.ingredients.active[1]?.children.map((row) => row.name)).toContain(
+      "Rice",
+    );
+    expect(result.nutrition.rows[0]).toEqual({
+      name: "Calories",
+      amount: { display: "400", unit: "kcal", value: 400 },
+      dailyValuePercent: null,
+      basis: "per_serving",
+    });
   });
 
   it("accepts current brand-label serving and other-ingredient shapes", () => {

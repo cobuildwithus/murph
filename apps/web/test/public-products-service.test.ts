@@ -119,6 +119,39 @@ describe("public product service", () => {
     expect(JSON.stringify(result)).not.toContain("privateRawLabel");
   });
 
+  it("preserves canonical FDC nutrient values in the public detail contract", async () => {
+    const record = productRecord({
+      id: "fdc:1",
+      dataOrigin: "usda_branded",
+      dataOriginId: "1",
+      label: {
+        ingredients: "Example ingredient",
+        nutrientsPer100g: [
+          { name: "Protein", value: 12.4, unit: "g" },
+        ],
+      },
+      name: "Example branded food",
+    });
+    const source = createDataSource({
+      getFoodRecord: vi.fn(async () => record),
+    });
+    const service = createPublicProductsService(source);
+
+    const result = await service.getDetail(encodePublicProductRef("food", record.id));
+
+    expect(result?.nutrition).toEqual({
+      basis: "per_100_g",
+      rows: [
+        {
+          name: "Protein",
+          amount: { display: "12.4", unit: "g", value: 12.4 },
+          dailyValuePercent: null,
+          basis: "per_100_g",
+        },
+      ],
+    });
+  });
+
   it("derives honest unknowns from missing label and test evidence", async () => {
     const record = productRecord({
       label: { ingredients: "Ingredient statement only" },
