@@ -255,6 +255,7 @@ jobs:
           MURPH_TEST_POSTGRES_CONCURRENCY: "1"
         run: >-
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/device-sync-dirty-account-deletion-concurrency.test.ts
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
           apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts

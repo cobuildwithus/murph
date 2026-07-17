@@ -13,6 +13,7 @@ Last verified: 2026-07-16
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 Stripe Checkout packs and a Murph-owned webhook-fulfilled usage-credit ledger for direct paid Pulse/Edge members, with group funding kept as future scope. | Active |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
+| `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding for a private broad-assistant relationship: brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, and finite completion. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
