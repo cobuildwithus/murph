@@ -50,6 +50,7 @@ import {
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
+import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
 import {
   HOSTED_RETELL_USAGE_COST_KEY,
   HOSTED_RETELL_USAGE_PRICING_SOURCE,
@@ -60,8 +61,13 @@ import {
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
+  | "ai_usage_limit_exceeded"
   | "hosted_access_inactive"
   | "trial_expired_pending_billing";
+type HostedAiUsageAccessDeniedReason = Exclude<
+  HostedAiUsageGateDeniedReason,
+  "ai_usage_limit_exceeded"
+>;
 
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
@@ -86,9 +92,11 @@ export type HostedAiUsageGateDecision =
     periodStart: Date;
     remainingUsdMicros: bigint;
     spentUsdMicros: bigint;
+    usageCreditBalanceUsdMicros: bigint;
+    usageCreditLedgerVersion: bigint;
   }
   | {
-    allowed: true;
+    allowed: false;
     billingPlanCode: HostedBillingPlanCode;
     limitUsdMicros: bigint;
     memberId: string;
@@ -98,6 +106,8 @@ export type HostedAiUsageGateDecision =
     remainingUsdMicros: bigint;
     retryAfter: Date;
     spentUsdMicros: bigint;
+    usageCreditBalanceUsdMicros: bigint;
+    usageCreditLedgerVersion: bigint;
     userNotice: HostedAiUsageGateUserNotice;
   }
   | {
@@ -107,10 +117,12 @@ export type HostedAiUsageGateDecision =
     memberId: string;
     periodEnd: Date;
     periodStart: Date;
-    reason: HostedAiUsageGateDeniedReason;
+    reason: HostedAiUsageAccessDeniedReason;
     remainingUsdMicros: bigint;
     retryAfter: Date;
     spentUsdMicros: bigint;
+    usageCreditBalanceUsdMicros: bigint;
+    usageCreditLedgerVersion: bigint;
     userNotice: HostedAiUsageGateUserNotice | null;
   };
 
@@ -144,6 +156,7 @@ export interface HostedAiUsageLimitNoticeCandidate {
   periodEnd: Date;
   periodStart: Date;
   sourceUsageId: string;
+  usageCreditLedgerVersion: bigint;
   userNotice: HostedAiUsageLimitNotice;
 }
 
@@ -205,6 +218,8 @@ interface HostedAiUsageAllowancePeriod {
   periodEnd: Date;
   periodStart: Date;
   spentUsdMicros: bigint;
+  usageCreditBalanceUsdMicros: bigint;
+  usageCreditLedgerVersion: bigint;
 }
 
 type HostedAiUsageAllowancePeriodResult =
@@ -212,14 +227,26 @@ type HostedAiUsageAllowancePeriodResult =
   | ({
     kind: "denied";
     spentUsdMicros: bigint;
-  } & Extract<HostedAiUsageAllowancePeriodResolution, { kind: "denied" }>);
+  } & HostedAiUsageCreditProjection
+    & Extract<HostedAiUsageAllowancePeriodResolution, { kind: "denied" }>);
+
+interface HostedAiUsageCreditProjection {
+  usageCreditBalanceUsdMicros: bigint;
+  usageCreditLedgerVersion: bigint;
+}
 
 type HostedAiUsageAllowancePeriodResolution =
   | ({
     kind: "period";
     allowanceSource: HostedAiUsageAllowanceSourceKind;
     source: "billing" | "calendar" | "trial";
-  } & Omit<HostedAiUsageAllowancePeriod, "blockedAt" | "spentUsdMicros">)
+  } & Omit<
+    HostedAiUsageAllowancePeriod,
+    | "blockedAt"
+    | "spentUsdMicros"
+    | "usageCreditBalanceUsdMicros"
+    | "usageCreditLedgerVersion"
+  >)
   | {
     allowanceSource: HostedAiUsageAllowanceSourceKind;
     billingPlanCode: HostedBillingPlanCode;
@@ -227,7 +254,7 @@ type HostedAiUsageAllowancePeriodResolution =
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
-    reason: HostedAiUsageGateDeniedReason;
+    reason: HostedAiUsageAccessDeniedReason;
     retryAfter: Date;
     userNotice: HostedAiUsageGateUserNotice | null;
   };
@@ -783,6 +810,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
+  await lockHostedAiUsageAllowanceBeneficiaryTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
   const memberState = await input.tx.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -811,11 +842,14 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       },
       billingStatus: true,
       suspendedAt: true,
+      usageCreditBalanceUsdMicros: true,
+      usageCreditLedgerVersion: true,
     },
   });
   if (!memberState) {
     throw new TypeError("Hosted AI usage allowance member does not exist.");
   }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
   const allowanceAccess = memberState.suspendedAt === null
     ? await resolveHostedAiUsageAllowanceBillingRefForMember({
         billingRef: memberState.billingRef,
@@ -841,6 +875,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     threadContainer: memberState.threadContainer,
     threadContainerAccessActive,
     tx: input.tx,
+    ...usageCreditProjection,
   });
   if (period.kind === "denied") {
     await markHostedAiUsageAllowanceDeniedTx({
@@ -1000,6 +1035,10 @@ export async function resolveHostedAiUsageGate(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
   return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
+    await lockHostedAiUsageAllowanceBeneficiaryTx({
+      memberId: input.memberId,
+      tx,
+    });
     const memberState = await tx.hostedMember.findUnique({
       where: {
         id: input.memberId,
@@ -1028,12 +1067,15 @@ export async function resolveHostedAiUsageGate(input: {
         },
         billingStatus: true,
         suspendedAt: true,
+        usageCreditBalanceUsdMicros: true,
+        usageCreditLedgerVersion: true,
       },
     });
 
     if (!memberState) {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
+    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
     const allowanceAccess = memberState.suspendedAt === null
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
@@ -1075,6 +1117,7 @@ export async function resolveHostedAiUsageGate(input: {
         suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
+        ...usageCreditProjection,
       });
     }
 
@@ -1086,6 +1129,7 @@ export async function resolveHostedAiUsageGate(input: {
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
       tx,
+      ...usageCreditProjection,
     });
     if (period.kind === "denied") {
       return buildHostedAiUsageGateDecision({
@@ -1138,12 +1182,15 @@ export async function readHostedAiUsageGate(input: {
         },
         billingStatus: true,
         suspendedAt: true,
+        usageCreditBalanceUsdMicros: true,
+        usageCreditLedgerVersion: true,
       },
     });
 
     if (!memberState) {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
+    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
     const allowanceAccess = memberState.suspendedAt === null
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
@@ -1185,6 +1232,7 @@ export async function readHostedAiUsageGate(input: {
         suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
+        ...usageCreditProjection,
       });
     }
 
@@ -1195,6 +1243,7 @@ export async function readHostedAiUsageGate(input: {
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
       tx,
+      ...usageCreditProjection,
     });
 
     return buildHostedAiUsageGateDecision({
@@ -1204,10 +1253,9 @@ export async function readHostedAiUsageGate(input: {
   });
 }
 
-// Read-first gate for hot-path checks: usage exhaustion is advisory and stays
-// allowed, while access denials are confirmed by the mutating gate before
-// callers act on them. The read path cannot materialize period rows,
-// plan-change limit updates, or notice metadata; spend accounting
+// Read-first gate for hot-path checks: denials are confirmed by the mutating
+// gate before callers act on them. The read path cannot lock or materialize
+// period rows or apply plan-change limit updates; spend accounting
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
@@ -1230,7 +1278,7 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
   suspendedAt: Date | null;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
-}): HostedAiUsageGateDecisionWithSource {
+} & HostedAiUsageCreditProjection): HostedAiUsageGateDecisionWithSource {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
@@ -1249,6 +1297,8 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
       period: {
         ...resolved,
         spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion,
       },
     });
   }
@@ -1278,6 +1328,8 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
     remainingUsdMicros: period.limitUsdMicros,
     retryAfter,
     spentUsdMicros: 0n,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion,
     userNotice: null,
   };
 }
@@ -1300,17 +1352,21 @@ function buildHostedAiUsageGateDecision(input: {
       remainingUsdMicros: 0n,
       retryAfter: period.retryAfter,
       spentUsdMicros: period.spentUsdMicros,
+      usageCreditBalanceUsdMicros: period.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: period.usageCreditLedgerVersion,
       userNotice: period.userNotice,
     };
   }
 
-  const remainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
+  const baseRemainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
     ? period.limitUsdMicros - period.spentUsdMicros
     : 0n;
+  const remainingUsdMicros =
+    baseRemainingUsdMicros + period.usageCreditBalanceUsdMicros;
 
-  if (period.spentUsdMicros >= period.limitUsdMicros) {
+  if (remainingUsdMicros === 0n) {
     return {
-      allowed: true,
+      allowed: false,
       allowanceSource: period.allowanceSource,
       billingPlanCode: period.billingPlanCode,
       limitUsdMicros: period.limitUsdMicros,
@@ -1321,6 +1377,8 @@ function buildHostedAiUsageGateDecision(input: {
       remainingUsdMicros,
       retryAfter: period.periodEnd,
       spentUsdMicros: period.spentUsdMicros,
+      usageCreditBalanceUsdMicros: period.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: period.usageCreditLedgerVersion,
       userNotice: buildHostedAiUsageGateLimitNotice({
         allowanceSource: period.allowanceSource,
         billingPlanCode: period.billingPlanCode,
@@ -1341,6 +1399,8 @@ function buildHostedAiUsageGateDecision(input: {
     periodStart: period.periodStart,
     remainingUsdMicros,
     spentUsdMicros: period.spentUsdMicros,
+    usageCreditBalanceUsdMicros: period.usageCreditBalanceUsdMicros,
+    usageCreditLedgerVersion: period.usageCreditLedgerVersion,
   };
 }
 
@@ -1349,6 +1409,10 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  await lockHostedAiUsageAllowanceBeneficiaryTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
   const memberState = await input.tx.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -1369,6 +1433,8 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
       },
       billingStatus: true,
       suspendedAt: true,
+      usageCreditBalanceUsdMicros: true,
+      usageCreditLedgerVersion: true,
     },
   });
   if (
@@ -1378,6 +1444,7 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
   ) {
     throw new Error("Hosted AI usage allowance member is not active.");
   }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
   const period = await ensureHostedAiUsageAllowancePeriodTx({
     at: input.now,
@@ -1385,6 +1452,7 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
     memberId: input.memberId,
     now: input.now,
     tx: input.tx,
+    ...usageCreditProjection,
   });
   if (period.kind === "denied") {
     throw new Error("Hosted AI usage allowance period could not be reconciled.");
@@ -1399,7 +1467,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageAllowancePeriodResult> {
+} & HostedAiUsageCreditProjection): Promise<HostedAiUsageAllowancePeriodResult> {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
@@ -1418,6 +1486,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       reason: resolved.reason,
       retryAfter: resolved.retryAfter,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: input.usageCreditLedgerVersion,
       userNotice: resolved.userNotice,
     };
   }
@@ -1470,6 +1540,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: current.limitUsdMicros,
       now: input.now,
       spentUsdMicros: current.spentUsdMicros,
+      usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
     });
 
     if (!sameNullableTime(current.blockedAt, blockedAt)) {
@@ -1494,8 +1565,10 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
-      blockedAt: current.blockedAt,
+      blockedAt,
       spentUsdMicros: current.spentUsdMicros,
+      usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: input.usageCreditLedgerVersion,
     };
   }
 
@@ -1504,6 +1577,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: resolved.limitUsdMicros,
     now: input.now,
     spentUsdMicros: current.spentUsdMicros,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
   });
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
@@ -1539,6 +1613,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     periodEnd: upgraded.periodEnd,
     periodStart: upgraded.periodStart,
     spentUsdMicros: upgraded.spentUsdMicros,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion,
   };
 }
 
@@ -1549,7 +1625,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageAllowancePeriodResult> {
+} & HostedAiUsageCreditProjection): Promise<HostedAiUsageAllowancePeriodResult> {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
@@ -1568,6 +1644,8 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       reason: resolved.reason,
       retryAfter: resolved.retryAfter,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: input.usageCreditLedgerVersion,
       userNotice: resolved.userNotice,
     };
   }
@@ -1607,6 +1685,8 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
       spentUsdMicros: current.spentUsdMicros,
+      usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+      usageCreditLedgerVersion: input.usageCreditLedgerVersion,
     };
   }
 
@@ -1619,6 +1699,8 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
     spentUsdMicros: 0n,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion,
   };
 }
 
@@ -1631,8 +1713,31 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   sourceUsageId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
-  const noticeEligible =
-    input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
+  const baseRemainingUsdMicros = input.period.limitUsdMicros > input.period.spentUsdMicros
+    ? input.period.limitUsdMicros - input.period.spentUsdMicros
+    : 0n;
+  const creditDebitUsdMicros = input.costUsdMicros > baseRemainingUsdMicros
+    ? input.costUsdMicros - baseRemainingUsdMicros
+    : 0n;
+  let usageCreditBalanceUsdMicros = input.period.usageCreditBalanceUsdMicros;
+  let usageCreditLedgerVersion = input.period.usageCreditLedgerVersion;
+
+  if (creditDebitUsdMicros > 0n) {
+    const settlement = await settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: input.memberId,
+      debitUsdMicros: creditDebitUsdMicros,
+      effectiveAt: input.recordOccurredAt,
+      sourceUsageId: input.sourceUsageId,
+      tx: input.tx,
+    });
+    usageCreditBalanceUsdMicros = settlement.balanceUsdMicros;
+    usageCreditLedgerVersion = settlement.ledgerVersion;
+  }
+
+  const remainingBeforeUsdMicros =
+    baseRemainingUsdMicros + input.period.usageCreditBalanceUsdMicros;
+  const noticeEligible = remainingBeforeUsdMicros > 0n
+    && input.costUsdMicros >= remainingBeforeUsdMicros;
 
   const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
@@ -1640,7 +1745,8 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
       "last_usage_at" = GREATEST(COALESCE("last_usage_at", ${input.recordOccurredAt}), ${input.recordOccurredAt}),
       "blocked_at" = CASE
-        WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros" THEN
+        WHEN "spent_usd_micros" + ${input.costUsdMicros} >= "limit_usd_micros"
+          AND ${usageCreditBalanceUsdMicros} <= 0 THEN
           CASE
             WHEN "spent_usd_micros" < "limit_usd_micros" OR "blocked_at" IS NULL THEN ${input.now}
             ELSE "blocked_at"
@@ -1652,7 +1758,11 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
       AND "period_start" = ${input.period.periodStart}
   `;
 
-  if (!noticeEligible || updated !== 1) {
+  if (updated !== 1) {
+    throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
+  }
+
+  if (!noticeEligible) {
     return null;
   }
 
@@ -1662,6 +1772,7 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     periodEnd: input.period.periodEnd,
     periodStart: input.period.periodStart,
     sourceUsageId: input.sourceUsageId,
+    usageCreditLedgerVersion,
     userNotice: buildHostedAiUsageGateLimitNotice({
       allowanceSource: input.period.allowanceSource,
       billingPlanCode: input.period.billingPlanCode,
@@ -1675,9 +1786,11 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 function resolveHostedAiUsageAllowanceRemainingUsdMicros(
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>,
 ): bigint {
-  return period.limitUsdMicros > period.spentUsdMicros
+  const baseRemainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
     ? period.limitUsdMicros - period.spentUsdMicros
     : 0n;
+
+  return baseRemainingUsdMicros + period.usageCreditBalanceUsdMicros;
 }
 
 function resolveHostedAiUsageAllowancePeriod(input: {
@@ -1907,8 +2020,12 @@ function resolveHostedAiUsageAllowanceBlockedAt(input: {
   limitUsdMicros: bigint;
   now: Date;
   spentUsdMicros: bigint;
+  usageCreditBalanceUsdMicros: bigint;
 }): Date | null {
-  if (input.spentUsdMicros < input.limitUsdMicros) {
+  const baseRemainingUsdMicros = input.limitUsdMicros > input.spentUsdMicros
+    ? input.limitUsdMicros - input.spentUsdMicros
+    : 0n;
+  if (baseRemainingUsdMicros + input.usageCreditBalanceUsdMicros > 0n) {
     return null;
   }
 
@@ -1917,6 +2034,16 @@ function resolveHostedAiUsageAllowanceBlockedAt(input: {
 
 function sameNullableTime(left: Date | null, right: Date | null): boolean {
   return left?.getTime() === right?.getTime();
+}
+
+function normalizeHostedAiUsageCreditProjection(input: {
+  usageCreditBalanceUsdMicros: bigint | null;
+  usageCreditLedgerVersion: bigint | null;
+}): HostedAiUsageCreditProjection {
+  return {
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
+  };
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {
@@ -1929,6 +2056,18 @@ async function lockHostedAiUsageAllowancePeriodTx(input: {
     FROM "hosted_ai_usage_period"
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.periodStart}
+    FOR UPDATE
+  `;
+}
+
+async function lockHostedAiUsageAllowanceBeneficiaryTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT 1
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
     FOR UPDATE
   `;
 }

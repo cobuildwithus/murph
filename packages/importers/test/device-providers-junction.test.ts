@@ -33,6 +33,29 @@ import {
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
+test("Junction sleep normalization preserves explicit session identity without guessing unknown types", () => {
+  const sleep = [
+    { id: "main", type: "long_sleep" },
+    { id: "nap", type: "nap" },
+    { id: "unknown", type: "other" },
+    { id: "missing" },
+  ].map((entry, index) => ({
+    ...entry,
+    source: { provider: "oura", type: "wearable" },
+    start: `2026-03-${String(10 + index).padStart(2, "0")}T01:00:00.000Z`,
+    end: `2026-03-${String(10 + index).padStart(2, "0")}T02:00:00.000Z`,
+  }));
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-03-16T10:00:00.000Z",
+    summaries: { sleep },
+  });
+  const sessionTypes = payload.events
+    ?.filter((event) => event.kind === "sleep_session")
+    .map((event) => event.fields?.sleepType);
+
+  assert.deepEqual(sessionTypes, ["main_sleep", "nap", undefined, undefined]);
+});
+
 function buildCompanionHrvRmssdSnapshotEntry(
   observation: Parameters<typeof serializeCompanionHrvRmssdObservation>[0],
 ) {

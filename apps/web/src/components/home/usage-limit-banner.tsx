@@ -27,23 +27,23 @@ const usageLimitBannerCopy: Record<
   }
 > = {
   edge_usage_limit_reached: {
-    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
+    body: "New replies and other AI work are blocked until your included usage resets.",
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
-    title: "Your Family has used 100% of this month's included usage",
+    body: "New replies and other AI work are blocked until your included usage resets. Other Family members have separate allowances.",
+    title: "You've used 100% of your included usage this month",
   },
   pulse_upgrade_edge: {
-    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
+    body: "New replies and other AI work are blocked until your included usage resets.",
     title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
-    body: "Your included trial access is no longer active.",
+    body: "New replies and other AI work are blocked because your included trial access is no longer active.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    body: "Murph keeps replying. In Settings, you can choose a less capable model that uses less of your included usage.",
+    body: "New replies and other AI work are blocked because your included trial usage is exhausted.",
     title: "You've used 100% of your included trial usage",
   },
 };
@@ -60,11 +60,16 @@ export function UsageLimitBanner({
 
   const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
+  const body = recommendedAction?.kind === "add_usage"
+    ? "New replies and other AI work are blocked until you add usage or your included usage resets."
+    : copy.body;
   const actionBody = recommendedAction?.kind === "start_pulse"
-    ? " You can start Pulse when you're ready."
+    ? " Start Pulse to continue."
     : recommendedAction?.kind === "upgrade_edge"
       ? " Edge offers more included usage."
-      : "";
+      : recommendedAction?.kind === "add_usage"
+        ? " You can add more usage now."
+        : "";
 
   return (
     <section
@@ -81,7 +86,7 @@ export function UsageLimitBanner({
           {copy.title}
         </h2>
         <p className="mt-1 max-w-xl text-sm leading-relaxed text-pretty text-muted-foreground">
-          {copy.body}{actionBody}
+          {body}{actionBody}
         </p>
       </div>
 

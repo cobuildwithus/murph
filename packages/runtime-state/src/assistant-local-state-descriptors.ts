@@ -4,6 +4,9 @@ import {
   defineLocalStateSubtreeDescriptor,
   type VaultLocalStatePathDescriptor,
 } from "./local-state-descriptor-helpers.ts";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "./assistant-generated-deliveries.ts";
 
 const ASSISTANT_OWNER = "assistant-runtime";
 
@@ -89,6 +92,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   definePortableAssistantFile(
     ".runtime/operations/assistant/context-snapshot.json",
     "Assistant private context snapshot that moves with hosted continuity.",
+  ),
+  definePortableAssistantSubtree(
+    ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+    "Assistant-generated one-time delivery files that must move with active hosted delivery continuity.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/auto-reply",

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Current Guardrails
 
@@ -17,8 +17,39 @@ Last verified: 2026-07-15
 - Add tests for failure modes before relying on production-side recovery logic.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
+- A usage-credit purchase persists one reconstructible `created` purchase before
+  Stripe I/O; that row and the single purchase-status lifecycle are the durable
+  ambiguity fence. Every create retry during the first 30 minutes uses the
+  same purchase-derived Stripe idempotency key, leaving at least 60 minutes on
+  the frozen Session expiry. An ambiguous response must
+  not mint a replacement purchase or create a second payable Session. The
+  member may begin another purchase only after the existing one is terminal.
+- Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
+  It verifies live one-time payment state, then appends the unique grant and
+  updates the beneficiary balance/version projection in one locked
+  transaction. Included allowance is consumed first; credit debits serialize
+  under the same beneficiary owner and crossing overage is absorbed rather than
+  becoming debt. A committed grant clears the current usage block when capacity
+  becomes positive and makes the normal runtime recheck a retry-owned
+  post-commit obligation, so accepted blocked input remains pending and can
+  resume. Duplicate Checkout and webhook delivery must converge on the same
+  purchase, grant, and recheck outcome. Provider/KMS preparation and the full
+  database-plus-Temporal recheck handoff are hard-bounded below the derived
+  receipt lease, and receipt completion must win its exact attempt fence; a
+  timed-out or reclaimed worker remains retryable and cannot report completion.
+- Matching usage-credit refund or dispute events must never fall through to the
+  subscription suspension path. Live re-fetch plus the same beneficiary lock
+  must append replay-safe, capped signed `refund_adjustment` or
+  `dispute_adjustment` entries as live financial exposure moves. Negative
+  entries revoke unused credit and positive entries restore only credit that
+  was previously revoked. A failure keeps the Stripe receipt retryable; it does
+  not silently complete the event.
+- Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
+- Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
 - Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient replay must preserve that logical terminal state instead of resetting the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
 - A canonical pending or retryable signup welcome is obsolete once durable auto-reply provenance proves a newer accepted reply for the same recipient route. Hosted collection must abandon that welcome before provider dispatch; a `sending` welcome remains under the normal delivery-confirmation contract rather than being hidden mid-flight.
+- Accepted canonical Linq signup welcomes require a completed delivery-outcome callback even when they answer no conversation mailbox item. Web records acceptance and materializes the provider's direct chat in one transaction under existing route ownership locks; callback failure is a may-have-succeeded delivery, and replay relies on the canonical provider idempotency key instead of issuing an ordinary duplicate send.
 - Assistant Ask uses `assistant.ask.requested` and
   `assistant.ask.completed` in the existing encrypted mailbox as its only
   durable queue and operation state. Stable request and completion identities

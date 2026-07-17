@@ -637,6 +637,46 @@ test("importDeviceBatch validates only target integration ingest shards while ap
   assert.equal((targetRows[0] as { id?: string }).id, result.ingestId);
 });
 
+test("importDeviceBatch preserves explicit sleep session identity through canonical persistence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-sleep-type");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "sleep-type-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events: [{
+      kind: "sleep_session",
+      occurredAt: "2026-03-15T22:00:00.000Z",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      title: "Sleep session",
+      externalRef: {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "sleep-type-1",
+      },
+      fields: {
+        startAt: "2026-03-15T22:00:00.000Z",
+        endAt: "2026-03-16T07:00:00.000Z",
+        durationMinutes: 540,
+        sleepType: "main_sleep",
+      },
+    }],
+  });
+
+  const sleep = result.events[0];
+  assert.equal(sleep?.kind, "sleep_session");
+  assert.equal(sleep?.kind === "sleep_session" ? sleep.sleepType : undefined, "main_sleep");
+
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.eventShardPaths[0] as string,
+  });
+  const persisted = records[0] as EventRecord | undefined;
+  assert.equal(persisted?.kind === "sleep_session" ? persisted.sleepType : undefined, "main_sleep");
+});
+
 test("importDeviceBatch streams target ingest duplicate checks without rehashing unrelated rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-stream-target-ingest-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
@@ -6676,15 +6716,107 @@ test("importDeviceBatch supersedes in place when the provider bumps externalRef.
   assert.equal(new Set(records.map((record) => record.id)).size, 1);
 });
 
-test("importDeviceBatch rejects conflicting WHOOP content at the same source revision", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-version-conflict");
+test("importDeviceBatch enriches legacy WHOOP sleep types without aborting a mixed snapshot", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-whoop-sleep-type-enrichment");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-  const buildInput = (value: number, importedAt: string) => ({
+
+  const buildSleepEvent = ({
+    resourceId,
+    occurredAt,
+    endAt,
+    durationMinutes,
+    title,
+    sleepType,
+  }: {
+    resourceId: string;
+    occurredAt: string;
+    endAt: string;
+    durationMinutes: number;
+    title: "WHOOP sleep" | "WHOOP nap";
+    sleepType?: "main_sleep" | "nap";
+  }) => ({
+    kind: "sleep_session" as const,
+    occurredAt,
+    recordedAt: endAt,
+    dayKey: "2026-06-03",
+    title,
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId,
+      version: "2026-06-03T10:00:00.000Z",
+    },
+    fields: {
+      startAt: occurredAt,
+      endAt,
+      durationMinutes,
+      ...(sleepType === undefined ? {} : { sleepType }),
+    },
+  });
+  const mainSleep = {
+    resourceId: "legacy-main-sleep",
+    occurredAt: "2026-06-02T22:00:00.000Z",
+    endAt: "2026-06-03T06:00:00.000Z",
+    durationMinutes: 480,
+    title: "WHOOP sleep" as const,
+  };
+  const nap = {
+    resourceId: "legacy-nap",
+    occurredAt: "2026-06-03T14:00:00.000Z",
+    endAt: "2026-06-03T14:30:00.000Z",
+    durationMinutes: 30,
+    title: "WHOOP nap" as const,
+  };
+  const deletedNap = {
+    resourceId: "legacy-deleted-nap",
+    occurredAt: "2026-06-03T15:00:00.000Z",
+    endAt: "2026-06-03T15:30:00.000Z",
+    durationMinutes: 30,
+    title: "WHOOP nap" as const,
+  };
+  const editedNap = {
+    resourceId: "legacy-edited-nap",
+    occurredAt: "2026-06-03T16:00:00.000Z",
+    endAt: "2026-06-03T16:30:00.000Z",
+    durationMinutes: 30,
+    title: "WHOOP nap" as const,
+  };
+
+  const legacy = await importDeviceBatch({
     vaultRoot,
     provider: "whoop",
     accountId: "whoop-user-1",
-    importedAt,
-    events: [{
+    importedAt: "2026-06-03T11:00:00.000Z",
+    events: [
+      buildSleepEvent(mainSleep),
+      buildSleepEvent(nap),
+      buildSleepEvent(deletedNap),
+      buildSleepEvent(editedNap),
+    ],
+  });
+  const deletedEventId = legacy.events[2]?.id;
+  const editedEventId = legacy.events[3]?.id;
+  assert.ok(deletedEventId);
+  assert.ok(editedEventId);
+  await deleteEvent({ vaultRoot, eventId: deletedEventId });
+  const eventShardPath = legacy.eventShardPaths[0] as string;
+  const editedBase = ((await readJsonlRecords({ vaultRoot, relativePath: eventShardPath })) as EventRecord[])
+    .find((record) => record.id === editedEventId && (record.lifecycle?.revision ?? 1) === 1);
+  assert.ok(editedBase);
+  const editedByUser = {
+    ...editedBase,
+    source: "manual",
+    note: "keep this user context",
+    lifecycle: { revision: 2 },
+  } satisfies EventRecord;
+  await fs.appendFile(path.join(vaultRoot, eventShardPath), `${JSON.stringify(editedByUser)}\n`);
+
+  const enrichedSnapshotEvents = [
+    buildSleepEvent({ ...mainSleep, sleepType: "main_sleep" }),
+    buildSleepEvent({ ...nap, sleepType: "nap" }),
+    buildSleepEvent({ ...deletedNap, sleepType: "nap" }),
+    buildSleepEvent({ ...editedNap, sleepType: "nap" }),
+    {
       kind: "observation" as const,
       occurredAt: "2026-06-03T07:30:00.000Z",
       recordedAt: "2026-06-03T07:30:00.000Z",
@@ -6692,27 +6824,175 @@ test("importDeviceBatch rejects conflicting WHOOP content at the same source rev
       externalRef: {
         system: "whoop",
         resourceType: "recovery",
-        resourceId: "sleep-version-conflict",
+        resourceId: "mixed-snapshot-recovery",
         version: "2026-06-03T10:00:00.000Z",
         facet: "recovery-score",
       },
       fields: {
         metric: "recovery-score",
-        value,
+        value: 67,
         unit: "%",
       },
-    }],
+    },
+  ];
+
+  const enriched = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-06-04T11:00:00.000Z",
+    events: enrichedSnapshotEvents,
   });
-  const first = await importDeviceBatch(buildInput(67, "2026-06-03T11:00:00.000Z"));
-  const eventShardPath = first.eventShardPaths[0] as string;
-  const beforeConflict = await fs.readFile(path.join(vaultRoot, eventShardPath));
+
+  assert.ok(enriched.applied);
+  const enrichedMainSleep = enriched.events.find(
+    (event) => event.externalRef?.resourceId === mainSleep.resourceId,
+  );
+  const enrichedNap = enriched.events.find(
+    (event) => event.externalRef?.resourceId === nap.resourceId,
+  );
+  assert.equal(enrichedMainSleep?.id, legacy.events[0]?.id);
+  assert.equal(enrichedMainSleep?.lifecycle?.revision, 2);
+  assert.equal(
+    enrichedMainSleep?.kind === "sleep_session" ? enrichedMainSleep.sleepType : undefined,
+    "main_sleep",
+  );
+  assert.equal(enrichedNap?.id, legacy.events[1]?.id);
+  assert.equal(enrichedNap?.lifecycle?.revision, 2);
+  assert.equal(
+    enrichedNap?.kind === "sleep_session" ? enrichedNap.sleepType : undefined,
+    "nap",
+  );
+  assert.ok(
+    enriched.events.some((event) => event.externalRef?.resourceId === "mixed-snapshot-recovery"),
+  );
+
+  const afterEnrichment = await fs.readFile(path.join(vaultRoot, eventShardPath));
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  assert.equal(
+    records.length,
+    9,
+    "expected four legacy rows, two user-state revisions, two enrichments, and the new resource",
+  );
+  assert.equal(await findEventByExternalRef({
+    vaultRoot,
+    system: "whoop",
+    resourceType: "sleep",
+    resourceId: deletedNap.resourceId,
+  }), null);
+  const preservedUserEdit = await findEventByExternalRef({
+    vaultRoot,
+    system: "whoop",
+    resourceType: "sleep",
+    resourceId: editedNap.resourceId,
+  });
+  assert.equal(preservedUserEdit?.id, editedEventId);
+  assert.equal(preservedUserEdit?.note, "keep this user context");
+  assert.equal(
+    preservedUserEdit?.kind === "sleep_session" ? preservedUserEdit.sleepType : undefined,
+    undefined,
+  );
+
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-06-05T11:00:00.000Z",
+    events: enrichedSnapshotEvents,
+  });
+  assert.equal(
+    replay.events.find((event) => event.externalRef?.resourceId === mainSleep.resourceId)?.id,
+    legacy.events[0]?.id,
+  );
+  assert.equal(
+    replay.events.find((event) => event.externalRef?.resourceId === nap.resourceId)?.id,
+    legacy.events[1]?.id,
+  );
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventShardPath)), afterEnrichment);
+});
+
+test("importDeviceBatch rejects sleep-type enrichment with other same-revision changes atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-version-conflict");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = ({
+    endAt,
+    durationMinutes,
+    sleepType,
+    importedAt,
+    includeUnrelated = false,
+  }: {
+    endAt: string;
+    durationMinutes: number;
+    sleepType?: "main_sleep";
+    importedAt: string;
+    includeUnrelated?: boolean;
+  }) => ({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt,
+    events: [
+      {
+        kind: "sleep_session" as const,
+        occurredAt: "2026-06-02T22:00:00.000Z",
+        recordedAt: endAt,
+        dayKey: "2026-06-03",
+        title: "WHOOP sleep",
+        externalRef: {
+          system: "whoop",
+          resourceType: "sleep",
+          resourceId: "sleep-version-conflict",
+          version: "2026-06-03T10:00:00.000Z",
+        },
+        fields: {
+          startAt: "2026-06-02T22:00:00.000Z",
+          endAt,
+          durationMinutes,
+          ...(sleepType === undefined ? {} : { sleepType }),
+        },
+      },
+      ...(includeUnrelated ? [{
+        kind: "observation" as const,
+        occurredAt: "2026-06-03T08:00:00.000Z",
+        recordedAt: "2026-06-03T08:00:00.000Z",
+        title: "WHOOP strain score",
+        externalRef: {
+          system: "whoop",
+          resourceType: "cycle",
+          resourceId: "unrelated-conflict-batch-resource",
+          version: "2026-06-03T10:00:00.000Z",
+          facet: "strain-score",
+        },
+        fields: {
+          metric: "strain-score",
+          value: 12.4,
+          unit: "score",
+        },
+      }] : []),
+    ],
+  });
+  await importDeviceBatch(buildInput({
+    endAt: "2026-06-03T06:00:00.000Z",
+    durationMinutes: 480,
+    importedAt: "2026-06-03T11:00:00.000Z",
+  }));
+  const beforeConflict = await snapshotVaultFiles(vaultRoot);
 
   await assert.rejects(
-    importDeviceBatch(buildInput(70, "2026-06-04T11:00:00.000Z")),
+    importDeviceBatch(buildInput({
+      endAt: "2026-06-03T05:30:00.000Z",
+      durationMinutes: 450,
+      sleepType: "main_sleep",
+      importedAt: "2026-06-04T11:00:00.000Z",
+      includeUnrelated: true,
+    })),
     (error) => error instanceof VaultError && error.code === "EVENT_SOURCE_REVISION_CONFLICT",
   );
 
-  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventShardPath)), beforeConflict);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
 });
 
 test("importDeviceBatch keeps Junction sleep summary stages over later cycle fallback facts", async () => {

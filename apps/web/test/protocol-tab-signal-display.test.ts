@@ -41,12 +41,6 @@ describe("ProtocolTab signal display", () => {
         direction: "up",
       },
       {
-        routeId: "at-home-static-stretching-for-flexibility",
-        label: "Perceived Stiffness",
-        expected: "Less stiff",
-        direction: "down",
-      },
-      {
         routeId: "pneumatic-compression-pants",
         label: "Muscle Soreness Score",
         expected: "Less sore",
@@ -63,24 +57,6 @@ describe("ProtocolTab signal display", () => {
         label: "Perceived Recovery Score",
         expected: "More recovered",
         direction: "up",
-      },
-      {
-        routeId: "red-near-infrared-skin-texture-photoaging",
-        label: "Periocular Wrinkle Score",
-        expected: "Softer lines",
-        direction: "down",
-      },
-      {
-        routeId: "red-near-infrared-skin-texture-photoaging",
-        label: "Standardized Skin Photo Score",
-        expected: "Better skin",
-        direction: "down",
-      },
-      {
-        routeId: "red-near-infrared-skin-texture-photoaging",
-        label: "Skin Texture / Roughness Score",
-        expected: "Smoother texture",
-        direction: "down",
       },
     ];
 

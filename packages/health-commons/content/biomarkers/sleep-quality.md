@@ -47,7 +47,7 @@ measurementContexts:
 unit: score
 interpretationFrame:
   principle: Compare repeated same-scale ratings against your own baseline, and interpret them alongside bedtime, wake time, sleep duration, symptoms, and confounders.
-  caveat: Subjective sleep quality is valuable because it captures lived experience, but it can be influenced by mood, stress, expectations, illness, alcohol, pain, and what happened after waking.
+  caveat: Murph experiment sessions use a lightweight 0-to-10 rating where 0 is worst possible and 10 is best possible; this is not a diagnostic questionnaire. Mood, stress, expectations, illness, alcohol, pain, and what happened after waking can move the rating.
 biomarker:
   shortName: Sleep quality
   displayName: Subjective Sleep Quality
@@ -56,7 +56,7 @@ biomarker:
   direction:
     desired: higher_or_stable
     label: Better or stable sleep quality is the goal.
-    nuance: Use a consistent scale where higher means better. Do not compare a 1-5 rating against a PSQI global score without conversion.
+    nuance: Use the same 0-to-10 wording where higher means better. Keep legacy ratings and PSQI global scores separate unless a documented conversion exists.
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 7
@@ -79,7 +79,7 @@ biomarker:
   measurement:
     bestContext: Record the rating soon after waking, before the day changes your memory of the night.
     howToMeasure:
-      - Use the same 1-5 or 1-10 scale every morning, with higher meaning better sleep quality.
+      - Ask the same 0-to-10 question every morning, where 0 is worst possible and 10 is best possible.
       - Optionally pair the rating with a short note such as rested, restless, woke often, hard to fall asleep, or woke too early.
       - Keep the scale stable across baseline and intervention; do not switch questionnaires mid-experiment.
     confounders:
@@ -100,6 +100,6 @@ communityOutcomeSummary:
 
 Subjective sleep quality is a practical primary outcome for morning-light experiments because it is low-burden and close to the outcomes used in the closest outdoor/natural-light sources.
 
-Use it as a **same-person trend**, not a diagnosis. A useful log can be as simple as: “How was your sleep quality last night?” on a stable 1-5 or 1-10 scale, plus bedtime, final wake time, morning alertness, and a short confounder note.
+Use it as a **same-person trend**, not a diagnosis. A useful Murph log can be as simple as: “How was your sleep quality last night, from 0 (worst possible) to 10 (best possible)?” plus bedtime, final wake time, morning alertness, and a short confounder note.
 
 For Morning Outdoor Light Exposure, subjective sleep quality should be interpreted alongside exposure adherence, sleep timing, evening-light changes, symptoms, UV/heat constraints, and whether the exposure was truly outdoors rather than through a window.

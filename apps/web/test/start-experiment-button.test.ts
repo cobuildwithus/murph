@@ -14,6 +14,12 @@ import { MURPH_EXPERIMENT_TELEGRAM_URL } from "@/src/lib/experiments/start-exper
 
 import { renderClientComponent } from "./render-client-component";
 
+const TEST_PROTOCOL_REF = {
+  key: "protocol_variant:dry-sauna/murph-standard-3x-week",
+  pageRevisionId: `sha256:${"1".repeat(64)}`,
+  runSpecRevisionId: `sha256:${"2".repeat(64)}`,
+};
+
 const mocks = vi.hoisted(() => ({
   authButtonClicksEnabled: true,
 }));
@@ -105,6 +111,7 @@ describe("StartExperimentButton", () => {
         },
         murphPhoneNumber: "+15550100001",
         protocolDays: 14,
+        protocolRef: TEST_PROTOCOL_REF,
         protocolTitle: "Finnish Dry Sauna",
       }),
     );
@@ -126,8 +133,10 @@ describe("StartExperimentButton", () => {
     const links = Array.from(container.querySelectorAll("a"))
       .map((anchor) => (anchor as HTMLAnchorElement).href);
     expect(links.some((href) => href.startsWith("sms:+15550100001?body="))).toBe(true);
-    expect(links).toContain(MURPH_EXPERIMENT_TELEGRAM_URL);
+    expect(links.some((href) => href.startsWith(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`))).toBe(true);
     expect(links.some((href) => href.startsWith("mailto:murph@mail.withmurph.ai"))).toBe(true);
+    expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
+      .toContain(TEST_PROTOCOL_REF.runSpecRevisionId);
 
     const renderedContactSurface = [
       container.textContent ?? "",
@@ -190,7 +199,7 @@ describe("StartExperimentButton", () => {
     expect(container.textContent).toContain("2 available");
     expect(container.textContent).not.toContain("member@example.test");
     expect(links).toEqual([
-      MURPH_EXPERIMENT_TELEGRAM_URL,
+      expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
       expect.stringMatching(/^mailto:murph@mail\.withmurph\.ai/u),
     ]);
   });
@@ -247,7 +256,11 @@ describe("StartExperimentButton", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
-    expect(open).toHaveBeenCalledWith(MURPH_EXPERIMENT_TELEGRAM_URL, "_blank", "noreferrer");
+    expect(open).toHaveBeenCalledWith(
+      expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
+      "_blank",
+      "noreferrer",
+    );
     expect(assign).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("Choose where to start.");
   });
@@ -268,7 +281,11 @@ describe("StartExperimentButton", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
-    expect(open).toHaveBeenCalledWith(MURPH_EXPERIMENT_TELEGRAM_URL, "_blank", "noreferrer");
+    expect(open).toHaveBeenCalledWith(
+      expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
+      "_blank",
+      "noreferrer",
+    );
     expect(assign).not.toHaveBeenCalled();
   });
 });

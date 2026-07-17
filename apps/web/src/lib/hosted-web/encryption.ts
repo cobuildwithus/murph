@@ -11,6 +11,7 @@ export async function encryptHostedWebNullableString(input: {
   field: string;
   memberId: string;
   prisma?: HostedWebEncryptionPrismaClient;
+  signal?: AbortSignal;
   value: string | null | undefined;
 }): Promise<string | null> {
   return sealHostedUserSecureBoxString({
@@ -23,6 +24,7 @@ export async function encryptHostedWebNullableString(input: {
     lane: "hosted-member-private-field",
     prisma: input.prisma,
     scope: `hosted-member-private-field:${input.field}`,
+    signal: input.signal,
     userId: input.memberId,
     value: input.value,
   });
@@ -32,6 +34,7 @@ export async function decryptHostedWebNullableString(input: {
   field: string;
   memberId: string;
   prisma?: HostedWebEncryptionPrismaClient;
+  signal?: AbortSignal;
   value: string | null | undefined;
 }): Promise<string | null> {
   return openHostedUserSecureBoxString({
@@ -44,6 +47,7 @@ export async function decryptHostedWebNullableString(input: {
     lane: "hosted-member-private-field",
     prisma: input.prisma,
     scope: `hosted-member-private-field:${input.field}`,
+    signal: input.signal,
     userId: input.memberId,
     value: input.value,
   });

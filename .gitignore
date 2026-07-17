@@ -14,6 +14,7 @@ coverage/
 .runtime/
 .next/
 .next-dev/
+.next-dev*/
 .next-smoke/
 .next-smoke*/
 apps/web/next-env.d.ts

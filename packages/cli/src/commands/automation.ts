@@ -2,16 +2,21 @@ import { Cli, z } from "incur";
 
 import { isHostedRuntimeProcessEnv } from "@murphai/hosted-execution/env";
 import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   assistantReasoningEffortValues,
   automationAssistantTargetOverrideSchema,
+  automationActiveUntilSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
   automationScheduleKindValues,
+  automationSupportKindValues,
   automationTimeScheduleKindValues,
   automationStatusValues,
+  buildAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
   type AutomationRoute,
   type AutomationScaffoldPayload,
@@ -40,11 +45,12 @@ import {
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   patchAutomation,
+  reconcileAutomationSupportSeries,
   scaffoldAutomationPayload,
   upsertAutomation,
 } from "@murphai/core";
 import {
-  listAutomations,
+  listAutomationPage,
   showAutomation,
 } from "@murphai/query";
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -63,6 +69,11 @@ interface AutomationScheduleOptions {
   triggerEveryMs?: number;
   triggerKind?: AutomationScheduleKind;
   triggerLocalTime?: string;
+}
+
+interface AutomationLifecycleOptions {
+  activeUntil?: string;
+  clearActiveUntil?: boolean;
 }
 
 interface AutomationRouteOptions {
@@ -91,9 +102,11 @@ export const automationRecordSchema = z
     title: z.string().min(1),
     status: z.enum(automationStatusValues),
     summary: z.string().min(1).nullable(),
+    activeUntil: automationActiveUntilSchema.nullable().default(null),
     schedule: automationScheduleSchema,
     route: automationRouteSchema,
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable(),
+    supportKind: z.enum(automationSupportKindValues).nullable(),
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
@@ -116,9 +129,13 @@ export const automationListResultSchema = z.object({
   filters: z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
     text: z.string().nullable(),
+    supportSeriesId: z.string().nullable(),
+    cursor: z.string().nullable(),
     limit: z.number().int().positive().max(200),
   }),
   count: z.number().int().nonnegative(),
+  totalCount: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
   items: z.array(automationListItemSchema),
 });
 
@@ -139,6 +156,18 @@ export const automationScaffoldResultSchema = z.object({
   vault: pathSchema,
   noun: z.literal("automation"),
   payload: automationScaffoldPayloadSchema,
+});
+
+export const automationSupportSeriesReconcileResultSchema = z.object({
+  vault: pathSchema,
+  supportSeriesId: z.string().min(1),
+  supportSeriesTag: z.string().min(1),
+  desiredAutomationIds: z.array(z.string().min(1)),
+  matchedCount: z.number().int().nonnegative(),
+  archivedCount: z.number().int().nonnegative(),
+  unchangedCount: z.number().int().nonnegative(),
+  missingDesiredAutomationIds: z.array(z.string().min(1)),
+  auditPath: pathSchema.nullable(),
 });
 
 export function createAutomationScaffoldPayload(): z.infer<
@@ -230,6 +259,31 @@ function buildAutomationScheduleFromOptions(
 
 function hasDefinedAutomationOption(options: object): boolean {
   return Object.values(options).some((value) => value !== undefined);
+}
+
+function buildAutomationActiveUntilPatch(
+  options: AutomationLifecycleOptions,
+): string | null | undefined {
+  if (options.clearActiveUntil === true) {
+    if (options.activeUntil !== undefined) {
+      return invalidAutomationOption(
+        "--clear-active-until cannot be combined with --active-until.",
+      );
+    }
+    return null;
+  }
+
+  return options.activeUntil;
+}
+
+function requireAutomationSupportSeriesTagFromId(seriesId: string): string {
+  try {
+    return buildAutomationSupportSeriesTag(seriesId);
+  } catch {
+    return invalidAutomationOption(
+      "Support series id must be 1-200 characters using letters, numbers, colon, period, underscore, or hyphen.",
+    );
+  }
 }
 
 function buildAutomationRouteFromOptions(
@@ -324,7 +378,24 @@ function buildAutomationAssistantTargetOverridePatchFromOptions(
   });
 }
 
+function buildAutomationSupportKindPatchFromOptions(input: {
+  clearSupportKind?: boolean;
+  supportKind?: (typeof automationSupportKindValues)[number];
+}): (typeof automationSupportKindValues)[number] | null | undefined {
+  if (input.clearSupportKind === true) {
+    if (input.supportKind !== undefined) {
+      return invalidAutomationOption(
+        "--clear-support-kind cannot be combined with --support-kind.",
+      );
+    }
+    return null;
+  }
+  return input.supportKind;
+}
+
 function normalizeAutomationTagOptions(input: {
+  existingTags?: readonly string[];
+  supportSeriesId?: string;
   tag?: readonly string[];
   tags?: readonly string[];
 }): string[] | undefined {
@@ -336,14 +407,47 @@ function normalizeAutomationTagOptions(input: {
   }
 
   const values = input.tag ?? input.tags;
-  if (values === undefined) {
-    return undefined;
+  const normalizedTags = values === undefined
+    ? undefined
+    : normalizeRepeatableFlagOption(
+        values,
+        input.tag === undefined ? "tags" : "tag",
+      );
+  assertNoRawAutomationSupportSeriesTags(normalizedTags);
+
+  if (input.supportSeriesId === undefined) {
+    const existingSupportSeriesTag = input.existingTags?.find((tag) =>
+      tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+    );
+    if (normalizedTags !== undefined && existingSupportSeriesTag !== undefined) {
+      return [...normalizedTags, existingSupportSeriesTag];
+    }
+    return normalizedTags;
   }
 
-  return normalizeRepeatableFlagOption(
-    values,
-    input.tag === undefined ? "tags" : "tag",
+  const supportSeriesTag = requireAutomationSupportSeriesTagFromId(
+    input.supportSeriesId,
   );
+  const baseTags = normalizedTags ?? input.existingTags ?? [];
+  return [
+    ...baseTags.filter((tag) => !tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)),
+    supportSeriesTag,
+  ];
+}
+
+function assertNoRawAutomationSupportSeriesTags(
+  tags: readonly string[] | undefined,
+): void {
+  if (tags?.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)) {
+    return invalidAutomationOption(
+      `${AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG} is an internal reconciliation marker and cannot be set directly.`,
+    );
+  }
+  if (tags?.some((tag) => tag.trim().startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX))) {
+    return invalidAutomationOption(
+      `Reserved ${AUTOMATION_SUPPORT_SERIES_TAG_PREFIX}<series-id> tags must be set with --support-series-id.`,
+    );
+  }
 }
 
 function normalizeDeviceActivityKindOption(
@@ -369,6 +473,13 @@ function normalizeDeviceActivityKindOption(
 }
 
 const automationSharedOptionSchemas = {
+  activeUntil: automationActiveUntilSchema
+    .optional()
+    .describe("Exclusive automation end timestamp, including a one-shot retry deadline."),
+  clearActiveUntil: z
+    .boolean()
+    .optional()
+    .describe("Clear the automation end timestamp."),
   slug: z
     .string()
     .regex(automationSlugPattern)
@@ -384,11 +495,21 @@ const automationSharedOptionSchemas = {
   tag: z
     .array(z.string().min(1))
     .optional()
-    .describe("Optional automation tag. Repeat --tag for multiple values."),
+    .describe("Optional ordinary automation tag. Repeat --tag; use --support-series-id for reserved ownership."),
   tags: z
     .array(z.string().min(1))
     .optional()
-    .describe("Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags."),
+    .describe("Legacy alias for --tag ordinary values. Reserved support-series tags are rejected."),
+  supportSeriesId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Assign the canonical support-series id; reserved raw tags are not accepted."),
+  supportKind: z
+    .enum(automationSupportKindValues)
+    .optional()
+    .describe("Persist the exact accepted support purpose for a plan-owned automation."),
   continuityPolicy: z
     .enum(automationContinuityPolicyValues)
     .optional()
@@ -509,6 +630,10 @@ const automationEditOptionSchemas = {
     .min(1)
     .optional()
     .describe("Optional automation instructions."),
+  clearSupportKind: z
+    .boolean()
+    .optional()
+    .describe("Clear persisted plan-support consent metadata."),
   clearAssistantTargetOverride: z
     .boolean()
     .optional()
@@ -573,6 +698,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         assertAutomationRouteCanDeliver(route);
       }
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
+        activeUntil: buildAutomationActiveUntilPatch({
+          activeUntil: context.options.activeUntil,
+          clearActiveUntil: context.options.clearActiveUntil,
+        }),
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         assistantTargetOverride: buildAutomationAssistantTargetOverrideFromOptions({
@@ -580,6 +709,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           assistantTargetOverrideModelProvider: context.options.assistantTargetOverrideModelProvider,
           assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
         }),
+        supportKind: context.options.supportKind,
         instructions: context.options.instructions,
         route,
         schedule: buildAutomationScheduleFromOptions({
@@ -600,6 +730,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         status: context.options.status,
         summary: context.options.summary,
         tags: normalizeAutomationTagOptions({
+          supportSeriesId: context.options.supportSeriesId,
           tag: context.options.tag,
           tags: context.options.tags,
         }),
@@ -690,7 +821,15 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         existingAssistantTargetOverride: existing.assistantTargetOverride,
       });
       const result = await patchAutomation({
+        activeUntil: buildAutomationActiveUntilPatch({
+          activeUntil: context.options.activeUntil,
+          clearActiveUntil: context.options.clearActiveUntil,
+        }),
         assistantTargetOverride,
+        supportKind: buildAutomationSupportKindPatchFromOptions({
+          clearSupportKind: context.options.clearSupportKind,
+          supportKind: context.options.supportKind,
+        }),
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
@@ -703,6 +842,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         status: context.options.status,
         summary: context.options.summary,
         tags: normalizeAutomationTagOptions({
+          existingTags: existing.tags,
+          supportSeriesId: context.options.supportSeriesId,
           tag: context.options.tag,
           tags: context.options.tags,
         }),
@@ -786,11 +927,32 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Optional lexical filter across title, instructions, route, and metadata."),
+      supportSeriesId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional exact support-series id filter, for example experiment:exp_123."),
+      cursor: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Continue an exact support-series listing after this automation id."),
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
     async run(context) {
-      const items = await listAutomations(context.options.vault, {
+      if (context.options.cursor !== undefined && context.options.supportSeriesId === undefined) {
+        return invalidAutomationOption(
+          "--cursor requires --support-series-id so pagination uses immutable automation ids.",
+        );
+      }
+      const supportSeriesId = context.options.supportSeriesId?.trim();
+      const exactTag = supportSeriesId === undefined
+        ? undefined
+        : requireAutomationSupportSeriesTagFromId(supportSeriesId);
+      const page = await listAutomationPage(context.options.vault, {
+        cursor: context.options.cursor,
+        exactTag,
         limit: context.options.limit,
         status: context.options.status,
         text: context.options.text,
@@ -801,10 +963,58 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         filters: {
           status: context.options.status ?? null,
           text: context.options.text ?? null,
+          supportSeriesId: supportSeriesId ?? null,
+          cursor: context.options.cursor ?? null,
           limit: context.options.limit,
         },
-        count: items.length,
-        items: items.map((item) => automationListItem(item)),
+        count: page.items.length,
+        totalCount: page.totalCount,
+        nextCursor: page.nextCursor,
+        items: page.items.map((item) => automationListItem(item)),
+      };
+    },
+  });
+
+  automation.command("reconcile-support-series", {
+    args: z.object({
+      seriesId: z
+        .string()
+        .min(1)
+        .describe("Canonical support-series id, for example experiment:exp_123."),
+    }),
+    description: "Archive support-series automations that are not in the desired active id set.",
+    options: withBaseOptions({
+      desiredAutomationId: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Automation id to keep in the support series. Repeat for multiple ids; omit to archive the whole series."),
+    }),
+    output: automationSupportSeriesReconcileResultSchema,
+    async run(context) {
+      assertAutomationCliMutationAllowed();
+      const supportSeriesId = context.args.seriesId.trim();
+      const supportSeriesTag = requireAutomationSupportSeriesTagFromId(
+        supportSeriesId,
+      );
+      const desiredAutomationIds = [...new Set(
+        context.options.desiredAutomationId ?? [],
+      )].sort((left, right) => left.localeCompare(right));
+      const result = await reconcileAutomationSupportSeries({
+        desiredAutomationIds,
+        supportSeriesTag,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        supportSeriesId,
+        supportSeriesTag,
+        desiredAutomationIds,
+        matchedCount: result.matchedCount,
+        archivedCount: result.archivedCount,
+        unchangedCount: result.unchangedCount,
+        missingDesiredAutomationIds: result.missingDesiredAutomationIds,
+        auditPath: result.auditPath,
       };
     },
   });
@@ -827,6 +1037,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation payload",
         ),
       );
+      assertNoRawAutomationSupportSeriesTags(input.tags);
       const route = normalizeAutomationRouteFieldsForSave(input.route);
       if (automationStatusIsActive(input.status)) {
         assertAutomationRouteCanDeliver(route);

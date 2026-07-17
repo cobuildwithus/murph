@@ -60,6 +60,15 @@ describe("Health Commons route-bundle boundary", () => {
     expect(source).not.toContain("auth(");
   });
 
+  it("keeps experiment browse code off the filesystem-backed Health Commons runtime", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "apps/web/src/lib/health-commons/experiment-browse.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("@murphai/health-commons/runtime");
+  });
+
   it("keeps public biomarker pages on generated page projections instead of route bundles", () => {
     const files = [
       "apps/web/app/(dashboard)/biomarkers/page.tsx",

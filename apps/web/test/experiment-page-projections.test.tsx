@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveHealthCommonsExperimentResultsPublic } from "@/src/lib/health-commons/experiment-projections";
 import type { ProtocolTabExperiment } from "@/src/components/experiments/experiment-detail/protocol-tab";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  hostedStart: vi.fn(),
   protocolTab: vi.fn(),
   resultsTabClient: vi.fn(),
 }));
@@ -76,7 +78,16 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-start-button-s
   ExperimentStartButtonFallback({ protocolTitle }: { protocolTitle: string }) {
     return createElement("button", { type: "button" }, protocolTitle);
   },
-  HostedExperimentStartButton({ protocolTitle }: { protocolTitle: string }) {
+  HostedExperimentStartButton(props: {
+    protocolRef?: {
+      key: string;
+      pageRevisionId: string;
+      runSpecRevisionId: string;
+    } | null;
+    protocolTitle: string;
+  }) {
+    mocks.hostedStart(props);
+    const { protocolTitle } = props;
     return createElement("button", { type: "button" }, protocolTitle);
   },
 }));
@@ -98,6 +109,7 @@ describe("experiment page projections", () => {
       session: null,
     });
     mocks.notFound.mockClear();
+    mocks.hostedStart.mockClear();
     mocks.protocolTab.mockClear();
     mocks.resultsTabClient.mockClear();
   });
@@ -181,8 +193,31 @@ describe("experiment page projections", () => {
       }),
     });
     const markup = renderToStaticMarkup(element);
+    const resultsPublic = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
+
+    if (!resultsPublic?.commons.runSpecRevisionId) {
+      throw new Error("Expected exact Finnish sauna protocol lineage.");
+    }
 
     expect(markup).toContain("child");
+    expect(mocks.hostedStart).toHaveBeenCalledWith(expect.objectContaining({
+      protocolRef: {
+        key: resultsPublic.commons.key,
+        pageRevisionId: resultsPublic.commons.pageRevisionId,
+        runSpecRevisionId: resultsPublic.commons.runSpecRevisionId,
+      },
+    }));
+  });
+
+  it("returns not found for an explicit draft protocol instead of rendering Start", async () => {
+    await expect(ExperimentDetailLayout({
+      children: createElement("div", null, "child"),
+      params: Promise.resolve({
+        experimentId: "red-light-glasses-before-bed",
+      }),
+    })).rejects.toThrow("NEXT_NOT_FOUND");
+
+    expect(mocks.hostedStart).not.toHaveBeenCalled();
   });
 
   it("renders the protocol tab projection with full-detail parity for protocol-only fields", async () => {

@@ -118,6 +118,13 @@ export class InvalidRouteParamEncodingError extends TypeError {
   }
 }
 
+export class InvalidJsonObjectBodyError extends TypeError {
+  constructor() {
+    super("Request body must be a JSON object.");
+    this.name = "InvalidJsonObjectBodyError";
+  }
+}
+
 export interface JsonBodyReadOptions {
   limitBytes?: number;
 }
@@ -401,7 +408,7 @@ export function mergeJsonHeaders(
 
 function requireJsonObject(body: unknown): Record<string, unknown> {
   if (!isRecord(body)) {
-    throw new TypeError("Request body must be a JSON object.");
+    throw new InvalidJsonObjectBodyError();
   }
 
   return body;

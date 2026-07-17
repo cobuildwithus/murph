@@ -28,6 +28,7 @@ import {
   type HealthCommonsWebBiomarkerProjectionArtifact,
   type HealthCommonsWebBiomarkerProjectionKey,
 } from "./biomarker-web-artifacts.ts";
+import { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export {
   HEALTH_COMMONS_WEB_BIOMARKER_OVERVIEW_SCHEMA_VERSION,
@@ -559,6 +560,9 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     if (!WEB_BUNDLE_ENTITY_TYPES.has(entity.entityType)) {
       continue;
     }
+    if (entity.entityType === "protocol_variant" && !isPublicProtocolVariant(entity)) {
+      continue;
+    }
 
     const routeIds = buildEntityRouteIds(entity, redirectsByTarget.get(entity.key) ?? []);
     const routeId = selectPrimaryRouteId(entity, routeIds);
@@ -701,7 +705,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         .filter((bundle) => bundle.route.entityType === "protocol_variant")
         .flatMap((bundle) => {
           const entity = entitiesByKey.get(bundle.primaryKey);
-          if (!entity) {
+          if (!isPublicProtocolVariant(entity)) {
             return [];
           }
           return [{
@@ -2268,7 +2272,7 @@ function isPublicProtocolVariant(
   entity: HealthCommonsCatalogEntity | undefined,
 ): entity is HealthCommonsCatalogEntity & { entityType: "protocol_variant" } {
   return entity?.entityType === "protocol_variant"
-    && entity.status !== "deprecated"
+    && isRunnableProtocolStatus(entity.status)
     && entity.hidden !== true;
 }
 
@@ -2332,9 +2336,14 @@ function collectRouteClosureKeys(
       return;
     }
     const stripped = stripRevision(key);
-    if (entitiesByKey.has(stripped)) {
-      keys.add(stripped);
+    const entity = entitiesByKey.get(stripped);
+    if (!entity) {
+      return;
     }
+    if (entity.entityType === "protocol_variant" && !isPublicProtocolVariant(entity)) {
+      return;
+    }
+    keys.add(stripped);
   };
 
   for (const relation of primary.relations ?? []) {
@@ -2588,7 +2597,7 @@ function hasPublishedProtocolExpectedSignal(
   for (const entity of entities) {
     if (
       entity.entityType !== "protocol_variant" ||
-      entity.status === "deprecated" ||
+      !isRunnableProtocolStatus(entity.status) ||
       entity.hidden === true
     ) {
       continue;

@@ -75,6 +75,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
     'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
+    'usageCreditBalanceUsdMicros BigInt? @default(0) @map("usage_credit_balance_usd_micros")',
+    "usageCreditEntries HostedUsageCreditEntry[]",
+    'usageCreditLedgerVersion BigInt? @default(0) @map("usage_credit_ledger_version")',
+    'usageCreditPurchasesPaid HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchasePayer")',
+    'usageCreditPurchasesReceived HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchaseBeneficiary")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -624,6 +629,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqSignupWelcomeReservationMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260716190000_linq_signup_welcome_reservation/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
@@ -838,6 +850,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260715150000_hosted_family_pending_member_plan",
       "20260715190000_hosted_assistant_personality_projection_watermarks",
       "20260715230000_hosted_mailbox_subscription_action_claim",
+      "20260716160000_hosted_usage_credits",
+      "20260716190000_linq_signup_welcome_reservation",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
@@ -846,6 +860,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ADD COLUMN "subscription_action_claim" TEXT',
     );
+    expect(linqSignupWelcomeReservationMigrationSql).toContain(
+      'ADD COLUMN "proactive_conversation_day_utc" DATE',
+    );
+    expect(linqSignupWelcomeReservationMigrationSql).toContain(
+      'ADD COLUMN "proactive_conversation_count" INTEGER',
+    );
+    expect(linqSignupWelcomeReservationMigrationSql).not.toContain("UPDATE");
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
       'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
     );

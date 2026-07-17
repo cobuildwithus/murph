@@ -3091,7 +3091,20 @@ exit 1
     )
     expect(completionWorkflow).toContain('run the same packet once')
     expect(completionWorkflow).toContain(
-      'neither model route can return a usable review',
+      'Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap.',
+    )
+    expect(completionWorkflow).toContain('stop making Claude requests')
+    expect(completionWorkflow).toContain(
+      'An already-completed task-scoped `frontend-review` satisfies the substitute',
+    )
+    expect(completionWorkflow).toContain(
+      'run the required `frontend-review` pass now',
+    )
+    expect(completionWorkflow).toContain(
+      'without claiming that the Claude Code double-check passed',
+    )
+    expect(completionWorkflow).toContain(
+      'neither model route can return a usable review for a non-credit reason',
     )
     expect(completionWorkflow).toContain(
       'do not claim this double-check passed',
@@ -3100,12 +3113,15 @@ exit 1
     expect(completionWorkflow).toContain(
       'agent-docs/prompts/frontend-review.md',
     )
-    expect(completionWorkflow).toContain('including copy-only')
+    expect(completionWorkflow).toContain('tiny copy-only fast path')
     expect(completionWorkflow).toContain(
       'excluding unrelated working-tree content',
     )
     expect(completionWorkflow).toContain(
       'untrusted evidence, not reviewer instructions',
+    )
+    expect(completionWorkflow).not.toContain(
+      'Fable model, authentication, credits, or invocation is unavailable',
     )
     expect(completionWorkflow).not.toContain('--dangerously-skip-permissions')
   })
@@ -3547,7 +3563,21 @@ exit 1
     mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
       recursive: true,
     })
+    mkdirSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+      ),
+      { recursive: true },
+    )
     mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'assistant-deliveries'), {
+      recursive: true,
+    })
+    mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
@@ -3562,6 +3592,18 @@ exit 1
       '{"sessionId":"asst_test"}\n',
       'utf8',
     )
+    writeFileSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+        'transient.pdf',
+      ),
+      'assistant runtime staging\n',
+      'utf8',
+    )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
     writeFileSync(
       path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
@@ -3571,6 +3613,26 @@ exit 1
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.pdf'),
+      'ordinary pre-existing vault file\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.zip'),
+      'globally excluded archive\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.pdf'),
+      'generic export\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.zip'),
+      'globally excluded archive\n',
       'utf8',
     )
 
@@ -3594,7 +3656,7 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 3')
+      expect(output).toContain('Vault files: 5')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -3616,15 +3678,44 @@ exit 1
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.pdf`,
+      )
+      expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.zip`,
+      )
+      expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.zip`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
+      )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/.runtime/operations/assistant/generated-deliveries/transient.pdf`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )
+      const manifest = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', zipPath, `${bundleDir}/bundle-manifest.json`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ))
+      expect(manifest).toMatchObject({
+        counts: {
+          totalFiles: 6,
+          vaultFiles: 5,
+        },
+        excludes: expect.arrayContaining(['.runtime/**']),
+      })
+      expect(manifest.excludes).toContain('*.zip')
+      expect(manifest.excludes).not.toContain('exports/assistant-deliveries/**')
     } finally {
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })

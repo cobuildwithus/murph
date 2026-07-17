@@ -21,6 +21,7 @@ import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
+import { createHostedRuntimeLabsToolPort } from "./labs-tool-port.ts";
 import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
 import { createHostedRuntimeSubscriptionToolPort } from "./subscription-tool-port.ts";
@@ -253,6 +254,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           groupToolPort: createHostedRuntimeGroupToolPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          labsToolPort: createHostedRuntimeLabsToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

@@ -42,6 +42,7 @@ import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
+  readStripeShouldRetryDirective,
 } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
@@ -65,6 +66,10 @@ import {
   normalizeNullableString,
 } from "./shared";
 import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "./bounded-post-commit";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -74,13 +79,43 @@ import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
 import {
+  HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
+import { isHostedOnboardingError } from "./errors";
+import {
+  HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
+  isHostedUsageCreditStripeRetryableError,
+  reconcileHostedUsageCreditStripeEvent,
+} from "./usage-credit-stripe-reconciliation";
+import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
 
-// One pinned Stripe event retrieve can consume six minutes, the shared member
-// mutation transaction can consume thirteen, and post-commit side effects plus
-// receipt finalization need a bounded two-minute margin.
-const STRIPE_EVENT_LEASE_MS = 21 * 60_000;
+// Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
+// read-only preparation deadline, and a request-count ceiling. Keep the receipt
+// lease large enough for every bounded top-up phase so new provider work cannot
+// silently outrun it.
+const HOSTED_STRIPE_EVENT_LEASE_PHASES = {
+  eventRetrieveMs: 6 * 60_000,
+  marginMs: 60_000,
+  memberMutationMs: HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
+  postCommitMs: 2 * 60_000,
+  usageCreditPreparationMs:
+    HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET.timeoutMs,
+} as const;
+export const HOSTED_STRIPE_EVENT_LEASE_BUDGET = {
+  ...HOSTED_STRIPE_EVENT_LEASE_PHASES,
+  totalMs:
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.eventRetrieveMs +
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.usageCreditPreparationMs +
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.memberMutationMs +
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.postCommitMs +
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.marginMs,
+} as const;
+const STRIPE_EVENT_LEASE_MS = HOSTED_STRIPE_EVENT_LEASE_BUDGET.totalMs;
+const STRIPE_EVENT_RECEIPT_FINALIZATION_MARGIN_MS = 30_000;
+export const HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS =
+  HOSTED_STRIPE_EVENT_LEASE_BUDGET.postCommitMs -
+  STRIPE_EVENT_RECEIPT_FINALIZATION_MARGIN_MS;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
 const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 1000,
@@ -104,12 +139,27 @@ class HostedLegacyFamilyCleanupPendingError extends Error {
   readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
 }
 
+class HostedStripeEventRetrieveRetryableError extends Error {
+  readonly code = "HOSTED_STRIPE_EVENT_RETRIEVE_RETRYABLE";
+
+  constructor(cause: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : "Stripe event retrieval must be retried.",
+      { cause },
+    );
+    this.name = "HostedStripeEventRetrieveRetryableError";
+  }
+}
+
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
   eventId: string;
   hostedExecutionEventId: string | null;
   status: "completed" | "failed";
+  usageCreditGrantedMemberId?: string;
 };
 
 export async function recordHostedStripeEvent(input: {
@@ -644,20 +694,34 @@ async function processClaimedHostedStripeEvent(
     attemptCount: claimed.attemptCount,
     eventType: claimed.type,
   });
+  let usageCreditEventHandled = false;
 
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
-    const directBillingMemberId = await resolveHostedStripeEventDirectBillingMemberId(
-      stripeEvent,
+    const usageCreditReconciliation = await reconcileHostedUsageCreditStripeEvent({
+      event: stripeEvent,
       prisma,
-    );
-    const legacyFamilySubscriptionId = directBillingMemberId
+    });
+    usageCreditEventHandled = usageCreditReconciliation.handled;
+    const directBillingMemberId = usageCreditReconciliation.handled
+      ? null
+      : await resolveHostedStripeEventDirectBillingMemberId(
+          stripeEvent,
+          prisma,
+        );
+    const legacyFamilySubscriptionId = usageCreditReconciliation.handled ||
+        directBillingMemberId
       ? null
       : await prisma.$transaction(
           (tx) => prepareHostedLegacySyntheticFamilyCleanupTx({ event: stripeEvent, tx }),
           HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
         );
-    const processing = legacyFamilySubscriptionId
+    const processing = usageCreditReconciliation.handled
+      ? {
+          memberId: usageCreditReconciliation.beneficiaryMemberId,
+          result: buildEmptyHostedStripeEventProcessingResult(),
+        }
+      : legacyFamilySubscriptionId
       ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
       : directBillingMemberId
       ? await processHostedStripeEventWithVerifiedMemberLock({
@@ -670,6 +734,24 @@ async function processClaimedHostedStripeEvent(
           prisma,
         );
     const { memberId: processingMemberId, result } = processing;
+    if (
+      usageCreditReconciliation.handled &&
+      usageCreditReconciliation.wakeRequired
+    ) {
+      try {
+        await signalHostedUsageCreditRuntimeRecheck({
+          prisma,
+          userId: usageCreditReconciliation.beneficiaryMemberId,
+        });
+      } catch (error) {
+        if (
+          !isHostedOnboardingError(error) ||
+          error.code !== "HOSTED_RUNTIME_USER_INACTIVE"
+        ) {
+          throw error;
+        }
+      }
+    }
     if (legacyFamilySubscriptionId) {
       await executeHostedLegacySyntheticFamilyCleanup({
         invoice: stripeEvent.type === "invoice.paid"
@@ -722,7 +804,7 @@ async function processClaimedHostedStripeEvent(
         }
       }
     }
-    await prisma.hostedStripeEvent.updateMany({
+    const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
         eventId: claimed.eventId,
@@ -736,12 +818,19 @@ async function processClaimedHostedStripeEvent(
         status: HostedStripeEventStatus.completed,
       },
     });
+    if (completed.count !== 1) {
+      throw new Error(
+        "Stripe event receipt ownership changed before completion.",
+      );
+    }
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
       activatedMemberCount: result.activatedMembers?.length ?? 0,
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
       subscriptionCancellationEmailCandidate:
         Boolean(result.subscriptionCancellationEmail),
+      usageCreditGranted:
+        usageCreditReconciliation.handled && usageCreditReconciliation.granted,
       welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
     });
 
@@ -753,10 +842,19 @@ async function processClaimedHostedStripeEvent(
       eventId: claimed.eventId,
       hostedExecutionEventId: result.hostedExecutionEventId,
       status: "completed",
+      ...(usageCreditReconciliation.handled && usageCreditReconciliation.granted
+        ? {
+            usageCreditGrantedMemberId:
+              usageCreditReconciliation.beneficiaryMemberId,
+          }
+        : {}),
     };
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
-      !(error instanceof HostedLegacyFamilyCleanupPendingError);
+      !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
+      !(error instanceof HostedStripeEventRetrieveRetryableError) &&
+      !usageCreditEventHandled &&
+      !isHostedUsageCreditStripeRetryableError(error);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
       error,
@@ -1091,7 +1189,63 @@ async function resolveHostedStripeInvoicePayment(
 }
 
 async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
-  return requireHostedStripeApi().events.retrieve(eventId);
+  const stripe = requireHostedStripeApi();
+  try {
+    return await stripe.events.retrieve(eventId);
+  } catch (error) {
+    if (isDefinitiveHostedStripeEventRetrieveRejection(error)) {
+      throw error;
+    }
+    throw new HostedStripeEventRetrieveRetryableError(error);
+  }
+}
+
+function isDefinitiveHostedStripeEventRetrieveRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const shouldRetry = readStripeShouldRetryDirective(error);
+  if (shouldRetry !== null) {
+    return !shouldRetry;
+  }
+  const statusCode = "statusCode" in error &&
+      typeof error.statusCode === "number"
+    ? error.statusCode
+    : null;
+  if (statusCode !== null) {
+    return statusCode >= 400 &&
+      statusCode < 500 &&
+      statusCode !== 409 &&
+      statusCode !== 429;
+  }
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : null;
+  const rawType = "rawType" in error && typeof error.rawType === "string"
+    ? error.rawType
+    : null;
+  return type === "StripeInvalidRequestError" ||
+    type === "StripeAuthenticationError" ||
+    type === "StripePermissionError" ||
+    rawType === "invalid_request_error" ||
+    rawType === "authentication_error" ||
+    rawType === "permission_error";
+}
+
+async function signalHostedUsageCreditRuntimeRecheck(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<void> {
+  await waitForHostedPostCommitOperation({
+    deadlineMs: createHostedPostCommitDeadline(
+      HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS,
+    ),
+    operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
+      abortSignal,
+      prisma: input.prisma,
+      userId: input.userId,
+    }),
+  });
 }
 
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {

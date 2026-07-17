@@ -29,6 +29,39 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Creating a hosted group
+
+Before any permission-bearing `create_join_link` or `post_join_offer`, call
+`read_current`. Only when it returns `status="none"`, request one reusable core
+set so members do not have to revisit consent for the most common future
+newsletter and challenge uses:
+
+- `group-email.v0`
+- `steps-days.v0`
+- `activity-days.v0`
+- `workout-days.v0`
+- `sleep-duration-days.v0`
+- `sleep-times.v0`
+- `resting-heart-rate-days.v0`
+- `hrv-days.v0`
+
+Pass the set as `requestedVaultShareProjectionScopes` on `create_join_link`, or
+as `projectionScopes` when creation uses `post_join_offer`. This is a permission
+request, not automatic sharing. On the join page, every item stays individually
+selectable. On a like-to-consent offer, liking grants exactly the disclosed
+snapshot and `{{join_url}}` remains the secondary path to share more or less.
+
+Follow an explicit request from the group creator for narrower or different
+health scopes. `group-email.v0` remains the server's standard new-group request,
+and each member may deselect it. Otherwise use the core set even if the first
+idea in the room is one particular challenge; the hosted group is reusable
+beyond that first activity. Do not request every available projection by
+default.
+
+When `read_current` returns an existing group, do not add the core set to that
+group's requested policy. Use only the exact workflow or additive scopes needed
+for the current request.
+
 ## Additive permissions
 
 When the room adds a sharing permission to a group that already exists, default
@@ -238,15 +271,17 @@ edit it, or stop it. One automation per group wins; apply later requests to
 the same stable slug.
 
 When a group asks for a newsletter, do not create it immediately with invented
-defaults. First send one short setup message that gets the essentials: what the
-group wants to call it, when it should go out (Sunday morning is the suggested
-default), whether it should arrive by email or right here in the group chat,
-and any tone preference if they care. For an email health newsletter, also
-propose the default reaction-share scope: name, email, sleep duration, activity
-minutes, workout summaries, resting heart rate, and HRV. Let the group widen
-or narrow that set. If they already gave some of that, or say "just set it up,"
-do not re-interrogate them. Use the current group's non-blank `displayName` from
-`murph.group action="read_current"` as the newsletter name before inventing a
+defaults. First call `murph.group action="read_current"`, then send one short
+setup message that gets the essentials: what the group wants to call it, when
+it should go out (Sunday morning is the suggested default), whether it should
+arrive by email or right here in the group chat, and any tone preference if
+they care. For an email health newsletter, the Creating a hosted group core set
+takes precedence when `read_current` returns `status="none"`. For an existing
+group, propose only the newsletter reaction-share scope: name, email, sleep
+duration, activity minutes, workout summaries, resting heart rate, and HRV. Let
+the group widen or narrow that set. If they already gave some of that, or say
+"just set it up," do not re-interrogate them. Use the existing group's non-blank
+`displayName` from `read_current` as the newsletter name before inventing a
 generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name

@@ -326,24 +326,31 @@ function rankSleepWindows(
   scorecards: Map<string, WearableSleepWindowScorecard>;
   sortedCandidates: WearableSleepWindowCandidate[];
 } {
+  const explicitMainSleep = candidates.filter((candidate) => candidate.sleepType === "main_sleep");
+  const nonNapSleep = candidates.filter((candidate) => candidate.sleepType !== "nap" && !candidate.nap);
+  const eligibleCandidates = explicitMainSleep.length > 0
+    ? explicitMainSleep
+    : nonNapSleep.length > 0
+      ? nonNapSleep
+      : [...candidates];
   const providerScores = buildProviderRankScores(
     "sessionMinutes",
-    candidates.map((candidate) => candidate.provider),
+    eligibleCandidates.map((candidate) => candidate.provider),
     { metricFamily: "sleep" },
   );
   const recencyScores = buildTimestampRankScores(
-    candidates.map((candidate) => candidate.recordedAt ?? candidate.endAt ?? candidate.startAt),
+    eligibleCandidates.map((candidate) => candidate.recordedAt ?? candidate.endAt ?? candidate.startAt),
   );
-  const durationScores = buildNumberRankScores(candidates.map((candidate) => candidate.durationMinutes));
-  const maxDurationMinutes = Math.max(0, ...candidates.map((candidate) => candidate.durationMinutes));
+  const durationScores = buildNumberRankScores(eligibleCandidates.map((candidate) => candidate.durationMinutes));
+  const maxDurationMinutes = Math.max(0, ...eligibleCandidates.map((candidate) => candidate.durationMinutes));
   const scorecards = new Map<string, WearableSleepWindowScorecard>();
 
-  for (const candidate of candidates) {
+  for (const candidate of eligibleCandidates) {
     const providerScore =
-      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates);
+      (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, eligibleCandidates);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "") ?? 0;
     const durationScore = durationScores.get(candidate.durationMinutes) ?? 0;
-    const agreementScore = scoreSleepWindowAgreement(candidate, candidates);
+    const agreementScore = scoreSleepWindowAgreement(candidate, eligibleCandidates);
     const napPenalty = candidate.nap || isShortWindowBesideMainSleep(candidate, maxDurationMinutes) ? -6 : 0;
 
     scorecards.set(candidate.candidateId, {
@@ -356,7 +363,7 @@ function rankSleepWindows(
     });
   }
 
-  const sortedCandidates = [...candidates].sort((left, right) => {
+  const sortedCandidates = [...eligibleCandidates].sort((left, right) => {
     const leftScore = scorecards.get(left.candidateId);
     const rightScore = scorecards.get(right.candidateId);
     const totalDifference = (rightScore?.total ?? 0) - (leftScore?.total ?? 0);
@@ -499,7 +506,7 @@ function scoreSleepWindowAgreement(
       candidates
         .filter((other) => other.candidateId !== candidate.candidateId)
         .filter((other) => other.provider !== candidate.provider)
-        .filter((other) => !other.nap)
+        .filter((other) => other.sleepType !== "nap" && !other.nap)
         .filter((other) => isWithinMetricTolerance("sessionMinutes", candidate.durationMinutes, other.durationMinutes))
         .map((other) => other.provider),
     )].length,
@@ -563,7 +570,7 @@ function describeMetricEvidence(candidate: WearableMetricCandidate): string {
 
 function describeSleepWindowEvidence(candidate: WearableSleepWindowCandidate): string {
   const timestamp = candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "unknown time";
-  return `${formatProviderName(candidate.provider)} ${candidate.nap ? "nap" : "sleep"} window recorded ${timestamp}`;
+  return `${formatProviderName(candidate.provider)} ${candidate.sleepType === "nap" || candidate.nap ? "nap" : "sleep"} window recorded ${timestamp}`;
 }
 
 export function compareSleepWindowByDateDesc(

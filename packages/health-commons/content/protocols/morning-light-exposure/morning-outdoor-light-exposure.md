@@ -277,7 +277,7 @@ protocol:
     - "Stay 10–30 min; start with 5–10 min if light-sensitive, migraine-prone, heat-sensitive, or unsure."
     - "Sit, stand, or walk gently; log walking separately if it becomes exercise."
     - "Use shade, hat, sunscreen, sunglasses, cooler timing, or skip when UV, glare, heat, medication, or symptoms require it."
-    - "Log wake time, start time, minutes, weather, protection, activity, symptoms, and next-night sleep quality."
+    - "Log wake time, start time, minutes, weather, protection, activity, symptoms, and next-night sleep quality on a stable 0-10 scale where 0 is worst possible and 10 is best possible."
   tips:
     - Pick tomorrow’s spot before bed: porch, balcony, courtyard, park path, or shaded open-sky area.
     - Go out in the first 30–60 minutes after waking; before 10 AM is the backup.
@@ -302,7 +302,7 @@ protocol:
     - sunglasses, hat, sunscreen, or shade use
     - activity during exposure
     - bedtime and final wake time
-    - subjective sleep quality
+    - subjective sleep quality 0-10 (0 = worst possible, 10 = best possible; higher is better)
     - morning alertness
     - headache, nausea, eye discomfort, skin reaction, heat symptoms, or mood activation
     - evening light or screen changes
@@ -316,7 +316,7 @@ protocol:
   - weather_brightness_context
   - uv_heat_protection_used
   - activity_during_exposure
-  - subjective_sleep_quality_next_morning
+  - subjective_sleep_quality
   - bedtime
   - final_wake_time
   - morning_alertness
@@ -343,6 +343,7 @@ testPlans:
     notes:
       - Use a 7-day baseline with no deliberate morning-light change, then compare against the 21-day intervention window.
       - Primary interpretation should focus on same-scale sleep quality and sleep-onset latency, with sleep efficiency, bedtime/final wake time, and morning alertness as supporting context; use exposure adherence to explain whether the protocol was actually tested.
+      - Keep the daily subjective sleep-quality question on 0-10, with 0 as worst possible and 10 as best possible, throughout baseline and intervention.
       - Use a wearable or sleep diary for sleep-onset latency and sleep efficiency, but do not treat consumer sleep stages as promised endpoints.
       - Record evening light changes, travel, illness, alcohol, caffeine, exercise, stress, heat, UV, and weather as confounders.
 expectedSignalDescriptions:
@@ -908,7 +909,7 @@ sessionLoggingFields:
   - weather_brightness_context
   - uv_heat_protection_used
   - activity_during_exposure
-  - subjective_sleep_quality_next_morning
+  - subjective_sleep_quality
   - morning_alertness
   - bedtime
   - final_wake_time

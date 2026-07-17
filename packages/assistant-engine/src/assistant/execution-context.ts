@@ -10,6 +10,7 @@ import type {
   AutomationContinuityPolicy,
   AutomationSchedule,
   AutomationStatus,
+  AutomationSupportKind,
 } from '@murphai/contracts'
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -39,6 +40,10 @@ import type {
 import type {
   HostedPlanUsageStatus,
 } from '@murphai/hosted-execution/plan-usage'
+import type {
+  HostedRuntimeLabsToolRequest,
+  HostedRuntimeLabsToolResponse,
+} from '@murphai/hosted-execution/labs'
 import type {
   HostedRuntimeSubscriptionControlRequest,
   HostedRuntimeSubscriptionToolResponse,
@@ -119,9 +124,17 @@ export interface AssistantHostedDeviceTool {
   ): Promise<AssistantHostedDeviceToolResponse>
 }
 
+export interface AssistantHostedLabsTool {
+  request(
+    request: HostedRuntimeLabsToolRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLabsToolResponse>
+}
+
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'save'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
@@ -130,11 +143,14 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title: string
     }
   | {
       action: 'patch'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
       instructions?: string
@@ -144,18 +160,34 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title?: string
     }
+  | {
+      action: 'reconcile'
+      desiredAutomationIds: readonly string[]
+      supportSeriesId: string
+    }
 
-export interface AssistantHostedAutomationToolResponse {
-  action: 'patch' | 'save'
-  automationId: string
-  created: boolean
-  lookupId: string
-  routeBinding: 'current_conversation' | 'preserved'
-  status: AutomationStatus
-}
+export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'patch' | 'save'
+      automationId: string
+      created: boolean
+      lookupId: string
+      routeBinding: 'current_conversation' | 'preserved'
+      status: AutomationStatus
+    }
+  | {
+      action: 'reconcile'
+      archivedCount: number
+      matchedCount: number
+      missingDesiredAutomationIds: readonly string[]
+      supportSeriesId: string
+      unchangedCount: number
+    }
 
 export interface AssistantHostedAutomationTool {
   request(
@@ -278,6 +310,7 @@ export interface AssistantHostedExecutionContext {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupTool?: AssistantHostedGroupTool | null
+  labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
@@ -343,6 +376,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.personalizationTool,
   )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
@@ -374,6 +408,7 @@ export function normalizeAssistantExecutionContext(
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupTool ? { groupTool } : {}),
+      ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
@@ -575,6 +610,18 @@ function normalizeAssistantConfigurationTool(
 function normalizeAssistantGroupTool(
   input: AssistantHostedExecutionContext['groupTool'] | undefined,
 ): AssistantHostedGroupTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantLabsTool(
+  input: AssistantHostedExecutionContext['labsTool'] | undefined,
+): AssistantHostedLabsTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

@@ -23,6 +23,15 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain("only when recommendedAction is non-null");
     expect(guidance).toContain("and relevant to the member's request");
     expect(guidance).toContain(
+      "When recommendedAction.kind is add_usage",
+    );
+    expect(guidance).toContain(
+      `${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription`,
+    );
+    expect(guidance).toContain(
+      "Do not select an amount, invoke murph.subscription, initiate Checkout, or claim that payment or credit completed",
+    );
+    expect(guidance).toContain(
       "subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent",
     );
     expect(guidance).toContain(
@@ -62,7 +71,9 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain(
       "Do not provide that private account-management link for group_not_supported or hosted_access_inactive",
     );
-    expect(guidance).toContain("not a group balance or top-up surface");
+    expect(guidance).toContain(
+      "not a group balance, group-funding, Checkout, or payment surface",
+    );
   });
 
   it("requires current matching terms and exact consent before a subscription action", () => {

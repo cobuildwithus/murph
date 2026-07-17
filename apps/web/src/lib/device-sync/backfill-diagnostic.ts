@@ -14,7 +14,6 @@ import {
 } from "./control-plane";
 import {
   toHostedBrowserDeviceSyncConnectionSource,
-  type HostedBrowserDeviceSyncConnectionSource,
 } from "./browser-connection-source";
 import {
   toHostedBrowserDeviceSyncConnection,
@@ -137,7 +136,12 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
 
   const selectedEntry = activeCandidates[0];
   const connection = selectedEntry.browserConnection;
-  const connectionSources = selectedEntry.browserConnectionSources;
+  const selectedSources = await input.controlPlane.store.listConnectionSources(
+    selectedEntry.durableConnection.id,
+  );
+  const connectionSources = selectedSources.map((source) =>
+    toHostedBrowserDeviceSyncConnectionSource(source, connection.id)
+  );
   const restProbeSourceProviderSlug = normalizeQueryString(input.restProbe?.sourceProviderSlug ?? null);
   if (
     restProbeSourceProviderSlug
@@ -438,28 +442,17 @@ async function listDiagnosticConnectionEntries(input: {
   memberId: string;
 }): Promise<Array<{
   browserConnection: HostedBrowserDeviceSyncConnection;
-  browserConnectionSources: HostedBrowserDeviceSyncConnectionSource[];
   durableConnection: PublicDeviceSyncAccount;
 }>> {
   const durableConnections = await input.controlPlane.store.listConnectionsForUser(input.memberId);
 
-  return Promise.all(
-    durableConnections.map(async (durableConnection) => {
-      const browserConnection = toHostedBrowserDeviceSyncConnection(
-        durableConnection,
-        input.controlPlane.env.routingIndexKey,
-      );
-      const sources = await input.controlPlane.store.listConnectionSources(durableConnection.id);
-
-      return {
-        browserConnection,
-        browserConnectionSources: sources.map((source) =>
-          toHostedBrowserDeviceSyncConnectionSource(source, browserConnection.id)
-        ),
-        durableConnection,
-      };
-    }),
-  );
+  return durableConnections.map((durableConnection) => ({
+    browserConnection: toHostedBrowserDeviceSyncConnection(
+      durableConnection,
+      input.controlPlane.env.routingIndexKey,
+    ),
+    durableConnection,
+  }));
 }
 
 function redactDiagnosticProviderIdentifiers(value: Record<string, unknown>): Record<string, unknown> {

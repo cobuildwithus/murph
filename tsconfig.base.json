@@ -111,6 +111,9 @@
       "@murphai/hosted-execution/plan-usage": [
         "./packages/hosted-execution/src/plan-usage.ts"
       ],
+      "@murphai/hosted-execution/labs": [
+        "./packages/hosted-execution/src/labs.ts"
+      ],
       "@murphai/hosted-execution/routes": [
         "./packages/hosted-execution/src/routes.ts"
       ],
@@ -179,6 +182,9 @@
       ],
       "@murphai/runtime-state": [
         "./packages/runtime-state/src/index.ts"
+      ],
+      "@murphai/runtime-state/assistant-generated-deliveries": [
+        "./packages/runtime-state/src/assistant-generated-deliveries.ts"
       ],
       "@murphai/runtime-state/assistant-ids": [
         "./packages/runtime-state/src/assistant-ids.ts"

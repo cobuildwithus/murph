@@ -173,14 +173,16 @@ loses a reminder; it must never lose the challenge.
    withdraws, record that state in the same turn. Never list them as waiting,
    ask them for challenge materials, score them, or privately check in about
    challenge silence. Re-entry requires a new explicit affirmative response.
-4. **Collect sharing permissions.** Read the current group and use `murph.group`
-   `action="post_join_offer"` with the challenge's share scopes. Existing
-   members like the server-owned message to opt into that permission snapshot;
-   the included first-party link is only for someone who wants to customize
-   what they share. Do not tell the room to join again or make the link the
-   primary action. Use `action="create_join_link"` only when the group
-   explicitly asks for a standalone link. Never use data a member has not
-   granted to this group.
+4. **Collect sharing permissions.** Read the current group first. When
+   `read_current` returns `status="none"`, the group-chat skill's Creating a
+   hosted group core set takes precedence. For an existing group, use
+   `murph.group action="post_join_offer"` with only the challenge's share
+   scopes. Existing members like the server-owned message to opt into that
+   permission snapshot; the included first-party link is only for someone who
+   wants to customize what they share. Do not tell the room to join again or
+   make the link the primary action. Use `action="create_join_link"` only when
+   the group explicitly asks for a standalone link. Never use data a member has
+   not granted to this group.
 5. **Ask for introductions and photos.** Each participant gives a one-line
    intro or a fun fact about themselves, plus a photo if they're willing.
    Record every intro verbatim on the page — they are seed material for

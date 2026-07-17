@@ -51,6 +51,36 @@ test("normalizeOuraSnapshot covers dailySpo2 aliasing", () => {
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
+test("normalizeOuraSnapshot preserves explicit main-sleep and nap identity without guessing unknown types", () => {
+  const sleeps = [
+    { id: "main", type: "sleep" },
+    { id: "long", type: "long_sleep" },
+    { id: "nap", type: "nap" },
+    { id: "unknown", type: "other" },
+    { id: "missing" },
+  ].map((sleep, index) => ({
+    ...sleep,
+    bedtime_start: `2026-03-${String(10 + index).padStart(2, "0")}T01:00:00.000Z`,
+    bedtime_end: `2026-03-${String(10 + index).padStart(2, "0")}T02:00:00.000Z`,
+  }));
+
+  const payload = normalizeOuraSnapshot({
+    importedAt: "2026-03-16T10:00:00.000Z",
+    sleeps,
+  });
+  const byId = new Map(
+    payload.events
+      ?.filter((event) => event.kind === "sleep_session")
+      .map((event) => [event.externalRef?.resourceId, event.fields?.sleepType]),
+  );
+
+  assert.equal(byId.get("main"), "main_sleep");
+  assert.equal(byId.get("long"), "main_sleep");
+  assert.equal(byId.get("nap"), "nap");
+  assert.equal(byId.get("unknown"), undefined);
+  assert.equal(byId.get("missing"), undefined);
+});
+
 test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing branches", () => {
   const payload = normalizeOuraSnapshot({
     importedAt: "2026-03-16T10:00:00.000Z",
