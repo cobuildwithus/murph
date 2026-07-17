@@ -1777,8 +1777,14 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain('A list of desired outcomes is not a reason')
     expect(raw).toContain('1. What would success look or feel like?')
-    expect(raw).toContain('2. Why would that matter?')
-    expect(raw).toContain('3. Is this the main priority or one of several?')
+    expect(raw).toContain('2. Why do you want that?')
+    expect(raw).not.toContain('Is this the main priority or one of several?')
+    expect(compact).toContain(
+      'When several threads are named, keep them all without asking the user to rank them.',
+    )
+    expect(compact).toContain(
+      'Never dress it up in coaching language such as "what would that give you?" or "what matters most right now?".',
+    )
     expect(compact).toContain(
       'Do not excavate obstacles or failed attempts, diagnose the problem, collect a baseline, or ask about schedule, equipment, treatment, or plan mechanics in this phase.',
     )
@@ -1910,8 +1916,7 @@ describe('assistant skill assets', () => {
         .map((match) => match[1]),
     ).toEqual([
       'What would success look or feel like?',
-      'Why would that matter?',
-      'Is this the main priority or one of several?',
+      'Why do you want that?',
     ])
 
     const behavioralFitQuestionList = returnSection
