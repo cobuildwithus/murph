@@ -140,16 +140,26 @@ export function buildAssistantCliSurfaceContract(
 export function scopeAssistantCliSurfaceContractForAssistant(input: {
   contract: string | null
   hostedRuntime?: boolean
+  scheduledNotificationTurn?: boolean
 }): string | null {
   if (input.contract === null) {
     return input.contract
   }
 
+  // A scheduled notification turn is unattended and must never be advertised
+  // automation-lifecycle or device/account mutation commands, even on the
+  // local runtime where hosted stripping does not apply. Reuse the existing
+  // hosted-unavailable command set instead of adding a new authority owner, so
+  // the advertised surface matches the scheduled-turn authority in
+  // docs/contracts/00-invariants.md.
+  const omitHostedUnavailableCommands =
+    (input.hostedRuntime ?? false) || (input.scheduledNotificationTurn ?? false)
+
   const contract = input.contract
     .split('\n')
     .flatMap((line) => scopeAssistantCliSurfaceContractLine(
       line,
-      input.hostedRuntime ?? false,
+      omitHostedUnavailableCommands,
     ))
     .join('\n')
     .trim()
@@ -159,13 +169,16 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
 
 function scopeAssistantCliSurfaceContractLine(
   line: string,
-  hostedRuntime: boolean,
+  omitHostedUnavailableCommands: boolean,
 ): string[] {
   const normalizedLine = line.trim()
   const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
   if (
     commandMatch !== null
-    && shouldOmitAssistantCliSurfaceCommand(commandMatch[1], hostedRuntime)
+    && shouldOmitAssistantCliSurfaceCommand(
+      commandMatch[1],
+      omitHostedUnavailableCommands,
+    )
   ) {
     return []
   }
@@ -183,7 +196,10 @@ function scopeAssistantCliSurfaceContractLine(
   const retainedLeaves = leaves.filter((leaf) => {
     const leafName = leaf.slice(1, -1)
     const commandName = family === 'root' ? leafName : `${family} ${leafName}`
-    return !shouldOmitAssistantCliSurfaceCommand(commandName, hostedRuntime)
+    return !shouldOmitAssistantCliSurfaceCommand(
+      commandName,
+      omitHostedUnavailableCommands,
+    )
   })
   if (retainedLeaves.length === leaves.length) {
     return [line]
@@ -197,10 +213,10 @@ function scopeAssistantCliSurfaceContractLine(
 
 function shouldOmitAssistantCliSurfaceCommand(
   commandName: string,
-  hostedRuntime: boolean,
+  omitHostedUnavailableCommands: boolean,
 ): boolean {
   return assistantCliSurfaceRetiredCommandNames.has(commandName)
-    || (hostedRuntime
+    || (omitHostedUnavailableCommands
       && assistantCliSurfaceHostedUnavailableCommandNames.has(commandName))
 }
 

@@ -74,19 +74,21 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
-  it('gates activation and rotates actual media rather than text frames', async () => {
+  it('keeps automation setup interactive and derives real media rotation from the log', async () => {
     const challengeRaw = await readSkill('group-challenge')
     const challenge = challengeRaw.replace(/\s+/gu, ' ')
 
-    expect(challenge).toContain('Activation gate')
     expect(challenge).toContain(
-      'Do not activate the daily dispatch until the active challenge page exists',
+      'During interactive setup only, create one daily dispatch automation',
+    )
+    expect(challenge).toContain(
+      'A scheduled occurrence never creates, edits, reschedules, or archives an automation; it enters directly at the numbered run steps below.',
     )
     expect(challenge).toContain(
       'every confirmed participant has been asked once for a one-line intro or fun fact plus an optional photo',
     )
     expect(challenge).toContain(
-      'A photo is always optional; sending the request and recording the response or absence is mandatory.',
+      'asking and recording the response or absence is mandatory, the photo itself is always optional',
     )
     expect(challenge).toContain(
       'label it as a group-challenge dispatch, name the exact challenge-page slug',
@@ -103,12 +105,20 @@ describe('assistant group challenge buy-in guidance', () => {
     expect(challenge).toContain(
       'Audit, sportsbook, ruling, press conference, poem, and similar devices are creative frames, not different media',
     )
+    // Rotation derives from the actual prepared-dispatch log, not a separately
+    // planned future sequence (no second source of truth to initialize or drift).
     expect(challenge).toContain(
-      'for a five-to-seven-day challenge use every available medium before repeating one',
+      'Derive the medium from the prepared-dispatch entries already on the page: choose the least-recently-used medium that is currently available',
     )
     expect(challenge).toContain(
-      'When a planned medium is blocked, record the concrete blocker and fallback in the sent log.',
+      'across a five-to-seven-day challenge use every available medium before repeating one',
     )
+    expect(challenge).toContain(
+      'an unavailable medium is simply skipped in that selection, not tracked as a plan',
+    )
+    expect(challenge).not.toContain('Activation gate')
+    expect(challenge).not.toContain('planned medium')
+    expect(challenge).not.toContain('planned sequence')
     expect(challenge).toContain(
       'exactly one prepared-dispatch entry per scheduled occurrence',
     )

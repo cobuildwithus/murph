@@ -226,25 +226,23 @@ loses a reminder; it must never lose the challenge.
    opening artifact — it pays off the photos everyone just contributed and
    sets the tone for the whole run. Build it under the Comics rules below.
 
-**Activation gate.** Do not activate the daily dispatch until the active
-challenge page exists, the confirmed roster is recorded, the sent log is
-initialized with a medium plan for the challenge window, and every confirmed
-participant has been asked once for a one-line intro or fun fact plus an
-optional photo. A photo is always optional; sending the request and recording
-the response or absence is mandatory. Missing or declined photos never block
-the challenge after the one light follow-up above — those members appear by
-name rather than likeness.
-
 ## The daily loop
 
-Create one daily dispatch automation under the developer prompt's shared
+During interactive setup only, create one daily dispatch automation under the developer prompt's shared
 automation action rules with a `dailyLocal` schedule and
-`continuityPolicy: preserve`. Keep its instructions compact: label it as a
-group-challenge dispatch, name the exact challenge-page slug, require each run
-to read `group-chat`, `group-challenge`, and `groupchat-comedy`, state that
-rich media is welcome only within the recorded consent and privacy rules, and
-name the challenge page's sent log as the rotation source. The automation
-prompt is a pointer into this skill and durable page, not a copied lifecycle.
+`continuityPolicy: preserve`. Do this once the confirmed roster is recorded
+and every confirmed participant has been asked once for a one-line intro or fun
+fact plus an optional photo; asking and recording the response or absence is
+mandatory, the photo itself is always optional, and missing or declined photos
+never block the challenge after the one light follow-up above. Keep the
+automation's instructions compact: label it as a group-challenge dispatch, name
+the exact challenge-page slug, require each run to read `group-chat`,
+`group-challenge`, and `groupchat-comedy`, state that rich media is welcome only
+within the recorded consent and privacy rules, and name the challenge page's
+sent log as the rotation source. The automation prompt is a pointer into this
+skill and durable page, not a copied lifecycle. A scheduled occurrence never
+creates, edits, reschedules, or archives an automation; it enters directly at
+the numbered run steps below.
 Each run:
 
 1. Read the challenge page.
@@ -263,14 +261,15 @@ Each run:
    Medium means text, comic/image, voice memo, or song. Audit, sportsbook,
    ruling, press conference, poem, and similar devices are creative frames,
    not different media; changing the frame while sending another plain-text
-   standings bubble does not count as rotation. Follow the planned sequence
-   in the sent log, never use the same medium twice in a row, and for a
-   five-to-seven-day challenge use every available medium before repeating
-   one. "Available" means the current channel and tool support it and the
-   required likeness/photo consent exists. When a planned medium is blocked,
-   record the concrete blocker and fallback in the sent log. A voice memo or
-   song cannot share a turn with other media, so the day's medium is a real
-   choice.
+   standings bubble does not count as rotation. Derive the medium from the
+   prepared-dispatch entries already on the page: choose the
+   least-recently-used medium that is currently available, never use the same
+   medium twice in a row, and across a five-to-seven-day challenge use every
+   available medium before repeating one. "Available" means the current channel
+   and tool support it and the required likeness/photo consent exists; an
+   unavailable medium is simply skipped in that selection, not tracked as a
+   plan. A voice memo or song cannot share a turn with other media, so the
+   day's medium is a real choice.
 4. For images, follow the Comics rules below. Pass the pinned capture paths
    of everyone appearing (plus your character sheet ref when you appear) as
    `referenceImageRefs`, and record the saved vault ref that
@@ -280,11 +279,11 @@ Each run:
    or lyrics saved in the sent log (`music-generation` owns song prompt
    craft). Nothing sent is recoverable except through what the page saved.
 5. Before returning, append exactly one prepared-dispatch entry for the
-   engine-supplied occurrence key: planned medium and frame, what was prepared,
-   standings snapshot, saved media refs or full audio script, new canon, and
-   new confounders. When retry evidence names the same occurrence and its entry
-   already exists, reuse that medium and replay material; do not advance the
-   plan or append a duplicate occurrence. Never label the entry delivered from
+   engine-supplied occurrence key: the chosen medium and frame, what was
+   prepared, standings snapshot, saved media refs or full audio script, new
+   canon, and new confounders. When retry evidence names the same occurrence
+   and its entry already exists, reuse that medium and replay material; do not
+   append a duplicate occurrence. Never label the entry delivered from
    model-side evidence — delivery status belongs to the engine and outbox.
 
 Between dispatches, the normal `group-chat` decision ladder applies. Answer

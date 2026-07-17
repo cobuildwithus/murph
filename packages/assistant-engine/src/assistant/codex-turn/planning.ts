@@ -535,6 +535,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
+    scheduledNotificationTurn,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
