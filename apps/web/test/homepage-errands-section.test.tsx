@@ -10,7 +10,7 @@ test("ErrandsSection renders the static errand timeline copy", () => {
   const markup = renderToStaticMarkup(createElement(ErrandsSection));
 
   assert.match(markup, /Errands, handled/);
-  assert.match(markup, /Murph has a browser and a phone\./);
+  assert.match(markup, /Murph can call anyone and order anything\./);
   assert.match(
     markup,
     /It shops the web and sits on hold so you don&#x27;t have to\./,
@@ -48,17 +48,12 @@ test("ErrandsSection renders the static errand timeline copy", () => {
     markup,
     /One text\. Seventeen minutes\. Zero apps opened\./,
   );
-  assert.match(markup, /Also plugs into/);
-  assert.match(markup, /Google Calendar/);
-  assert.match(markup, /Gmail &amp; Outlook/);
-  assert.match(markup, /Amazon &amp; Instacart/);
-  assert.match(markup, /Clinician lookup/);
-  assert.match(markup, /Weather/);
-  assert.match(markup, /Notion &amp; Drive/);
   assert.match(
     markup,
-    /Plus hundreds more, with new ones added every week\./,
+    /Also plugs into Google Calendar, Gmail, Amazon, Instacart, clinician search, and hundreds more\./,
   );
+  assert.match(markup, /📦 Omega-3 refill, left at your door\./);
+  assert.match(markup, /doorstep-delivery\.jpg/);
   assert.doesNotMatch(markup, /personal health assistant/i);
   assert.doesNotMatch(markup, /composio/i);
 });
