@@ -108,12 +108,12 @@ adaptation, seed composition, and cross-app E2E imports.
 
 ## Experiment detail data sources
 
-The experiment detail page composes two narrow data sources:
+The experiment detail routes compose two narrow data sources:
 
-- Health Commons is the public protocol source of truth. Server components resolve generated route bundles/projections and pass a typed `ExperimentProtocol` into the page.
-- The browser vault is the private run source. Client components decrypt the dashboard snapshot in-browser, project a matching `ExperimentRunProjection`, and overlay only private status, timeline, next-step, and outcome fields.
+- Health Commons is the public protocol source of truth. Server components resolve generated route projections for the Protocol, Research, and public portion of Your results.
+- The browser vault is the private run source. The Your results client decrypts the dashboard snapshot in-browser, projects the matching active run or newest completed run, and renders private status, timeline, context, next-step, and outcome fields. Completed and low-confidence runs remain reachable at `/experiments/[experimentId]/results`.
 
-The UI receives the composed `Experiment` view model, but public protocol prose, citations, and commons revisions are never copied into private run state.
+Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 

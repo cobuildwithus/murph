@@ -41,7 +41,7 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
         <div
           className={
             schedule
-              ? "grid gap-4 md:grid-cols-[1fr_340px]"
+              ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"
               : "flex flex-col gap-4"
           }
         >
@@ -128,7 +128,7 @@ export function ResultsSummarySkeleton() {
         <MetricCardSkeleton />
         <MetricCardSkeleton />
       </div>
-      <div className="grid gap-4 md:grid-cols-[1fr_340px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex flex-col gap-4">
           <TrendChartSkeleton />
           <TrendChartSkeleton />

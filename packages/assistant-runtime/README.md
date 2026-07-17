@@ -9,6 +9,7 @@ Current responsibilities:
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
 - run inbox media retention during existing idle checkpoint maintenance so old raw inbox image/audio/video bytes expire without a separate scheduler
 - run bounded post-device-sync dense raw retention through the core dense-prune primitive, logging only counts, byte totals, and tombstone totals
+- build the encrypted hosted browser-vault replica from generic canonical query sources plus schema-valid saved experiment outcomes referenced by canonical experiment frontmatter; referenced outcome bytes participate in source freshness, while invalid, escaping, missing, or mismatched references are omitted fail-closed
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers

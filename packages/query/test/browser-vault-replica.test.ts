@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   computeHabitatCoverage,
+  type ExperimentOutcome,
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
 import { test } from "vitest";
@@ -312,6 +313,38 @@ test("browser vault replicas validate schema", () => {
     }),
     /Browser vault replica\.schema must be murph\.browser-vault-replica\./u,
   );
+});
+
+test("browser vault replicas validate and round-trip canonical experiment outcomes", async () => {
+  const outcome = createExperimentOutcome();
+  const replica = await createBrowserVaultReplicaFromVault({
+    experimentOutcomes: [outcome],
+    generatedAt: "2027-06-20T12:00:00.000Z",
+    sourceBundleHash: "a".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [outcome]);
+});
+
+test("browser vault parser defaults legacy replicas without outcomes to an empty list", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2027-06-20T12:00:00.000Z",
+    sourceBundleHash: "a".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const legacyReplica = { ...replica };
+  delete legacyReplica.experimentOutcomes;
+
+  assert.deepEqual(parseBrowserVaultReplica(legacyReplica).experimentOutcomes, []);
 });
 
 test("browser vault replica keeps metric adherence targets", async () => {
@@ -781,6 +814,47 @@ test("browser vault replica projects experiment event fields only for relevant e
   assert.ok(journal);
   assert.deepEqual(journal.attributes, {});
 });
+
+function createExperimentOutcome(): ExperimentOutcome {
+  return {
+    adherenceSummary: {
+      completedSessions: 4,
+      minimumUsefulSessions: 3,
+      status: "met_target",
+      targetSessions: 4,
+    },
+    asOf: "2026-04-20",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: ["A travel day overlapped the intervention window."],
+      headline: "Resting heart rate moved lower",
+      plainLanguage: "The saved analysis found a lower intervention average.",
+    },
+    confidence: {
+      level: "medium",
+      reasons: ["One intervention day overlapped travel."],
+    },
+    confounders: ["Travel"],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      slug: "light-morning-walk",
+      status: "completed",
+      title: "Morning walk",
+    },
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    metricResults: [],
+    outcomeId: "outcome_exp_1",
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v1",
+    windows: {
+      baselineEnd: "2026-04-07",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-20",
+      interventionStart: "2026-04-08",
+    },
+  };
+}
 
 function createEntity(
   family: BrowserVaultEntity["family"],

@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(() => {
     throw new Error("not found");
   }),
+  pathname: "/experiments/finnish-sauna",
   protocolTab: vi.fn(() => createElement("div", null, "protocol tab")),
   readHostedMurphContactContext: vi.fn(),
   refresh: vi.fn(),
@@ -50,12 +51,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.refresh,
   }),
-  usePathname: () => "/experiments/finnish-sauna",
+  usePathname: () => mocks.pathname,
 }));
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) =>
-    createElement("a", { href }, children),
+  default: ({
+    children,
+    href,
+    ...props
+  }: {
+    children: ReactNode;
+    href: string;
+    "aria-current"?: "page";
+    "data-active"?: string;
+    "data-tab-value"?: string;
+  }) => createElement("a", { ...props, href }, children),
 }));
 
 vi.mock("@/src/components/ui/tabs", () => ({
@@ -114,6 +124,7 @@ const { parseHTML } = loadLinkedom();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  mocks.pathname = "/experiments/finnish-sauna";
   mocks.readHostedMurphContactContext.mockResolvedValue({
     initialContactChannels: {
       email: false,
@@ -193,6 +204,47 @@ test("passes the hosted start action slot into the experiment header", async () 
   await view.cleanup();
 });
 
+test.each([
+  "/experiments/finnish-sauna/results",
+  "/experiments/murph-finnish-standard-3x-week/results",
+])("keeps a linkable Your results tab selected for %s", async (pathname) => {
+  mocks.pathname = pathname;
+  const view = await renderClient(
+    createElement(
+      ExperimentLayoutClient,
+      {
+        headerStartAction: createElement("button", { type: "button" }, "start"),
+        shell: createShell(),
+      },
+      createElement("div", null, "completed results"),
+    ),
+  );
+
+  const resultsLink = view.container.querySelector(
+    'a[href="/experiments/finnish-sauna/results"]',
+  );
+  const protocolLink = view.container.querySelector(
+    'a[href="/experiments/finnish-sauna"]',
+  );
+  const researchLink = view.container.querySelector(
+    'a[href="/experiments/finnish-sauna/research"]',
+  );
+  expect(protocolLink?.textContent).toBe("Protocol");
+  expect(protocolLink?.hasAttribute("aria-current")).toBe(false);
+  expect(researchLink?.textContent).toBe("Research");
+  expect(researchLink?.hasAttribute("aria-current")).toBe(false);
+  expect(resultsLink?.textContent).toBe("Your results");
+  expect(resultsLink?.getAttribute("aria-current")).toBe("page");
+  expect(resultsLink?.hasAttribute("role")).toBe(false);
+  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
+    | [{ showStartAction?: boolean }]
+    | undefined)?.[0];
+  expect(headerProps?.showStartAction).toBe(false);
+  expect(view.container.textContent).toContain("completed results");
+
+  await view.cleanup();
+});
+
 test("hosted experiment start context resolves the assigned member phone", async () => {
   mocks.readHostedMurphContactContext.mockResolvedValue({
     initialContactChannels: {
@@ -256,6 +308,7 @@ test("experiment start action becomes a quiet status chip for a running browser-
   const protocol = createResultsPublicProjection();
   const activeRun: ExperimentRunProjection = {
     id: "run_1",
+    outcomeStatus: "not_expected",
     source: "browser-vault",
     snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
     slug: null,
@@ -311,6 +364,7 @@ test("paused browser-vault runs get the muted status chip, not the live dot", as
   const protocol = createResultsPublicProjection();
   const pausedRun: ExperimentRunProjection = {
     id: "run_1",
+    outcomeStatus: "not_expected",
     source: "browser-vault",
     snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
     slug: null,
