@@ -11,6 +11,7 @@ import {
   type SharedGroupMemberView,
 } from '@murphai/hosted-execution/vault-share'
 import {
+  hasSharedVaultShareAuthorityUnavailableMarker,
   readSharedVaultShareProjectionStore,
 } from '@murphai/hosted-execution/vault-share-store-node'
 import {
@@ -206,7 +207,11 @@ export async function buildGroupSharedResult(input: {
   vault: string
 }): Promise<GroupSharedResult> {
   const read = await readSharedVaultShareProjectionStore(input.vault)
-  if (read.status === 'corrupt' || read.status === 'read_failed') {
+  if (
+    read.status === 'corrupt'
+    || read.status === 'read_failed'
+    || await hasSharedVaultShareAuthorityUnavailableMarker(input.vault)
+  ) {
     return { memberCount: 0, members: [], sharingMemberCount: 0, status: 'unavailable' }
   }
 
@@ -234,7 +239,11 @@ export async function buildGroupWeeklyResult(input: {
   const referenceAt = input.asOf ?? new Date().toISOString()
   const timeZone = await readGroupVaultTimeZone(input.vault)
 
-  if (read.status === 'corrupt' || read.status === 'read_failed') {
+  if (
+    read.status === 'corrupt'
+    || read.status === 'read_failed'
+    || await hasSharedVaultShareAuthorityUnavailableMarker(input.vault)
+  ) {
     return {
       memberCount: 0,
       members: [],

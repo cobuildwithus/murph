@@ -841,7 +841,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("fails retryably before the assistant lane when share authority is unavailable", async () => {
+  it("withholds the shared view and still runs the assistant lane when share authority is unavailable", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     await writeHostedPhaseSharedProjection({ vaultRoot });
     const request: NonNullable<
@@ -853,19 +853,112 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         unavailableReason: "control_plane_unavailable",
       },
     }));
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => ({
+      assistantAutomationProgressed: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    }));
 
     try {
-      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
         runtimeGroupToolPort: { request },
         vaultRoot,
-      }))).rejects.toMatchObject({
-        code: "HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE",
-        context: { retryable: true },
-        message:
-          "Hosted shared group data authority could not be verified before assistant work.",
-      });
+      }));
       expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
-      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+      await expect(readFile(
+        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
+        "utf8",
+      )).rejects.toMatchObject({ code: "ENOENT" });
+      const marker = JSON.parse(await readFile(
+        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+        "utf8",
+      ));
+      expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
+      const withheld = JSON.parse(await readFile(
+        path.join(
+          vaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "vault-share-withheld.json",
+        ),
+        "utf8",
+      ));
+      expect(Object.keys(withheld.projections["profile-name.v0"].grantors))
+        .toEqual(["member_shared_current"]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("re-exposes withheld records without redelivery once share authority recovers", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
+    await writeHostedPhaseSharedProjection({ vaultRoot });
+    const responses = [
+      {
+        action: "read_share_authority" as const,
+        result: {
+          status: "unavailable" as const,
+          unavailableReason: "control_plane_unavailable",
+        },
+      },
+      {
+        action: "read_share_authority" as const,
+        result: {
+          memberIds: ["member_shared_current"],
+          shares: [{
+            memberId: "member_shared_current",
+            projectionScopeKey: "profile-name.v0",
+            shareId: "share_profile_current",
+          }],
+          status: "ok" as const,
+        },
+      },
+    ];
+    const request: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = vi.fn(async () => responses.shift() ?? responses[0]!);
+    mocks.runHostedAssistantAutomationLane.mockImplementation(async () => ({
+      assistantAutomationProgressed: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    }));
+
+    try {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }));
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }));
+      const restored = JSON.parse(await readFile(
+        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
+        "utf8",
+      ));
+      expect(Object.keys(restored.projections["profile-name.v0"].grantors))
+        .toEqual(["member_shared_current"]);
+      await expect(readFile(
+        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+        "utf8",
+      )).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(
+        path.join(
+          vaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "vault-share-withheld.json",
+        ),
+        "utf8",
+      )).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

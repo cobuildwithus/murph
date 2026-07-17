@@ -11,18 +11,15 @@ type HostedBackgroundGroupAuthorityResponse = Awaited<
   ReturnType<HostedRuntimeGroupToolPort["request"]>
 >;
 
-export async function buildHostedBackgroundGroupRosterPrompt(input: {
-  groupToolPort: HostedRuntimeGroupToolPort | null | undefined;
-  signal?: AbortSignal | null;
-}): Promise<string | null> {
-  if (!input.groupToolPort || input.signal?.aborted) {
-    return null;
-  }
-
-  const response = await readHostedBackgroundGroupAuthority({
-    groupToolPort: input.groupToolPort,
-    signal: input.signal ?? null,
-  });
+/**
+ * Pure formatter over the pass-local share-authority snapshot owned by the
+ * workspace phase. It performs no network or filesystem work, so the roster
+ * always renders the same snapshot that filtered the landed shared store.
+ */
+export function buildHostedBackgroundGroupRosterPrompt(input: {
+  authority: HostedBackgroundGroupAuthorityResponse | null;
+}): string | null {
+  const response = input.authority;
   if (
     !response
     || response.action !== "read_share_authority"
@@ -56,36 +53,4 @@ export async function buildHostedBackgroundGroupRosterPrompt(input: {
     "- For challenge logic, count only participants recorded as `in` on the challenge page. Do not infer challenge participation from group membership or grants.",
     "- Do not call `murph.group post_join_offer` or attempt any other mutating group action during this scheduled turn.",
   ].join("\n");
-}
-
-async function readHostedBackgroundGroupAuthority(input: {
-  groupToolPort: HostedRuntimeGroupToolPort;
-  signal: AbortSignal | null;
-}): Promise<HostedBackgroundGroupAuthorityResponse | null> {
-  let abortListener: (() => void) | null = null;
-  const aborted = input.signal
-    ? new Promise<null>((resolve) => {
-        abortListener = () => resolve(null);
-        input.signal?.addEventListener("abort", abortListener, { once: true });
-      })
-    : null;
-  if (input.signal?.aborted) {
-    if (abortListener) {
-      input.signal.removeEventListener("abort", abortListener);
-    }
-    return null;
-  }
-
-  const request = input.groupToolPort.request({ action: "read_share_authority" }).then(
-    (response): HostedBackgroundGroupAuthorityResponse => response,
-    (): null => null,
-  );
-
-  try {
-    return aborted ? await Promise.race([request, aborted]) : await request;
-  } finally {
-    if (abortListener) {
-      input.signal?.removeEventListener("abort", abortListener);
-    }
-  }
 }

@@ -58,6 +58,7 @@ import {
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
 import {
+  hasSharedVaultShareAuthorityUnavailableMarker,
   readSharedVaultShareProjectionStore,
 } from '@murphai/hosted-execution/vault-share-store-node'
 import {
@@ -3313,6 +3314,9 @@ function isNewsletterAllRecipientSendFailure(
 }
 
 async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<boolean> {
+  if (await hasSharedVaultShareAuthorityUnavailableMarker(vaultRoot)) {
+    return false
+  }
   const read = await readSharedVaultShareProjectionStore(vaultRoot)
   return read.status === 'loaded' || read.status === 'empty'
 }
@@ -3333,6 +3337,9 @@ async function readNewsletterWeeklySource(input: {
     return { status: 'empty' }
   }
 
+  if (await hasSharedVaultShareAuthorityUnavailableMarker(input.vaultRoot)) {
+    return null
+  }
   const read = await readSharedVaultShareProjectionStore(input.vaultRoot)
   if (read.status === 'corrupt' || read.status === 'read_failed') {
     return null

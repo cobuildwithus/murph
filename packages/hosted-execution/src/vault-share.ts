@@ -1749,6 +1749,15 @@ export const SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA =
 export const SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH =
   "derived/vault-share/projections.json";
 
+/**
+ * Relative path of the fixed model-facing fact written while current share
+ * authority cannot be verified. While it exists the landed store is withheld
+ * from the model view, so shared-data readers report "unavailable" instead of
+ * "nobody shared anything".
+ */
+export const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_RELATIVE_PATH =
+  "derived/vault-share/authority-unavailable.json";
+
 /** Projection kind whose landed record carries a member's display name. */
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND =
   "profile-name.v0" satisfies HostedVaultShareProjectionKind;

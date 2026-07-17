@@ -92,9 +92,6 @@ import {
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
-import {
-  reconcileSharedVaultShareProjectionAuthorityFromGroupTool,
-} from "./hosted-runtime/vault-share-import.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -1902,18 +1899,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
-      async beforeExecuteAsk() {
-        const reconciliation =
-          await reconcileSharedVaultShareProjectionAuthorityFromGroupTool({
-            groupToolPort: runtime.platform.groupToolPort,
-            vaultRoot: restored.vaultRoot,
-          });
-        if (reconciliation.status === "blocked") {
-          throw new Error(
-            "Hosted shared group data authority could not be verified before detached assistant work.",
-          );
-        }
-      },
       codexHome: hostedCodexRuntime.codexHome,
       env: hostedCodexRuntime.runtimeEnv,
       onStateMutation() {

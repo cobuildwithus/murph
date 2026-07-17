@@ -109,7 +109,6 @@ describe("hosted detached assistant ask controller", () => {
       ]);
       const controller = createHostedDetachedAssistantAskController({
         assistantAskPort,
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         executeAsk,
@@ -170,7 +169,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk() {
@@ -210,53 +208,6 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("requeues the exact ask without starting Codex when its pre-execution gate fails", async () => {
-    const vaultRoot = await createVaultRoot();
-    const executeAsk = vi.fn();
-    const beforeExecuteAsk = vi.fn(async () => {
-      throw new Error("share authority unavailable");
-    });
-
-    try {
-      await writePending(vaultRoot, [
-        createPendingAsk({ eventId: "ask_event_authority", itemId: "item_authority" }),
-      ]);
-      const controller = createHostedDetachedAssistantAskController({
-        assistantAskPort: {
-          async request(request) {
-            assert.equal(request.action, "prepare");
-            return {
-              action: "prepare",
-              question: "question blocked by authority",
-              status: "ready",
-              targetLabel: "100 Club",
-            };
-          },
-        },
-        beforeExecuteAsk,
-        codexHome: null,
-        env: {},
-        executeAsk,
-        now: () => TEST_NOW,
-        onStateMutation() {},
-        vaultRoot,
-      });
-
-      controller.kick();
-      await waitUntil(async () => {
-        const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-        assert.equal(pending[0]?.itemId, "item_authority");
-        assert.equal(pending[0]?.status, "pending");
-        assert.equal(pending[0]?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
-      });
-      await controller.closeAndRequeue();
-      assert.equal(beforeExecuteAsk.mock.calls.length, 1);
-      assert.equal(executeAsk.mock.calls.length, 0);
-    } finally {
-      await removeVaultRoot(vaultRoot);
-    }
-  });
-
   test("suppresses a sending wake and aborts, awaits, then requeues the exact ask", async () => {
     const vaultRoot = await createVaultRoot();
     const askStarted = createDeferred<void>();
@@ -281,7 +232,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk(input) {
@@ -369,7 +319,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk(input) {
@@ -428,7 +377,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         executeAsk,

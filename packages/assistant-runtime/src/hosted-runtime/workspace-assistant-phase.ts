@@ -108,7 +108,8 @@ import {
   buildHostedBackgroundGroupRosterPrompt,
 } from "./group-roster-prompt.ts";
 import {
-  reconcileSharedVaultShareProjectionAuthorityFromGroupTool,
+  prepareSharedVaultShareModelView,
+  type HostedVaultShareModelViewOutcome,
 } from "./vault-share-import.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -219,7 +220,12 @@ const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
-const HOSTED_GROUP_ROSTER_PROMPT_TIMEOUT_MS = 1_000;
+const HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_PROMPT = [
+  "Shared group data is temporarily unavailable this turn because current",
+  "sharing authority could not be verified. Do not report challenge standings,",
+  "rankings, or any member's shared data, and do not treat this as members",
+  "having shared nothing; say the shared view is temporarily unavailable.",
+].join(" ");
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
@@ -1050,21 +1056,27 @@ export async function runHostedWorkspaceAssistantPhase(
         cancellation.dispose();
       }
     };
-    const readBackgroundGroupRosterPrompt = async (): Promise<string | null> => {
-      const cancellation = createHostedBackgroundMaintenanceCancellation({
-        signal: channelAbortController.signal,
-        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
-        timeoutMs: HOSTED_GROUP_ROSTER_PROMPT_TIMEOUT_MS,
-      });
-
-      try {
-        return await buildHostedBackgroundGroupRosterPrompt({
-          groupToolPort: input.runtime.platform.groupToolPort ?? null,
-          signal: cancellation.signal,
-        }).catch(() => null);
-      } finally {
-        cancellation.dispose();
+    // One pass-local share-authority snapshot serves both landed-store
+    // reconciliation and scheduled roster context, so a single Web read owns
+    // one consistent membership/grant view and one failure disposition.
+    let shareAuthorityResponsePromise: ReturnType<
+      NonNullable<typeof input.runtime.platform.groupToolPort>["request"]
+    > | null = null;
+    const readShareAuthorityResponseOnce = () => {
+      const groupToolPort = input.runtime.platform.groupToolPort;
+      if (!groupToolPort) {
+        return null;
       }
+      shareAuthorityResponsePromise ??= groupToolPort.request({
+        action: "read_share_authority",
+      });
+      return shareAuthorityResponsePromise;
+    };
+    let vaultShareModelViewOutcome: HostedVaultShareModelViewOutcome | null = null;
+    const readBackgroundGroupRosterPrompt = async (): Promise<string | null> => {
+      const response = await Promise.resolve(readShareAuthorityResponseOnce())
+        .catch(() => null);
+      return buildHostedBackgroundGroupRosterPrompt({ authority: response });
     };
     const createBackgroundDynamicContextPromptBuilder = (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -1082,8 +1094,13 @@ export async function runHostedWorkspaceAssistantPhase(
         return null;
       }
 
-      const prompts = [deviceSyncStatusPrompt, groupRosterPrompt]
-        .filter((prompt): prompt is string => Boolean(prompt));
+      const prompts = [
+        deviceSyncStatusPrompt,
+        groupRosterPrompt,
+        vaultShareModelViewOutcome?.status === "unavailable"
+          ? HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_PROMPT
+          : null,
+      ].filter((prompt): prompt is string => Boolean(prompt));
       return prompts.length > 0 ? prompts.join("\n\n") : null;
     };
     const runAutomationLane = async (options: {
@@ -1091,7 +1108,21 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
-      await assertCurrentHostedVaultShareAuthority(input);
+      vaultShareModelViewOutcome = await prepareSharedVaultShareModelView({
+        readAuthority: async () => {
+          const response = await readShareAuthorityResponseOnce();
+          if (!response || response.action !== "read_share_authority") {
+            throw new Error("group_share_authority_invalid");
+          }
+          if (response.result.status === "unavailable") {
+            throw new Error("group_share_authority_unavailable");
+          }
+          return response.result.status === "none"
+            ? []
+            : response.result.shares;
+        },
+        vaultRoot: input.restored.vaultRoot,
+      });
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
@@ -1646,22 +1677,6 @@ export async function runHostedWorkspaceAssistantPhase(
   } finally {
     releaseChannelAbortRelay();
     channelAbortController.abort();
-  }
-}
-
-async function assertCurrentHostedVaultShareAuthority(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): Promise<void> {
-  const reconciliation = await reconcileSharedVaultShareProjectionAuthorityFromGroupTool({
-    groupToolPort: input.runtime.platform.groupToolPort,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  if (reconciliation.status === "blocked") {
-    throw new VaultCliError(
-      "HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE",
-      "Hosted shared group data authority could not be verified before assistant work.",
-      { retryable: true },
-    );
   }
 }
 

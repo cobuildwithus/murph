@@ -391,4 +391,18 @@ describe('buildGroupSharedResult', () => {
     const result = await buildGroupSharedResult({ kinds: null, vault })
     expect(result.status).toBe('unavailable')
   })
+
+  it('reports unavailable while the authority-unavailable marker is present', async () => {
+    const dir = join(vault, 'derived', 'vault-share')
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+      join(dir, 'authority-unavailable.json'),
+      JSON.stringify({ schema: 'murph.shared-vault-authority-unavailable.v1' }),
+      'utf8',
+    )
+
+    const result = await buildGroupSharedResult({ kinds: null, vault })
+    expect(result.status).toBe('unavailable')
+    expect(result.members).toEqual([])
+  })
 })

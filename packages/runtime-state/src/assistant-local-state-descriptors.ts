@@ -142,6 +142,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/state/onboarding/conversation.json",
     "Assistant Murph onboarding lifecycle state that must move with hosted resume.",
   ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/state/vault-share-withheld.json",
+    "Landed vault-share records withheld from the model view while share authority is unverified; must move with hosted resume so an outage plus recycle cannot lose landed data.",
+  ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/state/onboarding/first-contact",
     "Assistant first-contact onboarding continuity state that must move with hosted resume.",

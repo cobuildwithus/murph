@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
+import path from "node:path";
 
 import { normalizeOpaquePathSegment } from "@murphai/core";
 import type {
@@ -22,68 +23,73 @@ import {
   type SharedVaultShareRecordEntry,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  readSharedVaultShareProjectionStore,
+  readSharedVaultShareProjectionStoreFile,
+  resolveSharedVaultShareAuthorityUnavailableMarkerPath,
   resolveSharedVaultShareProjectionStorePath,
 } from "@murphai/hosted-execution/vault-share-store-node";
 import { writeJsonFileAtomic } from "@murphai/runtime-state/node";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import type { HostedMailboxItemImportOutcome } from "./mailbox-import.ts";
 import type { HostedRuntimeGroupToolPort } from "./platform.ts";
 
-export type HostedVaultShareAuthorityReconciliationOutcome =
-  | { status: "empty" | "reconciled" | "unchanged" }
+export type HostedVaultShareModelViewOutcome =
+  | { status: "empty" | "ready" }
   | {
-      status: "blocked";
+      status: "unavailable";
       reasonCode:
         | "vault_share.authority_unavailable"
         | "vault_share.read_failed"
         | "vault_share.write_failed";
     };
 
+const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT = {
+  notice:
+    "Shared group data is temporarily unavailable because current sharing "
+    + "authority could not be verified. Do not treat this as members having "
+    + "shared nothing.",
+  schema: "murph.shared-vault-authority-unavailable.v1",
+} as const;
+
 /**
  * Revalidates every already-landed projection against Web's current grant-row
- * generation before a hosted model can read it. The authority callback runs
- * only after a non-empty, valid local store is known to exist, so ordinary
- * personal runtimes pay no control-plane request and transient authority
- * failures never mutate the local store.
+ * generation and materializes the model-visible view accordingly. Share
+ * authority is visibility authority only, never model-admission authority:
+ * when it cannot be verified the landed records are withheld from the vault
+ * view (durably retained under the runtime-private assistant state root) and
+ * the accepted turn proceeds without shared data. A later successful snapshot
+ * restores the retained, still-authorized records without redelivery. The
+ * authority callback runs only after a non-empty local store is known to
+ * exist, so ordinary personal runtimes pay no control-plane request.
  */
-export async function reconcileSharedVaultShareProjectionAuthority(input: {
+export async function prepareSharedVaultShareModelView(input: {
   readAuthority: () => Promise<readonly HostedRuntimeGroupShareAuthorityEntry[]>;
   vaultRoot: string;
-}): Promise<HostedVaultShareAuthorityReconciliationOutcome> {
-  const read = await readSharedVaultShareProjectionStore(input.vaultRoot);
-  if (read.status === "empty") {
+}): Promise<HostedVaultShareModelViewOutcome> {
+  const combined = await readCombinedSharedVaultShareStores(input.vaultRoot);
+  if (combined.status === "blocked") {
+    await withholdSharedVaultShareModelView(input.vaultRoot, null);
+    return { status: "unavailable", reasonCode: combined.reasonCode };
+  }
+  if (combined.status === "empty") {
+    await clearSharedVaultShareWithheldState(input.vaultRoot);
     return { status: "empty" };
   }
-  if (read.status !== "loaded") {
-    return { status: "blocked", reasonCode: "vault_share.read_failed" };
-  }
 
-  const store = read.store;
-  if (Object.keys(store.projections).length === 0) {
-    try {
-      await rm(resolveSharedVaultShareProjectionStorePath(input.vaultRoot), {
-        force: true,
-      });
-      return { status: "empty" };
-    } catch {
-      return { status: "blocked", reasonCode: "vault_share.write_failed" };
-    }
-  }
-
+  const store = combined.store;
   let authority: readonly HostedRuntimeGroupShareAuthorityEntry[];
   try {
     authority = await input.readAuthority();
   } catch {
+    await withholdSharedVaultShareModelView(input.vaultRoot, store);
     return {
-      status: "blocked",
+      status: "unavailable",
       reasonCode: "vault_share.authority_unavailable",
     };
   }
   const authorizedTriples = new Set(authority.map((entry) =>
     buildVaultShareAuthorityKey(entry.memberId, entry.projectionScopeKey, entry.shareId)
   ));
-  let changed = false;
   for (const [projectionScopeKey, projection] of Object.entries(store.projections)) {
     for (const [grantorMemberId, grantor] of Object.entries(projection.grantors)) {
       const authorized = authorizedTriples.has(buildVaultShareAuthorityKey(
@@ -93,30 +99,21 @@ export async function reconcileSharedVaultShareProjectionAuthority(input: {
       ));
       if (!authorized) {
         delete projection.grantors[grantorMemberId];
-        changed = true;
         continue;
       }
 
       const records = grantor.records.filter((record) =>
         record.shareId === grantor.shareId
       );
-      if (records.length !== grantor.records.length) {
-        changed = true;
-      }
       if (records.length === 0) {
         delete projection.grantors[grantorMemberId];
-        changed = true;
       } else {
         grantor.records = records;
       }
     }
     if (Object.keys(projection.grantors).length === 0) {
       delete store.projections[projectionScopeKey];
-      changed = true;
     }
-  }
-  if (!changed) {
-    return { status: "unchanged" };
   }
 
   try {
@@ -124,39 +121,105 @@ export async function reconcileSharedVaultShareProjectionAuthority(input: {
       await rm(resolveSharedVaultShareProjectionStorePath(input.vaultRoot), {
         force: true,
       });
-    } else {
-      await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
+      await clearSharedVaultShareWithheldState(input.vaultRoot);
+      return { status: "empty" };
     }
-    return { status: "reconciled" };
+    await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
+    await clearSharedVaultShareWithheldState(input.vaultRoot);
+    return { status: "ready" };
   } catch {
-    return { status: "blocked", reasonCode: "vault_share.write_failed" };
+    await withholdSharedVaultShareModelView(input.vaultRoot, store);
+    return { status: "unavailable", reasonCode: "vault_share.write_failed" };
   }
 }
 
-export async function reconcileSharedVaultShareProjectionAuthorityFromGroupTool(input: {
-  groupToolPort: HostedRuntimeGroupToolPort | null | undefined;
-  vaultRoot: string;
-}): Promise<HostedVaultShareAuthorityReconciliationOutcome> {
-  return await reconcileSharedVaultShareProjectionAuthority({
-    readAuthority: async () => {
-      if (!input.groupToolPort) {
-        throw new Error("group_tool_unavailable");
-      }
-      const response = await input.groupToolPort.request({
-        action: "read_share_authority",
-      });
-      if (response.action !== "read_share_authority") {
-        throw new Error("group_share_authority_invalid");
-      }
-      if (response.result.status === "unavailable") {
-        throw new Error("group_share_authority_unavailable");
-      }
-      return response.result.status === "none"
-        ? []
-        : response.result.shares;
-    },
-    vaultRoot: input.vaultRoot,
+/**
+ * Hides the landed store from the model view without deleting landed data.
+ * The durable copy moves under the runtime-private assistant state root and a
+ * fixed marker replaces it so shared-data readers report "unavailable". The
+ * final vault-path removal is the one operation that must succeed: if the
+ * runtime can neither verify nor hide the landed records it fails the pass
+ * closed rather than exposing unverified shared data.
+ */
+async function withholdSharedVaultShareModelView(
+  vaultRoot: string,
+  store: SharedVaultShareProjectionsFile | null,
+): Promise<void> {
+  if (store && Object.keys(store.projections).length > 0) {
+    await writeJsonFileAtomic(
+      resolveWithheldSharedVaultShareProjectionStorePath(vaultRoot),
+      store,
+    );
+  }
+  await writeJsonFileAtomic(
+    resolveSharedVaultShareAuthorityUnavailableMarkerPath(vaultRoot),
+    SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT,
+  );
+  await rm(resolveSharedVaultShareProjectionStorePath(vaultRoot), {
+    force: true,
   });
+}
+
+async function clearSharedVaultShareWithheldState(vaultRoot: string): Promise<void> {
+  await rm(resolveWithheldSharedVaultShareProjectionStorePath(vaultRoot), {
+    force: true,
+  });
+  await rm(resolveSharedVaultShareAuthorityUnavailableMarkerPath(vaultRoot), {
+    force: true,
+  });
+}
+
+export function resolveWithheldSharedVaultShareProjectionStorePath(
+  vaultRoot: string,
+): string {
+  return path.join(
+    resolveAssistantStatePaths(vaultRoot).stateDirectory,
+    "vault-share-withheld.json",
+  );
+}
+
+type CombinedSharedVaultShareStoresReadResult =
+  | { status: "loaded"; store: SharedVaultShareProjectionsFile }
+  | { status: "empty" }
+  | { status: "blocked"; reasonCode: "vault_share.read_failed" };
+
+/**
+ * Reads the model-visible store and any withheld durable copy as one logical
+ * store. At most one of the two normally exists; a crash between the withhold
+ * and restore transitions can briefly leave both, so grantor entries merge
+ * with the vault copy winning collisions.
+ */
+async function readCombinedSharedVaultShareStores(
+  vaultRoot: string,
+): Promise<CombinedSharedVaultShareStoresReadResult> {
+  const vaultRead = await readRepairableSharedVaultShareProjectionStoreFile(
+    resolveSharedVaultShareProjectionStorePath(vaultRoot),
+  );
+  const withheldRead = await readRepairableSharedVaultShareProjectionStoreFile(
+    resolveWithheldSharedVaultShareProjectionStorePath(vaultRoot),
+  );
+  if (vaultRead.status !== "loaded" || withheldRead.status !== "loaded") {
+    return { status: "blocked", reasonCode: "vault_share.read_failed" };
+  }
+
+  const merged = withheldRead.store;
+  for (const [projectionScopeKey, projection] of Object.entries(vaultRead.store.projections)) {
+    const target = merged.projections[projectionScopeKey] ?? {
+      grantors: {},
+      projectionScope: projection.projectionScope,
+      projectionScopeKey,
+    };
+    for (const [grantorMemberId, grantor] of Object.entries(projection.grantors)) {
+      target.grantors[grantorMemberId] = grantor;
+    }
+    merged.projections[projectionScopeKey] = target;
+  }
+  if (vaultRead.store.updatedAt > merged.updatedAt) {
+    merged.updatedAt = vaultRead.store.updatedAt;
+  }
+  return Object.keys(merged.projections).length === 0
+    ? { status: "empty" }
+    : { status: "loaded", store: merged };
 }
 
 function buildVaultShareAuthorityKey(
@@ -206,7 +269,8 @@ export async function importHostedVaultShareDeliveryWake(input: {
   }
 
   try {
-    const read = await readRepairableSharedVaultShareProjectionStore(input.vaultRoot);
+    const storePath = await resolveActiveSharedVaultShareStorePath(input.vaultRoot);
+    const read = await readRepairableSharedVaultShareProjectionStoreFile(storePath);
     if (read.status === "read_failed") {
       return {
         reasonCode: "vault_share.read_failed",
@@ -232,7 +296,7 @@ export async function importHostedVaultShareDeliveryWake(input: {
       shareId: delivery.shareId,
       updatedAt: input.wake.occurredAt,
     });
-    await writeSharedVaultShareProjectionStore(input.vaultRoot, read.store);
+    await writeJsonFileAtomic(storePath, read.store);
   } catch {
     // Retry instead of consuming the mailbox item: the web mailbox dedupe key already
     // owns exact replay idempotency, so the destination must not checkpoint past the
@@ -270,7 +334,8 @@ export async function applyHostedVaultShareRevokeWake(input: {
   }
 
   try {
-    const read = await readRepairableSharedVaultShareProjectionStore(input.vaultRoot);
+    const storePath = await resolveActiveSharedVaultShareStorePath(input.vaultRoot);
+    const read = await readRepairableSharedVaultShareProjectionStoreFile(storePath);
     if (read.status === "read_failed") {
       return {
         reasonCode: "vault_share.read_failed",
@@ -304,11 +369,9 @@ export async function applyHostedVaultShareRevokeWake(input: {
     store.updatedAt = revoke.revokedAt;
 
     if (Object.keys(store.projections).length === 0) {
-      await rm(resolveSharedVaultShareProjectionStorePath(input.vaultRoot), {
-        force: true,
-      });
+      await rm(storePath, { force: true });
     } else {
-      await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
+      await writeJsonFileAtomic(storePath, store);
     }
   } catch {
     return {
@@ -384,14 +447,14 @@ function upsertSharedVaultShareRecord(
   store.updatedAt = input.updatedAt;
 }
 
-async function readRepairableSharedVaultShareProjectionStore(
-  vaultRoot: string,
+async function readRepairableSharedVaultShareProjectionStoreFile(
+  storePath: string,
 ): Promise<
   | { status: "loaded"; store: SharedVaultShareProjectionsFile }
   | { status: "read_failed" }
   | { status: "repair_failed" }
 > {
-  const read = await readSharedVaultShareProjectionStore(vaultRoot);
+  const read = await readSharedVaultShareProjectionStoreFile(storePath);
   if (read.status === "empty") {
     return {
       status: "loaded",
@@ -403,9 +466,7 @@ async function readRepairableSharedVaultShareProjectionStore(
   }
 
   try {
-    await rm(resolveSharedVaultShareProjectionStorePath(vaultRoot), {
-      force: true,
-    });
+    await rm(storePath, { force: true });
   } catch {
     return { status: "repair_failed" };
   }
@@ -414,6 +475,36 @@ async function readRepairableSharedVaultShareProjectionStore(
     status: "loaded",
     store: createEmptySharedVaultShareProjectionStore(),
   };
+}
+
+/**
+ * Imports and revokes land in whichever durable copy currently owns the
+ * records: the model-visible vault store normally, or the withheld
+ * runtime-private copy while share authority is unverified so records landed
+ * during an outage stay invisible until the next successful snapshot.
+ */
+async function resolveActiveSharedVaultShareStorePath(
+  vaultRoot: string,
+): Promise<string> {
+  const withheldPath = resolveWithheldSharedVaultShareProjectionStorePath(vaultRoot);
+  if (
+    await hostedVaultSharePathExists(withheldPath)
+    || await hostedVaultSharePathExists(
+      resolveSharedVaultShareAuthorityUnavailableMarkerPath(vaultRoot),
+    )
+  ) {
+    return withheldPath;
+  }
+  return resolveSharedVaultShareProjectionStorePath(vaultRoot);
+}
+
+async function hostedVaultSharePathExists(filePath: string): Promise<boolean> {
+  try {
+    await lstat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function writeSharedVaultShareProjectionStore(

@@ -1838,6 +1838,101 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
+  it("blocks prepare and send while the authority-unavailable marker is present", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-authority-marker-"));
+    try {
+      await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+        JSON.stringify({ schema: "murph.shared-vault-authority-unavailable.v1" }),
+        "utf8",
+      );
+      const newsletterRequest = vi.fn<NewsletterToolRequest>(async (request) =>
+        request.action === "prepare"
+          ? {
+              action: "prepare" as const,
+              result: {
+                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+                groupId: request.groupId,
+                missingEmailParticipants: [],
+                participants: [
+                  {
+                    authorizedShares: [],
+                    hasEmail: true,
+                    memberId: "member_a",
+                  },
+                ],
+                status: "ok" as const,
+              },
+            }
+          : {
+              action: "send" as const,
+              result: {
+                participantCount: 1,
+                skippedNoEmailMemberIds: [],
+                status: "sent" as const,
+              },
+            }
+      );
+      const hostedToolContext = createNewsletterHostedToolContext({
+        newsletterRequest,
+      });
+      const readRequest = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "prepare",
+        groupId: "group_1",
+      }));
+      const sendRequest = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "send",
+        groupId: "group_1",
+        html: "<p>Weekly</p>",
+        subject: "Weekly note",
+        text: "Weekly",
+      }));
+      if (!readRequest || readRequest.kind !== "newsletter" || !sendRequest || sendRequest.kind !== "newsletter") {
+        throw new Error("Expected newsletter requests.");
+      }
+
+      const readResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: readRequest,
+        vaultRoot,
+      });
+      const sendResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: sendRequest,
+        vaultRoot,
+      });
+
+      expect(readResult.rpcResult.success).toBe(true);
+      expect(readNewsletterToolPayload(readResult)).toEqual({
+        action: "prepare",
+        result: {
+          status: "unavailable",
+          unavailableReason: "shared_projection_unavailable",
+        },
+      });
+      expect(sendResult.rpcResult.success).toBe(true);
+      expect(readNewsletterToolPayload(sendResult)).toEqual({
+        action: "send",
+        result: {
+          status: "unavailable",
+          unavailableReason: "shared_projection_unavailable",
+        },
+      });
+      expect(newsletterRequest).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("records a rejected newsletter request as an unavailable send result", async () => {
     const closeNewsletterCapability = vi.fn();
     const recordNewsletterSendResult = vi.fn();

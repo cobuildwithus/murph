@@ -26,7 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyHostedVaultShareRevokeWake,
   importHostedVaultShareDeliveryWake,
-  reconcileSharedVaultShareProjectionAuthority,
+  prepareSharedVaultShareModelView,
 } from "../src/hosted-runtime/vault-share-import.ts";
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
@@ -2031,6 +2031,15 @@ describe("importHostedVaultShareDeliveryWake", () => {
   };
   const storePath = (vaultRoot: string) =>
     join(vaultRoot, "derived", "vault-share", "projections.json");
+  const withheldPath = (vaultRoot: string) =>
+    join(
+      vaultRoot,
+      ".runtime",
+      "operations",
+      "assistant",
+      "state",
+      "vault-share-withheld.json",
+    );
 
   it("lands the shared record as durable vault content, idempotently", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
@@ -2089,7 +2098,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     });
     await writeFile(storePath(vaultRoot), JSON.stringify(before));
 
-    await expect(reconcileSharedVaultShareProjectionAuthority({
+    await expect(prepareSharedVaultShareModelView({
       readAuthority: async () => [{
         memberId: "member_current",
         projectionScopeKey: "sleep-times.v0",
@@ -2100,7 +2109,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         shareId: "share_new_generation",
       }],
       vaultRoot,
-    })).resolves.toEqual({ status: "reconciled" });
+    })).resolves.toEqual({ status: "ready" });
 
     const after = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
     expect(Object.keys(after.projections["sleep-times.v0"].grantors))
@@ -2115,36 +2124,90 @@ describe("importHostedVaultShareDeliveryWake", () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
     await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
 
-    await expect(reconcileSharedVaultShareProjectionAuthority({
+    await expect(prepareSharedVaultShareModelView({
       readAuthority: async () => [],
       vaultRoot,
-    })).resolves.toEqual({ status: "reconciled" });
+    })).resolves.toEqual({ status: "empty" });
     await expect(readFile(storePath(vaultRoot), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("leaves landed data byte-for-byte unchanged when authority is unavailable", async () => {
+  it("withholds landed data without deleting it when authority is unavailable", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
     await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
-    const before = await readFile(storePath(vaultRoot));
+    const before = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
 
-    await expect(reconcileSharedVaultShareProjectionAuthority({
+    await expect(prepareSharedVaultShareModelView({
       readAuthority: async () => {
         throw new Error("control unavailable");
       },
       vaultRoot,
     })).resolves.toEqual({
       reasonCode: "vault_share.authority_unavailable",
-      status: "blocked",
+      status: "unavailable",
     });
-    expect(await readFile(storePath(vaultRoot))).toEqual(before);
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    const marker = JSON.parse(await readFile(
+      join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+      "utf8",
+    ));
+    expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
+    const withheld = JSON.parse(await readFile(withheldPath(vaultRoot), "utf8"));
+    expect(withheld.projections).toEqual(before.projections);
+
+    await expect(prepareSharedVaultShareModelView({
+      readAuthority: async () => [{
+        memberId: wake.delivery.grantorMemberId,
+        projectionScopeKey: "sleep-times.v0",
+        shareId: wake.delivery.shareId,
+      }],
+      vaultRoot,
+    })).resolves.toEqual({ status: "ready" });
+    const restored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    expect(restored.projections).toEqual(before.projections);
+    await expect(readFile(withheldPath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(
+      join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
+      "utf8",
+    )).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("lands imports invisibly while the shared view is withheld", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+    await prepareSharedVaultShareModelView({
+      readAuthority: async () => {
+        throw new Error("control unavailable");
+      },
+      vaultRoot,
+    });
+
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          grantorMemberId: "member_outage_import",
+          shareId: "share_outage_import",
+        },
+        eventId: "vault-share:outage-import",
+      },
+    })).resolves.toEqual({ status: "imported" });
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    const withheld = JSON.parse(await readFile(withheldPath(vaultRoot), "utf8"));
+    expect(Object.keys(withheld.projections["sleep-times.v0"].grantors).sort())
+      .toEqual([wake.delivery.grantorMemberId, "member_outage_import"].sort());
   });
 
   it("skips the authority control read when no landed store exists", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
     const readAuthority = vi.fn(async () => []);
 
-    await expect(reconcileSharedVaultShareProjectionAuthority({
+    await expect(prepareSharedVaultShareModelView({
       readAuthority,
       vaultRoot,
     })).resolves.toEqual({ status: "empty" });
