@@ -7257,7 +7257,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
   assert.equal(steeredResult.responseDisposition, 'none')
   expect(finishWithoutReplyAcceptedEvents).toEqual([
     {
-      acceptedInputIds: ['manual-1'],
+      acceptedInputIds: ['initial', 'manual-1'],
       deliveryContextOrdinal: 1,
     },
   ])

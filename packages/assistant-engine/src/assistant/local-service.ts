@@ -1000,12 +1000,27 @@ export async function sendAssistantMessageLocal(
               throw error
             }
           }
-        const resolveAcceptedInputIdsForDeliveryContextOrdinal = (
+        // Cumulative through the ordinal: the no-reply hook is a pre-marker
+        // durability fence over every input already admitted into the provider
+        // turn, while each per-ordinal entry stays exact for target
+        // authorization and effect-time revalidation.
+        const resolveAcceptedInputIdsThroughDeliveryContextOrdinal = (
           deliveryContextOrdinal: number,
-        ): readonly string[] => [
-          ...(acceptedInputIdsByDeliveryContextOrdinal[deliveryContextOrdinal] ??
-            acceptedInputIdsForProviderRequest),
-        ]
+        ): readonly string[] => {
+          if (
+            deliveryContextOrdinal >=
+              acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            return [...acceptedInputIdsForProviderRequest]
+          }
+          return [
+            ...new Set(
+              acceptedInputIdsByDeliveryContextOrdinal
+                .slice(0, deliveryContextOrdinal + 1)
+                .flat(),
+            ),
+          ]
+        }
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
@@ -1114,7 +1129,7 @@ export async function sendAssistantMessageLocal(
               vault: currentInput.vault,
             })
             const acceptedInputIds =
-              resolveAcceptedInputIdsForDeliveryContextOrdinal(
+              resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
                 event.deliveryContextOrdinal,
               )
             await currentInput.onFinishWithoutReplyAccepted?.({
