@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Purpose
 
@@ -88,6 +88,7 @@ Murph pauses model-capable automation wakes for Linq members with no inbound day
 Linq egress should stay small and obvious:
 
 - Participant-target sends are signup-welcome only, tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line.
+- After Linq accepts that canonical participant welcome, its signed delivery outcome must atomically promote the returned direct chat into the Web-owned home route. Manual dashboard sends and generic provider `message.sent` events remain observability-only and must not bind or retarget a member.
 - Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
 - The Web Linq egress owner resolves the canonical delivery target and direct/group audience at send time. Stored automation routes are bounded authority evidence, not a second route-ownership system.
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.
