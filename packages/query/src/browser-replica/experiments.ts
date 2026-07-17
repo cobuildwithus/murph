@@ -322,6 +322,7 @@ interface BrowserVaultExperimentRunContext {
   events: BrowserVaultEntity[];
   eventTimeZone: string | null;
   expectedEffects: BrowserVaultExperimentExpectedEffectInput[];
+  persistedOutcome: ExperimentOutcome | null;
   run: BrowserVaultExperimentResultRun;
   unsupportedExplicitAdherenceTargets: boolean;
 }
@@ -362,8 +363,13 @@ export function selectBrowserVaultExperimentResults(
     return null;
   }
 
-  const context = buildRunContext(client, entity, asOf);
-  const persistedOutcome = findPersistedExperimentOutcome(client, context);
+  const context = buildRunContext(
+    client,
+    entity,
+    asOf,
+    findReferencedExperimentOutcome(client, entity),
+  );
+  const { persistedOutcome } = context;
   const biomarkers = persistedOutcome
     ? buildPersistedOutcomeBiomarkers(persistedOutcome)
     : buildBiomarkerResults(
@@ -461,19 +467,20 @@ function buildRunContext(
   client: BrowserVaultQueryClient,
   entity: BrowserVaultEntity,
   asOf: string,
+  referencedOutcome: ExperimentOutcome | null,
 ): BrowserVaultExperimentRunContext {
   const diagnostics: BrowserVaultExperimentResultDiagnostic[] = [];
   const attributes = entity.attributes;
   const sourceStatus = readString(attributes.status) ?? entity.status;
-  const plannedWindows = readRunWindows(attributes);
+  const authoritativeWindows = referencedOutcome?.windows ?? readRunWindows(attributes);
   const endedOn = readIsoDate(attributes.endedOn);
-  const endedEarly = sourceStatus === "completed" &&
-    endedOn !== null &&
-    plannedWindows.interventionEnd !== null &&
-    endedOn < plannedWindows.interventionEnd;
+  const endedEarly = endedOn !== null &&
+    authoritativeWindows.interventionEnd !== null &&
+    endedOn < authoritativeWindows.interventionEnd;
   const windows = endedEarly
-    ? clampRunWindowsToTerminalDate(plannedWindows, endedOn)
-    : plannedWindows;
+    ? clampRunWindowsToTerminalDate(authoritativeWindows, endedOn)
+    : authoritativeWindows;
+  const persistedOutcome = endedEarly ? null : referencedOutcome;
   const schedule = readRunSchedule(attributes, diagnostics);
   const runPlanRecord = readRecord(attributes.runPlan);
   const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);
@@ -489,7 +496,7 @@ function buildRunContext(
     : parsedAdherenceTargets.targets;
   const runTimeZone = adherenceTargets.find((target) => target.calendar)?.calendar?.timeZone ?? schedule?.timeZone ?? null;
   const requestedAsOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
-  const evidenceThrough = sourceStatus === "completed" && endedOn !== null
+  const evidenceThrough = endedOn !== null
     ? minIsoDate(requestedAsOfDate, endedOn) ?? requestedAsOfDate
     : requestedAsOfDate;
   const effectiveAsOf = endedEarly ? evidenceThrough : asOf;
@@ -497,17 +504,31 @@ function buildRunContext(
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
   const runStart = windows.baselineStart ?? windows.interventionStart;
   const run = {
-    commonsProtocolRef: cloneRecordOrNull(attributes.commonsProtocolRef),
+    commonsProtocolRef: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.commonsProtocolRef
+        : attributes.commonsProtocolRef,
+    ),
     completedAt,
     dayInRun: windows.interventionStart !== null && windows.interventionEnd !== null
       ? computeDayInRun(runStart, evidenceThrough)
       : null,
-    effectiveProtocolSnapshot: cloneRecordOrNull(attributes.effectiveProtocolSnapshot),
+    effectiveProtocolSnapshot: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.effectiveProtocolSnapshot
+        : attributes.effectiveProtocolSnapshot,
+    ),
     id: readString(attributes.experimentId) ?? entity.id,
     phase: endedEarly
       ? "abandoned"
-      : resolveExperimentPhase(sourceStatus, windows, evidenceThrough),
-    protocolRef: cloneRecordOrNull(attributes.protocolRef),
+      : persistedOutcome
+        ? "completed"
+        : resolveExperimentPhase(sourceStatus, windows, evidenceThrough),
+    protocolRef: cloneRecordOrNull(
+      persistedOutcome
+        ? persistedOutcome.protocolRef
+        : attributes.protocolRef,
+    ),
     runPlan: {
       ...windows,
       adherenceTargets: adherenceTargets.map(projectBrowserAdherenceTarget),
@@ -518,8 +539,8 @@ function buildRunContext(
     },
     slug: readString(attributes.slug) ?? entity.experimentSlug ?? entity.id,
     startedOn,
-    status: sourceStatus,
-    title: entity.title ?? readString(attributes.title) ?? entity.id,
+    status: persistedOutcome?.experiment.status ?? sourceStatus,
+    title: persistedOutcome?.experiment.title ?? entity.title ?? readString(attributes.title) ?? entity.id,
     windows,
   } satisfies BrowserVaultExperimentResultRun;
   const events = selectExperimentEvents(client, entity, run, evidenceThrough, runTimeZone);
@@ -543,6 +564,7 @@ function buildRunContext(
     eventTimeZone: runTimeZone,
     adherenceTargets,
     expectedEffects,
+    persistedOutcome,
     run,
     unsupportedExplicitAdherenceTargets: parsedAdherenceTargets.unsupportedExplicit,
   };
@@ -587,35 +609,27 @@ function clampRunWindowsToTerminalDate(
   };
 }
 
-function findPersistedExperimentOutcome(
+function findReferencedExperimentOutcome(
   client: BrowserVaultQueryClient,
-  context: BrowserVaultExperimentRunContext,
+  entity: BrowserVaultEntity,
 ): ExperimentOutcome | null {
-  if (context.run.phase !== "completed" && context.run.phase !== "review_due") {
-    return null;
-  }
-
   const parsedRef = experimentOutcomeRefSchema.safeParse(
-    context.entity.attributes.outcomeRef,
+    entity.attributes.outcomeRef,
   );
   if (!parsedRef.success) {
     return null;
   }
 
+  const experimentId = readString(entity.attributes.experimentId) ?? entity.id;
+  const experimentSlug = readString(entity.attributes.slug) ?? entity.experimentSlug ?? entity.id;
+
   return (client.replica.experimentOutcomes ?? []).find((outcome) =>
     outcome.outcomeId === parsedRef.data.outcomeId &&
     (parsedRef.data.generatedAt === undefined ||
       outcome.generatedAt === parsedRef.data.generatedAt) &&
-    persistedOutcomeMatchesRun(outcome, context.run)
+    outcome.experiment.id === experimentId &&
+    outcome.experiment.slug === experimentSlug
   ) ?? null;
-}
-
-function persistedOutcomeMatchesRun(
-  outcome: ExperimentOutcome,
-  run: BrowserVaultExperimentResultRun,
-): boolean {
-  return outcome.experiment.id === run.id &&
-    outcome.experiment.slug === run.slug;
 }
 
 function resolveSavedOutcomeStatus(

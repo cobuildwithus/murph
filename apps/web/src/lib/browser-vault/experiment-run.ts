@@ -76,11 +76,11 @@ function mapExperimentResultsProjection(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection {
   const { experiment } = results;
-  const status = normalizePrivateRunStatus(results);
+  const status = results.persistedOutcome
+    ? "finished"
+    : normalizePrivateRunStatus(results);
   const startedOn = experiment.windows.baselineStart ?? experiment.startedOn;
-  const savedWindows = status === "finished"
-    ? results.persistedOutcome?.windows ?? null
-    : null;
+  const savedWindows = results.persistedOutcome?.windows ?? null;
   const dateRangeStart = savedWindows
     ? savedWindows.baselineStart ?? savedWindows.interventionStart ?? undefined
     : startedOn;
@@ -150,7 +150,7 @@ function mapExperimentResultsProjection(
     outcomeStatus: results.savedOutcomeStatus,
     summary,
     summaryDetail,
-    conclusions: status === "finished" && results.persistedOutcome
+    conclusions: results.persistedOutcome
       ? buildConclusions(results)
       : undefined,
   };
@@ -896,6 +896,10 @@ function readCurrentBiomarkerValue(
 function normalizePrivateRunStatus(
   results: BrowserVaultExperimentResultsView,
 ): ReturnType<typeof normalizeExperimentRunStatus> {
+  if (results.experiment.phase === "abandoned") {
+    return "stopped";
+  }
+
   return normalizeExperimentRunStatus({
     phase: results.experiment.phase,
     startedOn: results.experiment.startedOn,
@@ -1084,6 +1088,13 @@ function formatStatusLabel(
   }
 
   if (isOpenSourceStatus(sourceStatus) && normalizedStatus !== "active") {
+    return normalizedLabel;
+  }
+
+  if (
+    normalizedStatus === "finished" &&
+    normalizeExperimentRunStatus({ status: sourceStatus }) !== "finished"
+  ) {
     return normalizedLabel;
   }
 

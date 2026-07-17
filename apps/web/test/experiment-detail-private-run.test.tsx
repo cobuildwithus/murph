@@ -504,7 +504,7 @@ describe("experiment detail private-run composition", () => {
     const outcome = createSavedOutcome({
       id: "exp_sauna_saved_outcome",
       slug: "finnish-sauna",
-      status: "active",
+      status: "paused",
       title: "Original sauna run",
     });
 
@@ -535,7 +535,7 @@ describe("experiment detail private-run composition", () => {
             runPlan: {
               baselineEnd: "2026-04-04",
               baselineStart: "2026-04-02",
-              interventionEnd: "2026-04-07",
+              interventionEnd: "2026-04-10",
               interventionStart: "2026-04-05",
             },
             slug: "finnish-sauna",
@@ -560,6 +560,7 @@ describe("experiment detail private-run composition", () => {
       dateRange: "Apr 1 – Apr 6",
       outcomeStatus: "available",
       status: "finished",
+      statusLabel: "Finished",
       summary: outcome.conclusion.headline,
     }));
     expect(privateRun?.summaryDetail).toContain(outcome.conclusion.plainLanguage);
@@ -1763,11 +1764,24 @@ describe("experiment detail private-run composition", () => {
 
   it("keeps a post-stop point measurement out of stopped Results", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const outcome = createSavedOutcome({
+      id: "exp_sauna_stopped_anchor",
+      slug: "finnish-sauna",
+      status: "paused",
+      title: "Stopped anchor run",
+      windows: {
+        baselineEnd: "2026-04-03",
+        baselineStart: "2026-04-01",
+        interventionEnd: "2026-04-10",
+        interventionStart: "2026-04-04",
+      },
+    });
 
     expect(protocol).not.toBeNull();
 
     const stoppedRun = resolveBrowserVaultExperimentRun({
       client: await createClient({
+        experimentOutcomes: [outcome],
         generatedAt: "2026-04-20T08:00:00.000Z",
         metricRows: [
           metricRow({
@@ -1820,21 +1834,26 @@ describe("experiment detail private-run composition", () => {
             },
             endedOn: "2026-04-05",
             id: "exp_sauna_stopped_anchor",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+              relativePath: "bank/experiments/outcomes/stopped-anchor.json",
+            },
             runPlan: {
               baselineEnd: "2026-04-03",
               baselineStart: "2026-04-01",
-              interventionEnd: "2026-04-10",
+              interventionEnd: "2026-04-05",
               interventionStart: "2026-04-04",
             },
             slug: "finnish-sauna",
             startedOn: "2026-04-01",
-            status: "completed",
+            status: "paused",
             title: "Stopped anchor run",
           }),
           id: "exp_sauna_stopped_anchor",
           slug: "finnish-sauna",
           startedOn: "2026-04-01",
-          status: "completed",
+          status: "paused",
           summary: "Stopped before the later lab result.",
           tags: ["sauna"],
           title: "Stopped anchor run",
@@ -1962,6 +1981,7 @@ function createSavedOutcome(input: {
   slug: string;
   status?: ExperimentOutcome["experiment"]["status"];
   title?: string;
+  windows?: ExperimentOutcome["windows"];
 }): ExperimentOutcome {
   return {
     adherenceSummary: {
@@ -2019,7 +2039,7 @@ function createSavedOutcome(input: {
     outcomeId: `outcome_${input.id}`,
     protocolRef: null,
     schemaVersion: "murph.experiment-outcome.v1",
-    windows: {
+    windows: input.windows ?? {
       baselineEnd: "2026-04-03",
       baselineStart: "2026-04-01",
       interventionEnd: "2026-04-06",

@@ -223,9 +223,10 @@ describe("hosted browser-vault replica refresh preparation", () => {
         runPlan: {
           baselineEnd: "2026-06-04",
           baselineStart: "2026-06-02",
-          interventionEnd: "2026-06-11",
+          interventionEnd: "2026-06-20",
           interventionStart: "2026-06-05",
         },
+        status: "paused",
         title: "Renamed writer projection",
         vault: vaultRoot,
       });
@@ -248,12 +249,17 @@ describe("hosted browser-vault replica refresh preparation", () => {
       );
       expect(results?.savedOutcomeStatus).toBe("available");
       expect(results?.persistedOutcome).toEqual(written.outcome);
-      expect(results?.experiment.windows).toEqual({
-        baselineEnd: "2026-06-04",
-        baselineStart: "2026-06-02",
-        interventionEnd: "2026-06-11",
-        interventionStart: "2026-06-05",
-      });
+      expect(results?.experiment.commonsProtocolRef).toEqual(
+        written.outcome.commonsProtocolRef,
+      );
+      expect(results?.experiment.effectiveProtocolSnapshot).toEqual(
+        written.outcome.effectiveProtocolSnapshot,
+      );
+      expect(results?.experiment.phase).toBe("completed");
+      expect(results?.experiment.protocolRef).toEqual(written.outcome.protocolRef);
+      expect(results?.experiment.status).toBe(written.outcome.experiment.status);
+      expect(results?.experiment.title).toBe(written.outcome.experiment.title);
+      expect(results?.experiment.windows).toEqual(written.outcome.windows);
       expect(results?.persistedOutcome?.windows).toEqual({
         baselineEnd: "2026-06-03",
         baselineStart: "2026-06-01",
