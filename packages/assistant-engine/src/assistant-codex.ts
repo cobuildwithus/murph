@@ -2886,6 +2886,7 @@ async function runCodexAppServerTurnOnProcess(
       droppedThreadCount: subagentDroppedUsageThreadIds.size,
       modelProvider: normalizeNullableString(input.modelProvider) ?? null,
       ordinalStart: nextDynamicToolUsageOrdinal,
+      parentModel: normalizeNullableString(input.model) ?? null,
       parentRawEvents: jsonEvents,
       serviceTier: input.serviceTier ?? null,
       subagentTokenUsageByThread,

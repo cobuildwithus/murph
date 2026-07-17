@@ -21,16 +21,15 @@ test("NutritionSection renders the static nutrition database copy", () => {
   );
   assert.match(markup, /are these protein bars actually healthy\?/);
   assert.match(markup, /Chocolate peanut protein bar/);
-  assert.match(markup, /Product test · PlasticList/);
+  assert.match(markup, /High BPA/);
+  assert.match(markup, /plasticlist\.org/);
+  assert.match(markup, /href="https:\/\/plasticlist\.org"/);
   assert.match(
     markup,
     /BPA measured at 41 ng\/g, near the top of everything PlasticList has tested\./,
   );
-  assert.match(markup, /Murph&#x27;s read/);
-  assert.match(
-    markup,
-    /that BPA number is high for an everyday bar\. Two bars with clean tests hit the same 20 g\. Want the swap\?/,
-  );
+  assert.doesNotMatch(markup, /Murph&#x27;s read/);
+  assert.doesNotMatch(markup, /Want the swap\?/);
   assert.match(markup, /Murph Facts/);
   assert.match(markup, /Behind every answer about what you eat/);
   assert.match(markup, /Food labels/);

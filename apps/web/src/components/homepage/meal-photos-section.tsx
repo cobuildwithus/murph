@@ -79,76 +79,67 @@ function CameraArtifact() {
   );
 }
 
-const MEAL_ITEMS = [
-  ["Brown rice", "210"],
-  ["Roasted sweet potato", "140"],
-  ["Half an avocado", "120"],
-  ["Chickpeas", "90"],
-  ["Arugula", "10"],
+// Other shots in the roll, dimmed so the food photo Murph picks out reads as
+// the one it grabbed on its own.
+const OTHER_ROLL_PHOTOS = [
+  "/design-assets/hero-morning-outdoor-light-exposure.jpeg",
+  "/design-assets/cold-plunge-tub.jpeg",
+  "/design-assets/hero-walking-after-every-meal.jpeg",
 ] as const;
 
 function BackgroundLogArtifact() {
   return (
     <div className="w-full max-w-[320px] rounded-2xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="relative aspect-[4/3] overflow-hidden rounded-xl">
-        <Image
-          alt="The same lunch bowl photo, recognized from the camera roll"
-          className="object-cover"
-          fill
-          sizes="320px"
-          src="/meal-snap-2.jpg"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute top-2.5 left-2.5 h-4 w-4 rounded-tl-[3px] border-t-2 border-l-2 border-white/90"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute top-2.5 right-2.5 h-4 w-4 rounded-tr-[3px] border-t-2 border-r-2 border-white/90"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute bottom-2.5 left-2.5 h-4 w-4 rounded-bl-[3px] border-b-2 border-l-2 border-white/90"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute right-2.5 bottom-2.5 h-4 w-4 rounded-br-[3px] border-b-2 border-r-2 border-white/90"
-        />
-        <span className="absolute right-3 bottom-3 rounded-full bg-[#2c7a3f] px-2.5 py-1 font-mono text-[9px] font-medium tracking-[0.1em] text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
-          ✓ LOGGED
+      <div className="flex items-center justify-between px-1">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#8a6428]">
+          Your camera roll
         </span>
       </div>
 
-      <div className="mt-3 flex items-baseline justify-between px-1">
-        <p className="text-[0.9375rem] font-semibold text-[#2d3436]">
-          Grain bowl
-        </p>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          12:43 PM
-        </span>
-      </div>
-      <p className="mt-0.5 px-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#8a6428]">
-        Found in your camera roll · read on your phone
-      </p>
-
-      <div className="mt-3 space-y-1.5 px-1">
-        {MEAL_ITEMS.map(([name, cal]) => (
-          <div
-            key={name}
-            className="flex items-baseline justify-between border-b border-[#c4a882]/20 pb-1.5 text-[0.8125rem] leading-[1.4]"
-          >
-            <span className="text-[#635a48]">{name}</span>
-            <span className="font-mono tabular-nums text-[#2d3436]">
-              {cal} cal
-            </span>
+      <div className="mt-3 grid grid-cols-[1.9fr_1fr] gap-2">
+        <div className="relative overflow-hidden rounded-xl ring-2 ring-[#2c7a3f]">
+          <div className="relative aspect-square">
+            <Image
+              alt="Your meal photo, picked out of the camera roll on its own"
+              className="object-cover"
+              fill
+              sizes="200px"
+              src="/meal-snap-2.jpg"
+            />
           </div>
-        ))}
-        <div className="flex items-baseline justify-between pt-1 text-[0.875rem]">
-          <span className="font-semibold text-[#2d3436]">Meal total</span>
-          <span className="font-mono font-semibold tabular-nums text-[#2d3436]">
-            ≈ 570 cal
+          <span className="absolute top-2 left-2 rounded-full bg-black/55 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-white backdrop-blur-sm">
+            New
+          </span>
+          <span className="absolute right-2 bottom-2 rounded-full bg-[#2c7a3f] px-2.5 py-1 font-mono text-[9px] font-medium tracking-[0.1em] text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
+            ✓ Logged
           </span>
         </div>
+
+        <div className="flex flex-col gap-2" aria-hidden="true">
+          {OTHER_ROLL_PHOTOS.map((src) => (
+            <div
+              key={src}
+              className="relative min-h-0 flex-1 overflow-hidden rounded-lg opacity-55"
+            >
+              <Image
+                alt=""
+                className="object-cover"
+                fill
+                sizes="90px"
+                src={src}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-baseline justify-between border-t border-[#c4a882]/25 px-1 pt-2.5">
+        <span className="text-[0.875rem] font-semibold text-[#2d3436]">
+          Grain bowl
+        </span>
+        <span className="font-mono text-[0.875rem] font-semibold tabular-nums text-[#2d3436]">
+          ≈ 570 cal
+        </span>
       </div>
     </div>
   );
@@ -203,13 +194,13 @@ const STEPS = [
   {
     number: "01",
     heading: "You take the picture.",
-    body: "Like you already do. Don't open anything, don't type anything.",
+    body: "The same photo you'd snap anyway. Don't open an app, don't type a thing.",
     artifact: <CameraArtifact />,
   },
   {
     number: "02",
     heading: "Murph logs it by itself.",
-    body: "The app spots new food photos in the background and reads them right on your phone.",
+    body: "No app to open. Your phone flags the food photos on its own, and Murph logs them for you.",
     artifact: <BackgroundLogArtifact />,
   },
   {

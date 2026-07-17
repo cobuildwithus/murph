@@ -69,7 +69,6 @@ const CONNECT_SOURCE_UI = {
     name: "Apple Health",
     unavailableActionLabel: "Download app",
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
-    unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",

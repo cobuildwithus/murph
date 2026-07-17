@@ -89,16 +89,16 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // closure, 24,408B over the prior budget (CI linux measures 7,426,324B on the
 // same tree). The July 17 morning merges (Epic clinical records beta and
 // onboarding clarifiers) measure 7,473,273B locally, 6,083B over the resulting
-// budget. Advance only by those measured overages and preserve the separate
-// 96KB noise band.
+// budget, the multi-agent V1 posture comment adds the same measured 71B, the
+// proactive-delegation hint rewrite adds the same measured 8,345B, and V2
+// subagent usage evidence adds the same measured 355B. Advance only by those
+// measured overages and preserve the separate 96KB noise band.
 // Shared accepted-message targeting adds the reviewed boot-critical shared
 // resolver, both targeting tools, and the true-only native-reply outbox
-// marker: a 14,570B feature increment measured against the July 16 merge
-// baseline tree. The July 17 merged tree with the feature measures
-// 7,496,729B locally, 8,886B over that predicted budget from base/feature
-// interaction growth. Advance by those exact measured overages and preserve
-// the separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_150_729;
+// marker. The July 17 tree merging main's subagent-delegation growth with this
+// feature measures a 7,500,884B local static boot closure; advance by that
+// exact measured overage and preserve the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_154_884;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.
