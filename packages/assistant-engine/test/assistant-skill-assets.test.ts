@@ -1817,17 +1817,22 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
+      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
+    )
+    expect(compact).toContain('Last thing before I quit interrogating you')
+    expect(compact).toContain(
+      'spawn a separate background child for each: the medical-persistence child owns the entire medical save, and the supplement child owns label enrichment',
+    )
+    expect(compact).toContain(
+      'Up to three may be active at once, as an explicit exception to the global one-at-a-time default',
+    )
+    expect(compact).toContain(
+      "ok, one last question and then I'll leave you alone, promise",
+    )
+    expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
     )
-    expect(compact).toContain(
-      'attach the current protocol-or-experiment question as a short voice memo and leave the final response text empty',
-    )
-    expect(compact).toContain(
-      'This is an explicit product-flow voice preference; do not require the user to ask for voice separately.',
-    )
-    expect(compact).toContain(
-      'a photo of bottles or labels is welcome if easier',
-    )
+    expect(compact).toContain('a photo of bottles or labels is welcome if easier')
     expect(compact).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
     )
@@ -2085,7 +2090,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt above, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt and the foundation brain-dump memo above, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
