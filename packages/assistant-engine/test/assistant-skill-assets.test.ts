@@ -1911,6 +1911,12 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'hear a bit more about what Murph can do for them, or dive into the goals they named earlier, in their words',
     )
+    expect(compact).toContain(
+      'running health challenges and group chats with friends, ordering things on Amazon, calling to book appointments, singing songs, and tracking meals and calories',
+    )
+    expect(compact).toContain(
+      'steer back to the goals they named and toward setting up the first habit or experiment below',
+    )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
     const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
