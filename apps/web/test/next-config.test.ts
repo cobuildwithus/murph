@@ -692,11 +692,11 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
   assert.equal(testHeaderValues.get("X-DNS-Prefetch-Control"), "off");
 });
 
-test("next.config serves the hosted security headers on every route", async () => {
+test("next.config serves global security headers and stricter Murph Safe referrer privacy", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 1);
+  assert.equal(routes.length, 2);
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -711,6 +711,13 @@ test("next.config serves the hosted security headers on every route", async () =
       "Permissions-Policy",
     ],
   );
+  assert.equal(routes[1]?.source, "/search/:path*");
+  assert.deepEqual(routes[1]?.headers, [
+    {
+      key: "Referrer-Policy",
+      value: "no-referrer",
+    },
+  ]);
 });
 
 function resolveHostedOptionalModule(): boolean {

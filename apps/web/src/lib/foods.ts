@@ -4,9 +4,13 @@ import type {
   ProductLabelDetail,
   ProductLabelsQueryClient,
   ProductLabelSearchItem,
+  PublicProductLabelRecord,
+  PublicProductLabelSearchItem,
+  PublicProductTestEvidence,
 } from "./product-labels";
 import {
   createProductLabelsQueries,
+  createPublicProductLabelsQueries,
   getDefaultProductLabelsPool,
 } from "./product-labels";
 
@@ -21,6 +25,9 @@ export type FoodDetail = ProductLabelDetail;
 
 let defaultFoodsQueriesInstance: ReturnType<typeof createFoodsQueries> | null =
   null;
+let defaultPublicFoodsQueriesInstance: ReturnType<
+  typeof createPublicFoodsQueries
+> | null = null;
 
 export function createFoodsQueries(client: ProductLabelsQueryClient): {
   getFoodById: (input: {
@@ -51,6 +58,29 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
   };
 }
 
+export function createPublicFoodsQueries(client: ProductLabelsQueryClient): {
+  searchPublicFoods: (input: {
+    limit: number;
+    q: string;
+  }) => Promise<PublicProductLabelSearchItem[]>;
+  getPublicFoodRecordById: (input: {
+    id: string;
+  }) => Promise<PublicProductLabelRecord | null>;
+  getPublicFoodEvidence: (input: {
+    id: string;
+  }) => Promise<PublicProductTestEvidence>;
+} {
+  const queries = createPublicProductLabelsQueries(client, "foods", {
+    excludedDataOrigins: GENERIC_FOOD_DATA_ORIGINS,
+  });
+
+  return {
+    searchPublicFoods: queries.searchCompact,
+    getPublicFoodRecordById: queries.getRecordById,
+    getPublicFoodEvidence: queries.getEvidence,
+  };
+}
+
 export async function searchFoods(input: {
   q: string;
   limit: number;
@@ -74,10 +104,37 @@ export async function getFoodByUpc(input: {
   return await defaultFoodsQueries().getFoodByUpc(input);
 }
 
+export async function searchPublicFoods(input: {
+  q: string;
+  limit: number;
+}): Promise<PublicProductLabelSearchItem[]> {
+  return await defaultPublicFoodsQueries().searchPublicFoods(input);
+}
+
+export async function getPublicFoodRecordById(input: {
+  id: string;
+}): Promise<PublicProductLabelRecord | null> {
+  return await defaultPublicFoodsQueries().getPublicFoodRecordById(input);
+}
+
+export async function getPublicFoodEvidence(input: {
+  id: string;
+}): Promise<PublicProductTestEvidence> {
+  return await defaultPublicFoodsQueries().getPublicFoodEvidence(input);
+}
+
 function defaultFoodsQueries(): ReturnType<typeof createFoodsQueries> {
   defaultFoodsQueriesInstance ??= createFoodsQueries(
     getDefaultProductLabelsPool(),
   );
 
   return defaultFoodsQueriesInstance;
+}
+
+function defaultPublicFoodsQueries(): ReturnType<typeof createPublicFoodsQueries> {
+  defaultPublicFoodsQueriesInstance ??= createPublicFoodsQueries(
+    getDefaultProductLabelsPool(),
+  );
+
+  return defaultPublicFoodsQueriesInstance;
 }
