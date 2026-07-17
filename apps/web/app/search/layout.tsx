@@ -19,7 +19,7 @@ export default async function MurphSafeLayout(input: { children: ReactNode }) {
         githubStarCount={githubStarCount}
         preloadAuthPanel
       />
-      <div className="flex-1">{input.children}</div>
+      <div className="flex flex-1 flex-col">{input.children}</div>
       <MurphSafeFooter />
     </div>
   );
