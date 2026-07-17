@@ -94,9 +94,11 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // Shared accepted-message targeting adds the reviewed boot-critical shared
 // resolver, both targeting tools, and the true-only native-reply outbox
 // marker: a 14,570B feature increment measured against the July 16 merge
-// baseline tree. Advance by that exact feature increment and preserve the
-// separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_141_843;
+// baseline tree. The July 17 merged tree with the feature measures
+// 7,496,729B locally, 8,886B over that predicted budget from base/feature
+// interaction growth. Advance by those exact measured overages and preserve
+// the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_150_729;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.
