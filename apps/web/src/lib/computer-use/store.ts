@@ -104,6 +104,18 @@ export interface ComputerUseStore {
     handoffId: string;
     memberId: string;
   }): Promise<ComputerHandoffRecord | null>;
+  claimLoginHandoffForCheckpoint(input: {
+    expectedAwaitingReason: HostedComputerAwaitingReason | null;
+    expectedKernelSessionId: string | null;
+    expectedPausedAt: Date;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
+    expectedStatus: "checkpointing" | "completed";
+    expectedUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerHandoffRecord | null>;
   completeHandoff(input: {
     expectedUpdatedAt?: Date;
     handoffId: string;
@@ -261,6 +273,17 @@ export interface ComputerUseStore {
     expectedPendingHandoffId: string | null;
     kernelLiveViewUrlEncrypted: string;
     kernelSessionId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
+  resumeRunAfterLoginCheckpoint(input: {
+    awaitingReason: HostedComputerAwaitingReason | null;
+    expectedHandoffUpdatedAt: Date;
+    expectedKernelSessionId: string;
+    expectedPausedAt: Date;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
+    handoffId: string;
     memberId: string;
     now: Date;
     runId: string;
@@ -690,7 +713,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
-    const where = requireCheckpointingHandoffForBrowserUpdate({
+    const where = requireHandoffForBrowserUpdate({
+      expectedHandoffStatus: "checkpointing",
       expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
       expectedPendingHandoffId: input.expectedPendingHandoffId,
       where: {
@@ -898,6 +922,63 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         throw computerUseNotFoundError("Computer handoff was not found.");
       }
 
+      return mapHandoff(handoff);
+    });
+  }
+
+  async claimLoginHandoffForCheckpoint(input: {
+    expectedAwaitingReason: HostedComputerAwaitingReason | null;
+    expectedKernelSessionId: string | null;
+    expectedPausedAt: Date;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
+    expectedStatus: "checkpointing" | "completed";
+    expectedUpdatedAt: Date;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerHandoffRecord | null> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const claimed = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          status: "checkpointing",
+          updatedAt: input.now,
+        },
+        where: {
+          completedAt: { not: null },
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "login",
+          run: {
+            is: {
+              awaitingReason: input.expectedAwaitingReason,
+              expiresAt: { gt: input.now },
+              id: input.runId,
+              kernelSessionId: input.expectedKernelSessionId,
+              memberId: input.memberId,
+              pausedAt: input.expectedPausedAt,
+              pendingHandoffId: input.handoffId,
+              resumeAfterMailboxLaneSeq:
+                input.expectedResumeAfterMailboxLaneSeq,
+              status: "awaiting_user",
+            },
+          },
+          runId: input.runId,
+          status: input.expectedStatus,
+          updatedAt: input.expectedUpdatedAt,
+        },
+      });
+      if (claimed.count === 0) {
+        return null;
+      }
+
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
       return mapHandoff(handoff);
     });
   }
@@ -1118,6 +1199,79 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return mapRun(run);
   }
 
+  async resumeRunAfterLoginCheckpoint(input: {
+    awaitingReason: HostedComputerAwaitingReason | null;
+    expectedHandoffUpdatedAt: Date;
+    expectedKernelSessionId: string;
+    expectedPausedAt: Date;
+    expectedResumeAfterMailboxLaneSeq: bigint | null;
+    handoffId: string;
+    memberId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const updated = await tx.hostedComputerRun.updateMany({
+        data: {
+          awaitingMessage: null,
+          awaitingReason: null,
+          metadataJson: Prisma.JsonNull,
+          pausedAt: null,
+          pendingHandoffId: null,
+          resumeAfterMailboxLaneSeq: null,
+          status: "running",
+          suggestedReply: null,
+        },
+        where: requireHandoffForBrowserUpdate({
+          expectedHandoffStatus: "checkpointing",
+          expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
+          expectedPendingHandoffId: input.handoffId,
+          where: {
+            awaitingReason: input.awaitingReason,
+            id: input.runId,
+            kernelSessionId: input.expectedKernelSessionId,
+            memberId: input.memberId,
+            pausedAt: input.expectedPausedAt,
+            pendingHandoffId: input.handoffId,
+            resumeAfterMailboxLaneSeq:
+              input.expectedResumeAfterMailboxLaneSeq,
+            status: "awaiting_user",
+          },
+        }),
+      });
+      if (updated.count === 0) {
+        throw staleRunStateConflictError();
+      }
+
+      const completed = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          status: "completed",
+        },
+        where: {
+          completedAt: { not: null },
+          id: input.handoffId,
+          memberId: input.memberId,
+          purpose: "login",
+          runId: input.runId,
+          status: "checkpointing",
+          updatedAt: input.expectedHandoffUpdatedAt,
+        },
+      });
+      if (completed.count === 0) {
+        throw staleRunStateConflictError();
+      }
+
+      const run = await tx.hostedComputerRun.findUnique({
+        where: { id: input.runId },
+      });
+      if (!run) {
+        throw computerUseNotFoundError();
+      }
+      return mapRun(run);
+    });
+  }
+
   async replaceRunBrowser(input: {
     expectedHandoffUpdatedAt?: Date | null;
     expectedPendingHandoffId: string | null;
@@ -1129,7 +1283,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
       await lockMemberComputerUseAvailable(tx, input.memberId);
-      const where = requireCheckpointingHandoffForBrowserUpdate({
+      const where = requireHandoffForBrowserUpdate({
+        expectedHandoffStatus: "checkpointing",
         expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
         expectedPendingHandoffId: input.expectedPendingHandoffId,
         where: {
@@ -1150,7 +1305,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       });
       if (updated.count === 0) {
         const existingRun = await tx.hostedComputerRun.findFirst({
-          where: requireCheckpointingHandoffForBrowserUpdate({
+          where: requireHandoffForBrowserUpdate({
+            expectedHandoffStatus: "checkpointing",
             expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
             expectedPendingHandoffId: input.expectedPendingHandoffId,
             where: {
@@ -1563,7 +1719,8 @@ async function publishManagedLoginBrowser(
       kernelLiveViewUrlEncrypted: input.browser.kernelLiveViewUrlEncrypted,
       kernelSessionId: input.browser.kernelSessionId,
     },
-    where: requireCheckpointingHandoffForBrowserUpdate({
+    where: requireHandoffForBrowserUpdate({
+      expectedHandoffStatus: "checkpointing",
       expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
       expectedPendingHandoffId: input.pendingHandoffId,
       where: {
@@ -1599,7 +1756,8 @@ async function setManagedLoginFallbackReplyBoundary(
       pausedAt: input.now,
       resumeAfterMailboxLaneSeq: replyBoundarySeq,
     },
-    where: requireCheckpointingHandoffForBrowserUpdate({
+    where: requireHandoffForBrowserUpdate({
+      expectedHandoffStatus: "checkpointing",
       expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
       expectedPendingHandoffId: input.handoffId,
       where: {
@@ -1635,7 +1793,8 @@ function staleRunStateConflictError(): Error {
   });
 }
 
-function requireCheckpointingHandoffForBrowserUpdate(input: {
+function requireHandoffForBrowserUpdate(input: {
+  expectedHandoffStatus: "checkpointing" | "completed";
   expectedHandoffUpdatedAt?: Date | null;
   expectedPendingHandoffId: string | null;
   where: Prisma.HostedComputerRunWhereInput;
@@ -1649,7 +1808,7 @@ function requireCheckpointingHandoffForBrowserUpdate(input: {
     handoffs: {
       some: {
         id: input.expectedPendingHandoffId,
-        status: "checkpointing",
+        status: input.expectedHandoffStatus,
         ...(input.expectedHandoffUpdatedAt
           ? { updatedAt: input.expectedHandoffUpdatedAt }
           : {}),

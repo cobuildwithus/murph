@@ -203,7 +203,11 @@ describe("user-facing message variants", () => {
   });
 
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
-    expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /\bMurph\b/u);
+    expectEveryVariantDoesNotMatch(
+      "assistant.signup_welcome",
+      /personal health assistant/iu,
+    );
     expectEveryVariantMatches("assistant.signup_welcome", /private/iu);
     expectEveryVariantMatches("assistant.signup_welcome", /remember|keep|learn/iu);
     for (const text of collectRenderedTexts("assistant.signup_welcome")) {

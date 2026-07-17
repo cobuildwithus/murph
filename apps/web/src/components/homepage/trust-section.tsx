@@ -32,13 +32,18 @@ export function TrustSection() {
   return (
     <section className="bg-[#f5f0e8] px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="inline-block h-px w-10 bg-[#2d3436]/40"
-          />
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#2d3436]">
-            Why people trust Murph
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="inline-block h-px w-10 bg-[#2d3436]/40"
+            />
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#2d3436]">
+              Why people trust Murph
+            </span>
+          </div>
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
+            6,000+ messages and counting
           </span>
         </div>
 

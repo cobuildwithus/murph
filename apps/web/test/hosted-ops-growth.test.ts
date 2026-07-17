@@ -26,6 +26,12 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
+  hostedLinqDelivery: {
+    count: vi.fn(),
+  },
+  hostedMailboxItem: {
+    count: vi.fn(),
+  },
   hostedMember: {
     count: vi.fn(),
     findMany: vi.fn(),
@@ -77,6 +83,8 @@ const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
   hostedAccountGroup: mocks.hostedAccountGroup,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
+  hostedLinqDelivery: mocks.hostedLinqDelivery,
+  hostedMailboxItem: mocks.hostedMailboxItem,
   hostedMember: mocks.hostedMember,
   hostedMemberBillingRef: mocks.hostedMemberBillingRef,
 };
@@ -103,6 +111,8 @@ describe("hosted ops growth metrics", () => {
       member: { id: "member_ops" },
     });
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.hostedLinqDelivery.count.mockResolvedValue(0);
+    mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_ops" },
     });
@@ -528,6 +538,70 @@ describe("hosted ops growth metrics", () => {
     ).toEqual(startOfUtcDay(now));
   });
 
+  it("records prior-day message counts in the snapshot", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    expect(mocks.hostedMailboxItem.count.mock.calls[0]?.[0]).toEqual({
+      where: {
+        kind: "conversation.message",
+        occurredAt: {
+          gte: new Date("2026-07-05T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]).toEqual({
+      where: {
+        attemptedAt: {
+          gte: new Date("2026-07-05T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+        status: {
+          in: ["accepted", "delivered", "sent_no_receipt_expected"],
+        },
+      },
+    });
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      inboundMessagesPriorDay: 42,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      inboundMessagesPriorDay: 42,
+      outboundMessagesPriorDay: 57,
+    });
+  });
+
+  it("anchors the prior-day message window to the UTC day at exactly midnight", async () => {
+    const now = new Date("2026-07-06T00:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    expect(mocks.hostedMailboxItem.count.mock.calls[0]?.[0]?.where.occurredAt).toEqual({
+      gte: new Date("2026-07-05T00:00:00.000Z"),
+      lt: new Date("2026-07-06T00:00:00.000Z"),
+    });
+    expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]?.where.attemptedAt).toEqual({
+      gte: new Date("2026-07-05T00:00:00.000Z"),
+      lt: new Date("2026-07-06T00:00:00.000Z"),
+    });
+    expect(
+      mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0].where.snapshotDate,
+    ).toEqual(new Date("2026-07-06T00:00:00.000Z"));
+  });
+
   it("fails closed before reading growth data when page ops access is missing", async () => {
     delete process.env.HOSTED_OPS_MEMBER_IDS;
 
@@ -672,7 +746,9 @@ function snapshotRow(date: string, mrrUsdCents: number) {
   return {
     capturedAt: new Date(`${date}T00:05:00.000Z`),
     coveredMembers: 3,
+    inboundMessagesPriorDay: 0,
     mrrUsdCents,
+    outboundMessagesPriorDay: 0,
     payingCustomers: 3,
     payingFamilyGroups: 1,
     payingFamilySeats: 1,

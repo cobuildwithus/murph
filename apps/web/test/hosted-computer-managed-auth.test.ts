@@ -26,6 +26,7 @@ type MockStoreMethod<K extends keyof ComputerUseStore> =
   ComputerUseStore[K] & MockedFunction;
 type MockComputerUseStore = ComputerUseStore & {
   claimHandoffForCompletion: MockStoreMethod<"claimHandoffForCompletion">;
+  claimLoginHandoffForCheckpoint: MockStoreMethod<"claimLoginHandoffForCheckpoint">;
   clearRunBrowser: MockStoreMethod<"clearRunBrowser">;
   completeHandoff: MockStoreMethod<"completeHandoff">;
   completeManagedLoginHandoff: MockStoreMethod<"completeManagedLoginHandoff">;
@@ -39,6 +40,7 @@ type MockComputerUseStore = ComputerUseStore & {
   releaseHandoffClaim: MockStoreMethod<"releaseHandoffClaim">;
   replaceAwaitingRunHandoff: MockStoreMethod<"replaceAwaitingRunHandoff">;
   replaceRunBrowser: MockStoreMethod<"replaceRunBrowser">;
+  resumeRunAfterLoginCheckpoint: MockStoreMethod<"resumeRunAfterLoginCheckpoint">;
   rotateManagedLoginHandoffCapability: MockStoreMethod<"rotateManagedLoginHandoffCapability">;
   requireOwnedRun: MockStoreMethod<"requireOwnedRun">;
 };
@@ -2171,6 +2173,9 @@ function createStore(input: {
     claimHandoffForCompletion: vi.fn(
       async () => claimed,
     ),
+    claimLoginHandoffForCheckpoint: vi.fn(async () => {
+      throw new Error("claimLoginHandoffForCheckpoint should not be called.");
+    }),
     clearRunBrowser: vi.fn(async () => ({
       ...input.run,
       kernelLiveViewUrlEncrypted: null,
@@ -2278,6 +2283,9 @@ function createStore(input: {
       resumeAfterMailboxLaneSeq: null,
     })),
     replaceRunBrowser: vi.fn(async () => input.run),
+    resumeRunAfterLoginCheckpoint: vi.fn(async () => {
+      throw new Error("resumeRunAfterLoginCheckpoint should not be called.");
+    }),
     rotateManagedLoginHandoffCapability: vi.fn(async (rotateInput) => ({
       ...input.handoff!,
       expiresAt: rotateInput.expiresAt,
