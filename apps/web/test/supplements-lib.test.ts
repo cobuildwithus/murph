@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  createPublicSupplementsQueries,
   createSupplementsQueries,
   normalizeSupplementConnectionString,
 } from "../src/lib/supplements";
@@ -2036,5 +2037,175 @@ describe("supplements query helpers", () => {
       ["00000123456789", "0000123456789", "000123456789"],
       false,
     ]);
+  });
+
+  it("bounds public supplement candidates before ranking", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              dataOriginUrl: "https://example.test/supplement/82118",
+              importedAt: "2026-07-16T12:00:00.000Z",
+              name: "Creatine Monohydrate",
+              brand: "Example Nutrition",
+              upc: "123456789012",
+              observationCount: 3,
+              sourceCount: 1,
+              latestReportDate: "2026-06-01",
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const result = await queries.searchPublicSupplements({
+      q: "Example Nutrition Creatine Monohydrate",
+      limit: 5,
+    });
+
+    expect(result[0]?.testing).toEqual({
+      status: "known_product_tests",
+      observationCount: 3,
+      sourceCount: 1,
+      latestReportDate: "2026-06-01",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(calls[0]?.text).toContain("LIMIT 250");
+    expect(calls[0]?.text).toContain(
+      "product_tests.supplement_id = selected.id",
+    );
+    expect(calls[0]?.text).not.toContain("labels.label");
+    expect(calls[0]?.text).not.toMatch(
+      /brand_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements/u,
+    );
+  });
+
+  it("projects public supplement record provenance without food-only dates", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              dataOriginUrl: "https://example.test/supplement/82118",
+              importedAt: "2026-07-16T12:00:00.000Z",
+              releaseDate: null,
+              lastSeenAt: null,
+              name: "Creatine Monohydrate",
+              brand: "Example Nutrition",
+              upc: "123456789012",
+              servingGrams: 5,
+              label: { ingredientRows: [] },
+              labelOmitted: false,
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getPublicSupplementRecordById({
+      id: "82118",
+    })).resolves.toMatchObject({
+      releaseDate: null,
+      lastSeenAt: null,
+      servingGrams: 5,
+    });
+    expect(calls[0]?.text).toContain("NULL::text AS \"releaseDate\"");
+    expect(calls[0]?.text).toContain("NULL::text AS \"lastSeenAt\"");
+    expect(calls[0]?.text).toContain("octet_length(labels.label::text)");
+    expect(calls[0]?.text).toContain('AS "labelOmitted"');
+  });
+
+  it("bounds exact supplement evidence after stable observation deduplication", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createPublicSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              productId: "brand-site:example-creatine",
+              productTestId: "test-1",
+              observationTotal: 1,
+              servingGrams: 5,
+              sourceKey: "example_laboratory_report",
+              sourceName: "Example Laboratory Report",
+              sourceUrl: "https://example.test/report",
+              sourceReportTitle: "Example product testing",
+              reportDate: "2026-06-01",
+              sourceResultId: "result-1",
+              testedProductName: "Creatine Monohydrate",
+              testedProductBrand: "Example Nutrition",
+              testedProductUpc: "123456789012",
+              testedSourceProductId: "source-product-123",
+              matchMethod: "manual_confirmed",
+              contaminantKey: "lead",
+              contaminantName: "Lead",
+              resultOperator: "not_detected",
+              resultValue: null,
+              resultUnit: "ppm",
+              resultBasis: "product_mass",
+              normalizedValue: null,
+              normalizedUnit: null,
+              normalizedBasis: null,
+              labName: null,
+              testMethod: null,
+              importedAt: "2026-07-16T12:00:00.000Z",
+              thresholdId: null,
+              thresholdValue: null,
+              thresholdUnit: null,
+              thresholdBasis: null,
+              thresholdNormalizedValue: null,
+              thresholdNormalizedUnit: null,
+              thresholdNormalizedBasis: null,
+              thresholdAuthorityName: null,
+              thresholdName: null,
+              thresholdUrl: null,
+              concernLevelIfExceeded: null,
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const evidence = await queries.getPublicSupplementEvidence({
+      id: "brand-site:example-creatine",
+    });
+
+    expect(evidence).toMatchObject({
+      total: 1,
+      returned: 1,
+      truncated: false,
+      observations: [
+        {
+          id: "test-1",
+          sourceResultId: "result-1",
+          screening: null,
+          alert: null,
+        },
+      ],
+    });
+    expect(calls).toHaveLength(1);
+    const query = calls[0]?.text ?? "";
+    expect(query).not.toContain("linked_labels AS MATERIALIZED");
+    expect(query).toContain("labels.id = product_tests.supplement_id");
+    expect(query).toContain("labels.id = $1");
+    expect(query).toContain("DISTINCT ON (product_tests.id)");
+    expect(query).toContain("WHERE observation_rank <= 20");
+    expect(query.indexOf("bounded_observations AS MATERIALIZED")).toBeLessThan(
+      query.indexOf("FROM contaminant_thresholds threshold_rows"),
+    );
+    expect(calls[0]?.values).toEqual(["brand-site:example-creatine"]);
   });
 });

@@ -117,6 +117,27 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+    expect(intent.automationAuthority).toBeUndefined()
+
+    const authorizedIntent = assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: ' automation_sleep_reminder ',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })
+    expect(authorizedIntent.automationAuthority).toEqual({
+      automationId: 'automation_sleep_reminder',
+      expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+    })
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: 'automation_sleep_reminder',
+        expectedStatus: 'active',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })).toThrow()
   })
 
   it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {

@@ -18,7 +18,7 @@ export function BiomarkerExperimentRowHeader() {
     >
       <span aria-hidden="true" />
       <span>Experiment</span>
-      <span className="hidden md:inline">Exp. change</span>
+      <span className="hidden md:inline">Expected change</span>
       <span className="hidden md:inline">Duration</span>
       <span className="hidden md:inline">Burden</span>
       <span className="hidden md:inline">Evidence</span>
@@ -73,7 +73,7 @@ export function BiomarkerExperimentRow({
         </span>
       </div>
       <span className="hidden font-serif text-sm font-medium text-primary tabular-nums md:inline">
-        {directionArrow} {expectedShort}
+        {directionArrow ? `${directionArrow} ${expectedShort}` : expectedShort}
       </span>
       <span className="hidden text-sm text-foreground tabular-nums md:inline">
         {durationShort}
@@ -112,7 +112,7 @@ function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDir
     case "stable":
       return "→";
     default:
-      return "·";
+      return "";
   }
 }
 

@@ -439,6 +439,39 @@ explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
 
+## Murph Safe public product data
+
+`/search` exposes the public Murph Safe product-evidence experience. Its browser
+search calls `POST /api/public/v1/products/search`; server-rendered product
+details use the same service as
+`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
+is available at `/api/public/v1/openapi.json`, and the current schema id is
+`murph.public-products.v1`.
+
+The public catalog includes current supplement and branded-food sources and
+excludes generic food origins. Search and detail DTOs are bounded normalized
+projections; product tests join only through the selected row's exact
+`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
+echoed, persisted, analyzed, or logged.
+
+Before a production build, configure these Production-scoped server values:
+
+- `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
+- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
+- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `HOSTED_WEB_VERCEL_PROJECT_ID`
+- optional `HOSTED_WEB_VERCEL_TEAM_ID`
+- `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
+
+The exact-id custom rules must be the first active rules after the optional
+companion diagnostics rule. Search is an exact POST path with a fixed-window
+per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
+while excluding search, plus the public web-detail prefix, at 120 requests per
+60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+configuration and fails on disabled firewall, order, condition, algorithm,
+key, limit, window, action, or id drift. It never downloads environment values
+or prints the provider token or response body.
+
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.

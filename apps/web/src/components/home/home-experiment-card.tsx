@@ -12,29 +12,35 @@ import { cn } from "@/src/lib/utils";
 
 interface HomeExperimentCardProps {
   card: ExperimentLibraryCard;
+  variant: "default" | "history";
 }
 
-export function HomeExperimentCard({ card }: HomeExperimentCardProps) {
+export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
   const dateLabel = resolveDateLabel(card);
   const content = (
     <article
       className={cn(
-        "group flex h-full min-h-[240px] flex-col rounded-xl border border-border/70 bg-card/70 p-5 transition-colors",
+        "group flex flex-col rounded-xl border border-border/70 bg-card/70 transition-colors",
+        variant === "history" ? "h-fit p-4" : "h-full min-h-[240px] p-5",
         card.href ? "hover:border-primary/35 hover:bg-card" : "",
       )}
       data-home-experiment-card
+      data-home-experiment-card-variant={variant}
     >
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             {card.category}
           </p>
-          <h3 className="mt-1 text-balance font-serif text-xl font-semibold leading-tight text-foreground">
+          <h3 className={cn(
+            "mt-1 text-balance font-serif font-semibold leading-tight text-foreground",
+            variant === "history" ? "text-lg" : "text-xl",
+          )}>
             {card.title}
           </h3>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {card.privateBadgeLabel ? (
+          {variant === "default" && card.privateBadgeLabel ? (
             <span
               className="inline-flex size-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground"
               title={card.privateBadgeLabel}
@@ -43,7 +49,9 @@ export function HomeExperimentCard({ card }: HomeExperimentCardProps) {
               <span className="sr-only">{card.privateBadgeLabel}</span>
             </span>
           ) : null}
-          {card.statusLabel ? (
+          {card.statusLabel && (
+            variant === "default" || !isRedundantHistoryStatus(card.statusLabel)
+          ) ? (
             <Badge variant={card.statusVariant ?? "outline"} className="font-normal">
               {card.statusLabel}
             </Badge>
@@ -51,15 +59,29 @@ export function HomeExperimentCard({ card }: HomeExperimentCardProps) {
         </div>
       </header>
 
-      <div className="mt-5 flex flex-1 items-center border-t border-border/60 pt-5">
-        <ExperimentDataVisual card={card} />
+      <div className={cn(
+        "flex flex-1 items-center border-t border-border/60",
+        variant === "history" ? "mt-3 pt-3" : "mt-5 pt-5",
+      )}>
+        <ExperimentDataVisual card={card} variant={variant} />
       </div>
 
-      <footer className="mt-5 flex items-center justify-between gap-4 text-[11px] text-muted-foreground">
-        <span className="min-w-0 truncate tabular-nums">
-          {dateLabel ?? "Stored in your private vault"}
+      <footer className={cn(
+        "flex items-center justify-between gap-4 text-[11px] text-muted-foreground",
+        variant === "history" ? "mt-3" : "mt-5",
+      )}>
+        <span className="inline-flex min-w-0 items-center gap-1.5 tabular-nums">
+          {variant === "history" && card.privateBadgeLabel ? (
+            <>
+              <LockKeyhole aria-hidden="true" className="size-3 shrink-0" />
+              <span className="sr-only">{card.privateBadgeLabel}</span>
+            </>
+          ) : null}
+          <span className="min-w-0 truncate">
+            {dateLabel ?? "Stored in your private vault"}
+          </span>
         </span>
-        {card.href ? (
+        {variant === "default" && card.href ? (
           <span className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground/70 transition-colors group-hover:text-foreground">
             View
             <ArrowRight
@@ -79,22 +101,30 @@ export function HomeExperimentCard({ card }: HomeExperimentCardProps) {
   return (
     <Link
       href={card.href}
-      className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className={cn(
+        "block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        variant === "default" ? "h-full" : "",
+      )}
     >
       {content}
     </Link>
   );
 }
 
-function ExperimentDataVisual({ card }: HomeExperimentCardProps) {
+function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
   const summary = card.runSummary;
   const inProgress = card.runStatus === "active" || card.runStatus === "paused";
+  const comparableMetrics = summary?.metrics ?? [];
 
   if (inProgress && typeof summary?.completionPercent === "number") {
     return <ExperimentProgress summary={summary} />;
   }
 
-  if (summary?.metric) {
+  if (variant === "history" && comparableMetrics.length > 0) {
+    return <ExperimentResults metrics={comparableMetrics} />;
+  }
+
+  if (variant === "default" && summary?.metric) {
     return <ExperimentResult metric={summary.metric} />;
   }
 
@@ -109,15 +139,46 @@ function ExperimentDataVisual({ card }: HomeExperimentCardProps) {
       <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         Experiment status
       </p>
-      <p className="mt-2 font-serif text-3xl font-semibold leading-none text-foreground">
+      <p className={cn(
+        "mt-2 font-serif font-semibold leading-none text-foreground",
+        variant === "history" ? "text-2xl" : "text-3xl",
+      )}>
         {fallback}
       </p>
     </div>
   );
 }
 
+function ExperimentResults({ metrics }: { metrics: ExperimentRunCardMetric[] }) {
+  return (
+    <div className="grid w-full grid-cols-2 gap-x-4 gap-y-3">
+      {metrics.map((metric, index) => {
+        const sentimentLabel = resolveMetricSentimentLabel(metric);
+
+        return (
+          <div key={`${metric.label}:${index}`} className="min-w-0">
+            <p className="font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
+              {metric.label}
+            </p>
+            <p className={cn(
+              "mt-1 font-serif text-xl font-semibold leading-none tabular-nums",
+              resolveMetricTone(metric),
+            )}>
+              {metric.delta || metric.current}
+              {sentimentLabel ? (
+                <span className="sr-only">{sentimentLabel}</span>
+              ) : null}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ExperimentResult({ metric }: { metric: ExperimentRunCardMetric }) {
   const headline = metric.delta || metric.current;
+  const sentimentLabel = resolveMetricSentimentLabel(metric);
 
   return (
     <div className="w-full">
@@ -129,6 +190,9 @@ function ExperimentResult({ metric }: { metric: ExperimentRunCardMetric }) {
         resolveMetricTone(metric),
       )}>
         {headline}
+        {sentimentLabel ? (
+          <span className="sr-only">{sentimentLabel}</span>
+        ) : null}
       </p>
       <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-y border-border/60 py-3">
         <ResultValue label="Baseline" value={metric.baseline ?? "—"} />
@@ -210,8 +274,18 @@ function resolveDateLabel(card: ExperimentLibraryCard): string | null {
 
 function resolveMetricTone(metric: ExperimentRunCardMetric): string {
   if (metric.sentiment === "positive") return "text-primary";
-  if (metric.sentiment === "negative") return "text-amber-600";
+  if (metric.sentiment === "negative") return "text-amber-700";
   return "text-foreground";
+}
+
+function resolveMetricSentimentLabel(metric: ExperimentRunCardMetric): string | null {
+  if (metric.sentiment === "positive") return ", favorable";
+  if (metric.sentiment === "negative") return ", unfavorable";
+  return null;
+}
+
+function isRedundantHistoryStatus(label: string): boolean {
+  return /^(?:complete|completed|finished)$/iu.test(label.trim());
 }
 
 function clampProgress(value: number): number {

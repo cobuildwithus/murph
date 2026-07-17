@@ -26,6 +26,19 @@ export const automationContinuityPolicyValues = [
   "preserve",
 ] as const;
 
+/**
+ * The exact member-authorized support purpose carried by a plan-owned
+ * automation. The automation record itself is the persisted consent owner for
+ * habit and supplement support; experiment support additionally rechecks the
+ * matching `assistantSupport` switch on the experiment owner.
+ */
+export const automationSupportKindValues = [
+  "reminder",
+  "check_in",
+  "review",
+  "weekly_digest",
+] as const;
+
 export const automationTimeScheduleKindValues = [
   "at",
   "every",
@@ -68,6 +81,15 @@ export const automationScheduleKindValues = [
 ] as const;
 
 export const MIN_AUTOMATION_EVERY_MS = MIN_EXECUTABLE_SCHEDULE_EVERY_MS;
+export const AUTOMATION_SUPPORT_SERIES_TAG_PREFIX = "system:support-series:";
+/**
+ * Durable ownership marker added only when support-series reconciliation
+ * archives an otherwise-active automation because it is temporarily absent
+ * from desired state. Cron consumption and user archive flows must not add it.
+ */
+export const AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG =
+  "system:automation-support:reconciled-archive";
+const automationSupportSeriesIdPattern = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,199})$/u;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 export const automationDeviceActivityKindPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 export const automationDeviceActivityKindSchema = z
@@ -78,6 +100,80 @@ export const automationDeviceActivityKindSchema = z
 
 function isoTimestampSchema() {
   return z.string().datetime({ offset: true });
+}
+export const automationActiveUntilSchema = isoTimestampSchema();
+
+export interface AutomationSupportSeriesTag {
+  seriesId: string;
+  tag: string;
+}
+
+export function buildAutomationSupportSeriesTag(seriesId: string): string {
+  const normalized = seriesId.trim();
+  if (!automationSupportSeriesIdPattern.test(normalized)) {
+    throw new TypeError(
+      "Automation support series id must be 1-200 characters using letters, numbers, colon, period, underscore, or hyphen.",
+    );
+  }
+
+  return `${AUTOMATION_SUPPORT_SERIES_TAG_PREFIX}${normalized}`;
+}
+
+export function parseAutomationSupportSeriesTag(
+  value: unknown,
+): AutomationSupportSeriesTag | null {
+  if (typeof value !== "string" || !value.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)) {
+    return null;
+  }
+
+  const seriesId = value.slice(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX.length);
+  if (!automationSupportSeriesIdPattern.test(seriesId)) {
+    return null;
+  }
+
+  return {
+    seriesId,
+    tag: value,
+  };
+}
+
+function validateAutomationLifecycleFields(
+  value: {
+    activeUntil?: string | null;
+    schedule: AutomationSchedule;
+    tags?: string[];
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    value.activeUntil &&
+    value.schedule.kind === "at" &&
+    Date.parse(value.activeUntil) <= Date.parse(value.schedule.at)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "activeUntil must be after schedule.at for a one-shot automation.",
+      path: ["activeUntil"],
+    });
+  }
+
+  const supportSeriesTags = (value.tags ?? []).filter((tag) =>
+    tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+  );
+  if (supportSeriesTags.some((tag) => parseAutomationSupportSeriesTag(tag) === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Support series tags must use a valid canonical support series id.",
+      path: ["tags"],
+    });
+  }
+  if (supportSeriesTags.length > 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "An automation may belong to at most one support series.",
+      path: ["tags"],
+    });
+  }
 }
 export const isValidAutomationCronExpression = isValidExecutableCronExpression;
 export const automationScheduleAtSchema = executableScheduleIntentAtSchema;
@@ -255,15 +351,18 @@ export const automationFrontmatterSchema = withContractMetadata(
       title: z.string().min(1).max(160),
       status: z.enum(automationStatusValues),
       summary: z.string().min(1).max(4000).optional(),
+      activeUntil: automationActiveUntilSchema.optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
+      supportKind: z.enum(automationSupportKindValues).optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
       updatedAt: isoTimestampSchema(),
     })
-    .strict(),
+    .strict()
+    .superRefine(validateAutomationLifecycleFields),
   "@murphai/contracts/frontmatter-automation.schema.json",
   "Murph Automation Frontmatter",
 );
@@ -278,10 +377,12 @@ export const automationMarkdownDocumentSchema = z
 export const automationScaffoldPayloadSchema = z
   .object({
     automationId: z.string().min(1).optional(),
+    activeUntil: automationActiveUntilSchema.nullable().optional(),
     continuityPolicy: z.enum(automationContinuityPolicyValues).default("preserve"),
     instructions: z.string().min(1),
     route: automationRouteSchema,
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
+    supportKind: z.enum(automationSupportKindValues).nullable().optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
@@ -289,10 +390,12 @@ export const automationScaffoldPayloadSchema = z
     tags: z.array(z.string().min(1)).optional(),
     title: z.string().min(1).max(160),
   })
-  .strict();
+  .strict()
+  .superRefine(validateAutomationLifecycleFields);
 
 export type AutomationStatus = (typeof automationStatusValues)[number];
 export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
+export type AutomationSupportKind = (typeof automationSupportKindValues)[number];
 export type AutomationTimeScheduleKind = (typeof automationTimeScheduleKindValues)[number];
 export type AutomationScheduleKind = (typeof automationScheduleKindValues)[number];
 export type AutomationDeviceActivitySource = (typeof automationDeviceActivitySourceValues)[number];
