@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   access,
@@ -36,12 +37,16 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   createAssistantOutboxIntent,
-  resolveAssistantVaultFileResponseMedia,
+} from "@murphai/assistant-engine/assistant-outbox";
+import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
   withCanonicalWriteLock,
 } from "@murphai/core";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import {
   readHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
@@ -949,35 +954,39 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
   });
 
-  it("reconciles quiescent generated deliveries before archive planning", async () => {
+  it("prunes only quiescent runtime deliveries before archive planning", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
-    const generatedRelativePath = "exports/assistant-deliveries/orphan.pdf";
-    const generatedPath = path.join(vaultRoot, generatedRelativePath);
-    const activeRelativePath = "exports/assistant-deliveries/active.pdf";
-    const activePath = path.join(vaultRoot, activeRelativePath);
-    const genericRelativePath = "exports/user-files/keep.pdf";
-    const genericPath = path.join(vaultRoot, genericRelativePath);
-    const generatedContents = "terminal generated delivery";
-    await mkdir(path.dirname(generatedPath), { recursive: true });
-    await mkdir(path.dirname(genericPath), { recursive: true });
-    await writeFile(generatedPath, generatedContents, "utf8");
-    await writeFile(activePath, "active generated delivery", "utf8");
-    await writeFile(genericPath, "generic user file", "utf8");
+    const orphanRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/orphan.pdf`;
+    const orphanContents = Buffer.from("unreferenced generated delivery\n");
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
+    const activeContents = Buffer.from("active generated delivery\n");
+    const legacyRef = "exports/assistant-deliveries/base-era.pdf";
+    const legacyContents = Buffer.from("ordinary pre-existing vault file\n");
+    await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
+    await mkdir(path.dirname(path.join(vaultRoot, legacyRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
+    await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    await writeFile(path.join(vaultRoot, legacyRef), legacyContents);
     await createAssistantOutboxIntent({
       channel: "linq",
-      createdAt: "2026-06-10T00:00:00.000Z",
-      identityId: "participant_generated_delivery_bridge",
-      media: [await resolveAssistantVaultFileResponseMedia({
-        ref: activeRelativePath,
-        vaultRoot,
-      })],
-      message: "active generated delivery",
-      sessionId: "session_generated_delivery_bridge",
-      threadId: "thread_generated_delivery_bridge",
+      identityId: "identity-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "active.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Generated delivery",
+      sessionId: "session-generated-delivery",
+      threadId: "thread-generated-delivery",
       threadIsDirect: true,
-      turnId: "turn_generated_delivery_bridge",
+      turnId: "turn-generated-delivery",
       vault: vaultRoot,
     });
     const options = createBridgeOptions({
@@ -992,24 +1001,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const archiveEntries =
       vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
         .archiveEntries ?? [];
-    expect(archiveEntries.some(
-      (entry) => entry.relativePath === generatedRelativePath,
-    )).toBe(false);
-    expect(archiveEntries.some(
-      (entry) => entry.relativePath === activeRelativePath,
-    )).toBe(true);
-    expect(archiveEntries.some(
-      (entry) => entry.relativePath === genericRelativePath,
-    )).toBe(true);
-    await expectMissing(generatedPath);
-    await expectPresent(activePath);
-    await expectPresent(genericPath);
+    expect(archiveEntries.some((entry) => entry.relativePath === orphanRef)).toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === activeRef)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === legacyRef)).toBe(true);
+    await expectMissing(path.join(vaultRoot, orphanRef));
+    await expectPresent(path.join(vaultRoot, activeRef));
+    await expectPresent(path.join(vaultRoot, legacyRef));
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
       && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
-        === Buffer.byteLength(generatedContents)
+        === orphanContents.byteLength
     )).toBe(true);
   });
 

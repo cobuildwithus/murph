@@ -28,6 +28,8 @@ import type {
   ProjectedWearableLatestSummary as WearableLatestSummaryShape,
   ProjectedWearableRecoverySummary as WearableRecoverySummaryShape,
   ProjectedWearableSleepSummary as WearableSleepSummaryShape,
+  WearableSleepPatternFilters as WearableSleepPatternFiltersShape,
+  WearableSleepPatternSummary as WearableSleepPatternSummaryShape,
   ProjectedWearableMetricLatestSummary as WearableMetricLatestSummaryShape,
   WearableMetricSummaryFilters as WearableMetricSummaryFiltersShape,
   ProjectedWearableMetricTrendSummary as WearableMetricTrendSummaryShape,
@@ -63,6 +65,8 @@ export type QueryMealNutritionTotalsResult = SharedMealNutritionTotalsResult
 export type QueryWearableSummaryFilters = WearableSummaryFiltersShape
 export type QueryWearableMetricSummaryFilters = WearableMetricSummaryFiltersShape
 export type QueryWearableSleepSummary = WearableSleepSummaryShape
+export type QueryWearableSleepPatternFilters = WearableSleepPatternFiltersShape
+export type QueryWearableSleepPatternSummary = WearableSleepPatternSummaryShape
 export type QueryWearableActivitySummary = WearableActivitySummaryShape
 export type QueryWearableBodyStateSummary = WearableBodyStateSummaryShape
 export type QueryWearableDaySummary = WearableDaySummaryShape

@@ -242,7 +242,7 @@ expectedSignalDescriptions:
     description: "Sauna plus enough cooldown creates a warm-to-cool drop that supports settling and reduces wake time."
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
-    expected: "Algorithm-sensitive"
+    expected: "Could go either way"
     expectedDirection: "mixed_or_contextual"
     protocolProminence: "context"
     estimatedChange:
@@ -253,7 +253,7 @@ expectedSignalDescriptions:
     description: "Sauna shifts overnight temperature, pulse, and movement patterns, changing how stable early-night deep sleep becomes."
   -
     biomarkerKey: "biomarker:rem-sleep-minutes"
-    expected: "Algorithm-sensitive"
+    expected: "Could go either way"
     expectedDirection: "mixed_or_contextual"
     protocolProminence: "context"
     estimatedChange:

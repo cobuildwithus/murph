@@ -9,6 +9,10 @@ import {
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
+import {
+  getHostedUsageCreditOfferDefinition,
+  type HostedUsageCreditOfferCode,
+} from "./usage-credit-offers";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingEnv?: HostedOnboardingEnvironment;
@@ -72,6 +76,29 @@ export function requireHostedStripeApi(): Stripe {
   return stripe;
 }
 
+export function requireHostedStripeApiMode(): {
+  stripe: Stripe;
+  stripeLiveMode: boolean;
+} {
+  const environment = getHostedOnboardingEnvironment();
+  const stripeLiveMode = readHostedStripeSecretKeyLiveMode(
+    environment.stripeSecretKey,
+  );
+
+  if (hostedUsageCreditRequiresLiveStripe(environment) && !stripeLiveMode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_CREDIT_LIVE_STRIPE_REQUIRED",
+      message: "Hosted usage-credit checkout requires live Stripe in production.",
+      httpStatus: 500,
+    });
+  }
+
+  return {
+    stripe: requireHostedStripeApi(),
+    stripeLiveMode,
+  };
+}
+
 export function requireHostedStripeCheckoutConfig(input?: {
   billingPlanCode?: HostedBillingPlanCode;
 }): {
@@ -132,6 +159,62 @@ export function requireHostedStripeFamilyPlanConfig(input: {
     priceId,
     stripe: requireHostedStripeApi(),
   };
+}
+
+export function requireHostedStripeUsageCreditCheckoutConfig(input: {
+  offerCode: HostedUsageCreditOfferCode;
+}): {
+  offerCode: HostedUsageCreditOfferCode;
+  priceId: string;
+  stripe: Stripe;
+  stripeLiveMode: boolean;
+} {
+  const environment = getHostedOnboardingEnvironment();
+  const offer = getHostedUsageCreditOfferDefinition(input.offerCode);
+  const priceId = environment.stripeUsageCreditPriceIdsByOffer[input.offerCode];
+
+  if (!priceId) {
+    throw hostedOnboardingError({
+      code: "STRIPE_PRICE_ID_REQUIRED",
+      message: `${offer.priceIdEnvKey} must be configured for hosted usage credit.`,
+      httpStatus: 500,
+    });
+  }
+
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+
+  return {
+    offerCode: input.offerCode,
+    priceId,
+    stripe,
+    stripeLiveMode,
+  };
+}
+
+function readHostedStripeSecretKeyLiveMode(secretKey: string | null): boolean {
+  if (secretKey?.startsWith("sk_live_") || secretKey?.startsWith("rk_live_")) {
+    return true;
+  }
+
+  if (secretKey?.startsWith("sk_test_") || secretKey?.startsWith("rk_test_")) {
+    return false;
+  }
+
+  throw hostedOnboardingError({
+    code: "STRIPE_SECRET_KEY_MODE_INVALID",
+    message: "STRIPE_SECRET_KEY must identify a Stripe test or live environment.",
+    httpStatus: 500,
+  });
+}
+
+function hostedUsageCreditRequiresLiveStripe(
+  environment: HostedOnboardingEnvironment,
+): boolean {
+  const vercelEnvironment = process.env.VERCEL_ENV?.trim().toLowerCase();
+
+  return vercelEnvironment
+    ? vercelEnvironment === "production"
+    : environment.isProduction;
 }
 
 export function requireHostedStripeWebhookVerificationConfig(): {

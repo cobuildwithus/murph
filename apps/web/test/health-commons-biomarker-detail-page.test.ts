@@ -434,20 +434,24 @@ describe("BiomarkerPage", () => {
 
     expect(detail?.protocolRankings.slice(0, 4).map((protocol) => protocol.title)).toEqual([
       "Norwegian 4x4",
-      "Zone 2 Cardio",
       "Tabata 20/10 Interval Training",
       "Daily Step Floor",
+      "Hyperbaric Oxygen Therapy",
     ]);
 
     const saunaIndex = detail?.protocolRankings.findIndex((protocol) =>
       protocol.title === "Finnish Dry Sauna"
     ) ?? -1;
+    const hyperbaricIndex = detail?.protocolRankings.findIndex((protocol) =>
+      protocol.title === "Hyperbaric Oxygen Therapy"
+    ) ?? -1;
     const zone2Index = detail?.protocolRankings.findIndex((protocol) =>
       protocol.title === "Zone 2 Cardio"
     ) ?? -1;
 
-    expect(zone2Index).toBeGreaterThanOrEqual(0);
-    expect(saunaIndex).toBeGreaterThan(zone2Index);
+    expect(zone2Index).toBe(-1);
+    expect(hyperbaricIndex).toBeGreaterThanOrEqual(0);
+    expect(saunaIndex).toBeGreaterThan(hyperbaricIndex);
     expect(detail?.protocolRankings[0]).toEqual(expect.objectContaining({
       evidenceLabel: "Moderate",
       fitLabel: "Strong",
@@ -463,6 +467,28 @@ describe("BiomarkerPage", () => {
       "down_or_stable",
       "up_or_stable",
     ]));
+  });
+
+  it("excludes draft protocol variants from biomarker rankings", () => {
+    const catalog = createFixtureCatalog();
+    const norwegianFourByFour = catalog.entities.find((entity) =>
+      entity.entityType === "protocol_variant" && entity.title === "Norwegian 4x4"
+    );
+
+    expect(norwegianFourByFour).toBeDefined();
+    if (!norwegianFourByFour) {
+      throw new Error("Expected the Norwegian 4x4 protocol fixture.");
+    }
+    norwegianFourByFour.status = "draft";
+
+    const detail = resolveHealthCommonsBiomarkerDetail(
+      "estimated-vo2max",
+      createHealthCommonsCatalogReader(catalog),
+    );
+
+    expect(detail?.protocolRankings.map((protocol) => protocol.title)).not.toContain(
+      "Norwegian 4x4",
+    );
   });
 
   it("keeps incomplete biomarker pages unpublished without requiring private metric bindings", () => {

@@ -94,6 +94,7 @@ import {
   logExperimentContextRecordFromInput,
   logExperimentSessionRecord,
   logExperimentSessionRecordFromInput,
+  listExperimentLifecycleFrontmatterRecords,
   listExperimentRecords,
   listJournalRecords,
   planExperimentRecord,
@@ -1096,6 +1097,14 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       return listExperimentRecords(input)
     },
+    async listExperimentLifecycleFrontmatter(input: CommandContext & {
+      shouldYield?: (() => boolean) | null
+    }) {
+      return listExperimentLifecycleFrontmatterRecords({
+        vault: input.vault,
+        shouldYield: input.shouldYield ?? null,
+      })
+    },
     async showExperimentProgress(input: CommandContext & {
       lookup: string
       asOf?: string
@@ -1302,6 +1311,26 @@ function createIntegratedQueryServices(): QueryServices {
           windowDays: normalized.filters.windowDays,
         },
         summary: summary === null ? null : compactWearableDriftCommandSummary(summary),
+      }
+    },
+    async showWearableSleepPattern(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      timeZone?: string
+      windowDays?: number
+    }) {
+      const normalized = normalizeWearableSleepPatternInput(input)
+      const query = await loadQueryRuntime()
+      const summary = await query.summarizeWearableSleepPatternRuntime(
+        input.vault,
+        normalized.queryFilters,
+      )
+
+      return {
+        filters: normalized.filters,
+        summary,
       }
     },
     async listWearableSleep(input: CommandContext & {
@@ -1531,6 +1560,49 @@ function normalizeWearableMetricInput(input: {
   }
 }
 
+function normalizeWearableSleepPatternInput(input: {
+  date?: string
+  from?: string
+  to?: string
+  providers?: string[]
+  timeZone?: string
+  windowDays?: number
+}): {
+  filters: {
+    date: string | null
+    from: string | null
+    to: string | null
+    providers: string[]
+    timeZone: string | null
+    windowDays: number
+  }
+  queryFilters: {
+    date?: string
+    from?: string
+    to?: string
+    providers?: string[]
+    timeZone?: string
+    windowDays: number
+  }
+} {
+  const normalized = normalizeWearableSurfaceInput(input)
+  const timeZone = normalizeOptionalString(input.timeZone)
+  const windowDays = normalizeWearableSleepPatternWindowDays(input.windowDays)
+
+  return {
+    filters: {
+      ...normalized.filters,
+      timeZone: timeZone ?? null,
+      windowDays,
+    },
+    queryFilters: {
+      ...normalized.queryFilters,
+      timeZone,
+      windowDays,
+    },
+  }
+}
+
 function normalizeWearableSummaryInput(input: {
   date?: string
   from?: string
@@ -1609,6 +1681,14 @@ function normalizeWearableWindowDays(windowDays: number | undefined): number {
   }
 
   return Math.min(windowDays ?? 7, 30)
+}
+
+function normalizeWearableSleepPatternWindowDays(windowDays: number | undefined): number {
+  if (!Number.isInteger(windowDays) || (windowDays ?? 0) <= 0) {
+    return 28
+  }
+
+  return Math.min(windowDays ?? 28, 366)
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {

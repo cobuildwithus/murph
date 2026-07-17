@@ -3563,12 +3563,22 @@ exit 1
     mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
       recursive: true,
     })
+    mkdirSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+      ),
+      { recursive: true },
+    )
     mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'assistant-deliveries'), {
       recursive: true,
     })
-    mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'journal', '2026', '2026-03-18.md'), '# Journal\n', 'utf8')
@@ -3582,15 +3592,22 @@ exit 1
       '{"sessionId":"asst_test"}\n',
       'utf8',
     )
+    writeFileSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+        'transient.pdf',
+      ),
+      'assistant runtime staging\n',
+      'utf8',
+    )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
     writeFileSync(
       path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
       'rebuildable projection\n',
-      'utf8',
-    )
-    writeFileSync(
-      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'transient.pdf'),
-      'transient generated delivery\n',
       'utf8',
     )
     writeFileSync(
@@ -3599,8 +3616,23 @@ exit 1
       'utf8',
     )
     writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.pdf'),
+      'ordinary pre-existing vault file\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.zip'),
+      'globally excluded archive\n',
+      'utf8',
+    )
+    writeFileSync(
       path.join(vaultRoot, 'exports', 'user-files', 'keep.pdf'),
-      'generic user file\n',
+      'generic export\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.zip'),
+      'globally excluded archive\n',
       'utf8',
     )
 
@@ -3624,7 +3656,7 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 4')
+      expect(output).toContain('Vault files: 5')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -3646,19 +3678,44 @@ exit 1
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.pdf`,
+      )
       expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.zip`,
+      )
+      expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.zip`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
       )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/.runtime/operations/assistant/generated-deliveries/transient.pdf`,
+      )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
       expect(entries).not.toContain(
-        `${bundleDir}/vault/exports/assistant-deliveries/transient.pdf`,
-      )
-      expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )
+      const manifest = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', zipPath, `${bundleDir}/bundle-manifest.json`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ))
+      expect(manifest).toMatchObject({
+        counts: {
+          totalFiles: 6,
+          vaultFiles: 5,
+        },
+        excludes: expect.arrayContaining(['.runtime/**']),
+      })
+      expect(manifest.excludes).toContain('*.zip')
+      expect(manifest.excludes).not.toContain('exports/assistant-deliveries/**')
     } finally {
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })

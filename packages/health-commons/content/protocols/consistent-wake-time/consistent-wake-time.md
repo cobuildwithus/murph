@@ -374,7 +374,7 @@ expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     description: "Regular wake timing aligns sleep pressure with bedtime, reducing time awake in bed when sleep opportunity stays adequate."
-    expected: "Track as mixed context"
+    expected: "Possible change"
     estimatedChange:
       kind: "absolute"
       low: 0

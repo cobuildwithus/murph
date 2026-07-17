@@ -12,6 +12,7 @@ import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers"
 import type {
   AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
@@ -241,6 +242,9 @@ type RuntimeUsageRecordPort = NonNullable<
 >;
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
+>;
+type RuntimeLabsToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["labsToolPort"]
 >;
 type RuntimeSubscriptionToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["subscriptionToolPort"]
@@ -880,6 +884,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         hosted: expect.objectContaining({
           subscriptionTool: subscriptionToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("passes the hosted labs port into assistant execution when available", async () => {
+    const labsToolPort: RuntimeLabsToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeLabsToolPort: labsToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          labsTool: labsToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("omits the hosted labs port from assistant execution when unavailable", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.not.objectContaining({
+          labsTool: expect.anything(),
         }),
       },
       expect.any(Object),
@@ -2447,6 +2483,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
+      shouldYield: null,
       vaultRoot: "/tmp/murph-hosted-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
@@ -2473,9 +2510,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("keeps a retry wake when hosted managed automation work partially succeeds", async () => {
+  it("checkpoints a retry wake after logging partial managed setup failures", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    const stableKeyFailure = new Error("metadata unavailable");
+    const stableKeyFailure = new VaultCliError(
+      "MURPH_MANAGED_AUTOMATION_SETUP_TRANSIENT",
+      "metadata unavailable",
+      { retryable: true },
+    );
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
       created: 1,
       skipped: 1,
@@ -2500,19 +2541,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationUpdated: 0,
       }),
     }));
-    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
-      expect.objectContaining({
-        component: "runtime",
-        eventCode: "assistant.pass_finished",
-        level: "info",
-        redactedJson: expect.objectContaining({
-          murphManagedAutomationCreated: 1,
-          murphManagedAutomationFailed: true,
-          murphManagedAutomationSkipped: 1,
-          murphManagedAutomationUpdated: 0,
-        }),
-      }),
-    );
+
     expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
       expect.objectContaining({
         component: "runtime",
@@ -2531,12 +2560,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("logs stable-key metadata failures even when background setup stays idle", async () => {
+  it("logs stable-key metadata failures when background setup stays idle", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const stableKeyFailure = new Error("metadata unavailable");
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
       created: 0,
       skipped: 1,
-      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyFailure,
       stableKeyRetryNeeded: true,
       updated: 0,
     });
@@ -2545,7 +2575,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
     }));
-
     expect(result).not.toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:00:30.000Z",
     }));
@@ -2572,25 +2601,110 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("logs hosted managed automation setup failures without forcing a background retry", async () => {
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(
-      new Error("metadata unavailable"),
+  it("persists bounded retries for a zero-change typed transient stable-key failure", async () => {
+    const stableKeyFailure = new VaultCliError(
+      "MURPH_MANAGED_AUTOMATION_SETUP_TRANSIENT",
+      "workspace metadata is temporarily unavailable",
+      { retryable: true },
     );
+    mocks.applyMurphManagedAutomations.mockResolvedValue({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const firstRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    expect(firstRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 0,
+        murphManagedAutomationSetupRetryAttempt: 1,
+        murphManagedAutomationSetupRetryable: true,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+
+    const secondRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:01:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationSetupRetryAttempt: 1,
+        },
+      }),
+    }));
+    expect(secondRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:03:00.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 2,
+      }),
+    }));
+
+    const thirdRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:04:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationSetupRetryAttempt: 2,
+        },
+      }),
+    }));
+    expect(thirdRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 3,
+      }),
+    }));
+  });
+
+  it("checkpoints partial managed changes without retrying a permanent stable-key failure", async () => {
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 1,
+      stableKeyFailure: new Error("vault metadata failed schema validation"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationFailed: true,
+        murphManagedAutomationSetupRetryAttempt: 0,
+        murphManagedAutomationSetupRetryable: false,
+      }),
+    }));
+    expect(result).not.toHaveProperty("nextWakeAt", expect.any(String));
+  });
+
+  it("does not schedule a retry loop for an unclassified managed setup failure", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const setupFailure = new Error("invalid managed automation outcome");
+    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(setupFailure);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
     }));
-
-    expect(result).not.toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:00:30.000Z",
-    }));
-    expect(result).not.toEqual(expect.objectContaining({
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
       redactedStatus: expect.objectContaining({
         murphManagedAutomationFailed: true,
+        murphManagedAutomationSetupRetryAttempt: 0,
+        murphManagedAutomationSetupRetryExhausted: false,
+        murphManagedAutomationSetupRetryable: false,
       }),
     }));
+    expect(result).not.toHaveProperty("nextWakeAt", "2026-04-27T00:00:30.000Z");
     expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
       expect.objectContaining({
         component: "runtime",
@@ -2602,6 +2716,107 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }),
     );
+  });
+
+  it("backs off typed transient managed setup failures and exhausts the retry budget", async () => {
+    const setupFailure = new VaultCliError(
+      "MURPH_MANAGED_AUTOMATION_SETUP_TRANSIENT",
+      "workspace metadata is temporarily unavailable",
+      { retryable: true },
+    );
+    mocks.applyMurphManagedAutomations.mockRejectedValue(setupFailure);
+
+    const firstRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    expect(firstRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 1,
+        murphManagedAutomationSetupRetryExhausted: false,
+        murphManagedAutomationSetupRetryable: true,
+      }),
+    }));
+
+    const secondRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:01:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationSetupRetryAttempt: 1,
+        },
+      }),
+    }));
+    expect(secondRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:03:00.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 2,
+        murphManagedAutomationSetupRetryExhausted: false,
+      }),
+    }));
+
+    const thirdRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:04:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationSetupRetryAttempt: 2,
+        },
+      }),
+    }));
+    expect(thirdRetry).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 3,
+        murphManagedAutomationSetupRetryExhausted: false,
+      }),
+    }));
+
+    const exhaustedRetry = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:12:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationSetupRetryAttempt: 3,
+        },
+      }),
+    }));
+    expect(exhaustedRetry).toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationSetupRetryAttempt: 3,
+        murphManagedAutomationSetupRetryExhausted: true,
+        murphManagedAutomationSetupRetryable: true,
+      }),
+    }));
+    expect(exhaustedRetry).not.toHaveProperty("nextWakeAt", expect.any(String));
+  });
+
+  it("clears the managed setup retry budget after a later successful pass", async () => {
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:03:00.000Z",
+      workspace: createPhaseWorkspace({
+        redactedStatus: {
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSetupRetryAttempt: 2,
+          murphManagedAutomationSetupRetryable: true,
+        },
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: false,
+        murphManagedAutomationSetupRetryAttempt: 0,
+        murphManagedAutomationSetupRetryExhausted: false,
+        murphManagedAutomationSetupRetryable: false,
+      }),
+    }));
+    expect(result).not.toHaveProperty("nextWakeAt", expect.any(String));
   });
 
   it("skips hosted managed automation work when background maintenance yields", async () => {
@@ -2618,6 +2833,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: expect.any(String),
       nextWakeReason: "assistant",
       progressed: false,
+    }));
+  });
+
+  it("reschedules partial managed maintenance when foreground input arrives mid-pass", async () => {
+    let shouldYieldNow = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYieldNow);
+    mocks.applyMurphManagedAutomations.mockImplementationOnce(async (input) => {
+      expect(input.shouldYield).toBe(shouldYieldBackgroundMaintenance);
+      shouldYieldNow = true;
+      return {
+        created: 1,
+        skipped: 0,
+        updated: 0,
+        yielded: true,
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationUpdated: 0,
+        murphManagedAutomationYielded: true,
+      }),
     }));
   });
 
@@ -2704,6 +2951,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       operatorHomeRoot: "/tmp/murph-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
+      shouldYield: null,
       vaultRoot: "/tmp/murph-vault",
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -3041,7 +3289,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).not.toHaveProperty("nextWakeAt");
   });
 
-  it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
+  it("preserves a current inbound result and schedules managed setup retry after its checkpoint", async () => {
     const defaultRoute = {
       channel: "linq",
       deliverySource: null,
@@ -3065,10 +3313,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         threadId: defaultRoute.deliveryTarget,
       },
     });
+    const stableKeyFailure = new VaultCliError(
+      "MURPH_MANAGED_AUTOMATION_SETUP_TRANSIENT",
+      "metadata unavailable",
+      { retryable: true },
+    );
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
       created: 0,
       skipped: 1,
-      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyFailure,
       stableKeyRetryNeeded: true,
       updated: 0,
     });
@@ -3084,16 +3337,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:00:00.000Z",
     }));
 
-    expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: "2026-04-27T00:00:30.000Z",
-      redactedStatus: expect.objectContaining({
-        murphManagedAutomationFailed: true,
-      }),
+    // The current inbound phase completes and can be checkpointed before
+    // background managed-automation setup is attempted.
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      progressed: true,
     }));
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    await expect(result.afterCheckpoint?.()).resolves.toEqual(
+      expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
+        redactedStatus: expect.objectContaining({
+          murphManagedAutomationFailed: true,
+        }),
+      }),
+    );
   });
 
   it("fails closed for mixed fresh hosted inputs when any reply target lacks a route", async () => {
@@ -3327,11 +3586,73 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
           const saved = await executionContext.hosted?.automationTool?.request({
             action: "save",
+            activeUntil: "2099-08-01T00:00:00.000Z",
             instructions: "Ask for one lightweight group check-in.",
             schedule: { kind: "dailyLocal", localTime: "08:30" },
             slug: "group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
             title: "Group check-in",
           });
+          if (!saved || saved.action !== "save") {
+            throw new Error("Expected saved automation.");
+          }
+          const stale = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Archive this stale group check-in.",
+            schedule: { kind: "dailyLocal", localTime: "08:45" },
+            slug: "stale-group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
+            title: "Stale group check-in",
+          });
+          const paused = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Keep this user-paused group check-in paused.",
+            schedule: { kind: "dailyLocal", localTime: "09:00" },
+            slug: "paused-group-check-in",
+            status: "paused",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
+            title: "Paused group check-in",
+          });
+          const otherSeries = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Keep this separate support series active.",
+            schedule: { kind: "dailyLocal", localTime: "09:15" },
+            slug: "other-group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:other-group-check-in",
+            title: "Other group check-in",
+          });
+          if (
+            stale?.action !== "save"
+            || paused?.action !== "save"
+            || otherSeries?.action !== "save"
+          ) {
+            throw new Error("Expected support-series fixture automations.");
+          }
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "reconcile",
+            desiredAutomationIds: [saved.automationId],
+            supportSeriesId: "habit:group-check-in",
+          })).resolves.toEqual({
+            action: "reconcile",
+            archivedCount: 1,
+            matchedCount: 3,
+            missingDesiredAutomationIds: [],
+            supportSeriesId: "habit:group-check-in",
+            unchangedCount: 2,
+          });
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "This request must fail before persistence.",
+            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            tags: ["system:support-series:habit:model-controlled"],
+            title: "Invalid support tag",
+          })).rejects.toThrow(
+            "Reserved automation support tags must be set through supportSeriesId.",
+          );
           await executionContext.hosted?.groupTool?.request({
             action: "update_display_name",
             updateDisplayName: { displayName: "Linq can rename" },
@@ -3363,12 +3684,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
+        activeUntil: "2099-08-01T00:00:00.000Z",
         route: expect.objectContaining({
           channel: "linq",
           deliveryTarget: "linq_group_chat",
           threadIsDirect: false,
         }),
+        supportKind: "check_in",
+        tags: expect.arrayContaining([
+          "system:support-series:habit:group-check-in",
+        ]),
       }));
+      await expect(showAutomation({
+        slug: "stale-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
+      await expect(showAutomation({
+        slug: "paused-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "paused" }));
+      await expect(showAutomation({
+        slug: "other-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "active" }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -12949,6 +13287,24 @@ describe("hosted runtime log helpers", () => {
   });
 });
 
+function createPhaseWorkspace(input: {
+  redactedStatus: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["workspace"]
+  >["redactedStatus"];
+}): NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["workspace"]> {
+  return {
+    checkpointedAt: "2026-04-27T00:00:00.000Z",
+    createdAt: "2026-04-27T00:00:00.000Z",
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatus: input.redactedStatus,
+    snapshotRef: null,
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    userId: "member_synthetic_phase",
+    version: "8",
+  };
+}
+
 function createPhaseInput(input: {
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
@@ -12995,6 +13351,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantPersonalizationToolPort"]
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
+  runtimeLabsToolPort?: RuntimeLabsToolPort;
   runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -13133,6 +13490,9 @@ function createPhaseInput(input: {
               assistantConfigurationToolPort:
                 input.runtimeAssistantConfigurationToolPort,
             }
+          : {}),
+        ...(input.runtimeLabsToolPort
+          ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }

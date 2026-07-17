@@ -40,14 +40,28 @@ const OBSERVABILITY_TEST_KEYRING_ENTRIES = {
 const AI_USAGE_NOTICE_MEMBER_ID = "member_123";
 const AI_USAGE_NOTICE_PERIOD_START = new Date("2026-03-01T00:00:00.000Z");
 
-function buildCurrentAiUsageNoticeKey(): string {
+function buildCurrentAiUsageNoticeKey(
+  usageCreditLedgerVersion = 0n,
+): string {
   return buildHostedAiUsageGateNoticeIdempotencyKey({
     memberId: AI_USAGE_NOTICE_MEMBER_ID,
     periodStart: AI_USAGE_NOTICE_PERIOD_START,
+    usageCreditLedgerVersion,
   });
 }
 
 describe("hosted Linq observability stores", () => {
+  it("preserves the legacy zero-credit notice key and keys later capacity epochs by ledger version", () => {
+    const legacyKey = buildCurrentAiUsageNoticeKey();
+    const replenishedKey = buildCurrentAiUsageNoticeKey(2n);
+
+    expect(legacyKey).toBe(
+      "ai-usage-gate:3a2c4e20210115cdb00461b93c8ed458",
+    );
+    expect(replenishedKey).not.toBe(legacyKey);
+    expect(buildCurrentAiUsageNoticeKey(2n)).toBe(replenishedKey);
+  });
+
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
@@ -1929,6 +1943,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
       idempotencyKey: currentIdempotencyKey,
       status: "claimed",
@@ -1962,6 +1977,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toMatchObject({ status: "claimed" });
 
     expect(fixture.executeRaw).toHaveBeenCalledOnce();
@@ -2030,6 +2046,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({ status: "already_notified" });
 
     expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
@@ -2070,7 +2087,11 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
-    })).resolves.toEqual({ status: "in_flight" });
+      usageCreditLedgerVersion: 0n,
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:35:00.000Z"),
+      status: "in_flight",
+    });
 
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
   });
@@ -2109,6 +2130,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
       idempotencyKey: currentIdempotencyKey,
       status: "claimed",
@@ -2161,14 +2183,70 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: "telegram-update:123",
       targetKind: "telegram_thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({ status: "already_notified" });
 
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
   });
 
+  it("does not let Telegram replace a failed Linq usage-limit attempt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
+    const failedDelivery = {
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:20:00.000Z"),
+      deliveredAt: null,
+      failedAt: new Date("2026-03-26T12:20:01.000Z"),
+      failureCode: "linq_usage_limit_dispatch_retryable",
+      id: "hld_failed_linq_dispatch",
+      idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
+        currentIdempotencyKey,
+      ),
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      status: "failed",
+    };
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(failedDelivery)
+      .mockResolvedValueOnce(failedDelivery);
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      memberId: "member_123",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram-update:failed-linq",
+      targetKind: "telegram_thread",
+      usageCreditLedgerVersion: 0n,
+    })).resolves.toEqual({ status: "already_notified" });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{
+            attemptedAt: {
+              lte: new Date("2026-03-26T12:15:00.000Z"),
+            },
+            status: "attempted",
+          }],
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     {
-      expected: { status: "in_flight" },
+      expected: {
+        retryAt: new Date("2026-03-26T12:44:00.000Z"),
+        status: "in_flight",
+      },
       label: "in flight",
       reread: {
         acceptedAt: null,
@@ -2241,6 +2319,7 @@ describe("hosted Linq observability stores", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "linq-message:event-123",
       targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
     })).resolves.toEqual(expected);
 
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);

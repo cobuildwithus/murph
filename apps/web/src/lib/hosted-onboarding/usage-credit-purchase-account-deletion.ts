@@ -1,0 +1,574 @@
+import type Stripe from "stripe";
+
+import {
+  HostedUsageCreditPurchaseStatus,
+  type HostedUsageCreditPurchase,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
+
+import { coerceStripeObjectId } from "./billing";
+import {
+  createHostedStripeCheckoutSessionLookupKey,
+  hostedLookupKeyMatchesValue,
+} from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
+import { requireHostedStripeApiMode } from "./runtime";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
+import {
+  assertHostedUsageCreditStripeSessionMatchesPurchase,
+  buildHostedUsageCreditCheckoutIdempotencyKey,
+  buildHostedUsageCreditInvariantError,
+  buildHostedUsageCreditStripeUnavailableError,
+  decryptHostedUsageCreditPurchaseStripeField,
+  encryptHostedUsageCreditPurchaseStripeField,
+  HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS,
+  isDefinitiveHostedUsageCreditStripeRequestRejection,
+  projectHostedUsageCreditStripeSessionState,
+  reconstructHostedUsageCreditStripeCheckoutRequest,
+  requireHostedUsageCreditEncryptedValue,
+  requireHostedUsageCreditLookupKey,
+  retrieveAndExpireHostedUsageCreditStripeSession,
+} from "./usage-credit-purchase-stripe";
+import { getPrisma } from "../prisma";
+
+export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
+  memberIds: readonly string[];
+  now?: Date;
+  prisma?: PrismaClient;
+}): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)].sort();
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const now = input.now ?? new Date();
+  const prisma = input.prisma ?? getPrisma();
+  const purchases = await prisma.hostedUsageCreditPurchase.findMany({
+    orderBy: { id: "asc" },
+    where: buildHostedUsageCreditAccountDeletionScope(memberIds),
+  });
+
+  for (const listedPurchase of purchases) {
+    const purchase = await prepareHostedUsageCreditPurchaseForAccountDeletion({
+      prisma,
+      purchase: listedPurchase,
+    });
+    assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership({
+      memberIds,
+      purchase,
+    });
+    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(purchase)) {
+      continue;
+    }
+    if (purchase.status === HostedUsageCreditPurchaseStatus.payment_pending) {
+      throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+    }
+
+    const resolution = await resolveHostedUsageCreditStripeSessionForAccountDeletion({
+      now,
+      prisma,
+      purchase,
+    });
+    const reconciled = resolution.kind === "session"
+      ? await persistHostedUsageCreditAccountDeletionSessionState({
+          now,
+          prisma,
+          purchase,
+          session: resolution.session,
+        })
+      : await persistHostedUsageCreditAccountDeletionNoSessionProof({
+          now,
+          prisma,
+          purchase,
+        });
+    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(reconciled)) {
+      continue;
+    }
+    if (reconciled.status === HostedUsageCreditPurchaseStatus.payment_pending) {
+      throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+    }
+    throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+  }
+}
+
+export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
+  input: {
+    memberIds: readonly string[];
+    prisma?: HostedOnboardingReadClient;
+  },
+): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)].sort();
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const purchases = await prisma.hostedUsageCreditPurchase.findMany({
+    select: {
+      beneficiaryMemberId: true,
+      lastReconciledAt: true,
+      paidAt: true,
+      payerMemberId: true,
+      status: true,
+      stripeChargeIdEncrypted: true,
+      stripeChargeLookupKey: true,
+      stripeCheckoutSessionIdEncrypted: true,
+      stripeCheckoutSessionLookupKey: true,
+      stripePaymentIntentIdEncrypted: true,
+      stripePaymentIntentLookupKey: true,
+      terminalAt: true,
+    },
+    where: buildHostedUsageCreditAccountDeletionScope(memberIds),
+  });
+  for (const purchase of purchases) {
+    assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership({
+      memberIds,
+      purchase,
+    });
+    if (!isHostedUsageCreditPurchaseSafeForAccountDeletion(purchase)) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+  }
+}
+
+async function resolveHostedUsageCreditStripeSessionForAccountDeletion(input: {
+  now: Date;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+}): Promise<
+  | { kind: "absent_after_expiry" }
+  | { kind: "session"; session: Stripe.Checkout.Session }
+> {
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+  if (stripeLiveMode !== input.purchase.stripeLiveMode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
+      httpStatus: 500,
+      message: "Usage-credit checkout is temporarily unavailable.",
+    });
+  }
+
+  const sessionId = await decryptHostedUsageCreditPurchaseStripeField({
+    field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
+    payerMemberId: input.purchase.payerMemberId,
+    prisma: input.prisma,
+    value: input.purchase.stripeCheckoutSessionIdEncrypted,
+  });
+  let resolvedSessionId = sessionId;
+  if (sessionId) {
+    if (
+      !hostedLookupKeyMatchesValue({
+        expectedLookupKey: input.purchase.stripeCheckoutSessionLookupKey,
+        kind: "stripe-checkout-session",
+        normalizedValue: sessionId,
+      })
+    ) {
+      throw buildHostedUsageCreditInvariantError("checkout_session_identity_invalid");
+    }
+  } else {
+    if (input.purchase.stripeCheckoutSessionLookupKey) {
+      throw buildHostedUsageCreditInvariantError("checkout_session_identity_invalid");
+    }
+    const checkoutRequest = await reconstructHostedUsageCreditStripeCheckoutRequest({
+      prisma: input.prisma,
+      purchase: input.purchase,
+    });
+    let replayedSession: Stripe.Checkout.Session | null = null;
+    try {
+      replayedSession = await stripe.checkout.sessions.create(checkoutRequest, {
+        idempotencyKey: buildHostedUsageCreditCheckoutIdempotencyKey(input.purchase.id),
+      });
+    } catch (error) {
+      if (
+        input.now.getTime() >= input.purchase.checkoutExpiresAt.getTime() &&
+        isDefinitiveHostedUsageCreditStripeRequestRejection(error)
+      ) {
+        const matchedSession = await findHostedUsageCreditStripeSessionForExpiredAttempt({
+          checkoutRequest,
+          purchase: input.purchase,
+          stripe,
+        });
+        if (!matchedSession) {
+          return { kind: "absent_after_expiry" };
+        }
+        resolvedSessionId = matchedSession.id;
+      } else {
+        throw buildHostedUsageCreditStripeUnavailableError(error);
+      }
+    }
+    if (replayedSession) {
+      assertHostedUsageCreditStripeSessionMatchesPurchase({
+        purchase: input.purchase,
+        session: replayedSession,
+      });
+      resolvedSessionId = replayedSession.id;
+    }
+  }
+
+  if (!resolvedSessionId) {
+    throw buildHostedUsageCreditInvariantError("checkout_session_identity_invalid");
+  }
+  return {
+    kind: "session",
+    session: await retrieveAndExpireHostedUsageCreditStripeSession({
+      purchase: input.purchase,
+      sessionId: resolvedSessionId,
+      stripe,
+    }),
+  };
+}
+
+async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
+  checkoutRequest: Stripe.Checkout.SessionCreateParams;
+  purchase: HostedUsageCreditPurchase;
+  stripe: Stripe;
+}): Promise<Stripe.Checkout.Session | null> {
+  const customerId = coerceStripeObjectId(input.checkoutRequest.customer);
+  if (!customerId) {
+    throw buildHostedUsageCreditInvariantError("checkout_customer_missing");
+  }
+
+  let matchedSession: Stripe.Checkout.Session | null = null;
+  let startingAfter: string | undefined;
+  const seenPageBoundaries = new Set<string>();
+  while (true) {
+    let page: Stripe.ApiList<Stripe.Checkout.Session>;
+    try {
+      page = await input.stripe.checkout.sessions.list({
+        created: {
+          gte: Math.max(
+            0,
+            Math.floor(input.purchase.createdAt.getTime() / 1_000) - 1,
+          ),
+          lte: Math.floor(input.purchase.checkoutExpiresAt.getTime() / 1_000),
+        },
+        customer: customerId,
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+    } catch (error) {
+      throw buildHostedUsageCreditStripeUnavailableError(error);
+    }
+
+    for (const session of page.data) {
+      if (
+        session.client_reference_id !== input.purchase.id &&
+        session.metadata?.purchaseId !== input.purchase.id
+      ) {
+        continue;
+      }
+      assertHostedUsageCreditStripeSessionMatchesPurchase({
+        purchase: input.purchase,
+        session,
+      });
+      if (matchedSession && matchedSession.id !== session.id) {
+        throw buildHostedUsageCreditInvariantError("multiple_checkout_sessions");
+      }
+      matchedSession = session;
+    }
+
+    if (!page.has_more) {
+      return matchedSession;
+    }
+    const pageBoundary = page.data.at(-1)?.id;
+    if (!pageBoundary || seenPageBoundaries.has(pageBoundary)) {
+      throw buildHostedUsageCreditInvariantError("checkout_session_list_invalid");
+    }
+    seenPageBoundaries.add(pageBoundary);
+    startingAfter = pageBoundary;
+  }
+}
+
+async function prepareHostedUsageCreditPurchaseForAccountDeletion(input: {
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+}): Promise<HostedUsageCreditPurchase> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.purchase.payerMemberId);
+    const current = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: input.purchase.id },
+    });
+    if (!current || current.payerMemberId !== input.purchase.payerMemberId) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    const member = await tx.hostedMember.findUnique({
+      select: {
+        suspendedAt: true,
+      },
+      where: { id: current.payerMemberId },
+    });
+    if (!member?.suspendedAt) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    return current;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function persistHostedUsageCreditAccountDeletionSessionState(input: {
+  now: Date;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+  session: Stripe.Checkout.Session;
+}): Promise<HostedUsageCreditPurchase> {
+  assertHostedUsageCreditStripeSessionMatchesPurchase({
+    purchase: input.purchase,
+    session: input.session,
+  });
+  const providerState = projectHostedUsageCreditStripeSessionState(input.session);
+  if (providerState === "checkout_open") {
+    throw buildHostedUsageCreditInvariantError("stripe_session_remained_open");
+  }
+  const sessionLookupKey = requireHostedUsageCreditLookupKey(
+    createHostedStripeCheckoutSessionLookupKey(input.session.id),
+    "checkout_session",
+  );
+  const [stripeCheckoutSessionIdEncrypted, stripeCheckoutUrlEncrypted] =
+    await Promise.all([
+      encryptHostedUsageCreditPurchaseStripeField({
+        field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
+        payerMemberId: input.purchase.payerMemberId,
+        prisma: input.prisma,
+        value: input.session.id,
+      }),
+      encryptHostedUsageCreditPurchaseStripeField({
+        field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutUrl,
+        payerMemberId: input.purchase.payerMemberId,
+        prisma: input.prisma,
+        value: null,
+      }),
+    ]);
+  const nextStatus = providerState === "expired"
+    ? HostedUsageCreditPurchaseStatus.expired
+    : HostedUsageCreditPurchaseStatus.payment_pending;
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.purchase.payerMemberId);
+    const current = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: input.purchase.id },
+    });
+    if (!current || current.payerMemberId !== input.purchase.payerMemberId) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(current)) {
+      return current;
+    }
+    if (current.status === HostedUsageCreditPurchaseStatus.payment_pending) {
+      return current;
+    }
+    if (current.reconciliationVersion !== input.purchase.reconciliationVersion) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    if (
+      current.stripeCheckoutSessionIdEncrypted !==
+        input.purchase.stripeCheckoutSessionIdEncrypted ||
+      current.stripeCheckoutSessionLookupKey !==
+        input.purchase.stripeCheckoutSessionLookupKey
+    ) {
+      throw buildHostedUsageCreditInvariantError("checkout_session_identity_changed");
+    }
+
+    const updated = await tx.hostedUsageCreditPurchase.updateMany({
+      data: {
+        lastReconciledAt: input.now,
+        reconciliationVersion: { increment: 1n },
+        status: nextStatus,
+        stripeCheckoutSessionIdEncrypted: requireHostedUsageCreditEncryptedValue(
+          stripeCheckoutSessionIdEncrypted,
+          "checkout_session",
+        ),
+        stripeCheckoutSessionLookupKey: sessionLookupKey,
+        stripeCheckoutUrlEncrypted,
+        terminalAt: providerState === "expired" ? input.now : null,
+        updatedAt: input.now,
+      },
+      where: {
+        id: current.id,
+        payerMemberId: current.payerMemberId,
+        reconciliationVersion: input.purchase.reconciliationVersion,
+        status: {
+          in: [
+            HostedUsageCreditPurchaseStatus.created,
+            HostedUsageCreditPurchaseStatus.checkout_open,
+            HostedUsageCreditPurchaseStatus.expired,
+          ],
+        },
+      },
+    });
+    if (updated.count !== 1) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    const reconciled = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: current.id },
+    });
+    if (!reconciled) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    return reconciled;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
+  now: Date;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+}): Promise<HostedUsageCreditPurchase> {
+  if (
+    input.purchase.stripeCheckoutSessionIdEncrypted ||
+    input.purchase.stripeCheckoutSessionLookupKey
+  ) {
+    throw buildHostedUsageCreditInvariantError("checkout_session_identity_invalid");
+  }
+
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.purchase.payerMemberId);
+    const current = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: input.purchase.id },
+    });
+    if (!current || current.payerMemberId !== input.purchase.payerMemberId) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(current)) {
+      return current;
+    }
+    if (current.status === HostedUsageCreditPurchaseStatus.payment_pending) {
+      return current;
+    }
+    if (
+      current.reconciliationVersion !== input.purchase.reconciliationVersion ||
+      current.stripeCheckoutSessionIdEncrypted !== null ||
+      current.stripeCheckoutSessionLookupKey !== null
+    ) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+
+    const updated = await tx.hostedUsageCreditPurchase.updateMany({
+      data: {
+        lastReconciledAt: input.now,
+        reconciliationVersion: { increment: 1n },
+        status: HostedUsageCreditPurchaseStatus.expired,
+        stripeCheckoutUrlEncrypted: null,
+        terminalAt: input.now,
+        updatedAt: input.now,
+      },
+      where: {
+        id: current.id,
+        payerMemberId: current.payerMemberId,
+        reconciliationVersion: input.purchase.reconciliationVersion,
+        status: {
+          in: [
+            HostedUsageCreditPurchaseStatus.created,
+            HostedUsageCreditPurchaseStatus.expired,
+          ],
+        },
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+    });
+    if (updated.count !== 1) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    const reconciled = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: current.id },
+    });
+    if (!reconciled) {
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+    }
+    return reconciled;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function buildHostedUsageCreditAccountDeletionScope(
+  memberIds: readonly string[],
+): Prisma.HostedUsageCreditPurchaseWhereInput {
+  return {
+    OR: [
+      { beneficiaryMemberId: { in: [...memberIds] } },
+      { payerMemberId: { in: [...memberIds] } },
+    ],
+  };
+}
+
+function assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership(input: {
+  memberIds: readonly string[];
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    "beneficiaryMemberId" | "payerMemberId"
+  >;
+}): void {
+  if (
+    input.purchase.payerMemberId !== input.purchase.beneficiaryMemberId ||
+    !input.memberIds.includes(input.purchase.payerMemberId)
+  ) {
+    throw buildHostedUsageCreditAccountDeletionUnresolvedError();
+  }
+}
+
+function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
+  HostedUsageCreditPurchase,
+  | "lastReconciledAt"
+  | "paidAt"
+  | "status"
+  | "stripeChargeIdEncrypted"
+  | "stripeChargeLookupKey"
+  | "stripeCheckoutSessionIdEncrypted"
+  | "stripeCheckoutSessionLookupKey"
+  | "stripePaymentIntentIdEncrypted"
+  | "stripePaymentIntentLookupKey"
+  | "terminalAt"
+>): boolean {
+  if (!input.lastReconciledAt || !input.terminalAt) {
+    return false;
+  }
+  const hasSessionProof = Boolean(
+    input.stripeCheckoutSessionIdEncrypted &&
+    input.stripeCheckoutSessionLookupKey,
+  );
+  const hasNoSessionProof =
+    input.stripeCheckoutSessionIdEncrypted === null &&
+    input.stripeCheckoutSessionLookupKey === null;
+  if (!hasSessionProof && !hasNoSessionProof) {
+    return false;
+  }
+
+  switch (input.status) {
+    case HostedUsageCreditPurchaseStatus.expired:
+      return true;
+    case HostedUsageCreditPurchaseStatus.payment_failed:
+      return hasSessionProof;
+    case HostedUsageCreditPurchaseStatus.fulfilled:
+      return Boolean(
+        hasSessionProof &&
+        input.paidAt &&
+        input.stripeChargeIdEncrypted &&
+        input.stripeChargeLookupKey &&
+        input.stripePaymentIntentIdEncrypted &&
+        input.stripePaymentIntentLookupKey,
+      );
+    case HostedUsageCreditPurchaseStatus.created:
+    case HostedUsageCreditPurchaseStatus.checkout_open:
+    case HostedUsageCreditPurchaseStatus.payment_pending:
+      return false;
+  }
+}
+
+function buildHostedUsageCreditAccountDeletionPaymentPendingError() {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_USAGE_CREDIT_PAYMENT_PENDING",
+    httpStatus: 409,
+    message: "A usage-credit payment is still processing. Retry account deletion after it settles.",
+    retryable: true,
+  });
+}
+
+function buildHostedUsageCreditAccountDeletionUnresolvedError() {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_USAGE_CREDIT_UNRESOLVED",
+    httpStatus: 503,
+    message: "A usage-credit checkout could not be safely closed. Retry account deletion.",
+    retryable: true,
+  });
+}

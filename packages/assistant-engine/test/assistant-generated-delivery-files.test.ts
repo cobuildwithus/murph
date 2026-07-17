@@ -10,16 +10,28 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 
 describe('assistant generated delivery files', () => {
-  it('keeps the owned prefix exact and resolves supported content types', () => {
+  it('owns only one flat assistant runtime subtree', () => {
     expect(ASSISTANT_GENERATED_DELIVERY_DIRECTORY).toBe(
-      'exports/assistant-deliveries',
+      '.runtime/operations/assistant/generated-deliveries',
     )
     expect(isAssistantGeneratedDeliveryRef(
-      'exports/assistant-deliveries/report.zip',
+      '.runtime/operations/assistant/generated-deliveries/report.zip',
     )).toBe(true)
     expect(isAssistantGeneratedDeliveryRef(
-      'exports/assistant-deliveries-backup/report.zip',
+      '.runtime/operations/assistant/generated-deliveries-backup/report.zip',
     )).toBe(false)
+    expect(isAssistantGeneratedDeliveryRef(
+      '.runtime/operations/assistant/generated-deliveries/nested/report.zip',
+    )).toBe(false)
+    expect(isAssistantGeneratedDeliveryRef(
+      '.runtime/operations/assistant/generated-deliveries/.hidden.zip',
+    )).toBe(false)
+    expect(isAssistantGeneratedDeliveryRef(
+      'exports/assistant-deliveries/report.zip',
+    )).toBe(false)
+  })
+
+  it('preserves the vault-file content-type contract', () => {
     expect(resolveSupportedAssistantVaultFileContentType('REPORT.ZIP')).toBe(
       'application/zip',
     )
@@ -27,12 +39,18 @@ describe('assistant generated delivery files', () => {
     expect(resolveSupportedAssistantVaultFileContentType('report.bin')).toBeNull()
   })
 
-  it('routes only newly generated one-time files into transient staging', () => {
+  it('routes only newly generated same-turn sends into runtime staging', () => {
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'Create files intended solely for one-time delivery under exports/assistant-deliveries/',
+      'Only after this turn establishes an obligation to send a newly generated file now',
     )
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'never move or copy canonical, durable, or existing user files there',
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>`,
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'Do not stage files for possible later delivery',
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'never move or copy existing, user-owned, canonical, or durable files there',
     )
   })
 })

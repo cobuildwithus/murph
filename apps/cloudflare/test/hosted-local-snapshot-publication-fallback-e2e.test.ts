@@ -180,7 +180,8 @@ describe("hosted local snapshot publication fallback e2e", () => {
       baselineFaultCount,
     });
     expect(readSnapshotPublicationValidationStatuses()).toContain(409);
-    expect(rejectedPublicationStatus.workspace?.snapshotRef).toEqual(baselineSnapshotRef);
+    const retainedSnapshotRef = rejectedPublicationStatus.workspace?.snapshotRef;
+    expect(isHostedWorkspaceSnapshotV2Ref(retainedSnapshotRef ?? null)).toBe(true);
     expect(requireWorkspaceVersion(rejectedPublicationStatus))
       .toBeGreaterThanOrEqual(initialWorkspaceVersion);
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);
@@ -225,10 +226,13 @@ describe("hosted local snapshot publication fallback e2e", () => {
       .join("\n\n");
     expect(recoveryProviderText).toContain(baselineFileSha256);
 
-    const finalStatus = await waitForCleanSnapshotPublication(baselineSnapshotRef);
+    if (!retainedSnapshotRef) {
+      throw new Error("Rejected publication did not retain a restorable snapshot.");
+    }
+    const finalStatus = await waitForCleanSnapshotPublication(retainedSnapshotRef);
     expect(finalStatus.workspace).not.toBeNull();
     expect(isHostedWorkspaceSnapshotV2Ref(finalStatus.workspace?.snapshotRef ?? null)).toBe(true);
-    expect(finalStatus.workspace?.snapshotRef).not.toEqual(baselineSnapshotRef);
+    expect(finalStatus.workspace?.snapshotRef).not.toEqual(retainedSnapshotRef);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);

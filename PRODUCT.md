@@ -77,3 +77,12 @@ If the referee reads dry and clinical, it's failing; if the private write-ups st
 - Light mode is primary. Dark mode comes later; don't design dark-first and retrofit.
 - Restrained motion. Animations serve hierarchy and affordance, never decoration — reduced-motion users should lose nothing essential.
 - Desktop-first (1440px artboards) but every surface must stay usable at tablet and phone widths.
+
+## Murph Safe
+
+Murph Safe is the public product-evidence register. The recurring question is
+“Is it Murph Safe?”, but the answer is never a binary certification. The
+experience shows the exact supplement or branded-food record, linked product
+tests, label contents, nutrition, provenance, and known gaps with the same warm
+precision as the private product. Search terms remain private and the public
+surface does not require an account.

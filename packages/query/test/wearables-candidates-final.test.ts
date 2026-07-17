@@ -23,7 +23,7 @@ import type {
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "../src/wearables/types.ts";
-import { resolveMetric } from "../src/wearables/selection.ts";
+import { resolveMetric, resolveSleepWindowSelection } from "../src/wearables/selection.ts";
 
 function makeEntity(
   overrides: Partial<CanonicalEntity> & Pick<CanonicalEntity, "entityId" | "family" | "kind" | "recordClass">,
@@ -97,6 +97,64 @@ function makeExternalRef(overrides: Partial<WearableExternalRef> = {}): Wearable
     ...overrides,
   };
 }
+
+test("sleep window identity uses only canonical fields and explicit main sleep outranks naps", () => {
+  const sleepSession = (input: {
+    date: string;
+    durationMinutes: number;
+    entityId: string;
+    sleepType?: "main_sleep" | "nap";
+    title: string;
+  }) => makeWearableEntity({
+    attributes: {
+      dayKey: input.date,
+      durationMinutes: input.durationMinutes,
+      endAt: `${input.date}T07:00:00.000Z`,
+      externalRef: makeExternalRef({
+        resourceId: input.entityId,
+        resourceType: "sleep",
+        system: "oura",
+      }),
+      recordedAt: `${input.date}T08:00:00.000Z`,
+      sleepType: input.sleepType,
+      startAt: `${input.date}T00:00:00.000Z`,
+      timeZone: "UTC",
+    },
+    entityId: input.entityId,
+    family: "event",
+    kind: "sleep_session",
+    recordClass: "ledger",
+    title: input.title,
+  });
+  const dataset = collectWearableDataset(makeVault([
+    sleepSession({
+      date: "2026-07-10",
+      durationMinutes: 420,
+      entityId: "main_with_nap_title",
+      sleepType: "main_sleep",
+      title: "Misleading old nap title",
+    }),
+    sleepSession({
+      date: "2026-07-10",
+      durationMinutes: 600,
+      entityId: "nap_with_sleep_title",
+      sleepType: "nap",
+      title: "Ordinary sleep title",
+    }),
+    sleepSession({
+      date: "2026-07-11",
+      durationMinutes: 60,
+      entityId: "unknown_with_nap_title",
+      title: "Legacy nap title",
+    }),
+  ]), {});
+  const july10 = dataset.sleepWindows.filter((window) => window.date === "2026-07-10");
+  const unknown = dataset.sleepWindows.find((window) => window.recordIds.includes("unknown_with_nap_title"));
+
+  assert.equal(resolveSleepWindowSelection(july10).selection?.sleepType, "main_sleep");
+  assert.equal(unknown?.sleepType, "unknown");
+  assert.equal(unknown?.nap, false);
+});
 
 function makeMetricCandidate(
   overrides: Partial<WearableMetricCandidate> & Pick<
@@ -504,6 +562,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
           system: "oura",
         }),
         recordedAt: "2026-04-01T14:31:00Z",
+        sleepType: "nap",
         startAt: "2026-04-01T14:00:00Z",
         title: "Lunch nap",
       },

@@ -1,6 +1,6 @@
 # Pulse Trial Start Paid Pulse
 
-Last verified: 2026-05-13
+Last verified: 2026-07-16
 
 Status: Implemented
 
@@ -316,9 +316,10 @@ currentBillingPhase = paid
 ```
 
 If payment is required or pending, the member remains in trial or blocked
-billing state. A still-valid in-window trial remains usable even after its
-advisory accounting threshold is exhausted; malformed or expired trial access
-continues to fail closed until billing reconciliation advances the phase.
+billing state. A still-valid in-window trial remains subject to its enforced
+included-usage limit; the crossing operation may finish, but subsequent
+usage-bearing work blocks. Malformed or expired trial access continues to fail
+closed until billing reconciliation advances the phase.
 
 After local reconciliation writes paid Pulse, best-effort nudge the hosted
 runner with a billing-specific context. Never nudge on `payment_required` or

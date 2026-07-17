@@ -735,18 +735,38 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
-Newly generated files that exist solely for one-time delivery use the reserved
-`exports/assistant-deliveries/**` staging prefix. Existing user files and
-canonical or durable vault data remain at their owning refs. Idle snapshot
-publication already waits for resident foreground and background assistant work
-to become quiescent; only at that boundary does pre-checkpoint reconciliation
-read the complete outbox inventory and owned staging tree. Files whose ref,
-filename/content type, size, and SHA-256 match an active vault-file descriptor
-remain in the normal encrypted snapshot for approval, retry, and delivery
-recovery. Terminal, changed, or unclaimed regular files are removed before archive
-planning. Malformed or untrusted inventory, symlinks, special entries, and path
-anomalies retain the whole prefix, and generic vault paths are never scanned or
-deleted by this lifecycle.
+Generated-delivery staging uses an expand-then-produce rollout. The first
+Cloudflare release added persisted-outbox, hosted-side-effect, retry-read, and
+encrypted-checkpoint compatibility for the exact flat ref
+`.runtime/operations/assistant/generated-deliveries/<filename>` while keeping the
+writer closed. Only after that release reaches 100% traffic and the exact runner
+fingerprint converges may the producer release let initial `send_vault_file`
+preparation accept this ref.
+
+The producer uses the runtime path only when the same assistant turn creates a
+file for an already-established delivery obligation and calls `send_vault_file`.
+It never moves or copies an existing, canonical, or prepare-now/maybe-later file
+into staging. Before the initial descriptor is persisted, the runtime-state owner
+tightens the exact path's parent directories to `0700`, rejects symlinks and
+non-regular files, tightens the file to `0600`, and revalidates it before the
+assistant hashes or reads it. Ordinary vault-file refs are not chmodded.
+
+Idle snapshot publication already waits for foreground and background assistant
+work to become quiescent. At that boundary, cleanup validates the complete direct
+staging inventory and outbox state before deleting anything. Exact files remain
+when their filename/content type, size, and SHA-256 match an awaiting-approval,
+pending, sending, retryable, or delivery-confirmation-pending descriptor.
+Terminal, changed, or orphaned direct regular files are removed before archive
+planning. Nested directories, unsafe names, symlinks, special entries, or
+malformed/untrusted outbox inventory retain the entire staging set. Cleanup emits
+aggregate counts and bytes only.
+
+Once a producer can persist the hidden ref, the phase-one compatibility release
+is the rollback floor while any active or retained outbox record or committed
+checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
+generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
+vault data and receives no deletion or path-specific packaging authority.
+Existing global file-type exclusions still apply regardless of directory.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 

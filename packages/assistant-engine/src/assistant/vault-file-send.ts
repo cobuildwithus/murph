@@ -17,6 +17,12 @@ import {
   type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  isNormalizedAssistantVaultFileRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
+import {
+  adoptAssistantStateFile,
+} from '@murphai/runtime-state/node/assistant-state-fs'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import {
@@ -34,6 +40,7 @@ import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import {
+  isAssistantGeneratedDeliveryRef,
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
 
@@ -499,6 +506,9 @@ async function readAssistantVaultFileSnapshot(input: {
     ref,
     'file path',
   )
+  if (isAssistantGeneratedDeliveryRef(ref)) {
+    await adoptAssistantStateFile(absolutePath)
+  }
   const metadata = await stat(absolutePath)
   if (!metadata.isFile()) {
     throw new VaultCliError(
@@ -550,23 +560,17 @@ function applyAssistantVaultFileApprovalToMedia(input: {
 
 function normalizeVaultFileRef(value: string): string {
   const ref = value.trim().replace(/\\/gu, '/')
-  const segments = ref.split('/')
   if (
     ref.length === 0
     || ref.length > 1024
-    || ref.startsWith('/')
-    || /^[A-Za-z]:/u.test(ref)
-    || /[\u0000-\u001F\u007F]/u.test(ref)
-    || segments.some(
-      (segment) => segment.length === 0 || segment === '.' || segment === '..' || segment.startsWith('.'),
-    )
+    || !isNormalizedAssistantVaultFileRef(ref)
   ) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_REF_INVALID',
-      'Vault file refs must be normalized, non-hidden paths inside the vault.',
+      'Vault file refs must be normalized supported paths inside the vault.',
     )
   }
-  return segments.join('/')
+  return ref
 }
 
 function resolveAssistantVaultFileContentType(filename: string): string {

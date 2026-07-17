@@ -115,8 +115,9 @@ interface AssistantGeneratedDeliveryFileSnapshot {
 }
 
 interface AssistantGeneratedDeliveryPrunePlan {
-  directoriesDeepestFirst: string[]
   files: AssistantGeneratedDeliveryFileSnapshot[]
+  inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[]
+  root: string | null
   skippedUntrustedOutbox: boolean
 }
 
@@ -184,8 +185,9 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
         vault: input.vault,
       })
     : {
-        directoriesDeepestFirst: [],
         files: [],
+        inventoryFiles: [],
+        root: null,
         skippedUntrustedOutbox: false,
       }
   input.signal?.throwIfAborted()
@@ -257,8 +259,9 @@ async function planAssistantGeneratedDeliveryPrune(input: {
 }): Promise<AssistantGeneratedDeliveryPrunePlan> {
   if (!input.outbox.trusted) {
     return {
-      directoriesDeepestFirst: [],
       files: [],
+      inventoryFiles: [],
+      root: null,
       skippedUntrustedOutbox: true,
     }
   }
@@ -298,9 +301,15 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   } catch (error) {
     input.signal?.throwIfAborted()
     if (isMissingFileError(error)) {
+      if (activeMediaByRef.size > 0) {
+        throw new Error(
+          'An active assistant generated delivery is missing from runtime staging.',
+        )
+      }
       return {
-        directoriesDeepestFirst: [],
         files: [],
+        inventoryFiles: [],
+        root: null,
         skippedUntrustedOutbox: false,
       }
     }
@@ -312,74 +321,67 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     )
   }
 
-  const directories: string[] = [root]
   const files: AssistantGeneratedDeliveryFileSnapshot[] = []
-  const observedFiles: AssistantGeneratedDeliveryFileSnapshot[] = []
-  const pendingDirectories: Array<{
-    absolutePath: string
-    relativePath: string
-  }> = [{
-    absolutePath: root,
-    relativePath: ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
-  }]
+  const inventoryFiles: AssistantGeneratedDeliveryFileSnapshot[] = []
+  const entries = await readdir(root, { withFileTypes: true })
+  input.signal?.throwIfAborted()
 
-  while (pendingDirectories.length > 0) {
+  for (const entry of entries) {
     input.signal?.throwIfAborted()
-    const directory = pendingDirectories.pop()
-    if (!directory) {
-      break
+    const absolutePath = path.join(root, entry.name)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${entry.name}`
+    const stats = await lstat(absolutePath)
+    input.signal?.throwIfAborted()
+    if (entry.isSymbolicLink() || stats.isSymbolicLink()) {
+      throw new Error(
+        'Assistant generated-delivery paths must not contain symlinks.',
+      )
     }
-    const entries = await readdir(directory.absolutePath, {
-      withFileTypes: true,
-    })
-    input.signal?.throwIfAborted()
-
-    for (const entry of entries) {
-      input.signal?.throwIfAborted()
-      const absolutePath = path.join(directory.absolutePath, entry.name)
-      const ref = path.posix.join(directory.relativePath, entry.name)
-      const stats = await lstat(absolutePath)
-      input.signal?.throwIfAborted()
-      if (entry.isSymbolicLink() || stats.isSymbolicLink()) {
-        throw new Error(
-          'Assistant generated-delivery paths must not contain symlinks.',
-        )
-      }
-      if (entry.isDirectory() && stats.isDirectory()) {
-        directories.push(absolutePath)
-        pendingDirectories.push({
-          absolutePath,
-          relativePath: ref,
-        })
-        continue
-      }
-      if (!entry.isFile() || !stats.isFile()) {
-        throw new Error(
-          'Assistant generated-delivery paths must contain only regular files and directories.',
-        )
-      }
-      const file = {
-        absolutePath,
+    if (entry.isDirectory() && stats.isDirectory()) {
+      throw new Error(
+        'Assistant generated-delivery staging must remain flat.',
+      )
+    }
+    if (!entry.isFile() || !stats.isFile()) {
+      throw new Error(
+        'Assistant generated-delivery staging may contain only regular files.',
+      )
+    }
+    if (!isAssistantGeneratedDeliveryRef(ref)) {
+      throw new Error(
+        'Assistant generated-delivery staging contains an unsafe filename.',
+      )
+    }
+    const file = {
+      absolutePath,
+      ref,
+      stats,
+    }
+    inventoryFiles.push(file)
+    const activeMedia = activeMediaByRef.get(ref) ?? []
+    if (activeMedia.length > 0) {
+      await assertAssistantGeneratedDeliveryFileMatchesActiveMedia({
+        activeMedia,
+        filePath: absolutePath,
         ref,
+        signal: input.signal,
         stats,
-      }
-      observedFiles.push(file)
-      const activeMedia = activeMediaByRef.get(ref) ?? []
-      if (
-        !(await assistantGeneratedDeliveryFileMatchesActiveMedia({
-          activeMedia,
-          filePath: absolutePath,
-          ref,
-          signal: input.signal,
-          stats,
-        }))
-      ) {
-        files.push(file)
-      }
+      })
+    } else {
+      files.push(file)
     }
   }
 
-  for (const file of observedFiles) {
+  const observedRefs = new Set(inventoryFiles.map((file) => file.ref))
+  for (const activeRef of activeMediaByRef.keys()) {
+    if (!observedRefs.has(activeRef)) {
+      throw new Error(
+        'An active assistant generated delivery is missing from runtime staging.',
+      )
+    }
+  }
+
+  for (const file of inventoryFiles) {
     input.signal?.throwIfAborted()
     await assertAssistantGeneratedDeliveryFileUnchanged({
       file,
@@ -389,43 +391,47 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 
   return {
-    directoriesDeepestFirst: directories.sort(
-      (left, right) => right.length - left.length,
-    ),
     files,
+    inventoryFiles,
+    root,
     skippedUntrustedOutbox: false,
   }
 }
 
-async function assistantGeneratedDeliveryFileMatchesActiveMedia(input: {
+async function assertAssistantGeneratedDeliveryFileMatchesActiveMedia(input: {
   activeMedia: readonly AssistantVaultFileResponseMedia[]
   filePath: string
   ref: string
   signal?: AbortSignal | null
   stats: Stats
-}): Promise<boolean> {
-  if (input.activeMedia.length === 0) {
-    return false
-  }
+}): Promise<void> {
   const filename = path.posix.basename(input.ref)
   const contentType = resolveSupportedAssistantVaultFileContentType(filename)
   if (!contentType) {
-    return false
+    throw new Error(
+      'An active assistant generated delivery has an unsupported file type.',
+    )
   }
-  const possibleMatches = input.activeMedia.filter(
+  const metadataMatches = input.activeMedia.every(
     (media) =>
       media.filename === filename &&
       media.contentType === contentType &&
       media.sizeBytes === input.stats.size,
   )
-  if (possibleMatches.length === 0) {
-    return false
+  if (!metadataMatches) {
+    throw new Error(
+      'An active assistant generated delivery no longer matches its persisted metadata.',
+    )
   }
   const sha256 = await sha256AssistantGeneratedDeliveryFile(
     input.filePath,
     input.signal,
   )
-  return possibleMatches.some((media) => media.sha256 === sha256)
+  if (!input.activeMedia.every((media) => media.sha256 === sha256)) {
+    throw new Error(
+      'An active assistant generated delivery no longer matches its persisted bytes.',
+    )
+  }
 }
 
 async function sha256AssistantGeneratedDeliveryFile(
@@ -460,6 +466,15 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
 }> {
   let bytesPruned = 0
   let filesPruned = 0
+  for (const file of input.plan.inventoryFiles) {
+    input.signal?.throwIfAborted()
+    await assertAssistantGeneratedDeliveryFileUnchanged({
+      file,
+      signal: input.signal,
+      vault: input.vault,
+    })
+  }
+
   for (const file of input.plan.files) {
     input.signal?.throwIfAborted()
     await assertAssistantGeneratedDeliveryFileUnchanged({
@@ -473,27 +488,27 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
     filesPruned += 1
   }
 
-  for (const directory of input.plan.directoriesDeepestFirst) {
+  if (input.plan.root) {
     input.signal?.throwIfAborted()
     try {
       const resolvedDirectory = await resolveAssistantVaultPath(
         input.vault,
-        path.relative(input.vault, directory),
+        ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
       )
       input.signal?.throwIfAborted()
-      if (resolvedDirectory !== directory) {
+      if (resolvedDirectory !== input.plan.root) {
         throw new Error(
           'Assistant generated-delivery directory changed during cleanup.',
         )
       }
-      const stats = await lstat(directory)
+      const stats = await lstat(input.plan.root)
       input.signal?.throwIfAborted()
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
         throw new Error(
           'Assistant generated-delivery directory changed during cleanup.',
         )
       }
-      await rmdir(directory)
+      await rmdir(input.plan.root)
       input.signal?.throwIfAborted()
     } catch (error) {
       input.signal?.throwIfAborted()
@@ -501,7 +516,7 @@ async function applyAssistantGeneratedDeliveryPrunePlan(input: {
         isMissingFileError(error) ||
         readNodeErrorCode(error) === 'ENOTEMPTY'
       ) {
-        continue
+        return { bytesPruned, filesPruned }
       }
       throw error
     }

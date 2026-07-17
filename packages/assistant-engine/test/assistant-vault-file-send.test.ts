@@ -1,10 +1,13 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../src/assistant/generated-delivery-files.ts'
 import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
@@ -144,6 +147,82 @@ describe('assistant vault-file send', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_FILE_CHANGED_AFTER_APPROVAL',
     })
+  })
+
+  it('adopts the exact assistant-owned runtime delivery for initial prep and persisted retries', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-runtime-delivery-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const filePath = path.join(vaultRoot, ...ref.split('/'))
+    const contents = Buffer.from('generated report')
+    await mkdir(path.dirname(filePath), { recursive: true })
+    await writeFile(filePath, contents)
+    await chmod(filePath, 0o666)
+
+    const approvalRequest = vi.fn().mockResolvedValue({
+      approvalId: `haa_${'c'.repeat(32)}`,
+      approvalUrl: 'https://murph.test/approve/runtime-delivery',
+      expiresAt: '2026-06-24T12:15:00.000Z',
+      status: 'pending' as const,
+    })
+    const prepared = await requestAssistantVaultFileSend({
+      actionApprovalPort: { request: approvalRequest },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-runtime-delivery',
+      },
+      channel: 'linq',
+      identityId: 'identity-runtime-delivery',
+      ref,
+      sessionId: 'session-runtime-delivery',
+      threadId: 'thread-runtime-delivery',
+      threadIsDirect: true,
+      turnId: 'turn-runtime-delivery',
+      vault: vaultRoot,
+    })
+    expect(prepared).toMatchObject({
+      filename: 'report.pdf',
+      status: 'pending',
+    })
+    expect(approvalRequest).toHaveBeenCalledTimes(1)
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+
+    const [persistedIntent] = await listAssistantOutboxIntents(vaultRoot)
+    const [persistedMedia] = persistedIntent?.media ?? []
+    if (!persistedMedia || persistedMedia.kind !== 'vault_file') {
+      throw new Error('Expected one persisted vault-file descriptor.')
+    }
+
+    await expect(resolveAssistantVaultFileResponseMedia({
+      ref,
+      vaultRoot,
+    })).resolves.toEqual(persistedMedia)
+
+    await chmod(filePath, 0o666)
+    await expect(readVerifiedAssistantVaultFileBytes({
+      file: persistedMedia,
+      vaultRoot,
+    })).resolves.toEqual(contents)
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+
+    for (const rejectedRef of [
+      '.runtime/operations/assistant/outbox/intent.json',
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/nested/report.pdf`,
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/.hidden/report.pdf`,
+      '.hidden/report.pdf',
+    ]) {
+      await expect(readVerifiedAssistantVaultFileBytes({
+        file: {
+          ...persistedMedia,
+          ref: rejectedRef,
+        },
+        vaultRoot,
+      })).rejects.toMatchObject({
+        code: 'ASSISTANT_VAULT_FILE_REF_INVALID',
+      })
+    }
   })
 
   it('does not auto-return from approvals for iMessage group threads', async () => {

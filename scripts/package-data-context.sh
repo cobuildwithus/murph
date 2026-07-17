@@ -127,7 +127,6 @@ collect_tree_files() {
     find_args+=(
       \( -path './.git' -o -path './.git/*' \
          -o -path './.runtime' -o -path './.runtime/*' \
-         -o -path './exports/assistant-deliveries' -o -path './exports/assistant-deliveries/*' \
          -o -path './exports/packs' -o -path './exports/packs/*' \)
       -prune
       -o
@@ -277,7 +276,6 @@ cat > "$bundle_root/bundle-manifest.json" <<EOF
   "excludes": [
     ".env*",
     ".runtime/**",
-    "exports/assistant-deliveries/**",
     "exports/packs/**",
     "*.zip",
     "*.tar",

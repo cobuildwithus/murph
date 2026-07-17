@@ -151,6 +151,13 @@ import {
 } from './dynamic-tools/device.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 import {
+  executeLabsDynamicTool,
+  MURPH_LABS_TOOL,
+  readLabsDynamicToolRequest,
+  type LabsDynamicToolRequest,
+} from './dynamic-tools/labs.js'
+export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -418,7 +425,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start or upgrade suggestion only when recommendedAction is non-null and relevant to the member's request. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.`,
+    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start, upgrade, or add-usage suggestion only when recommendedAction is non-null and relevant to the member's request. When recommendedAction.kind is add_usage, explain that its personal Settings handoff lets the member choose a one-time usage-credit amount and provide ${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription. Do not select an amount, invoke murph.subscription, initiate Checkout, or claim that payment or credit completed; recommendedAction authorizes only that first-party browser handoff. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool changes neither billing nor usage credit. It exposes only the server-authorized personal add-usage handoff; it is not a group balance, group-funding, Checkout, or payment surface. Never ask a group for money, claim a shared balance, or name a payer.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -801,7 +808,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. Create files intended solely for one-time delivery under ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/; never move or copy canonical, durable, or existing user files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1017,6 +1024,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_LABS_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -1047,6 +1055,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsManageAvailable?: boolean | null
   deviceAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
@@ -1085,6 +1094,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
@@ -1646,6 +1656,7 @@ export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
+  | LabsDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -1840,6 +1851,14 @@ export function readMurphDynamicToolRequest(
   })
   if (deviceRequest) {
     return deviceRequest
+  }
+
+  const labsRequest = readLabsDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (labsRequest) {
+    return labsRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2257,6 +2276,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid automation arguments')
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
+    case 'invalid-labs-arguments':
+      return toolTextResult(false, 'invalid labs arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2349,6 +2370,20 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeDeviceDynamicTool({
         abortSignal: input.abortSignal ?? null,
         deviceTool,
+        request: input.request,
+      })
+    }
+    case 'labs': {
+      const labsTool = input.hostedToolContext?.labsTool ?? null
+      if (!labsTool) {
+        return toolTextResult(
+          false,
+          'lab catalog discovery is unavailable for this turn',
+        )
+      }
+      return await executeLabsDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        labsTool,
         request: input.request,
       })
     }

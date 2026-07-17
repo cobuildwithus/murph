@@ -20,6 +20,7 @@ import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "./usage-limit-notice";
+import { projectHostedAiUsageLimitNoticeForDelivery } from "./usage-limit-notice-message";
 import {
   readHostedMemberRoutingState,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -190,14 +191,18 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 function dedupeHostedAiUsageLimitNoticeCandidates(
   candidates: readonly HostedAiUsageLimitNoticeCandidate[],
 ): HostedAiUsageLimitNoticeCandidate[] {
-  const byPeriod = new Map<string, HostedAiUsageLimitNoticeCandidate>();
+  const byCapacityEpoch = new Map<string, HostedAiUsageLimitNoticeCandidate>();
   for (const candidate of candidates) {
-    const key = `${candidate.memberId}\u0000${candidate.periodStart.toISOString()}`;
-    if (!byPeriod.has(key)) {
-      byPeriod.set(key, candidate);
+    const key = [
+      candidate.memberId,
+      candidate.periodStart.toISOString(),
+      candidate.usageCreditLedgerVersion.toString(),
+    ].join("\u0000");
+    if (!byCapacityEpoch.has(key)) {
+      byCapacityEpoch.set(key, candidate);
     }
   }
-  return [...byPeriod.values()];
+  return [...byCapacityEpoch.values()];
 }
 
 async function sendHostedAiUsageLimitNoticeCandidate(input: {
@@ -221,9 +226,15 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
         claimToken: {
           periodStart: input.candidate.periodStart.toISOString(),
           sentAt: sentAt.toISOString(),
+          usageCreditLedgerVersion:
+            input.candidate.usageCreditLedgerVersion.toString(),
         },
         memberId: input.candidate.memberId,
-        message: input.candidate.userNotice.message,
+        message: await projectHostedAiUsageLimitNoticeForDelivery({
+          memberId: input.candidate.memberId,
+          message: input.candidate.userNotice.message,
+          prisma: input.prisma,
+        }),
         noticeCode: input.candidate.userNotice.code,
         occurredAt: input.candidate.crossedAt.toISOString(),
         prisma: input.prisma,
@@ -237,13 +248,18 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
     if (input.noticeDeliveryTarget?.channel === "telegram") {
       const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
         memberId: input.candidate.memberId,
-        message: input.candidate.userNotice.message,
+        message: await projectHostedAiUsageLimitNoticeForDelivery({
+          memberId: input.candidate.memberId,
+          message: input.candidate.userNotice.message,
+          prisma: input.prisma,
+        }),
         periodStart: input.candidate.periodStart,
         prisma: input.prisma,
         replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
         sentAt,
         sourceEventId: input.candidate.sourceUsageId,
         target: input.noticeDeliveryTarget.target,
+        usageCreditLedgerVersion: input.candidate.usageCreditLedgerVersion,
       });
       if (result.status === "not_applicable") {
         throw new Error("Hosted Telegram usage-limit delivery target is invalid.");
@@ -274,9 +290,15 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       claimToken: {
         periodStart: input.candidate.periodStart.toISOString(),
         sentAt: sentAt.toISOString(),
+        usageCreditLedgerVersion:
+          input.candidate.usageCreditLedgerVersion.toString(),
       },
       memberId: input.candidate.memberId,
-      message: input.candidate.userNotice.message,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.candidate.memberId,
+        message: input.candidate.userNotice.message,
+        prisma: input.prisma,
+      }),
       noticeCode: input.candidate.userNotice.code,
       occurredAt: input.candidate.crossedAt.toISOString(),
       prisma: input.prisma,

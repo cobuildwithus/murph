@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   createHealthCommonsCatalogReader,
+  isRunnableProtocolStatus,
 } from "@murphai/health-commons/runtime";
 import {
   listHealthCommonsExperimentBrowseProtocols,
@@ -31,30 +32,18 @@ import {
   createHealthCommonsRouteBundleFixtureCatalog,
 } from "./health-commons-fixture-catalog";
 
-const SUPPLEMENT_PROTOCOL_FIXTURES = [
+const PUBLIC_PROTOCOL_FIXTURES = [
   {
-    key: "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-    routeId: "hydrolyzed-collagen-peptides",
+    key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    routeId: "finnish-sauna",
   },
   {
-    key: "protocol_variant:creatine-supplementation/creatine-monohydrate",
-    routeId: "creatine-monohydrate",
+    key: "protocol_variant:cold-water-immersion/cold-plunge",
+    routeId: "cold-plunge",
   },
   {
-    key: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation",
-    routeId: "oral-epa-dha-supplementation",
-  },
-  {
-    key: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol",
-    routeId: "psyllium-husk-for-cholesterol",
-  },
-  {
-    key: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol",
-    routeId: "red-yeast-rice-for-cholesterol",
-  },
-  {
-    key: "protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation",
-    routeId: "daily-vitamin-d3-supplementation",
+    key: "protocol_variant:consistent-wake-time/consistent-wake-time",
+    routeId: "consistent-wake-time",
   },
 ] as const;
 
@@ -77,6 +66,18 @@ describe("Health Commons experiment protocol metadata", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     expect(protocol?.commons?.routeId).toBe("finnish-sauna");
     expect(protocol?.studies.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the generated route-bundle fixture catalog free of non-public protocols", () => {
+    const leakedProtocolKeys = createHealthCommonsRouteBundleFixtureCatalog().entities
+      .filter((entity) =>
+        entity.entityType === "protocol_variant"
+        && (!isRunnableProtocolStatus(entity.status) || entity.hidden === true)
+      )
+      .map((entity) => entity.key)
+      .sort();
+
+    expect(leakedProtocolKeys).toEqual([]);
   });
 
   it("uses the generated browse index directly for the public experiment library list", () => {
@@ -128,11 +129,20 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-norwegian-4x4.jpeg");
   });
 
-  it("uses the dedicated red-light glasses artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
+  it("does not publish or resolve explicit draft protocols", () => {
+    const draftRouteId = "red-light-glasses-before-bed";
 
-    expect(protocol).not.toBeNull();
-    expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
+    expect(getGeneratedExperimentIndex().experiments.map((entry) => entry.routeId))
+      .not.toContain(draftRouteId);
+    expect(listHealthCommonsExperimentBrowseProtocols().map((protocol) => protocol.id))
+      .not.toContain(draftRouteId);
+    expect(listHealthCommonsExperimentBrowseRouteParams().map((entry) => entry.experimentId))
+      .not.toContain(draftRouteId);
+    expect(resolveHealthCommonsExperimentProtocol(draftRouteId)).toBeNull();
+    expect(resolveHealthCommonsExperimentShell(draftRouteId)).toBeNull();
+    expect(resolveHealthCommonsExperimentProtocolTab(draftRouteId)).toBeNull();
+    expect(resolveHealthCommonsExperimentResearchTab(draftRouteId)).toBeNull();
+    expect(resolveHealthCommonsExperimentResultsPublic(draftRouteId)).toBeNull();
   });
 
   it("projects protocol session shapes from Health Commons content", () => {
@@ -155,15 +165,6 @@ describe("Health Commons experiment protocol metadata", () => {
 
   it("projects requested concrete protocol windows from session-shape content", () => {
     const expectedShapes = [
-      {
-        labels: ["easy cardio"],
-        routeId: "zone-2-aerobic-base-block",
-        ticks: [
-          { label: "0", offsetMinutes: 0 },
-          { label: "35 min minimum", offsetMinutes: 35 },
-          { label: "60 min", offsetMinutes: 60 },
-        ],
-      },
       {
         labels: ["entry", "cold exposure", "gentle rewarm"],
         routeId: "cold-plunge",
@@ -211,23 +212,6 @@ describe("Health Commons experiment protocol metadata", () => {
         ],
       },
       {
-        labels: ["fasting window", "first refeed"],
-        routeId: "prolonged-fasting-24-72-hours",
-        ticks: [
-          { label: "0", offsetMinutes: 0 },
-          { label: "24 h minimum", offsetMinutes: 1440 },
-          { label: "72 h / refeed", offsetMinutes: 4325 },
-        ],
-      },
-      {
-        labels: ["caffeine-free buffer", "bedtime"],
-        routeId: "caffeine-curfew-dose-reset",
-        ticks: [
-          { label: "cutoff", offsetMinutes: 0 },
-          { label: "8 h / bedtime", offsetMinutes: 485 },
-        ],
-      },
-      {
         labels: ["wake/rise window"],
         routeId: "consistent-wake-time",
         ticks: ["target wake", "+60 min"],
@@ -245,18 +229,6 @@ describe("Health Commons experiment protocol metadata", () => {
       expect(protocolTab?.sessionShape).toEqual(protocol?.sessionShape);
     }
 
-    const umbrellaProtocol = resolveHealthCommonsExperimentProtocol(
-      "pre-sleep-resonance-breathing-and-meditation",
-    );
-
-    expect(umbrellaProtocol?.sessionShape).toBeUndefined();
-  });
-
-  it("uses the dedicated caffeine curfew artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("caffeine-curfew-dose-reset");
-
-    expect(protocol).not.toBeNull();
-    expect(protocol?.image).toBe("/design-assets/hero-caffeine-curfew.jpeg");
   });
 
   it("uses the simplified intermittent fasting title", () => {
@@ -273,22 +245,6 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-intermittent-fasting.jpg");
   });
 
-  it("uses the dedicated red and near infrared skin artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol(
-      "red-near-infrared-skin-texture-photoaging",
-    );
-
-    expect(protocol).not.toBeNull();
-    expect(protocol?.image).toBe("/design-assets/hero-red-light-for-skin.jpeg");
-  });
-
-  it("uses the dedicated prolonged fasting artwork", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("prolonged-fasting-24-72-hours");
-
-    expect(protocol).not.toBeNull();
-    expect(protocol?.image).toBe("/design-assets/hero-prolonged-fasting.jpeg");
-  });
-
   it("uses the dedicated pneumatic compression pants artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("pneumatic-compression-pants");
 
@@ -299,9 +255,9 @@ describe("Health Commons experiment protocol metadata", () => {
   it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
     const catalog = createFixtureCatalog();
 
-    for (const supplementProtocol of SUPPLEMENT_PROTOCOL_FIXTURES) {
+    for (const publicProtocol of PUBLIC_PROTOCOL_FIXTURES) {
       const protocolIndex = catalog.entities.findIndex(
-        (entity) => entity.key === supplementProtocol.key,
+        (entity) => entity.key === publicProtocol.key,
       );
       const protocol = catalog.entities[protocolIndex];
 
@@ -321,13 +277,13 @@ describe("Health Commons experiment protocol metadata", () => {
     );
     const protocolIds = protocols.map((entry) => entry.id);
 
-    for (const supplementProtocol of SUPPLEMENT_PROTOCOL_FIXTURES) {
-      expect(protocolIds).not.toContain(supplementProtocol.routeId);
+    for (const publicProtocol of PUBLIC_PROTOCOL_FIXTURES) {
+      expect(protocolIds).not.toContain(publicProtocol.routeId);
     }
     expect(protocolIds).toContain("bryan-johnson-blueprint");
     expect(
       resolveHealthCommonsExperimentProtocol(
-        "hydrolyzed-collagen-peptides",
+        "finnish-sauna",
         createHealthCommonsCatalogReader(catalog),
       ),
     ).toBeNull();
@@ -337,13 +293,11 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(resolveHealthCommonsExperimentProtocol("hydrolyzed-collagen-peptides")).toBeNull();
   });
 
-  it("omits hidden generated protocols from the experiment browse list and route params", () => {
-    const hiddenRouteIds = getGeneratedExperimentIndex()
+  it("omits hidden generated protocols from the generated index, browse list, and route params", () => {
+    const hiddenRouteIds = ["it-band-syndrome-rehab-and-return-to-run"];
+    const generatedRouteIds = getGeneratedExperimentIndex()
       .experiments
-      .filter((entry) => entry.hidden === true)
       .map((entry) => entry.routeId);
-
-    expect(hiddenRouteIds).toContain("it-band-syndrome-rehab-and-return-to-run");
 
     const browseProtocolIds = listHealthCommonsExperimentBrowseProtocols()
       .map((protocol) => protocol.id);
@@ -351,6 +305,7 @@ describe("Health Commons experiment protocol metadata", () => {
       .map((entry) => entry.experimentId);
 
     for (const hiddenRouteId of hiddenRouteIds) {
+      expect(generatedRouteIds).not.toContain(hiddenRouteId);
       expect(browseProtocolIds).not.toContain(hiddenRouteId);
       expect(browseRouteParamIds).not.toContain(hiddenRouteId);
     }

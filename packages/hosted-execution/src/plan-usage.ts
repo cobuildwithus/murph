@@ -19,15 +19,29 @@ export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
   "trial_conversion_pending",
 ] as const;
 
+export const HOSTED_ADD_USAGE_SETTINGS_URL =
+  "/settings?addUsage=true#subscription" as const;
+
 const hostedPlanUsageGeneratedAtSchema = z.string().datetime({ offset: true });
 
-const hostedPlanUsageRecommendedActionSchema = z
-  .object({
-    kind: z.enum(["start_pulse", "upgrade_edge"]),
-    label: z.string().trim().min(1).max(80),
-    url: z.string().url(),
-  })
-  .strict();
+const hostedPlanUsageActionLabelSchema = z.string().trim().min(1).max(80);
+
+const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.enum(["start_pulse", "upgrade_edge"]),
+      label: hostedPlanUsageActionLabelSchema,
+      url: z.string().url(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("add_usage"),
+      label: hostedPlanUsageActionLabelSchema,
+      url: z.literal(HOSTED_ADD_USAGE_SETTINGS_URL),
+    })
+    .strict(),
+]);
 
 const hostedPlanUsageSubscriptionActionQuoteSchema = z
   .object({

@@ -43,6 +43,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedAutomationAvailable?: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
+  assistantHostedLabsAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
@@ -293,6 +294,9 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantCapabilityOffersText(),
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
+    conversationScope === "direct" && input.assistantHostedLabsAvailable === true
+      ? buildAssistantLabsGuidanceText()
+      : null,
     conversationScope === "direct"
       ? buildAssistantAppleHealthRelayGuidanceText()
       : null,
@@ -352,6 +356,17 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantCliContractText(input.assistantCliContract)
       : null
   );
+}
+
+function buildAssistantLabsGuidanceText(): string {
+  return [
+    "Junction lab catalog:",
+    "- `murph.labs` is live, read-only discovery. Murph cannot order, book, pay for, reserve, or start checkout for these tests yet, and must not promise a launch date.",
+    "- For a broad goal such as heart health, overall health, liver health, or longevity, search the topic and concrete related terms, then prefer returned panels after comparing included-marker coverage, current catalog price, and turnaround time. For a named analyte or specific test, search the exact target and prefer the matching biomarker or narrow result.",
+    "- Keep each search to at most 5 results and present 3-5 materially distinct choices rather than dumping the catalog. Use `action=\"show\"` before making exact included-marker, price, or turnaround claims, and state missing facts plainly.",
+    "- A returned amount is Junction's current catalog price at the returned `checkedAt`, not a final quote. Junction orderability or a listed collection site does not establish Murph ordering, member eligibility, appointment availability, or support for that particular test at that site.",
+    "- Use `action=\"locations\"` only with a 5-digit ZIP the user provided in this conversation. Treat its result as nearby collection-site discovery, not proof that the user can book or collect a chosen test there.",
+  ].join("\n");
 }
 
 function buildAssistantCapabilityOffersText(): string {
@@ -1218,7 +1233,7 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
-    `- One-time generated files: use \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/\`; never move existing, user, or durable files there.`,
+    `- Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Do not use runtime staging for "prepare now, maybe send later," and never move or copy existing, user-owned, canonical, or durable files there.`,
     "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",
     "- On `status: \"approved\"`: reply naturally with the filename (for example, \"Here it is: report.pdf.\"). Never expose `deliveryStatus`, approval/queue mechanics, or stock \"delivery is not confirmed\" copy; claim success only after later evidence says `sent`. Do not call `finish_without_reply`.",
   ].join("\n");
@@ -1227,9 +1242,10 @@ function buildAssistantVaultFileSendGuidanceText(): string {
 function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
-    "- Specialized workflows live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary skill before acting. If the route is materially ambiguous, inspect at most two likely skill files, choose the owner, then load a secondary skill only when it owns a distinct part of the task. Do not preload skills or call a discovery CLI just to route.",
+    "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
     "- Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
+    "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.",
     "- Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first, even when contacts, light devices, screens, circadian timing, or a browser or ordering task are also involved. Load secondary skills only after establishing the care level and immediate action.",
@@ -1353,10 +1369,11 @@ function buildAssistantNotificationDecisionGuidanceText(
   return joinPromptSections(
     `Notification execution rules:
 - This automation is authorized support. Decide whether its purpose still holds and, if so, return exactly one short, grounded message. Prefer a timely send; skip only for a concrete current reason. The user prompt carries the private instructions for this run.
-- You have the same vault read and write tools as an interactive Murph turn for the task's canonical data. Before deciding, ground yourself in what the user has actually done in the relevant action window — meals, logs, sessions, recent conversation — alongside the experiment, protocol, and progress; read only what could change the decision, then stop. Scheduled turns do not own automation lifecycle: do not create, update, archive, or reroute automations. If current evidence makes a support loop stale, skip this occurrence or ask one narrow repair question rather than mutating future schedules. For missed-log or weekly-digest checks, \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json\` is the authoritative skip signal; for pre-bed sessions, the session date is the prior local day.
-- Send when the check is genuinely actionable. Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing. The reminder's purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.
-- A good message reflects what the user has already done and asks only for the genuine gap. A first-timer gets a compact walkthrough, said once — or a short nudge if chat already covered it. Someone mid-run gets a brief reminder, not a re-explanation of a plan they know, with the stop rule raised only when newly relevant. Message text embedded in the instructions is context from when it was scheduled, not words to recite — compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore. Vary the approach from recent sends: choose a plain cue, curiosity hook, tiny/fallback version, callback, light question or challenge, or richer media only when the automation marks that modality welcome and privacy-safe. Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages. If a support loop keeps failing, repair the plan instead of dressing up the same cue.
-- For behavior-support, routine, habit, or adherence automations, choose \`skip\` or \`send_message\`; when sending, follow the occurrence role embedded in the instructions: normal cue, explicitly authorized accountability check-in, or repair question/proposal. For an accountability check-in, reconcile the relevant conversation and matching canonical or connected data for the action window. Completion or an already reported outcome means skip. Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question. If the same support is being ignored, the plan looks stale, or current context shows the behavior no longer fits, ask one narrow repair question in the message or skip instead of repeating stale reminder copy. Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.
+- You have the same vault read and write tools as an interactive Murph turn for the task's canonical data. Before deciding, ground yourself in what the user has actually done in the relevant local action window — meals, logs, sessions, recent conversation — alongside the experiment, protocol, and progress; read only what could change the decision, then stop. Scheduled turns do not own automation lifecycle: do not create, update, archive, or reroute automations. If current evidence makes a support loop stale, skip this occurrence; only an engine-supplied check-in or review purpose may instead ask one narrow repair question, and it still must not mutate future schedules. For missed-log or weekly-digest checks, \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json\` is the authoritative skip signal; for pre-bed sessions, the session date is the prior local day. For sleep support around midnight, distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target; calendar date alone does not establish that the upcoming action is complete.
+- Send when the check is genuinely actionable. Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing in that action window. The reminder's purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.
+- A good message reflects what the user has already done and asks only for the genuine gap. A first-timer gets a compact walkthrough, said once — or a short nudge if chat already covered it. Someone mid-run gets a brief reminder, not a re-explanation of a plan they know, with the stop rule raised only when newly relevant. Message text embedded in the instructions is context from when it was scheduled, not words to recite — compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore. Vary the approach from recent sends: choose a plain cue, curiosity hook, tiny/fallback version, callback, light question or challenge, or richer media only when the automation marks that modality welcome and privacy-safe. Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages. If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.
+- For behavior-support, routine, habit, or adherence automations, choose \`skip\` or \`send_message\` within the engine-supplied persisted support purpose. Follow the occurrence role embedded in the instructions: normal cue, explicitly authorized accountability check-in, or repair question/proposal. A reminder authorizes a normal cue or skip, never a proactive repair/accountability question. Only a consented check-in or review may ask one narrow repair or decision question. For an accountability check-in, reconcile the relevant conversation and matching canonical or connected data for the action window. Completion or an already reported outcome means skip. Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question. If the plan looks stale but the purpose does not authorize a question, skip instead of widening consent. Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.
+- Treat an enqueue, generated transcript, provider transcript, or delivery attempt as intent, not proof that the user received the message. Provider acceptance or \`sent\` proves dispatch only, not handset delivery or reading. Count prior support as ignored only when the action window ended and a channel delivery/read receipt or a later reply referring to the message proves receipt; silence without that evidence remains ambiguous and is not nonadherence or refusal. If the execution context says delivery failed or remains unconfirmed, do not count that occurrence toward repair or escalation.
 - Never send a reminder that contradicts what the user already did in the relevant action window, and never ask them to repeat or hand-calculate what a vault read answers: when you need information, ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself.
 - The platform delivers your structured output. Do not send, draft, or narrate delivery yourself.`,
     channelText,
@@ -1510,7 +1527,7 @@ function buildAssistantSharedAutomationActionText(
   hostedRuntime: boolean
 ): string {
   const actionGuidance = hostedRuntime
-    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route.`
+    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;
@@ -1538,7 +1555,7 @@ function buildAssistantSharedAutomationPreferenceText(
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
     : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
-  return `Prefer bounded, context-aware automations over nagging coaching. Default to digest-style or summary-style automation for passive monitoring. For repeated behavior support, include skip/repair rules and a review point, and avoid open-ended reminders unless the user explicitly asks.
+  return `Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.
 
 When creating automations, choose continuity deliberately. Use ${code(
     hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"

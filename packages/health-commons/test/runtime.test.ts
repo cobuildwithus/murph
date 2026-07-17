@@ -2,12 +2,14 @@ import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import {
+  buildHealthCommonsCatalog,
   createHealthCommonsCatalogReader,
   createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
@@ -19,6 +21,7 @@ import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
+  isRunnableProtocolStatus,
   loadGeneratedHealthCommonsProtocolFamilyGraph,
   loadGeneratedHealthCommonsProtocolIndex,
   loadGeneratedHealthCommonsProtocolRunSpecs,
@@ -35,6 +38,8 @@ import {
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const contentRoot = path.join(packageRoot, "content");
 const TEST_CATALOG_HASH = `sha256:${"0".repeat(64)}`;
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 
@@ -322,7 +327,6 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(firstProtocolIds).toEqual([
       "finnish-sauna",
       "norwegian-4x4",
-      "red-light-glasses-before-bed",
       "bryan-johnson-blueprint",
     ]);
     expect(
@@ -703,7 +707,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }));
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
       biomarkerRouteId: "sleep-efficiency",
-      expected: "Track as mixed context",
+      expected: "Possible change",
       protocolProminence: "context",
     }));
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
@@ -932,19 +936,77 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     })).toThrow("projection id does not match route index");
   });
 
-  it("does not publish hidden protocol variants as research-tab projections", () => {
-    expect(loadGeneratedHealthCommonsWebExperimentResearchTab({
-      routeId: "hydrolyzed-collagen-peptides",
-    })).toBeNull();
-    expect(loadGeneratedHealthCommonsWebExperimentShell({
-      routeId: "hydrolyzed-collagen-peptides",
-    })).toBeNull();
-    expect(loadGeneratedHealthCommonsWebExperimentProtocolTab({
-      routeId: "hydrolyzed-collagen-peptides",
-    })).toBeNull();
-    expect(loadGeneratedHealthCommonsWebExperimentResultsPublic({
-      routeId: "hydrolyzed-collagen-peptides",
-    })).toBeNull();
+  it("does not publish any explicit draft, deprecated, or hidden protocol route or bundle", async () => {
+    const catalog = await buildHealthCommonsCatalog({ contentRoot });
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const experimentIndex = getGeneratedHealthCommonsWebExperimentIndex();
+    const protocolIndexReader = getGeneratedHealthCommonsProtocolIndexReader();
+    const runSpecReader = getGeneratedHealthCommonsProtocolRunSpecReader();
+    const excludedProtocols = catalog.entities.filter((entity) =>
+      entity.entityType === "protocol_variant"
+      && (!isRunnableProtocolStatus(entity.status) || entity.hidden === true)
+    );
+
+    for (const protocol of excludedProtocols) {
+      const routeId = protocol.preferredRouteId ?? protocol.slug.split("/").at(-1);
+
+      expect(routeIndex.routes.some((route) => route.key === protocol.key)).toBe(false);
+      expect(experimentIndex.experiments.some((entry) => entry.key === protocol.key)).toBe(false);
+      expect(protocolIndexReader.findByLookup(protocol.key)).toBeNull();
+      expect(runSpecReader.findByLookup(protocol.key)).toBeNull();
+      expect(loadGeneratedHealthCommonsWebRouteBundle({
+        entityType: "protocol_variant",
+        routeId: routeId ?? protocol.key,
+      })).toBeNull();
+      expect(loadGeneratedHealthCommonsWebExperimentResearchTab({
+        routeId: routeId ?? protocol.key,
+      })).toBeNull();
+      expect(loadGeneratedHealthCommonsWebExperimentShell({
+        routeId: routeId ?? protocol.key,
+      })).toBeNull();
+      expect(loadGeneratedHealthCommonsWebExperimentProtocolTab({
+        routeId: routeId ?? protocol.key,
+      })).toBeNull();
+      expect(loadGeneratedHealthCommonsWebExperimentResultsPublic({
+        routeId: routeId ?? protocol.key,
+      })).toBeNull();
+    }
+
+    expect(excludedProtocols.some((protocol) => protocol.status === "draft")).toBe(true);
+    expect(excludedProtocols.some((protocol) => protocol.hidden === true)).toBe(true);
+  });
+
+  it("keeps non-public protocol variants out of every generated route bundle", () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const checkedBundlePaths = new Set<string>();
+
+    for (const route of routeIndex.routes) {
+      if (checkedBundlePaths.has(route.bundlePath)) {
+        continue;
+      }
+      checkedBundlePaths.add(route.bundlePath);
+
+      const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+        entityType: route.entityType,
+        routeId: route.routeId,
+      });
+      expect(bundle, `Expected generated route bundle ${route.bundlePath}`).not.toBeNull();
+      if (!bundle) {
+        continue;
+      }
+
+      const leakedProtocolKeys = Object.values(bundle.entitiesByKey)
+        .filter((entity) =>
+          entity.entityType === "protocol_variant"
+          && (!isRunnableProtocolStatus(entity.status) || entity.hidden === true)
+        )
+        .map((entity) => entity.key)
+        .sort();
+
+      expect(leakedProtocolKeys, route.bundlePath).toEqual([]);
+    }
+
+    expect(checkedBundlePaths.size).toBeGreaterThan(0);
   });
 
   it("does not include hidden protocol variants in public biomarker route bundles", () => {
@@ -1070,12 +1132,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     const protocols = indexReader.listProtocols({ limit: 6 });
     expect(protocols.map((protocol) => protocol.key)).toEqual([
-      "protocol_variant:static-stretching/at-home-static-stretching-for-flexibility",
       "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-      "protocol_variant:caffeine-timing/caffeine-curfew-dose-reset",
       "protocol_variant:cold-water-immersion/cold-plunge",
       "protocol_variant:consistent-wake-time/consistent-wake-time",
       "protocol_variant:daily-step-floor/daily-step-floor",
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
     expect(Object.keys(protocols[0] ?? {})).not.toContain("protocol");

@@ -1,7 +1,14 @@
 import path from 'node:path'
 
-export const ASSISTANT_GENERATED_DELIVERY_DIRECTORY =
-  'exports/assistant-deliveries'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+  isAssistantGeneratedDeliveryRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
+
+export {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+  isAssistantGeneratedDeliveryRef,
+}
 
 const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
   ['.csv', 'text/csv'],
@@ -20,10 +27,6 @@ const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
   ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   ['.zip', 'application/zip'],
 ])
-
-export function isAssistantGeneratedDeliveryRef(ref: string): boolean {
-  return ref.startsWith(`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/`)
-}
 
 export function resolveSupportedAssistantVaultFileContentType(
   filename: string,

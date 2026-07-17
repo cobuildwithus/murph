@@ -66,7 +66,7 @@ afterEach(async () => {
 })
 
 describe('assistant runtime residue pruning', () => {
-  it('prunes terminal and orphan generated deliveries while retaining exact active media and generic files', async () => {
+  it('prunes terminal and orphan flat runtime deliveries while retaining active media and ordinary exports', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-deliveries-',
     )
@@ -94,7 +94,7 @@ describe('assistant runtime residue pruning', () => {
     })
     const orphan = await writeGeneratedDeliveryFile({
       contents: 'orphan delivery',
-      refSuffix: 'nested/orphan.pdf',
+      refSuffix: 'orphan.pdf',
       vaultRoot,
     })
     const genericFilePath = path.join(
@@ -103,6 +103,12 @@ describe('assistant runtime residue pruning', () => {
       'user-files',
       'keep.pdf',
     )
+    const legacyPrefixPath = path.join(
+      vaultRoot,
+      'exports',
+      'assistant-deliveries',
+      'keep.zip',
+    )
     const prefixSiblingPath = path.join(
       vaultRoot,
       'exports',
@@ -110,8 +116,10 @@ describe('assistant runtime residue pruning', () => {
       'keep.zip',
     )
     await mkdir(path.dirname(genericFilePath), { recursive: true })
+    await mkdir(path.dirname(legacyPrefixPath), { recursive: true })
     await mkdir(path.dirname(prefixSiblingPath), { recursive: true })
     await writeFile(genericFilePath, 'generic user file', 'utf8')
+    await writeFile(legacyPrefixPath, 'ordinary legacy-path file', 'utf8')
     await writeFile(prefixSiblingPath, 'prefix sibling', 'utf8')
 
     const result = await pruneAssistantRuntimeResidue({
@@ -129,8 +137,8 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(active.filePath)
     await expectPathMissing(terminal.filePath)
     await expectPathMissing(orphan.filePath)
-    await expectPathMissing(path.dirname(orphan.filePath))
     await expectPathExists(genericFilePath)
+    await expectPathExists(legacyPrefixPath)
     await expectPathExists(prefixSiblingPath)
   })
 
@@ -185,7 +193,7 @@ describe('assistant runtime residue pruning', () => {
     }
   })
 
-  it('reclaims an active ref whose bytes no longer match its approved delivery snapshot', async () => {
+  it('fails closed before deleting anything when active delivery bytes changed', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-overwrite-',
     )
@@ -201,19 +209,23 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
     await writeFile(file.filePath, 'payload-b', 'utf8')
+    const orphan = await writeGeneratedDeliveryFile({
+      contents: 'must remain after validation failure',
+      refSuffix: 'orphan-after-overwrite.pdf',
+      vaultRoot,
+    })
 
-    const result = await pruneAssistantRuntimeResidue({
+    await expect(pruneAssistantRuntimeResidue({
       generatedDeliveryFilesQuiescent: true,
       now: PRUNE_NOW,
       pendingInputIds: [],
       vault: vaultRoot,
-    })
-
-    expect(result.generatedDeliveryFilesPruned).toBe(1)
-    expect(result.generatedDeliveryBytesPruned).toBe(
-      Buffer.byteLength('payload-b'),
+    })).rejects.toThrow(
+      'An active assistant generated delivery no longer matches its persisted bytes.',
     )
-    await expectPathMissing(file.filePath)
+
+    await expectPathExists(file.filePath)
+    await expectPathExists(orphan.filePath)
   })
 
   it('retains the entire generated-delivery prefix when outbox inventory is untrusted', async () => {
@@ -306,6 +318,64 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(regular.filePath)
     await expectPathExists(symlinkPath)
     await expectPathExists(targetPath)
+  })
+
+  it('rejects nested generated-delivery entries before deleting regular files', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-nested-',
+    )
+    const regular = await writeGeneratedDeliveryFile({
+      contents: 'must remain',
+      refSuffix: 'regular.pdf',
+      vaultRoot,
+    })
+    const nestedPath = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+      'nested',
+      'report.pdf',
+    )
+    await mkdir(path.dirname(nestedPath), { recursive: true })
+    await writeFile(nestedPath, 'invalid nested delivery', 'utf8')
+
+    await expect(pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })).rejects.toThrow(
+      'Assistant generated-delivery staging must remain flat.',
+    )
+    await expectPathExists(regular.filePath)
+    await expectPathExists(nestedPath)
+  })
+
+  it('rejects unsafe generated-delivery filenames before deleting regular files', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-unsafe-',
+    )
+    const regular = await writeGeneratedDeliveryFile({
+      contents: 'must remain',
+      refSuffix: 'regular.pdf',
+      vaultRoot,
+    })
+    const unsafePath = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+      '.hidden.pdf',
+    )
+    await writeFile(unsafePath, 'unsafe hidden delivery', 'utf8')
+
+    await expect(pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })).rejects.toThrow(
+      'Assistant generated-delivery staging contains an unsafe filename.',
+    )
+    await expectPathExists(regular.filePath)
+    await expectPathExists(unsafePath)
   })
 
   it('retains pending input events and their terminal evidence', async () => {

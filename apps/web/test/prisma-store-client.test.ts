@@ -161,7 +161,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
-      max: 5,
+      max: 15,
     });
     expect(mocks.attachDatabasePool).toHaveBeenCalledOnce();
     expect(mocks.attachDatabasePool).toHaveBeenCalledWith(pool);
@@ -276,7 +276,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
-      max: 5,
+      max: 15,
     });
   });
 

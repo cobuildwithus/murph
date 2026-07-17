@@ -50,21 +50,39 @@ describe('hosted domain dynamic tools', () => {
   it('accepts typed automation writes without exposing model-controlled routes', () => {
     expect(readToolRequest('automation', {
       action: 'save',
+      activeUntil: '2026-08-01T00:00:00.000Z',
       instructions: 'Send a short reminder to wind down.',
       schedule: { kind: 'dailyLocal', localTime: '22:30' },
       status: 'paused',
+      supportKind: 'reminder',
+      supportSeriesId: 'habit:sleep-wind-down',
       title: 'Evening wind-down',
     })).toEqual({
       kind: 'automation',
       request: {
         action: 'save',
+        activeUntil: '2026-08-01T00:00:00.000Z',
         instructions: 'Send a short reminder to wind down.',
         schedule: { kind: 'dailyLocal', localTime: '22:30' },
         status: 'paused',
+        supportKind: 'reminder',
+        supportSeriesId: 'habit:sleep-wind-down',
         title: 'Evening wind-down',
       },
     })
 
+    expect(readToolRequest('automation', {
+      action: 'reconcile',
+      desiredAutomationIds: ['automation-1'],
+      supportSeriesId: 'habit:sleep-wind-down',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'reconcile',
+        desiredAutomationIds: ['automation-1'],
+        supportSeriesId: 'habit:sleep-wind-down',
+      },
+    })
     expect(readToolRequest('automation', {
       action: 'patch',
       lookup: 'evening-wind-down',
@@ -198,6 +216,50 @@ describe('hosted domain dynamic tools', () => {
       request,
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
+  })
+
+  it('executes support-series reconciliation through the injected port', async () => {
+    const automationTool = {
+      request: vi.fn(async () => ({
+        action: 'reconcile' as const,
+        archivedCount: 1,
+        matchedCount: 2,
+        missingDesiredAutomationIds: ['automation-missing'],
+        supportSeriesId: 'habit:sleep-wind-down',
+        unchangedCount: 1,
+      })),
+    }
+    const request = readToolRequest('automation', {
+      action: 'reconcile',
+      desiredAutomationIds: ['automation-keep', 'automation-missing'],
+      supportSeriesId: 'habit:sleep-wind-down',
+    })
+    if (!request) {
+      throw new Error('Expected an automation reconciliation request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(automationTool.request).toHaveBeenCalledWith({
+      action: 'reconcile',
+      desiredAutomationIds: ['automation-keep', 'automation-missing'],
+      supportSeriesId: 'habit:sleep-wind-down',
+    }, { signal: null })
+    expect(readResultPayload(result)).toEqual({
+      action: 'reconcile',
+      archivedCount: 1,
+      matchedCount: 2,
+      missingDesiredAutomationIds: ['automation-missing'],
+      supportSeriesId: 'habit:sleep-wind-down',
+      unchangedCount: 1,
+    })
   })
 
   it('executes device actions through the injected port and fails closed without it', async () => {

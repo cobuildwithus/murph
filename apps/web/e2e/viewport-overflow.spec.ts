@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 // pages here so the gate covers them.
 const ROUTES = [
   "/",
+  "/search",
   "/security",
   "/pitch",
   "/changelog",
