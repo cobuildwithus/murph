@@ -2211,6 +2211,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
           projectionKind: wake.delivery.projectionKind,
           projectionScope: wake.delivery.projectionScope,
           revokedAt: "2026-06-10T08:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
           shareId: wake.delivery.shareId,
         },
         userId: wake.userId,
