@@ -29,10 +29,6 @@ import {
   type CompanionConnectionIntent,
 } from "./companion";
 import {
-  toHostedBrowserDeviceSyncConnectionSource,
-  type HostedBrowserDeviceSyncConnectionSource,
-} from "./browser-connection-source";
-import {
   createHostedBrowserConnectionId,
   toHostedBrowserDeviceSyncConnection,
   type HostedBrowserDeviceSyncConnection,
@@ -102,35 +98,6 @@ export class HostedDeviceSyncPublicIngressService {
 
   describeProviders(): PublicProviderDescriptor[] {
     return this.ingress.describeProviders();
-  }
-
-  async listConnections(userId: string): Promise<{
-    providers: PublicProviderDescriptor[];
-    connections: HostedBrowserDeviceSyncConnection[];
-    connectionSources: HostedBrowserDeviceSyncConnectionSource[];
-  }> {
-    const connections = await this.context.store.listConnectionsForUser(userId);
-    const connectionEntries = await Promise.all(
-      connections.map(async (connection) => {
-        const browserConnection = this.toBrowserConnection(connection);
-        const sources = await this.context.store.listConnectionSources(connection.id);
-        return {
-          browserConnection,
-          sources,
-        };
-      }),
-    );
-
-    return {
-      providers: this.describeProviders(),
-      connections: connectionEntries.map((entry) => entry.browserConnection),
-      connectionSources: connectionEntries.flatMap((entry) =>
-        entry.sources.map((source) => toHostedBrowserDeviceSyncConnectionSource(
-          source,
-          entry.browserConnection.id,
-        ))
-      ),
-    };
   }
 
   async getConnectionStatus(
