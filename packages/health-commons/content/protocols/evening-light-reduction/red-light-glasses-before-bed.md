@@ -173,7 +173,7 @@ expectedSignalDescriptions:
     low: -10
     high: 0
     unit: min
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: mixed
     basis: Pooled actigraphy across three crossover RCTs estimated SOL MD -4.86 min with a wide CI crossing zero; a small adult device-use eyewear trial reported significantly better sleep latency, while healthy-adult evidence was null or subgroup-limited [source_artifact:evening-light-reduction-pmid-41341515; source_artifact:evening-light-reduction-pmid-26730983; source_artifact:pmid-33707105].
   protocolProminence: focus
@@ -186,7 +186,7 @@ expectedSignalDescriptions:
     low: -1
     high: 2
     unit: "%"
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: mixed
     basis: A small adult device-use eyewear trial reported significantly better sleep efficiency; pooled actigraphy across three crossover RCTs estimated SE MD -0.61 percentage points with a wide CI crossing zero [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
@@ -200,7 +200,7 @@ expectedSignalDescriptions:
     low: -2
     high: 0
     unit: bpm
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: Low-confidence downstream estimate from sleep-onset, sleep-efficiency, and total-sleep-time signals; the direct eyewear trials and actigraphy meta-analysis did not measure resting heart rate [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
@@ -213,7 +213,7 @@ expectedSignalDescriptions:
     low: 0
     high: 5
     unit: "%"
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: Low-confidence downstream estimate from improved sleep continuity rather than direct eyewear HRV data; direct sources measured melatonin, sleep latency, sleep efficiency, insomnia ratings, total sleep time, and actigraphy outcomes, not RMSSD [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-41341515].
   protocolProminence: context
@@ -223,7 +223,7 @@ expectedSignalDescriptions:
   expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: mixed_or_contextual
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: Direct eyewear evidence centers on melatonin, sleep latency, sleep efficiency, insomnia ratings, and actigraphy total sleep time; it does not establish N3/deep-sleep effects, and consumer sleep-stage estimates are weaker than sleep/wake trends [source_artifact:evening-light-reduction-pmid-26730983; source_artifact:evening-light-reduction-pmid-29101797; source_artifact:evening-light-reduction-pmid-40300398].
   protocolProminence: context
@@ -233,7 +233,7 @@ expectedSignalDescriptions:
   expectedDirection: up_or_stable
   estimatedChange:
     kind: mixed_or_contextual
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: Direct eyewear evidence centers on melatonin, sleep latency, sleep efficiency, insomnia ratings, and actigraphy total sleep time; it does not establish a reliable REM-minutes effect.
   protocolProminence: context
@@ -243,7 +243,7 @@ expectedSignalDescriptions:
   expectedDirection: stable
   estimatedChange:
     kind: mixed_or_contextual
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: SpO2 is a safety-context signal here; repeated overnight drops should not be interpreted as protocol success or failure without sleep-disordered-breathing context.
   protocolProminence: context
@@ -253,7 +253,7 @@ expectedSignalDescriptions:
   expectedDirection: mixed_or_contextual
   estimatedChange:
     kind: mixed_or_contextual
-    window: baseline vs 7-14 intervention nights
+    window: 7-14 nights
     confidence: low
     basis: The direct consumer eyewear evidence does not establish glucose lowering; use glucose only as context if sleep timing changes materially.
   protocolProminence: context

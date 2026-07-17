@@ -87,7 +87,7 @@ export const SLEEP_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["sleep-quality", "sleep_quality", "sleepScore", "sleep_score"],
+    aliases: ["sleepScore", "sleep_score"],
     biomarkerKey: null,
     canonicalUnit: "score",
     category: "sleep",

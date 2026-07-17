@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-07-12
+Last verified: 2026-07-16
 
 ## Current State
 
@@ -24,7 +24,9 @@ question, task, or baseline review.
 - After a protocol-linked run is created, the assistant should send the matching experiment page link so the user can reopen the protocol and later results view.
 - The richer downstream loop is: onboarding plan -> private run -> outcome card -> optional sharing or contribution. Onboarding owns only the planning step.
 - Safety-screen positives or uncertainty are guardrails for unsupervised setup, not diagnoses.
-- Assistant follow-ups should never be created before the experiment is set up. After setup, follow-ups included in the agreed plan may default on with a clear opt-out, and should use neutral language that records what happened rather than implying failure.
+- A Health Commons run whose protocol defines `safetyScreen.mustAsk` may remain planned while screening is incomplete, but it cannot become active until the screen is recorded as complete against the exact current page and run-spec revisions. `positiveQuestionIds` records affirmative answers; completed questions omitted from that list are negative answers, so question-level `ifNegative` dispositions remain enforceable. Any clinician-guidance or do-not-start disposition blocks unsupervised activation.
+- Canonical start resolves that exact protocol and safety evidence inside the vault write lock, then commits the complete experiment document and start evidence in one batch; no scalar active experiment is created before its run plan, analysis plan, onboarding, and lineage. Reactivation re-reads the current experiment inside the same lock and applies an exact document-revision compare-and-swap before mutation.
+- Assistant follow-ups should never be created before the experiment is set up. Agreeing to a run or session time is not consent to proactive messages. User-facing support requires explicit agreement to a concrete, finite pattern and must use neutral language that records what happened rather than implying failure.
 
 ## Contract Shape
 
@@ -45,7 +47,8 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 ## Start Drafts Today, Start Intents Later
 
 - Today, a hosted `Run Experiment` click opens channel-specific draft/contact options for the user to send, such as text, email, or Telegram.
-- The draft should point the assistant at the exact protocol and start a protocol-aware onboarding conversation in the user's configured channel.
+- The draft includes a structured `Protocol reference` containing the exact protocol key, page revision, and run-spec revision. It starts a protocol-aware onboarding conversation in the user's configured channel but creates no private state by itself.
+- The reference is untrusted user input. The assistant resolves the key, preserves both supplied revisions as compare-and-swap expectations, and continues to apply this contract's safety and setup rules.
 - A persisted short-lived start intent is the desired future contract. When that exists, it should carry the structured onboarding block plus the exact protocol revision instead of relying on a prefilled sentence as durable state.
 
 ## Revision-Preserving Handoff
@@ -53,28 +56,49 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 Before Murph writes a private run, it should already know the exact Health Commons page it is using.
 
 - Read the protocol page before planning.
+- Pass both supplied revision ids through the dry run and real protocol-backed start. They are compare-and-swap expectations, not revision overrides. If either differs from the current protocol, stop and ask the member to refresh or reopen it rather than silently starting another revision.
 - Preserve `commonsProtocolRef.key`, `commonsProtocolRef.pageRevisionId`, `commonsProtocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record. Store a private `protocolRef` only when the run uses a saved private adaptation.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, measurement plan, and compact experiment-onboarding deltas. Copy edits, generic assistant-policy wording, vault-read behavior, or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.
 - For lab-backed runs, store and explain baseline evidence separately from the run baseline or pre-intervention window. A pre-existing lab panel may be the baseline evidence even when the runnable protocol has a prospective run-in window for adherence, logistics, or confounder control.
 - Completed outcome cards, shares, and community contributions must remain traceable back to this exact runnable contract.
 
+## Capturable Session Outcomes
+
+A run must be able to capture its promised primary outcome before it starts.
+
+- `runPlan.logging.sessionFields` declares the stable ids that an `intervention_session` may record. Logged `fields` values are typed strings, finite numbers, booleans, or `null`; undeclared ids are rejected.
+- The typed CLI accepts repeated `--field id=value` entries and rejects duplicate ids. Recognized subjective metrics, including bedtime delay, sleep-onset latency, sleepiness, sleep quality, arousal, and soreness measures, also enforce their metric-specific type and range.
+- Every primary biomarker must resolve to a canonical health metric. When it is a session-captured subjective metric, the run must declare exactly one recognized matching session field; unsupported or uncapturable primary outcomes block start and analysis readiness.
+- Only fields on sessions linked to this experiment contribute subjective metric points. A session can confirm adherence and supply outcome evidence at the same time; do not create a second adherence event for the same action.
+
 ## Reminder Policy
 
 - Reminders are experiment support that belong in the confirmed plan, not hidden compliance machinery.
-- Once a user agrees to a run plan with assistant support, missed-log checks may be default-on and opt-out.
+- Run consent, a planned session time, and session logging are not messaging consent. Create user-facing support only after the member explicitly accepts its route and finite cadence. A review-only or quiet experiment remains fully valid.
 - First-session prep and planned-session support are explicit onboarding support paths, separate from missed-log checks and weekly summaries.
 - First-session prep should resolve how the user will know what to do the first time, either through the current reply or a one-shot prep reminder when the first intervention session time and a deliverable route are known.
 - Planned-session support is a required onboarding decision: schedule it for every planned intervention session in the confirmed run plan, record that the user declined it, or record the concrete route/cadence blocker. Do not cap support at the first week or the first 3-5 sessions.
 - Planned-session support should use bounded one-shot reminders by default, with the bounds coming from the experiment's planned intervention sessions. Do not create indefinite recurring support reminders unless the product surface has a reliable end condition or the user explicitly asks for ongoing reminders outside the experiment plan.
+- Every plan-owned experiment support automation belongs to the immutable `system:support-series:experiment:<experimentId>` series and stores an exact `supportKind`. Its live experiment owner must remain active, and the matching saved `assistantSupport` consent must remain enabled at provider admission, immediately before delivery, and before commit. Reconcile that series to the exact desired automation ids and archive it when the plan is paused, stopped, completed, or repaired. The assistant must not use the engine-owned `experiment-lifecycle:<experimentId>` namespace.
+- Bounded support must carry a finite `activeUntil` when delivery may retry beyond its scheduled instant. At the boundary, canonical automation execution archives the record and must not send it.
 - Scheduled first-session prep and planned-session support decisions should read the saved experiment, protocol, and progress directly before sending. They should skip if the experiment is inactive, reminders were declined or cancelled, the scheduled work is already complete, the saved plan changed, or the planned support window has ended.
 - Other scheduled experiment checks should call deterministic product logic, such as `vault-cli experiment followup due <id> --kind missed-log --format json`, before deciding whether an outbound message is due.
 - Missed-log follow-up should be neutral, at most once per planned session, and easy to decline.
-- Weekly summaries are preferred over daily coaching by default.
-- Eligible runs lasting at least four intervention days should receive one visual progress moment on intervention day four. It celebrates completed work first and treats sparse or unchanged metric data as a caveat rather than a reason to suppress the card.
-- The morning after the intervention ends, Murph should persist the deterministic outcome, attach the progress card, congratulate the user for completing the run, summarize the result with confidence and confounders, and ask whether to repeat it, adapt it, or leave it alone.
-- Saved assistant support may opt out of scheduled summaries, and runs that end early should not receive either lifecycle message.
+- Weekly summaries are preferable to daily coaching when the member explicitly asks for ongoing summaries.
+- An eligible run with saved `assistantSupport.notificationStyle: send_scheduled_summary` may receive one visual progress moment on intervention day four. It celebrates completed work first and treats sparse or unchanged metric data as a caveat rather than a reason to suppress the card.
+- The morning after an on-schedule intervention ends, deterministic runtime code persists the outcome whether or not the member consented to messages. That internal closeout is consumed before an assistant turn and must not send anything.
+- With saved scheduled-summary consent, the same closeout may continue into a finite final review: attach the progress card, congratulate the member, summarize the result with confidence and confounders, and ask whether to repeat it, adapt it, or leave it alone. Revoked consent suppresses the message without suppressing outcome persistence. Runs that end early receive neither lifecycle message nor an on-schedule closeout.
 - One reply carries one media type. The card plus warm text is primary; a short voice memo may replace the card only when the card cannot be attached.
+
+## Outcome Closeout
+
+Outcome persistence and outcome messaging are separate responsibilities.
+
+- `experiment outcome write` derives a stable id and path from the experiment id and `asOf` date. Repeating the same write against unchanged evidence is a no-op that preserves `generatedAt`; changed evidence rewrites that same record with a strictly newer `generatedAt` rather than minting another outcome id. Every eligible lifecycle closeout or delivery retry invokes this content-aware writer before any final message, so late or corrected evidence can refresh the stable outcome.
+- An active run is completed only when `asOf` reaches or passes its planned intervention end, and `endedOn` is pinned to that end date. Interim writes leave it active. Planned, paused, completed, abandoned, and all other non-active statuses are preserved.
+- The engine-managed `system:support-series:experiment-lifecycle:<experimentId>` series owns the day-four progress and final-review or quiet-closeout one-shots. The final delivery window is finite, and deterministic outcome persistence must succeed before a consented final review can reach an assistant turn.
+- Provider dispatch, an outbox row, or a delivery attempt proves intent or dispatch only. It does not prove receipt, reading, adherence, or refusal. Silence remains ambiguous unless the channel reports delivery/read evidence or the member later refers to the message.
 
 ## Onboarding Is Structured Planning, Not A Transcript
 
@@ -111,9 +135,9 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 1. A protocol page can declare a machine-readable onboarding block without creating private user state.
 2. Assistants can use that block to review context, ask the right safety and setup questions, and summarize the plan consistently.
 3. `runSpecRevisionId` changes when onboarding semantics that affect a runnable protocol change.
-4. When setup is unambiguous and the user has been agreeing, Murph creates the experiment without requiring a formal confirmation step; any assistant follow-ups included in that plan must remain easy to opt out of.
+4. When setup is unambiguous and the user has been agreeing, Murph creates the experiment without requiring a formal confirmation step; proactive assistant support still requires its own explicit consent and finite pattern.
 5. High-caution protocols can steer users toward clinician guidance, lower-intensity alternatives, or postponement without pretending that Murph diagnosed them.
 6. Generic vault-read behavior stays in assistant instructions, not repeated on every public protocol page.
 7. Protocol-linked run handoff includes the matching experiment page link so the user can return to the protocol and results surface.
 8. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.
-9. Eligible runs receive one useful early progress card and one clear final-results celebration without adding another scheduler, transport, or source of truth.
+9. Opted-in eligible runs receive one useful early progress card and one clear final-results celebration without adding another scheduler, transport, or source of truth; quiet runs still receive deterministic outcome closeout.

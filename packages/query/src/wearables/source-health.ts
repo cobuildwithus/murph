@@ -1,3 +1,5 @@
+import { formatTimeZoneDateTimeParts, isValidIanaTimeZone } from "@murphai/contracts";
+
 import { collectLatestDate, collectSortedDatesDesc, daysBetweenIsoDates, latestIsoTimestamp, uniqueStrings } from "./shared.ts";
 import { resolveWearablePublicSourceProvider } from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
@@ -13,6 +15,7 @@ import type {
   WearableRecoveryDay,
   WearableResolvedMetric,
   WearableSleepNight,
+  WearableSleepWindowCandidate,
   WearableSourceHealth,
 } from "./types.ts";
 import {
@@ -21,6 +24,22 @@ import {
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
 } from "./types.ts";
+
+const UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS = new Set<WearableMetricKey>([
+  "awakeMinutes",
+  "deepMinutes",
+  "lightMinutes",
+  "lowestHeartRate",
+  "lowestSpo2",
+  "remMinutes",
+  "sleepConsistency",
+  "sleepEfficiency",
+  "sleepLatencyMinutes",
+  "sleepPerformance",
+  "sleepScore",
+  "timeInBedMinutes",
+  "totalSleepMinutes",
+]);
 
 export function buildWearableSourceHealth(input: {
   activityDays: readonly WearableActivityDay[];
@@ -39,6 +58,17 @@ export function buildWearableSourceHealth(input: {
     ...input.dataset.metricCandidates.map((candidate) => candidate.date),
     ...input.dataset.activitySessionAggregates.map((candidate) => candidate.date),
     ...input.dataset.sleepWindows.map((candidate) => candidate.date),
+  ]);
+  // SLEEP_METRIC_KEYS also contains generic HR/HRV/SpO2/respiratory metrics
+  // because they can enrich a sleep summary. They are not sleep-freshness
+  // evidence unless their own source identity is explicitly sleep-specific.
+  const validMainSleepWindows = input.dataset.sleepWindows.filter(isValidNonNapSleepWindow);
+  const sleepFreshnessMetricCandidates = input.dataset.metricCandidates.filter(
+    isUnambiguousSleepFreshnessMetricCandidate,
+  );
+  const latestSleepDate = collectLatestDate([
+    ...sleepFreshnessMetricCandidates.map((candidate) => candidate.date),
+    ...validMainSleepWindows.map(sleepFreshnessWindowDate),
   ]);
 
   const duplicateCountsByProvider = countExactDuplicatesByProvider([
@@ -73,6 +103,7 @@ export function buildWearableSourceHealth(input: {
       night.totalSleepMinutes,
       night.timeInBedMinutes,
       night.sleepEfficiency,
+      night.sleepLatencyMinutes,
       night.awakeMinutes,
       night.lightMinutes,
       night.deepMinutes,
@@ -132,6 +163,7 @@ export function buildWearableSourceHealth(input: {
       night.totalSleepMinutes,
       night.timeInBedMinutes,
       night.sleepEfficiency,
+      night.sleepLatencyMinutes,
       night.awakeMinutes,
       night.lightMinutes,
       night.deepMinutes,
@@ -171,7 +203,7 @@ export function buildWearableSourceHealth(input: {
   const includedProvenanceDiagnostics = input.dataset.provenanceDiagnostics.filter((diagnostic) => diagnostic.kind === "included");
   const excludedProvenanceDiagnostics = input.dataset.provenanceDiagnostics.filter((diagnostic) => diagnostic.kind === "excluded");
 
-  const rows = providers
+  const rows: WearableSourceHealth[] = providers
     .map((provider) => {
       const providerMetricCandidates = input.dataset.metricCandidates.filter(
         (candidate) => resolvePublicSourceProvider(candidate) === provider,
@@ -180,6 +212,12 @@ export function buildWearableSourceHealth(input: {
         (candidate) => resolvePublicSourceProvider(candidate) === provider,
       );
       const providerSleepWindows = input.dataset.sleepWindows.filter(
+        (candidate) => resolvePublicSourceProvider(candidate) === provider,
+      );
+      const providerValidMainSleepWindows = validMainSleepWindows.filter(
+        (candidate) => resolvePublicSourceProvider(candidate) === provider,
+      );
+      const providerSleepFreshnessMetricCandidates = sleepFreshnessMetricCandidates.filter(
         (candidate) => resolvePublicSourceProvider(candidate) === provider,
       );
       const providerWorkoutMetricKeys = uniqueStrings(
@@ -222,6 +260,13 @@ export function buildWearableSourceHealth(input: {
       const stalenessVsNewestDays = latestDate && providerDates[0]
         ? daysBetweenIsoDates(providerDates[0], latestDate)
         : null;
+      const providerSleepDates = collectSortedDatesDesc([
+        ...providerSleepFreshnessMetricCandidates.map((candidate) => candidate.date),
+        ...providerValidMainSleepWindows.map(sleepFreshnessWindowDate),
+      ]);
+      const sleepStalenessVsNewestDays = latestSleepDate && providerSleepDates[0]
+        ? daysBetweenIsoDates(providerSleepDates[0], latestSleepDate)
+        : null;
       const notes: string[] = [];
 
       if (stalenessVsNewestDays !== null && stalenessVsNewestDays > 0) {
@@ -260,6 +305,7 @@ export function buildWearableSourceHealth(input: {
         exactDuplicatesSuppressed: duplicateCountsByProvider.get(provider) ?? 0,
         firstDate: providerDates.at(-1) ?? null,
         lastDate: providerDates[0] ?? null,
+        lastSleepDate: providerSleepDates[0] ?? null,
         latestRecordedAt: latestIsoTimestamp([
           ...providerMetricCandidates.map((candidate) => candidate.recordedAt),
           ...providerActivitySessionAggregates.map((candidate) => candidate.recordedAt),
@@ -272,6 +318,7 @@ export function buildWearableSourceHealth(input: {
         recoveryDays: recoveryMetricDays.size,
         selectedMetrics: selectedMetricsByProvider.get(provider) ?? 0,
         sleepNights: sleepMetricDays.size,
+        sleepStalenessVsNewestDays,
         stalenessVsNewestDays,
       } satisfies WearableSourceHealth;
     })
@@ -291,6 +338,7 @@ export function buildWearableSourceHealth(input: {
     exactDuplicatesSuppressed: 0,
     firstDate: excludedDates.at(-1) ?? null,
     lastDate: excludedDates[0] ?? null,
+    lastSleepDate: null,
     latestRecordedAt: latestIsoTimestamp(excludedProvenanceDiagnostics.map((diagnostic) => diagnostic.latestRecordedAt)),
     metricsContributed: [],
     notes: [formatExcludedWearableProvenanceNote(excludedProvenanceDiagnostics)],
@@ -299,10 +347,52 @@ export function buildWearableSourceHealth(input: {
     recoveryDays: 0,
     selectedMetrics: 0,
     sleepNights: 0,
+    sleepStalenessVsNewestDays: null,
     stalenessVsNewestDays: null,
   });
 
   return rows.sort(compareSourceHealth);
+}
+
+function isUnambiguousSleepFreshnessMetricCandidate(
+  candidate: WearableMetricCandidate,
+): boolean {
+  return (
+    metricSetHas(UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS, candidate.metric)
+    || candidate.sourceKind.toLowerCase().includes("sleep")
+    || candidate.externalRef?.resourceType?.toLowerCase().includes("sleep") === true
+  );
+}
+
+function isValidNonNapSleepWindow(
+  window: WearableSleepWindowCandidate,
+): boolean {
+  if (window.nap || window.sleepType === "nap" || !(window.durationMinutes > 0)) {
+    return false;
+  }
+
+  const startMs = Date.parse(window.startAt ?? "");
+  const endMs = Date.parse(window.endAt ?? "");
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+}
+
+function sleepFreshnessWindowDate(window: WearableSleepWindowCandidate): string {
+  if (
+    typeof window.endAt === "string"
+    && typeof window.timeZone === "string"
+    && isValidIanaTimeZone(window.timeZone)
+  ) {
+    return formatTimeZoneDateTimeParts(window.endAt, window.timeZone).dayKey;
+  }
+
+  return window.date;
+}
+
+function metricSetHas(
+  metrics: ReadonlySet<WearableMetricKey>,
+  metric: string,
+): metric is WearableMetricKey {
+  return metrics.has(metric as WearableMetricKey);
 }
 
 function formatIncludedWearableProvenanceNote(

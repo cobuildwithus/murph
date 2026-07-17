@@ -11,6 +11,7 @@ import type {
 } from "@murphai/contracts";
 
 import type { HealthCommonsWebRouteIndex } from "./web-artifacts.ts";
+import { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export const HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION =
   "murph.commons.protocol-index.v1" as const;
@@ -437,7 +438,7 @@ function isPublicProtocolVariant(
   entity: HealthCommonsCatalogEntity,
 ): entity is HealthCommonsCatalogEntity & { entityType: "protocol_variant" } {
   return entity.entityType === "protocol_variant" &&
-    entity.status !== "deprecated" &&
+    isRunnableProtocolStatus(entity.status) &&
     entity.hidden !== true;
 }
 

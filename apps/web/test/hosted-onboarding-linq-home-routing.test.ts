@@ -5,6 +5,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
@@ -32,11 +36,259 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 }));
 
 import {
+  materializeHostedSignupWelcomeHomeRouteTx,
   readHostedLinqHomeLineAuthority,
   reserveHostedLinqHomeLineFromPoolTx,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   resolveHostedMemberActivationLinqRoute,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
+
+describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
+  const assignedAt = new Date("2026-07-15T20:27:00.000Z");
+  const directRecipientPhoneNumber = "+15550100001";
+  const fromPhoneNumber = "+15550100099";
+  const linqChatId = "chat_signup_welcome";
+  const memberId = "member_123";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting());
+  });
+
+  it("materializes a provider-dispatched welcome chat onto the assigned home line", async () => {
+    const prisma = buildMaterializationPrisma();
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "materialized" });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
+      memberId,
+      prisma,
+    });
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: assignedAt,
+      linqChatId,
+      memberId,
+      participantContact: {
+        kind: "phone",
+        lookupKey: requireLookupKey(
+          createHostedPhoneLookupKeyReadCandidates(directRecipientPhoneNumber),
+        ),
+      },
+      prisma,
+      recipientPhone: fromPhoneNumber,
+    });
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberHomeLinqBindingTx.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("replays idempotently when the same chat is already the home route", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting({
+      linqChatId,
+    }));
+    const prisma = buildMaterializationPrisma({
+      acceptedAt: new Date("2026-07-15T20:28:00.000Z"),
+      linqChatLookupKey: requireLookupKey(
+        createHostedLinqChatLookupKeyReadCandidates(linqChatId),
+      ),
+    });
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "already_materialized" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("materializes a durable home line without a historical assignment timestamp", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting({
+      linqHomeLineAssignedAt: null,
+    }));
+    const prisma = buildMaterializationPrisma();
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "materialized" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeLineAssignedAt: null,
+        linqChatId,
+        memberId,
+      }),
+    );
+  });
+
+  it.each([
+    ["home", { linqChatId: "chat_newer", pendingLinqChatId: null }],
+    ["pending", { linqChatId: null, pendingLinqChatId: "chat_inbound" }],
+  ])("preserves a different %s route established before a delayed callback", async (
+    _kind,
+    routingOverride,
+  ) => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(
+      buildMaterializationRouting(routingOverride),
+    );
+    const prisma = buildMaterializationPrisma();
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "superseded" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("preserves current authority when the member phone changed after provider entry", async () => {
+    const prisma = buildMaterializationPrisma({
+      identityPhoneLookupKey: requireLookupKey(
+        createHostedPhoneLookupKeyReadCandidates("+15550100002"),
+      ),
+    });
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "superseded" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["dispatch source", { deliverySource: "webhook" }],
+    ["assigned sender line", {
+      deliveryPhoneNumberLookupKey: requireLookupKey(
+        createHostedPhoneLookupKeyReadCandidates("+15550100098"),
+      ),
+    }],
+    ["accepted provider chat", {
+      acceptedAt: new Date("2026-07-15T20:28:00.000Z"),
+      linqChatLookupKey: requireLookupKey(
+        createHostedLinqChatLookupKeyReadCandidates("chat_other"),
+      ),
+    }],
+  ])("fails closed when the %s does not match pre-provider dispatch provenance", async (
+    _label,
+    deliveryOverride,
+  ) => {
+    const prisma = buildMaterializationPrisma(deliveryOverride);
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_PROVENANCE_MISMATCH",
+      httpStatus: 409,
+    });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  function buildMaterializationPrisma(overrides: {
+    acceptedAt?: Date | null;
+    deliveryPhoneNumberLookupKey?: string;
+    deliverySource?: string;
+    identityPhoneLookupKey?: string;
+    linqChatLookupKey?: string | null;
+  } = {}) {
+    return {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedLinqDelivery: {
+        findUnique: vi.fn().mockResolvedValue({
+          acceptedAt: overrides.acceptedAt ?? null,
+          linqChatLookupKey: overrides.linqChatLookupKey ?? null,
+          phoneNumberLookupKey: overrides.deliveryPhoneNumberLookupKey
+            ?? requireLookupKey(
+              createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber),
+            ),
+          source: overrides.deliverySource ?? "hosted_runtime_linq_delivery",
+          targetKind: "participant",
+        }),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          phoneLookupKey: overrides.identityPhoneLookupKey ?? requireLookupKey(
+            createHostedPhoneLookupKeyReadCandidates(directRecipientPhoneNumber),
+          ),
+          phoneNumberVerifiedAt: new Date("2026-07-15T20:26:00.000Z"),
+        }),
+      },
+    };
+  }
+
+  function buildMaterializationRouting(overrides: {
+    linqChatId?: string | null;
+    linqHomeLineAssignedAt?: Date | null;
+    pendingLinqChatId?: string | null;
+  } = {}) {
+    return {
+      hasPendingLinqRouteState: Boolean(overrides.pendingLinqChatId),
+      linqChatId: overrides.linqChatId ?? null,
+      linqHomeLineAssignedAt:
+        overrides.linqHomeLineAssignedAt === undefined
+          ? assignedAt
+          : overrides.linqHomeLineAssignedAt,
+      linqParticipantContact: null,
+      linqRecipientPhone: fromPhoneNumber,
+      memberId,
+      pendingLinqChatId: overrides.pendingLinqChatId ?? null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: overrides.pendingLinqChatId
+        ? fromPhoneNumber
+        : null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    };
+  }
+
+  function requireLookupKey(candidates: readonly string[]): string {
+    const [lookupKey] = candidates;
+    if (!lookupKey) {
+      throw new Error("Expected a test lookup key.");
+    }
+    return lookupKey;
+  }
+});
 
 describe("readHostedLinqHomeLineAuthority", () => {
   const baseRouting = {

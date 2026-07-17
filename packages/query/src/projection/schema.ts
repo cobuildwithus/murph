@@ -14,7 +14,8 @@ export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 16: Make recovery the sole daily HRV MetricPoint owner.
-export const QUERY_PROJECTION_SQLITE_VERSION = 16;
+// 17: bounded sleep-window support evidence and range-indexed sleep reads.
+export const QUERY_PROJECTION_SQLITE_VERSION = 17;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -229,6 +230,8 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
       ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
+      ON query_wearable_summaries(summary_kind, summary_date DESC);
 
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
