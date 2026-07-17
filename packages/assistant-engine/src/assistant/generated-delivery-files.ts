@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 
 import {
@@ -37,19 +37,35 @@ export function resolveSupportedAssistantVaultFileContentType(
 }
 
 // The model chooses a friendly staging name; the runtime owns the persisted
-// identity. A per-send collision-free basename keeps a later turn's reuse of
-// the same friendly name from overwriting bytes an earlier still-active
-// delivery already staged.
-export function buildAssistantGeneratedDeliveryOwnedRef(
-  displayFilename: string,
-): string {
-  const extension = path.posix.extname(displayFilename).toLowerCase()
+// identity. A stable per-send basename lets an interrupted retry recover the
+// same owned bytes, while distinct tool calls remain collision-free even when
+// they reuse the same friendly name.
+export function buildAssistantGeneratedDeliveryOwnedRef(input: {
+  displayFilename: string
+  ref: string
+  sessionId: string
+  toolCallId: string | null
+  turnId: string
+}): string {
+  const extension = path.posix.extname(input.displayFilename).toLowerCase()
   const stem = path.posix
-    .basename(displayFilename, path.posix.extname(displayFilename))
+    .basename(
+      input.displayFilename,
+      path.posix.extname(input.displayFilename),
+    )
     .replace(/[^A-Za-z0-9._-]+/gu, '-')
     .replace(/^[.-]+/u, '')
     .slice(0, 64)
-  const ownedFilename = `${stem.length > 0 ? `${stem}-` : ''}${randomUUID()}${extension}`
+  const ownedId = createHash('sha256')
+    .update(JSON.stringify([
+      'murph.assistant-generated-delivery-owned-ref.v1',
+      input.sessionId,
+      input.turnId,
+      input.toolCallId,
+      input.ref,
+    ]))
+    .digest('hex')
+  const ownedFilename = `${stem.length > 0 ? `${stem}-` : ''}${ownedId}${extension}`
   const ownedRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${ownedFilename}`
   if (!isAssistantGeneratedDeliveryRef(ownedRef)) {
     throw new Error(

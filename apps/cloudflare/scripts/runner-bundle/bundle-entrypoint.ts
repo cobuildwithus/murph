@@ -93,9 +93,11 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // baseline. Phase-two generated-delivery staging plus the review-remediation
 // consume-into-owned-name path (per-send collision-free staging refs) then
 // add an exact measured 10,900B on that fully merged base, for a 7,492,944B
-// closure. Advance by that exact overage and preserve the separate 96KB noise
-// band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_146_944;
+// closure. The round-2 remediation replacing the random owned-ref with a
+// stable per-send SHA-256 (threaded toolCallId) then adds an exact measured
+// 1,284B, for a 7,494,228B closure. Advance by that exact overage and preserve
+// the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_148_228;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.

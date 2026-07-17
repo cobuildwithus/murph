@@ -2457,7 +2457,10 @@ describe('assistant codex runtime', () => {
     let nextApprovalIndex = 0
     const onFinishWithoutReplyAccepted = vi.fn()
     const onFinishWithoutReplyRecorded = vi.fn()
-    const sendVaultFile = vi.fn(async () => {
+    const sendVaultFile = vi.fn(async (
+      _ref: string,
+      _toolCallId?: string | null,
+    ) => {
       const approvalUrl = exactApprovalUrls[nextApprovalIndex]
       if (!approvalUrl) {
         throw new Error('Unexpected vault approval request.')
@@ -2516,6 +2519,7 @@ describe('assistant codex runtime', () => {
               method: 'item/tool/call',
               params: {
                 arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
+                callId: `call-vault-approval-${approvalIndex + 1}`,
                 namespace: 'murph',
                 tool: 'send_vault_file',
               },
@@ -2601,6 +2605,12 @@ describe('assistant codex runtime', () => {
       expect(result.transcriptMessage ?? '').not.toContain(exactApprovalUrl)
     }
     expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
+    expect(sendVaultFile.mock.calls).toEqual(
+      Array.from({ length: approvalCount }, (_, index) => [
+        `documents/report-${index + 1}.pdf`,
+        `call-vault-approval-${index + 1}`,
+      ]),
+    )
     expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
     expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   }

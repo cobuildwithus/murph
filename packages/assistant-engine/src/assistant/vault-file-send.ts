@@ -36,6 +36,7 @@ import {
   hashAssistantOutboxTargetFingerprint,
 } from './outbox/intents.js'
 import {
+  isMissingFileError,
   normalizeNullableString,
 } from './shared.js'
 import {
@@ -77,6 +78,7 @@ export async function requestAssistantVaultFileSend(input: {
   sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
+  toolCallId?: string | null
   turnId: string
   turnTrigger?: AssistantTurnTrigger | null
   vault: string
@@ -88,6 +90,9 @@ export async function requestAssistantVaultFileSend(input: {
   if (isAssistantGeneratedDeliveryRef(normalizedRef)) {
     const consumed = await consumeAssistantGeneratedDeliveryStagingRef({
       ref: normalizedRef,
+      sessionId: input.sessionId,
+      toolCallId: normalizeNullableString(input.toolCallId),
+      turnId: input.turnId,
       vaultRoot: input.vault,
     })
     mediaRef = consumed.ownedRef
@@ -190,17 +195,25 @@ export async function resolveAssistantVaultFileResponseMedia(input: {
   return (await readAssistantVaultFileSnapshot(input)).file
 }
 
-// Consuming the model-selected staging file into a runtime-generated
-// collision-free name happens before hashing or approval so a later turn that
-// reuses the same friendly staging name can no longer truncate bytes this
-// delivery has already committed to.
+// Consuming the model-selected staging file into a stable per-send name happens
+// before hashing or approval. A retry can recover the same owned bytes, while a
+// distinct send that reuses the friendly staging name receives a different ref.
 async function consumeAssistantGeneratedDeliveryStagingRef(input: {
   ref: string
+  sessionId: string
+  toolCallId: string | null
+  turnId: string
   vaultRoot: string
 }): Promise<{ displayFilename: string; ownedRef: string }> {
   const displayFilename = path.posix.basename(input.ref)
   resolveAssistantVaultFileContentType(displayFilename)
-  const ownedRef = buildAssistantGeneratedDeliveryOwnedRef(displayFilename)
+  const ownedRef = buildAssistantGeneratedDeliveryOwnedRef({
+    displayFilename,
+    ref: input.ref,
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    turnId: input.turnId,
+  })
   const sourcePath = await resolveAssistantVaultPath(
     input.vaultRoot,
     input.ref,
@@ -211,8 +224,41 @@ async function consumeAssistantGeneratedDeliveryStagingRef(input: {
     ownedRef,
     'file path',
   )
-  await adoptAssistantStateFileIntoExclusiveName(sourcePath, targetPath)
+  await adoptAssistantGeneratedDeliveryIntoStableName({
+    sourcePath,
+    targetPath,
+  })
   return { displayFilename, ownedRef }
+}
+
+async function adoptAssistantGeneratedDeliveryIntoStableName(input: {
+  sourcePath: string
+  targetPath: string
+}): Promise<void> {
+  try {
+    await adoptAssistantStateFile(input.targetPath)
+    return
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
+
+  try {
+    await adoptAssistantStateFileIntoExclusiveName(
+      input.sourcePath,
+      input.targetPath,
+    )
+  } catch (sourceError) {
+    try {
+      await adoptAssistantStateFile(input.targetPath)
+    } catch (targetError) {
+      if (isMissingFileError(targetError)) {
+        throw sourceError
+      }
+      throw targetError
+    }
+  }
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {

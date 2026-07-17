@@ -536,12 +536,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // clarifiers, multi-agent posture/delegation/usage), both of which landed
     // without moving this lock. Phase-two generated-delivery staging plus the
     // review-remediation consume-into-owned-name path then advance the baseline
-    // by their exact measured 10,900B overage on that fully merged base.
+    // by their exact measured 10,900B overage on that fully merged base, and the
+    // round-2 stable-per-send-ref remediation advances it by its exact measured
+    // 1,284B overage.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_146_944 + 96_000 + 250_000,
+      staticClosureBytes: 7_148_228 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });

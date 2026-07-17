@@ -1712,6 +1712,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-vault-file'
       ref: string
+      toolCallId?: string
     }
   | {
       kind: 'invalid-send-vault-file-arguments'
@@ -1990,6 +1991,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name: {
@@ -2444,7 +2446,12 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = await sendVaultFile(input.request.ref)
+        const result = input.request.toolCallId === undefined
+          ? await sendVaultFile(input.request.ref)
+          : await sendVaultFile(
+              input.request.ref,
+              input.request.toolCallId,
+            )
         switch (result.status) {
           case 'pending':
             return {

@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -256,7 +256,7 @@ describe('assistant vault-file send', () => {
     }
   })
 
-  it('keeps an earlier pending delivery intact when a later turn reuses the same staging name', async () => {
+  it('keeps distinct sends separate when they reuse the same staging name', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-staging-collision-',
     )
@@ -267,10 +267,13 @@ describe('assistant vault-file send', () => {
 
     const contentsA = Buffer.from('generated report A')
     const contentsB = Buffer.from('generated report B bytes')
-    const sendWithPendingApproval = async (approvalSlug: string) => {
+    const sendWithPendingApproval = async (input: {
+      approvalSlug: string
+      toolCallId: string
+    }) => {
       const approvalRequest = vi.fn().mockResolvedValue({
-        approvalId: `haa_${approvalSlug.repeat(32).slice(0, 32)}`,
-        approvalUrl: `https://murph.test/approve/${approvalSlug}`,
+        approvalId: `haa_${input.approvalSlug.repeat(32).slice(0, 32)}`,
+        approvalUrl: `https://murph.test/approve/${input.approvalSlug}`,
         expiresAt: '2026-06-24T12:15:00.000Z',
         status: 'pending' as const,
       })
@@ -286,15 +289,22 @@ describe('assistant vault-file send', () => {
         sessionId: 'session-staging-collision',
         threadId: 'thread-staging-collision',
         threadIsDirect: true,
-        turnId: `turn-staging-collision-${approvalSlug}`,
+        toolCallId: input.toolCallId,
+        turnId: 'turn-staging-collision',
         vault: vaultRoot,
       })
     }
 
     await writeFile(stagingPath, contentsA)
-    await sendWithPendingApproval('a')
+    await sendWithPendingApproval({
+      approvalSlug: 'a',
+      toolCallId: 'call-staging-collision-a',
+    })
     await writeFile(stagingPath, contentsB)
-    await sendWithPendingApproval('b')
+    await sendWithPendingApproval({
+      approvalSlug: 'b',
+      toolCallId: 'call-staging-collision-b',
+    })
 
     const intents = await listAssistantOutboxIntents(vaultRoot)
     const media = intents
@@ -323,6 +333,89 @@ describe('assistant vault-file send', () => {
         vaultRoot,
       })).resolves.toEqual(expected)
     }
+  })
+
+  it('reuses one owned file and approval identity after outbox persistence is interrupted', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-staging-retry-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const stagingPath = path.join(vaultRoot, ...ref.split('/'))
+    const generatedDeliveryDirectory = path.dirname(stagingPath)
+    const outboxPath = path.join(
+      vaultRoot,
+      '.runtime',
+      'operations',
+      'assistant',
+      'outbox',
+    )
+    const contents = Buffer.from('generated report retry bytes')
+    await mkdir(generatedDeliveryDirectory, { recursive: true })
+    await writeFile(stagingPath, contents)
+    await writeFile(outboxPath, 'block outbox directory creation')
+
+    const pendingApproval = {
+      approvalId: `haa_${'r'.repeat(32)}`,
+      approvalUrl: 'https://murph.test/approve/retry',
+      expiresAt: '2026-06-24T12:15:00.000Z',
+      status: 'pending' as const,
+    }
+    const approvalRequest = vi.fn().mockResolvedValue(pendingApproval)
+    const request = {
+      actionApprovalPort: { request: approvalRequest },
+      bindingDelivery: {
+        kind: 'thread' as const,
+        target: 'chat-staging-retry',
+      },
+      channel: 'linq',
+      identityId: 'identity-staging-retry',
+      ref,
+      sessionId: 'session-staging-retry',
+      threadId: 'thread-staging-retry',
+      threadIsDirect: true,
+      toolCallId: 'call-staging-retry',
+      turnId: 'turn-staging-retry',
+      vault: vaultRoot,
+    }
+
+    await expect(requestAssistantVaultFileSend(request)).rejects.toBeDefined()
+    expect(approvalRequest).toHaveBeenCalledOnce()
+    await expect(stat(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    const entriesAfterInterruption = await readdir(generatedDeliveryDirectory)
+    expect(entriesAfterInterruption).toHaveLength(1)
+    expect(entriesAfterInterruption[0]).not.toBe('report.pdf')
+
+    await rm(outboxPath)
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+
+    const retried = await requestAssistantVaultFileSend(request)
+    expect(retried).toMatchObject({
+      approvalId: pendingApproval.approvalId,
+      filename: 'report.pdf',
+      status: 'pending',
+    })
+    expect(approvalRequest).toHaveBeenCalledTimes(2)
+    expect(approvalRequest.mock.calls[1]?.[0]).toEqual(
+      approvalRequest.mock.calls[0]?.[0],
+    )
+
+    const entriesAfterRetry = await readdir(generatedDeliveryDirectory)
+    expect(entriesAfterRetry).toEqual(entriesAfterInterruption)
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    expect(intents).toHaveLength(1)
+    const [persistedIntent] = intents
+    const [persistedMedia] = persistedIntent?.media ?? []
+    if (!persistedMedia || persistedMedia.kind !== 'vault_file') {
+      throw new Error('Expected one persisted vault-file descriptor.')
+    }
+    expect(persistedMedia.ref).toBe(
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${entriesAfterRetry[0]}`,
+    )
+    await expect(readVerifiedAssistantVaultFileBytes({
+      file: persistedMedia,
+      vaultRoot,
+    })).resolves.toEqual(contents)
   })
 
   it('does not auto-return from approvals for iMessage group threads', async () => {
