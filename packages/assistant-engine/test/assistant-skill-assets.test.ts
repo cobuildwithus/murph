@@ -1716,7 +1716,13 @@ describe('assistant skill assets', () => {
       'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
     )
     expect(compact).toContain(
-      'Its spawn is not durable operation state: do not say enrichment is pending, processing, or in progress',
+      "I've got my best man researching the exact ingredients.",
+    )
+    expect(compact).toContain(
+      'Its spawn is not durable operation state: do not promise it will finish, and on later turns do not say enrichment is pending, processing, or in progress.',
+    )
+    expect(compact).toContain(
+      'never expose internal subagent terminology, record ids, or save-status bookkeeping',
     )
     expect(compact).toContain(
       'Claim exact-label or structured child enrichment only after canonical readback confirms it.',
@@ -1822,6 +1828,9 @@ describe('assistant skill assets', () => {
       'This intentionally minimal record is durable reported context, not a claim that the exact label or ingredient panel is known.',
     )
     expect(compact).toContain(
+      'never recite bookkeeping such as "user-reported product names," "verified ingredient panel," or record status to the user',
+    )
+    expect(compact).toContain(
       'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
     )
     expect(compact).toContain(
@@ -1863,6 +1872,9 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain(
       'until canonical readback proves the extraction, do not state structured lab details as fact',
+    )
+    expect(compact).toContain(
+      'Checkpoints, records, receipts, and open/resolved status are internal bookkeeping, never conversation copy.',
     )
     expect(raw).toContain(
       'Route useful answers to their existing canonical owner in the same turn',
