@@ -17,11 +17,13 @@ export function BiomarkerExperimentCard({
   const imageSrc = protocol.image;
   const directionArrow = directionArrowFor(protocol.expectedDirection);
 
-  const expectedHighlight = `${directionArrow} ${protocol.expectedSignalLabel}`;
+  const expectedHighlight = directionArrow
+    ? `${directionArrow} ${protocol.expectedSignalLabel}`
+    : protocol.expectedSignalLabel;
   const durationHighlight = protocol.durationLabel;
 
   const evidenceLabel = `${protocol.evidenceLabel} evidence`;
-  const cautionLabel = `Caution ${protocol.cautionLabel.toLowerCase()}`;
+  const cautionLabel = `${protocol.cautionLabel} caution`;
 
   return (
     <Link
@@ -74,7 +76,7 @@ export function BiomarkerExperimentCard({
 
       <div className="mt-auto grid grid-cols-3 divide-x divide-border/60 border-t border-border/60 bg-muted/30">
         <StatCell
-          label="Exp. change"
+          label="Expected change"
           value={expectedHighlight}
           valueClassName="font-serif text-xs/4 font-semibold text-primary sm:text-sm/5"
         />
@@ -136,7 +138,7 @@ function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDir
     case "stable":
       return "→";
     default:
-      return "·";
+      return "";
   }
 }
 

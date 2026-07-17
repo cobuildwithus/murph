@@ -317,7 +317,7 @@ describe("health commons catalog", () => {
     }));
     expect(psylliumProtocol?.expectedSignalDescriptions).toContainEqual(expect.objectContaining({
       biomarkerKey: "biomarker:triglycerides",
-      expected: "Small/no reliable change",
+      expected: "Small or no change",
       estimatedChange: expect.objectContaining({
         basis: expect.any(String),
         confidence: "mixed",

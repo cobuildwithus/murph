@@ -177,7 +177,7 @@ expectedSignalDescriptions:
       low: -10
       high: -3
       unit: minutes
-      window: 14 nights vs 7-night baseline
+      window: 14 nights
       confidence: low
       basis: "Direct slow-breathing evidence includes a non-forced breathing-cycle study with sleep latency moving from 20.2 to 10.7 minutes and a small insomnia PSG study reporting lower sleep-onset latency; the healthy-adult PSG pilot was null, the 2026 review found objective sleep results inconclusive, and the meditation child evidence is mostly adjacent."
     protocolProminence: focus
@@ -190,7 +190,7 @@ expectedSignalDescriptions:
       low: 1
       high: 4
       unit: "%"
-      window: 14 nights vs 7-night baseline
+      window: 14 nights
       confidence: low
       basis: "The paced-breathing insomnia study reported higher PSG sleep efficiency, and the non-forced breathing-cycle study lowered smartwatch/app awake time by 5.4 percentage points. Objective findings were inconclusive in the healthy-adult PSG pilot and 2026 systematic review, so the estimate is conservative."
     protocolProminence: focus
@@ -204,7 +204,7 @@ expectedSignalDescriptions:
       low: -4
       high: -1
       unit: bpm
-      window: 14 nights vs 7-night baseline
+      window: 14 nights
       confidence: low
       basis: "The non-forced breathing-cycle study lowered pre-sleep heart rate by 5.6 bpm and several sleep-stage heart-rate measures by about 4-7 bpm. This protocol is gentler and user-run, so the expected same-device resting-heart-rate shift is smaller."
     protocolProminence: context
@@ -218,7 +218,7 @@ expectedSignalDescriptions:
       low: 0
       high: 10
       unit: "%"
-      window: 14 nights vs 7-night baseline
+      window: 14 nights
       confidence: low
       basis: "Direct sources show total HRV power or immediate HRV increases during pre-sleep slow breathing, while the extracted evidence does not give a clean overnight RMSSD effect. Treat this as a small same-device relative shift, not a cross-device HRV target."
     protocolProminence: context
@@ -229,7 +229,7 @@ expectedSignalDescriptions:
     description: Breath pacing and grounding give attention a repeatable low-threat task, reducing threat checks and rumination before lights-out.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights vs 7-night baseline
+      window: 14 nights
       confidence: low
       basis: "The bedtime app-guided mindfulness pilot reported lower PSAS scores, and structured mindfulness insomnia trials report lower pre-sleep arousal. Mapping those scales to a simple nightly check-in is approximate, and breathing-only arousal-scale estimates were not extracted."
     protocolProminence: focus

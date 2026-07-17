@@ -17,7 +17,9 @@ export function BiomarkerExperimentCardHero({
   const imageSrc = protocol.image;
   const directionArrow = directionArrowFor(protocol.expectedDirection);
 
-  const expectedHighlight = `${directionArrow} ${protocol.expectedSignalLabel}`;
+  const expectedHighlight = directionArrow
+    ? `${directionArrow} ${protocol.expectedSignalLabel}`
+    : protocol.expectedSignalLabel;
   const durationHighlight = protocol.durationLabel;
   const evidenceLabel = `${protocol.evidenceLabel} evidence`;
 
@@ -74,7 +76,7 @@ export function BiomarkerExperimentCardHero({
         </p>
 
         <div className="mt-auto grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/60 pt-5 sm:gap-x-6 sm:grid-cols-4">
-          <Stat label="Exp. change" value={expectedHighlight} valueClassName="text-primary" />
+          <Stat label="Expected change" value={expectedHighlight} valueClassName="text-primary" />
           <Stat label="Duration" value={durationHighlight} />
           <Stat label="Burden" value={formatChipLabel(protocol.burdenLabel)} />
           <Stat label="Evidence" value={evidenceLabel.replace(" evidence", "")} />
@@ -121,7 +123,7 @@ function directionArrowFor(direction: BiomarkerProtocolRankingModel["expectedDir
     case "stable":
       return "→";
     default:
-      return "·";
+      return "";
   }
 }
 

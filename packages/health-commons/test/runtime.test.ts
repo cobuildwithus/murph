@@ -703,7 +703,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     }));
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
       biomarkerRouteId: "sleep-efficiency",
-      expected: "Track as mixed context",
+      expected: "Possible change",
       protocolProminence: "context",
     }));
     expect(protocolTab?.expectedSignals).toContainEqual(expect.objectContaining({
