@@ -1,7 +1,7 @@
 import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
@@ -845,9 +845,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("deletes the shared view and still runs the assistant lane when share authority is unavailable", async () => {
+  it("marks shared data unavailable and still runs the assistant lane during an authority outage", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     await writeHostedPhaseSharedProjection({ vaultRoot });
+    const storeFilePath = path.join(vaultRoot, "derived", "vault-share", "projections.json");
+    const before = await readFile(storeFilePath, "utf8");
     const request: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = vi.fn(async () => ({
@@ -872,24 +874,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
       expect(request).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+      // Last-known-good authorized state: the landed records stay byte-for-byte
+      // while the marker makes every shared-data reader report unavailable.
+      expect(await readFile(storeFilePath, "utf8")).toBe(before);
       const marker = JSON.parse(await readFile(
         path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
         "utf8",
       ));
       expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
-      // Production-faithful visibility proof: foreground Codex runs with full
-      // container filesystem access, so no file anywhere under the workspace
-      // may still carry the unverified shared payload.
-      const files = await readdir(vaultRoot, { recursive: true, withFileTypes: true });
-      for (const entry of files) {
-        if (!entry.isFile()) {
-          continue;
-        }
-        const filePath = path.join(entry.parentPath, entry.name);
-        const contents = await readFile(filePath, "utf8").catch(() => "");
-        expect(contents, filePath).not.toContain("Shared member");
-        expect(contents, filePath).not.toContain("share_profile_current");
-      }
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -942,11 +934,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
         "utf8",
       )).rejects.toMatchObject({ code: "ENOENT" });
-      // Web re-delivers records after recovery; the runtime retains nothing.
-      await expect(readFile(
+      // The retained records are re-verified against fresh authority without
+      // any redelivery.
+      const restored = JSON.parse(await readFile(
         path.join(vaultRoot, "derived", "vault-share", "projections.json"),
         "utf8",
-      )).rejects.toMatchObject({ code: "ENOENT" });
+      ));
+      expect(Object.keys(restored.projections["profile-name.v0"].grantors))
+        .toEqual(["member_shared_current"]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

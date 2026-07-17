@@ -52,17 +52,18 @@ const SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT = {
 
 /**
  * Revalidates every already-landed projection against Web's current grant-row
- * generation before the model can read it. Share authority is visibility
- * authority only, never model-admission authority: when it cannot be verified
- * the landed store is deleted from the workspace (every foreground Codex
- * process has full container filesystem access, so removal is the only real
- * visibility boundary) and a fixed marker makes shared-data readers report
- * "unavailable" while the accepted turn proceeds without shared data. Web
- * remains the durable owner: deliveries queued during the outage stay in the
- * mailbox and producers re-offer current snapshots after recovery, so the
- * workspace never holds records the current authority has not verified. The
- * authority callback runs only after a non-empty local store is known to
- * exist, so ordinary personal runtimes pay no control-plane request.
+ * generation before a model read. Share authority is visibility authority
+ * only, never model-admission authority. When it cannot be verified the store
+ * keeps its last successfully verified content — the sanctioned
+ * last-known-good authorized state — and a fixed marker makes shared-data
+ * readers report "unavailable" and scheduled turns withhold standings while
+ * the accepted turn still runs. Landed records are never discarded on a
+ * transient failure (Web's mailbox dedupe cannot redeliver an unchanged
+ * record); revokes keep landing through their own durable mailbox channel
+ * during the outage, and new deliveries block retryably until a successful
+ * authority read clears the marker. The authority callback runs only after a
+ * non-empty local store is known to exist, so ordinary personal runtimes pay
+ * no control-plane request.
  */
 export async function prepareSharedVaultShareModelView(input: {
   readAuthority: () => Promise<readonly HostedRuntimeGroupShareAuthorityEntry[]>;
@@ -72,12 +73,12 @@ export async function prepareSharedVaultShareModelView(input: {
     resolveSharedVaultShareProjectionStorePath(input.vaultRoot),
   );
   if (read.status !== "loaded") {
-    await removeSharedVaultShareModelView(input.vaultRoot);
+    await markSharedVaultShareAuthorityUnavailable(input.vaultRoot);
     return { status: "unavailable", reasonCode: "vault_share.read_failed" };
   }
   const store = read.store;
   if (Object.keys(store.projections).length === 0) {
-    // The marker outlives the deleted store; only a successful authority read
+    // The marker outlives an emptied store; only a successful authority read
     // may end the unavailable state and unblock queued deliveries.
     if (!(await hasSharedVaultShareAuthorityUnavailableMarker(input.vaultRoot))) {
       return { status: "empty" };
@@ -98,7 +99,7 @@ export async function prepareSharedVaultShareModelView(input: {
   try {
     authority = await input.readAuthority();
   } catch {
-    await removeSharedVaultShareModelView(input.vaultRoot);
+    await markSharedVaultShareAuthorityUnavailable(input.vaultRoot);
     return {
       status: "unavailable",
       reasonCode: "vault_share.authority_unavailable",
@@ -145,25 +146,18 @@ export async function prepareSharedVaultShareModelView(input: {
     await clearSharedVaultShareAuthorityUnavailableMarker(input.vaultRoot);
     return { status: "ready" };
   } catch {
-    await removeSharedVaultShareModelView(input.vaultRoot);
+    await markSharedVaultShareAuthorityUnavailable(input.vaultRoot);
     return { status: "unavailable", reasonCode: "vault_share.write_failed" };
   }
 }
 
-/**
- * Deletes the landed store and marks shared data unavailable. The removal is
- * the one operation that must succeed: if the runtime can neither verify nor
- * remove unverified shared records it fails the pass closed rather than
- * leaving them readable in the workspace.
- */
-async function removeSharedVaultShareModelView(vaultRoot: string): Promise<void> {
+async function markSharedVaultShareAuthorityUnavailable(
+  vaultRoot: string,
+): Promise<void> {
   await writeJsonFileAtomic(
     resolveSharedVaultShareAuthorityUnavailableMarkerPath(vaultRoot),
     SHARED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_MARKER_CONTENT,
   );
-  await rm(resolveSharedVaultShareProjectionStorePath(vaultRoot), {
-    force: true,
-  });
 }
 
 async function clearSharedVaultShareAuthorityUnavailableMarker(

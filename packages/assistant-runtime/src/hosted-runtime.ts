@@ -92,6 +92,9 @@ import {
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
+import {
+  prepareSharedVaultShareModelView,
+} from "./hosted-runtime/vault-share-import.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -1899,6 +1902,38 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
+      // A detached ask is a separate model-read lifetime: it revalidates
+      // current share authority immediately before its model process can see
+      // landed shared projections, and requeues while authority is
+      // unverifiable instead of reading last-known-good state.
+      async beforeExecuteAsk() {
+        const view = await prepareSharedVaultShareModelView({
+          readAuthority: async () => {
+            const groupToolPort = runtime.platform.groupToolPort;
+            if (!groupToolPort) {
+              throw new Error("group_tool_unavailable");
+            }
+            const response = await groupToolPort.request({
+              action: "read_share_authority",
+            });
+            if (response.action !== "read_share_authority") {
+              throw new Error("group_share_authority_invalid");
+            }
+            if (response.result.status === "unavailable") {
+              throw new Error("group_share_authority_unavailable");
+            }
+            return response.result.status === "none"
+              ? []
+              : response.result.shares;
+          },
+          vaultRoot: restored.vaultRoot,
+        });
+        if (view.status === "unavailable") {
+          throw new Error(
+            "Hosted shared group data authority could not be verified before detached assistant work.",
+          );
+        }
+      },
       codexHome: hostedCodexRuntime.codexHome,
       env: hostedCodexRuntime.runtimeEnv,
       onStateMutation() {

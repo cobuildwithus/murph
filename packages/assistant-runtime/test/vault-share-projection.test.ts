@@ -2123,10 +2123,11 @@ describe("importHostedVaultShareDeliveryWake", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("deletes the landed store and marks shared data unavailable when authority cannot be verified", async () => {
+  it("keeps landed data byte-for-byte and marks it unavailable when authority cannot be verified", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
     const markerPath = join(vaultRoot, "derived", "vault-share", "authority-unavailable.json");
     await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+    const before = await readFile(storePath(vaultRoot));
 
     await expect(prepareSharedVaultShareModelView({
       readAuthority: async () => {
@@ -2137,12 +2138,11 @@ describe("importHostedVaultShareDeliveryWake", () => {
       reasonCode: "vault_share.authority_unavailable",
       status: "unavailable",
     });
-    await expect(readFile(storePath(vaultRoot), "utf8"))
-      .rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(storePath(vaultRoot))).toEqual(before);
     const marker = JSON.parse(await readFile(markerPath, "utf8"));
     expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
 
-    // The marker outlives the deleted store while the outage persists.
+    // The marker persists across repeated failures while the outage lasts.
     await expect(prepareSharedVaultShareModelView({
       readAuthority: async () => {
         throw new Error("control unavailable");
@@ -2152,20 +2152,23 @@ describe("importHostedVaultShareDeliveryWake", () => {
       reasonCode: "vault_share.authority_unavailable",
       status: "unavailable",
     });
+    expect(await readFile(storePath(vaultRoot))).toEqual(before);
 
-    // Recovery clears the marker; Web re-delivers records rather than the
-    // runtime retaining them, so a queued delivery lands normally afterward.
+    // Recovery reconciles the retained records against fresh authority and
+    // clears the marker without needing any redelivery.
     await expect(prepareSharedVaultShareModelView({
-      readAuthority: async () => [],
+      readAuthority: async () => [{
+        memberId: wake.delivery.grantorMemberId,
+        projectionScopeKey: "sleep-times.v0",
+        shareId: wake.delivery.shareId,
+      }],
       vaultRoot,
-    })).resolves.toEqual({ status: "empty" });
+    })).resolves.toEqual({ status: "ready" });
+    const restored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    expect(Object.keys(restored.projections["sleep-times.v0"].grantors))
+      .toEqual([wake.delivery.grantorMemberId]);
     await expect(readFile(markerPath, "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
-    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
-      .resolves.toEqual({ status: "imported" });
-    const relanded = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
-    expect(Object.keys(relanded.projections["sleep-times.v0"].grantors))
-      .toEqual([wake.delivery.grantorMemberId]);
   });
 
   it("blocks deliveries retryably while share authority is unverifiable", async () => {
@@ -2194,8 +2197,9 @@ describe("importHostedVaultShareDeliveryWake", () => {
       retryable: true,
       status: "blocked",
     });
-    await expect(readFile(storePath(vaultRoot), "utf8"))
-      .rejects.toMatchObject({ code: "ENOENT" });
+    const retained = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    expect(Object.keys(retained.projections["sleep-times.v0"].grantors))
+      .toEqual([wake.delivery.grantorMemberId]);
   });
 
   it("skips the authority control read when no landed store exists", async () => {

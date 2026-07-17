@@ -975,7 +975,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 45_000);
 
-  test("runs a detached ask over the persisted shared view without a pre-model authority read", async () => {
+  test("removes an old share generation before a detached ask reads the workspace", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref(
       "snapshot-detached-share-regrant",
@@ -1001,7 +1001,7 @@ describe("hosted workspace runtime entrypoint", () => {
           () => true,
           () => false,
         );
-        assert.equal(projectionStillExists, true);
+        assert.equal(projectionStillExists, false);
         return { answer: "Current shared data only.", outcome: "answered" };
       });
 
@@ -1087,7 +1087,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     vaultRoot: input.durableRoot,
                   });
                   projectionPath = await writeDetachedAskSharedProjection({
-                    shareId: "share_current",
+                    shareId: "share_old_generation",
                     vaultRoot: input.durableRoot,
                   });
                   await enqueueHostedSystemMailboxItem({
@@ -1128,15 +1128,177 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.ok(
         requireEventIndex(events, "foreground.finished")
-          < requireEventIndex(events, "ask.model.started"),
+          < requireEventIndex(events, "share.authority.read"),
       );
       assert.ok(
-        !events.includes("share.authority.read"),
-        "detached asks must not repeat mutable-authority reads before model work",
+        requireEventIndex(events, "share.authority.read")
+          < requireEventIndex(events, "ask.model.started"),
       );
       assert.ok(events.includes("ask.completed"));
       assert.equal(restoreCallCount, 1);
       assert.ok(result.status === "idle" || result.status === "scheduled");
+    } finally {
+      shutdownController.abort(new Error("Test cleanup."));
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
+  test("requeues a detached ask without model execution when share authority is unavailable", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-detached-share-authority-unavailable",
+    );
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const executeCallCountBefore = mocks.executeReadOnlyAssistantAsk.mock.calls.length;
+    let projectionBefore = "";
+    let projectionPath = "";
+    let restoreCallCount = 0;
+
+    try {
+      const askItem = createMailboxItem({
+        dedupeKey: "ask_event_entrypoint_share_authority_unavailable",
+        id: "mailbox_item_entrypoint_share_authority_unavailable",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "1",
+      });
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_detached_share_authority_unavailable",
+              idleCheckpointDelayMs: 120_000,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "7".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "detached-share-authority-unavailable.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error("Restored detached ask test should not import mailbox items.");
+            },
+            platform: createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  assert.equal(request.action, "prepare");
+                  return {
+                    action: "prepare",
+                    question: "This question must remain queued.",
+                    status: "ready",
+                    targetLabel: "100 Club",
+                  };
+                },
+              },
+              groupToolPort: {
+                async request(request) {
+                  assert.deepEqual(request, { action: "read_share_authority" });
+                  events.push("share.authority.unavailable");
+                  queueMicrotask(() => {
+                    shutdownController.abort(
+                      new Error("Stop after detached authority rejection."),
+                    );
+                  });
+                  return {
+                    action: "read_share_authority",
+                    result: {
+                      status: "unavailable",
+                      unavailableReason: "control_plane_unavailable",
+                    },
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ snapshotRef, version: "0" }),
+              }),
+              workspaceSnapshotPort: {
+                async abortSnapshotSession() {
+                  throw new Error("Restored detached ask test should not abort snapshots.");
+                },
+                async completeSnapshotSession() {
+                  throw new Error("Restored detached ask test should not complete snapshots.");
+                },
+                async putSnapshotObjectDirect() {
+                  throw new Error("Restored detached ask test should not upload snapshots.");
+                },
+                async restoreWorkspaceSnapshot(input) {
+                  restoreCallCount += 1;
+                  await initializeVault({
+                    createdAt: TEST_NOW,
+                    vaultRoot: input.durableRoot,
+                  });
+                  projectionPath = await writeDetachedAskSharedProjection({
+                    shareId: "share_authority_unavailable",
+                    vaultRoot: input.durableRoot,
+                  });
+                  projectionBefore = await readFile(projectionPath, "utf8");
+                  await enqueueHostedSystemMailboxItem({
+                    item: createResolvedAssistantAskSystemMailboxItem(askItem),
+                    vaultRoot: input.durableRoot,
+                    wake: createAssistantAskRequestedWake({
+                      eventId: askItem.dedupeKey,
+                    }),
+                  });
+                  assert.deepEqual(
+                    (await readHostedSystemMailboxState(input.durableRoot)).pending.map(
+                      (item) => item.itemId,
+                    ),
+                    [askItem.id],
+                  );
+                  runtimeWakeSignal.notify();
+                },
+                async startSnapshotSession() {
+                  throw new Error("Restored detached ask test should not start snapshots.");
+                },
+              },
+            }),
+            async runAssistantPhase() {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            },
+            runtimeWakeSignal,
+            shutdownSignal: shutdownController.signal,
+            vaultRoot,
+          },
+        ),
+        30_000,
+        () => events.join(","),
+      );
+
+      assert.ok(events.includes("share.authority.unavailable"));
+      assert.equal(
+        mocks.executeReadOnlyAssistantAsk.mock.calls.length,
+        executeCallCountBefore,
+      );
+      assert.equal(await readFile(projectionPath, "utf8"), projectionBefore);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+          itemId: item.itemId,
+          status: item.status,
+        })),
+        [{ itemId: askItem.id, status: "pending" }],
+      );
+      assert.equal(restoreCallCount, 1);
+      assert.equal(result.status, "scheduled");
     } finally {
       shutdownController.abort(new Error("Test cleanup."));
       await removeTempRoot(vaultRoot);
