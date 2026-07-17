@@ -305,6 +305,14 @@ it has been explicitly elevated to a cross-cutting invariant.
   concurrency-capped. Crypto owners batch envelope metadata, preserve binding
   and authenticity checks, fail closed on missing or mismatched material, and
   zeroize key and plaintext buffers on success and failure.
+- A database transaction holds one pooled connection for its full duration.
+  Never open one transaction per collection item concurrently; batch the items
+  into one transaction or process them sequentially, and count concurrent
+  transactions against the request's concurrency bound.
+- The fanout bound composes across the whole request, render, or job: parallel
+  helpers that each fan out internally multiply, so evaluate peak concurrent
+  datastore work for the composed path and keep one request's peak well below
+  the shared pool size, not merely below it.
 - Hot, locked, or transactional collection paths have deterministic
   maximum-cardinality tests for datastore call count, selected fields, external
   call count and concurrency, ordering, and required boundary revalidation.

@@ -5,7 +5,7 @@ import {
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
-const LABS_GUIDANCE_HEADER = 'Junction lab catalog:'
+const LABS_GUIDANCE_HEADER = 'Lab test discovery:'
 
 describe('assistant labs prompt guidance', () => {
   it('puts the read-only catalog policy in the stable direct layer only', () => {
@@ -28,11 +28,15 @@ describe('assistant labs prompt guidance', () => {
       'Keep each search to at most 5 results',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      "Junction's current catalog price",
+      'the current catalog price',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'does not establish Murph ordering, member eligibility, appointment availability',
     )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'ordering through Murph is planned for later',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toMatch(/junction/iu)
     expect(layers.threadContextPrompt).not.toContain(LABS_GUIDANCE_HEADER)
     expect(layers.dynamicTurnContextPrompt).not.toContain(LABS_GUIDANCE_HEADER)
   })

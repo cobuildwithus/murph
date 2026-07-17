@@ -6,9 +6,9 @@ Last verified: 2026-07-16
 
 ## Member outcome
 
-A hosted member can browse Junction's current lab catalog on the authenticated,
+A hosted member can browse the current lab catalog on the authenticated,
 unlinked `/labs` page or ask private Murph what tests are available. Both paths
-read the provider live and expose the same bounded facts about orderable panels,
+read the catalog live and expose the same bounded facts about available panels,
 individual biomarkers, current catalog prices, and ZIP-based collection
 locations.
 
@@ -51,6 +51,12 @@ test is medically necessary, eligible for the member, orderable through Murph,
 booked, or available at a final quoted price. It must not promise an ordering
 launch date.
 
+Member-facing pages and assistant replies describe this as Murph lab test
+discovery. The provider name, provider identifiers, catalog source, and
+integration plumbing stay internal. When ordering is relevant, Murph may say
+that it can help explore tests now and that ordering through Murph is planned
+for later, without promising timing.
+
 ## Ownership and data lifecycle
 
 `apps/web` is the sole Junction credential and provider-egress owner for this
@@ -88,7 +94,7 @@ not Murph's no-persistence guarantee.
 
 ## Failure and freshness semantics
 
-Every successful result includes a provider-source marker and a check time.
+Every successful result includes a check time.
 Requests are bounded by input length, result count, response bytes, time, and
 location fanout, and propagate caller cancellation. Provider calls are not
 retried automatically.

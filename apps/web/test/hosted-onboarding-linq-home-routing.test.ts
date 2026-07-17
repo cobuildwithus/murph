@@ -13,6 +13,7 @@ import {
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
+  claimHostedLinqProactiveConversationCapacityTx: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
@@ -32,6 +33,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  claimHostedLinqProactiveConversationCapacityTx:
+    mocks.claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
 }));
 
@@ -41,6 +44,7 @@ import {
   reserveHostedLinqHomeLineFromPoolTx,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   resolveHostedMemberActivationLinqRoute,
+  startOfUtcDay,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
 
 describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
@@ -361,6 +365,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
   });
 
@@ -396,8 +401,12 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     ).toBeLessThan(mocks.listHostedLinqAssignableHomeLines.mock.invocationCallOrder[0]);
   });
 
-  it("falls over to another assignable line when the preferred line is at quota", async () => {
-    const preferredLine = buildLine("+15550100001", { maxNewConversationsPerDay: 1 });
+  it("keeps the preferred line for member-initiated routing at the proactive quota", async () => {
+    const preferredLine = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 1,
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
     const fallbackLine = buildLine("+15550100002", { maxNewConversationsPerDay: 1 });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
       preferredLine,
@@ -418,13 +427,19 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     ).resolves.toMatchObject({
       kind: "reserved",
       reservation: {
-        line: fallbackLine,
+        line: preferredLine,
       },
     });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
-  it("falls over when the preferred line is not in the assignable pool", async () => {
-    const fallbackLine = buildLine("+15550100002");
+  it("selects a fallback without claiming capacity during inbound routing", async () => {
+    const fallbackLine = buildLine("+15550100002", {
+      maxNewConversationsPerDay: 10,
+      proactiveConversationCount: 10,
+      proactiveConversationDayUtc: new Date("2020-01-01T00:00:00.000Z"),
+    });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([fallbackLine]);
 
     await expect(
@@ -436,8 +451,59 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
       kind: "reserved",
       reservation: {
         line: fallbackLine,
+        proactiveConversationReserved: false,
       },
     });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps inbound routing available when every fallback is at its proactive limit", async () => {
+    const fallbackLine = buildLine("+15550100002", {
+      maxNewConversationsPerDay: 10,
+      proactiveConversationCount: 10,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([fallbackLine]);
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: "+15550100001",
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+        proactiveConversationReserved: false,
+      },
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+  });
+
+  it("leaves the final fallback claim to the participant-chat planner", async () => {
+    const fallbackLine = buildLine("+15550100002", {
+      maxNewConversationsPerDay: 10,
+      proactiveConversationCount: 9,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([fallbackLine]);
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: "+15550100001",
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+        proactiveConversationReserved: false,
+      },
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 });
 
@@ -448,6 +514,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
@@ -606,7 +673,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("preserves the existing assignment timestamp when a home recipient exists before chat binding", async () => {
+  it("reserves welcome capacity for a home recipient assigned before activation", async () => {
+    const line = buildLine("+15550100001");
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
@@ -640,26 +710,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
       memberId: "member_123",
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
   });
 
-  it("preserves an existing direct route assignment without consuming capacity", async () => {
+  it("preserves an existing direct route assignment while reserving welcome capacity", async () => {
     const assignedAt = new Date("2026-06-29T14:15:00.000Z");
     const line = buildLine("+15550100001", {
       activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
-      throw new Error("existing direct routes must not consume daily capacity");
-    });
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(async () => {
-      throw new Error("existing direct routes must not consume active capacity");
-    });
-
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
@@ -681,7 +745,12 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
-    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      excludedMemberId: "member_123",
+      now: expect.any(Date),
+      prisma: {} as never,
+      recipientPhones: [line.phoneNumber],
+    });
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -958,13 +1027,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         ["+15550100002", 1],
       ]),
     );
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
-      new Map([
-        ["+15550100001", 0],
-        ["+15550100002", 0],
-      ]),
-    );
-
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember(),
@@ -1010,6 +1072,126 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
+  it("falls back to another line when the preferred line reaches 50 proactive conversations", async () => {
+    const assignedAt = new Date("2026-07-15T12:00:00.000Z");
+    const dayUtc = startOfUtcDay(new Date());
+    const preferredLine = buildLine("+15550100001", {
+      proactiveConversationCount: 50,
+      proactiveConversationDayUtc: dayUtc,
+    });
+    const fallbackLine = buildLine("+15550100002", {
+      proactiveConversationCount: 4,
+      proactiveConversationDayUtc: dayUtc,
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      preferredLine,
+      fallbackLine,
+    ]);
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqHomeLineAssignedAt: assignedAt,
+          linqRecipientPhone: preferredLine.phoneNumber,
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          source: {
+            fromPhoneNumber: fallbackLine.phoneNumber,
+            kind: "linq",
+          },
+        },
+      },
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).toHaveBeenCalledWith({
+      dayUtc: expect.any(Date),
+      limit: 50,
+      phoneNumberLookupKey: fallbackLine.phoneNumberLookupKey,
+      prisma: {} as never,
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: fallbackLine.phoneNumber,
+    });
+    expect(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.calls[0]?.[0]
+        ?.homeLineAssignedAt,
+    ).not.toEqual(assignedAt);
+  });
+
+  it("keeps the home assignment but suppresses the welcome when the atomic capacity claim loses", async () => {
+    const line = buildLine("+15550100001", {
+      proactiveConversationCount: 49,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(false);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).toHaveBeenCalledWith({
+      dayUtc: expect.any(Date),
+      limit: 50,
+      phoneNumberLookupKey: line.phoneNumberLookupKey,
+      prisma: {} as never,
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: line.phoneNumber,
+    });
+    expect(
+      mocks.claimHostedLinqProactiveConversationCapacityTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("assigns a home line but suppresses the welcome when every line is at the hard cap", async () => {
+    const dayUtc = startOfUtcDay(new Date());
+    const firstLine = buildLine("+15550100001", {
+      proactiveConversationCount: 50,
+      proactiveConversationDayUtc: dayUtc,
+    });
+    const secondLine = buildLine("+15550100002", {
+      proactiveConversationCount: 50,
+      proactiveConversationDayUtc: dayUtc,
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([firstLine, secondLine]);
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: firstLine.phoneNumber,
+    });
+  });
+
   it("fails closed when activation has no usable pending thread and no configured home-line pool", async () => {
     await expect(
       resolveHostedMemberActivationLinqRoute({
@@ -1036,6 +1218,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   });
 
@@ -1218,7 +1401,8 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
-    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
   it("re-resolves the route under the home lock before allowing a same-line rebind", async () => {
@@ -1632,6 +1816,8 @@ function buildLine(
     activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
+    proactiveConversationCount: number | null;
+    proactiveConversationDayUtc: Date | null;
   }> = {},
 ) {
   return {
@@ -1641,6 +1827,8 @@ function buildLine(
     phoneNumber,
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
+    proactiveConversationCount: overrides.proactiveConversationCount ?? null,
+    proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
   };
 }
 
