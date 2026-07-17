@@ -57,6 +57,7 @@ interface HostedBrowserVaultWarmSourceState {
 export interface HostedBrowserVaultReplicaContentSummary {
   entities: number;
   hasPrivateContent: boolean;
+  labResultRows: number;
   metricGoalProgressRows: number;
   metricRows: number;
   metricSelectionRows: number;
@@ -303,6 +304,7 @@ export function summarizeHostedBrowserVaultReplicaContent(
 ): HostedBrowserVaultReplicaContentSummary {
   const contentCounts = {
     entities: replica.entities.length,
+    labResultRows: replica.labResultRows.length,
     metricGoalProgressRows: replica.metricGoalProgressRows.length,
     metricRows: replica.metricRows.length,
     searchRows: replica.searchRows.length,

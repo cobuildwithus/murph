@@ -8,20 +8,25 @@ import {
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-import { BiomarkersPageClient } from "./biomarkers-page-client";
+import { LabBiomarkerDetailClient } from "./lab-biomarker-detail-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Your biomarkers — Murph",
-  description:
-    "See every biomarker in your lab history and follow how each result changes over time.",
+  title: "Biomarker history — Murph",
+  description: "Review how one of your lab biomarkers has changed over time.",
 });
 
-export default async function BiomarkersPage() {
+export default async function LabBiomarkerResultPage({
+  params,
+}: {
+  params: Promise<{ metricKey: string }>;
+}) {
+  const { metricKey } = await params;
   const auth = await getHostedDashboardPageAuthSnapshot();
 
   return (
-    <BiomarkersPageClient
+    <LabBiomarkerDetailClient
       authenticated={auth.authenticated}
+      metricKey={metricKey}
       uploadLabsAction={
         <Suspense fallback={<UploadLabsActionFallback />}>
           <UploadLabsMurphContactAction />

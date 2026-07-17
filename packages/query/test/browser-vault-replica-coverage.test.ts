@@ -238,6 +238,7 @@ function createReplicaFixture(): BrowserVaultReplica {
     assistantSummary: { highlights: ["Keep it light."], latestDate: "2026-04-20" },
     entities: [{ attributes: {}, bodyPreview: "steady", date: "2026-04-20", experimentSlug: null, family: "experiment", id: "exp_browser", kind: "experiment_entry", links: [], lookupIds: ["exp_browser"], occurredAt: "2026-04-20T08:00:00.000Z", recordClass: "bank", status: "active", stream: null, tags: ["focus"], title: "Steady experiment" }],
     generatedAt: "2026-04-20T12:00:00.000Z",
+    labResultRows: [],
     metricGoalProgressRows: [{ currentValue: 41, currentValueLabel: "41", deltaToTarget: 1, goalId: "goal_rhr", metricKey: "resting-heart-rate", selectedPointIds: ["p_rhr"], status: "behind", targetId: "rhr-under-40", targetValueLabel: "<40 bpm", unit: "bpm", warnings: [] }],
     metricRows: [
       metricRow("steps", "2026-04-19", 820, "steps"),
