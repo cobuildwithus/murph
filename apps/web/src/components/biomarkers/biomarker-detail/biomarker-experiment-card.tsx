@@ -5,7 +5,6 @@ import type {
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
-import { biomarkerFitDisplayLabel, biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const CARD_IMAGE_SIZES = "(min-width: 1024px) 33vw, 100vw";
 
@@ -21,9 +20,6 @@ export function BiomarkerExperimentCard({
     ? `${directionArrow} ${protocol.expectedSignalLabel}`
     : protocol.expectedSignalLabel;
   const durationHighlight = protocol.durationLabel;
-
-  const evidenceLabel = `${protocol.evidenceLabel} evidence`;
-  const cautionLabel = `${protocol.cautionLabel} caution`;
 
   return (
     <Link
@@ -48,28 +44,13 @@ export function BiomarkerExperimentCard({
         )}
       </div>
       <div className="flex flex-col gap-3 p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1.5 min-w-0">
-            <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
-              {protocol.category}
-            </span>
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
-              {protocol.title}
-            </h3>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <span
-              className={cn(
-                "font-serif text-base/5 font-semibold sm:text-xl/6",
-                biomarkerFitToneClassName(protocol.fitLabel),
-              )}
-            >
-              {biomarkerFitDisplayLabel(protocol.fitLabel)}
-            </span>
-            <span className="font-mono text-[9px]/3 uppercase tracking-[0.14em] text-muted-foreground">
-              fit
-            </span>
-          </div>
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
+            {protocol.category}
+          </span>
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">
+            {protocol.title}
+          </h3>
         </div>
         <p className="text-sm/5.5 text-muted-foreground text-pretty line-clamp-3">{protocol.mechanism}</p>
       </div>
@@ -91,11 +72,6 @@ export function BiomarkerExperimentCard({
           valueClassName="text-xs/4 font-medium text-foreground sm:text-sm/5"
         />
       </div>
-
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
-        <Pill>{evidenceLabel}</Pill>
-        <Pill>{cautionLabel}</Pill>
-      </div>
     </Link>
   );
 }
@@ -116,14 +92,6 @@ function StatCell({
       </span>
       <span className={cn("tabular-nums text-pretty", valueClassName)}>{value}</span>
     </div>
-  );
-}
-
-function Pill({ children }: { children: string }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-border/70 bg-background/40 px-2.5 py-0.5 text-[11px] text-muted-foreground">
-      {children}
-    </span>
   );
 }
 

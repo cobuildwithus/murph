@@ -5,7 +5,6 @@ import type {
   BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-projections";
 import { cn } from "@/src/lib/utils";
-import { biomarkerFitDisplayLabel, biomarkerFitToneClassName } from "./biomarker-fit-tone";
 
 const HERO_IMAGE_SIZES = "(min-width: 1024px) 320px, 100vw";
 
@@ -47,28 +46,13 @@ export function BiomarkerExperimentCardHero({
       </div>
 
       <div className="flex flex-1 flex-col gap-5 p-6 lg:p-7">
-        <div className="flex items-start justify-between gap-4 sm:gap-6">
-          <div className="flex flex-col gap-2 min-w-0">
-            <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
-              {protocol.category}
-            </span>
-            <h3 className="font-serif text-xl/tight font-semibold tracking-tight text-foreground text-balance sm:text-2xl/tight lg:text-[26px]">
-              {protocol.title}
-            </h3>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <span
-              className={cn(
-                "font-serif text-lg/6 font-semibold sm:text-2xl/8",
-                biomarkerFitToneClassName(protocol.fitLabel),
-              )}
-            >
-              {biomarkerFitDisplayLabel(protocol.fitLabel)}
-            </span>
-            <span className="font-mono text-[9px]/3 uppercase tracking-[0.14em] text-muted-foreground">
-              fit
-            </span>
-          </div>
+        <div className="flex flex-col gap-2 min-w-0">
+          <span className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-chart-5">
+            {protocol.category}
+          </span>
+          <h3 className="font-serif text-xl/tight font-semibold tracking-tight text-foreground text-balance sm:text-2xl/tight lg:text-[26px]">
+            {protocol.title}
+          </h3>
         </div>
 
         <p className="max-w-[68ch] text-sm/6 text-muted-foreground text-pretty sm:text-[15px]/7">
