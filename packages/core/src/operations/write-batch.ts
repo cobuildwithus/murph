@@ -182,7 +182,12 @@ interface CreateWriteBatchInput {
 }
 
 interface RunCanonicalWriteInput<TResult> extends CreateWriteBatchInput {
+  assertCanContinue?: (() => void) | null;
   mutate: (context: { batch: WriteBatch; vaultRoot: string }) => Promise<TResult>;
+}
+
+interface CommitWriteBatchOptions {
+  assertCanContinue?: (() => void) | null;
 }
 
 interface StageTextWriteOptions {
@@ -1774,8 +1779,10 @@ export async function runCanonicalWrite<TResult>({
   occurredAt = new Date(),
   hostedCanonicalWritePort,
   hostedCanonicalWriteReceiptDirectory,
+  assertCanContinue,
   mutate,
 }: RunCanonicalWriteInput<TResult>): Promise<TResult> {
+  assertCanContinue?.();
   const batch = await WriteBatch.create({
     vaultRoot,
     operationType,
@@ -1788,16 +1795,18 @@ export async function runCanonicalWrite<TResult>({
   let result: TResult;
 
   try {
+    assertCanContinue?.();
     result = await mutate({
       batch,
       vaultRoot: batch.vaultRoot,
     });
+    assertCanContinue?.();
   } catch (error) {
     await batch.rollback();
     throw error;
   }
 
-  await batch.commit();
+  await batch.commit({ assertCanContinue });
   return result;
 }
 
@@ -2155,8 +2164,11 @@ export class WriteBatch {
     return normalizedTarget;
   }
 
-  async commit(): Promise<HostedCanonicalWriteReceipt | null> {
+  async commit(
+    options: CommitWriteBatchOptions = {},
+  ): Promise<HostedCanonicalWriteReceipt | null> {
     this.assertMutable();
+    options.assertCanContinue?.();
     assertUniqueStageRelativePaths(this.record.actions);
     const lock = await acquireCanonicalWriteLock(this.vaultRoot);
     let hostedCanonicalWriteReceipt: HostedCanonicalWriteReceipt | null = null;
@@ -2169,14 +2181,18 @@ export class WriteBatch {
         await this.persist();
 
         for (const [index, action] of this.record.actions.entries()) {
+          options.assertCanContinue?.();
           if (action.state === "applied" || action.state === "reused") {
             continue;
           }
 
           await this.applyAction(index, action);
+          options.assertCanContinue?.();
         }
 
+        options.assertCanContinue?.();
         await this.persistGuardReceiptIfConfigured();
+        options.assertCanContinue?.();
         const hostedCanonicalWritePersistenceInput =
           await this.persistHostedCanonicalWriteReceiptIfConfigured();
         hostedCanonicalWriteReceipt = hostedCanonicalWritePersistenceInput?.receipt ?? null;

@@ -19,6 +19,10 @@
       "types": "./dist/assistant-ids.d.ts",
       "default": "./dist/assistant-ids.js"
     },
+    "./assistant-generated-deliveries": {
+      "types": "./dist/assistant-generated-deliveries.d.ts",
+      "default": "./dist/assistant-generated-deliveries.js"
+    },
     "./hosted-codex-subscription-auth": {
       "types": "./dist/hosted-codex-subscription-auth.d.ts",
       "default": "./dist/hosted-codex-subscription-auth.js"

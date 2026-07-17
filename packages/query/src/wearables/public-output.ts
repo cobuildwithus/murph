@@ -111,6 +111,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     night.sessionMinutes,
     night.sleepConsistency,
     night.sleepEfficiency,
+    night.sleepLatencyMinutes,
     night.sleepPerformance,
     night.sleepScore,
     night.spo2,
@@ -129,6 +130,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
   const sessionMinutes = projectWearableResolvedMetricPublicSources(night.sessionMinutes);
   const sleepConsistency = projectWearableResolvedMetricPublicSources(night.sleepConsistency);
   const sleepEfficiency = projectWearableResolvedMetricPublicSources(night.sleepEfficiency);
+  const sleepLatencyMinutes = projectWearableResolvedMetricPublicSources(night.sleepLatencyMinutes);
   const sleepPerformance = projectWearableResolvedMetricPublicSources(night.sleepPerformance);
   const sleepScore = projectWearableResolvedMetricPublicSources(night.sleepScore);
   const spo2 = projectWearableResolvedMetricPublicSources(night.spo2);
@@ -139,6 +141,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     ["totalSleepMinutes", totalSleepMinutes],
     ["timeInBedMinutes", timeInBedMinutes],
     ["sleepEfficiency", sleepEfficiency],
+    ["sleepLatencyMinutes", sleepLatencyMinutes],
     ["sleepScore", sleepScore],
     ["sleepPerformance", sleepPerformance],
     ["sleepConsistency", sleepConsistency],
@@ -187,6 +190,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     sessionMinutes,
     sleepConsistency,
     sleepEfficiency,
+    sleepLatencyMinutes,
     sleepPerformance,
     sleepScore,
     sleepWindowProvider: sessionMinutes.selection.provider,

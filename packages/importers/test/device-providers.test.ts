@@ -23,6 +23,7 @@ import {
   type NormalizedDeviceBatch,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
+import { normalizeWhoopSnapshot } from "../src/device-providers/whoop.ts";
 import {
   makeNormalizedDeviceBatch,
   type NormalizedDeviceBatchOptions,
@@ -32,6 +33,31 @@ type AssertTrue<T extends true> = T;
 type IsMutuallyAssignable<A, B> =
   [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
+
+test("WHOOP sleep normalization preserves strict nap identity and leaves missing flags unknown", () => {
+  const sleeps = [
+    { id: "main", nap: false },
+    { id: "nap", nap: true },
+    { id: "missing" },
+  ].map((sleep, index) => ({
+    ...sleep,
+    start: `2026-03-${String(10 + index).padStart(2, "0")}T01:00:00.000Z`,
+    end: `2026-03-${String(10 + index).padStart(2, "0")}T02:00:00.000Z`,
+  }));
+  const payload = normalizeWhoopSnapshot({
+    importedAt: "2026-03-16T10:00:00.000Z",
+    sleeps,
+  });
+  const byId = new Map(
+    payload.events
+      ?.filter((event) => event.kind === "sleep_session")
+      .map((event) => [event.externalRef?.resourceId, event.fields?.sleepType]),
+  );
+
+  assert.equal(byId.get("main"), "main_sleep");
+  assert.equal(byId.get("nap"), "nap");
+  assert.equal(byId.get("missing"), undefined);
+});
 
 type _normalizedDeviceBatchMatchesCorePayload = AssertTrue<
   IsMutuallyAssignable<NormalizedDeviceBatch, Omit<DeviceBatchImportPayload, "vaultRoot">>
@@ -911,6 +937,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
     startAt: "2026-03-14T22:30:00.000Z",
     endAt: "2026-03-15T06:45:00.000Z",
     durationMinutes: 495,
+    sleepType: "main_sleep",
   });
   assert.equal(activityScoreEvent?.dayKey, "2026-03-15");
   assert.equal(sleepRespiratoryEvent?.dayKey, "2026-03-15");

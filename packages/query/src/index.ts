@@ -19,6 +19,9 @@ import type {
   ProjectedWearableSleepSummary,
   ProjectedWearableSourceHealthSummary,
   WearableMetricSummaryFilters,
+  WearableSleepPatternFilters,
+  WearableSleepPatternSummary,
+  WearableSleepReportingTimeZoneSource,
   WearableSummaryFilters,
 } from "./wearables.ts";
 
@@ -74,12 +77,15 @@ export type {
   DeviceActivityCoverageKey,
 } from "./device-activity-coverage.ts";
 export {
+  listAutomationPage,
   listAutomations,
   readAutomation,
   readAutomationByRelativePath,
   showAutomation,
 } from "./automation.ts";
 export type {
+  AutomationListPageOptions,
+  AutomationListPageResult,
   AutomationListOptions,
   AutomationQueryRecord,
 } from "./automation.ts";
@@ -189,12 +195,19 @@ export {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  assessExperimentPrimaryMetricCapture,
+  experimentSessionMetricIsDeclared,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
+  validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
   type GoalMetricTarget,
+  type ExperimentPrimaryMetricCaptureAssessment,
+  type ExperimentPrimaryMetricCaptureIssue,
   type MetricDefinition,
   type MetricGoalProgress,
   type MetricGoalProgressStatus,
@@ -273,6 +286,9 @@ export type {
   WearableRecoverySummary,
   WearableResolvedMetric,
   WearableSleepNight,
+  WearableSleepPatternFilters,
+  WearableSleepPatternSummary,
+  WearableSleepReportingTimeZoneSource,
   WearableSleepSummary,
   WearableSourceHealth,
   WearableSourceHealthSummary,
@@ -511,6 +527,14 @@ export async function summarizeWearableSleepRuntime(
 ): Promise<ProjectedWearableSleepSummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableSleepPatternRuntime(
+  vaultRoot: string,
+  filters: WearableSleepPatternFilters = {},
+): Promise<WearableSleepPatternSummary> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
 }
 
 export async function summarizeWearableActivityRuntime(

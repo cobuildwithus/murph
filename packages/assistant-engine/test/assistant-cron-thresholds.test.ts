@@ -13,6 +13,7 @@ import {
 } from '../src/assistant/cron/presets.ts'
 
 type MockAutomationRecord = {
+  activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: {
     model?: string | null
@@ -39,6 +40,7 @@ type MockAutomationRecord = {
 }
 
 const cronMocks = vi.hoisted(() => ({
+  archiveAutomationIfActiveUntilElapsed: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   getAssistantChannelAdapter: vi.fn(),
@@ -56,6 +58,15 @@ const cronMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/core', () => ({
+  archiveAutomationIfActiveUntilElapsed:
+    cronMocks.archiveAutomationIfActiveUntilElapsed,
+  isVaultError: (error: unknown) => Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.startsWith('VAULT_'),
+  ),
   loadVault: cronMocks.loadVault,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
@@ -124,6 +135,40 @@ beforeEach(() => {
   vi.useRealTimers()
   cronMocks.automationsByVault.clear()
   cronMocks.nextAutomationId = 1
+  cronMocks.archiveAutomationIfActiveUntilElapsed
+    .mockReset()
+    .mockImplementation(async (input: {
+      expectedUpdatedAt?: string
+      lookup: string
+      now?: Date
+      vaultRoot: string
+    }) => {
+      const record = getVaultAutomationStore(input.vaultRoot).find(
+        (candidate) =>
+          candidate.automationId === input.lookup ||
+          candidate.slug === input.lookup,
+      )
+      if (!record) {
+        const error = new Error('Automation was not found.') as Error & { code: string }
+        error.code = 'VAULT_AUTOMATION_MISSING'
+        throw error
+      }
+      const activeUntilMs = record.activeUntil
+        ? Date.parse(record.activeUntil)
+        : Number.NaN
+      if (
+        input.expectedUpdatedAt !== undefined &&
+          input.expectedUpdatedAt !== record.updatedAt ||
+        record.status !== 'active' ||
+        !Number.isFinite(activeUntilMs) ||
+        (input.now ?? new Date()).getTime() < activeUntilMs
+      ) {
+        return { archived: false, record }
+      }
+      record.status = 'archived'
+      record.updatedAt = (input.now ?? new Date()).toISOString()
+      return { archived: true, record }
+    })
 
   cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockReset().mockImplementation(
     async (input: Record<string, string | null | undefined>) => ({

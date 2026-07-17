@@ -64,6 +64,7 @@ export interface AddAssistantCronJobInput
 }
 
 export interface UpsertAssistantCronAutomationInput {
+  activeUntil?: string | null
   firstOccurrencePolicy?: 'after-current-local-day'
   instructions: string
   now?: Date
@@ -225,6 +226,7 @@ export async function upsertAssistantCronAutomation(
 
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
+        activeUntil: input.activeUntil,
         vault: resolvedCreation.vault,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,

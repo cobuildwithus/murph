@@ -12,6 +12,8 @@ import type {
   StoredMedia,
 } from "@murphai/contracts";
 
+import { isRunnableProtocolStatus } from "./protocol-publishing.ts";
+
 export const HEALTH_COMMONS_WEB_BIOMARKER_SHELL_SCHEMA_VERSION =
   "murph.commons.web.biomarker-shell.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_OVERVIEW_SCHEMA_VERSION =
@@ -568,7 +570,7 @@ function compareProtocolRankings(
 
 function isRankableProtocolVariant(protocol: HealthCommonsCatalogEntity): boolean {
   return protocol.entityType === "protocol_variant"
-    && protocol.status !== "deprecated"
+    && isRunnableProtocolStatus(protocol.status)
     && protocol.hidden !== true;
 }
 

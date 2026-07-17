@@ -964,6 +964,7 @@ function buildSleepWindowCandidate(
   }
 
   const title = normalizeNullableString(entity.title) ?? normalizeNullableString(entity.attributes.title);
+  const sleepType = resolveSleepSessionType(entity.attributes.sleepType);
 
   return {
     candidateId: buildCandidateId([
@@ -980,7 +981,7 @@ function buildSleepWindowCandidate(
     durationMinutes,
     endAt: normalizeNullableString(entity.attributes.endAt),
     externalRef,
-    nap: (title ?? "").toLowerCase().includes("nap"),
+    nap: sleepType === "nap",
     occurredAt: entity.occurredAt ?? null,
     paths: [entity.path],
     provider,
@@ -988,9 +989,15 @@ function buildSleepWindowCandidate(
     recordIds: [entity.entityId],
     sourceFamily: "event",
     sourceKind: "sleep_session",
+    sleepType,
     startAt: normalizeNullableString(entity.attributes.startAt) ?? entity.occurredAt ?? null,
+    timeZone: normalizeNullableString(entity.attributes.timeZone),
     title,
   };
+}
+
+function resolveSleepSessionType(value: unknown): "main_sleep" | "nap" | "unknown" {
+  return value === "main_sleep" || value === "nap" ? value : "unknown";
 }
 
 function buildSleepStageCandidate(

@@ -7,8 +7,6 @@ import type {
   HostedRuntimeLabsOffering,
   HostedRuntimeLabsSearchRequest,
   HostedRuntimeLabsSearchResponse,
-  HostedRuntimeLabsShowRequest,
-  HostedRuntimeLabsShowResponse,
   HostedRuntimeLabsToolRequest,
   HostedRuntimeLabsToolResponse,
 } from "@murphai/hosted-execution/labs";
@@ -19,7 +17,6 @@ import { isRecord } from "../primitives";
 const JUNCTION_LABS_BASE_URL = "https://api.us.junction.com";
 const JUNCTION_LABS_TIMEOUT_MS = 8_000;
 const JUNCTION_SEARCH_RESPONSE_MAX_BYTES = 1_024 * 1_024;
-const JUNCTION_SHOW_RESPONSE_MAX_BYTES = 256 * 1_024;
 const JUNCTION_AREA_RESPONSE_MAX_BYTES = 256 * 1_024;
 const JUNCTION_PSC_RESPONSE_MAX_BYTES = 512 * 1_024;
 const JUNCTION_MAX_PSC_LABS = 4;
@@ -56,13 +53,22 @@ interface JunctionAreaLabsProjection {
 
 interface JunctionPscProjection {
   hadMalformedEntries: boolean;
-  locations: HostedRuntimeLabsLocation[];
+  locations: JunctionLocationProjection[];
+}
+
+interface JunctionOfferingProjection {
+  identity: string;
+  offering: HostedRuntimeLabsOffering;
+}
+
+interface JunctionLocationProjection {
+  identity: string;
+  location: HostedRuntimeLabsLocation;
 }
 
 const RESPONSE_BASE = {
   orderableThroughMurph: false,
   orderingStatus: "discovery_only",
-  source: "junction",
 } as const;
 
 export async function executeJunctionLabsTool(
@@ -74,8 +80,6 @@ export async function executeJunctionLabsTool(
   switch (request.action) {
     case "search":
       return await searchJunctionLabs(request, runtime);
-    case "show":
-      return await showJunctionLabOffering(request, runtime);
     case "locations":
       return await findJunctionLabLocations(request, runtime);
   }
@@ -85,7 +89,6 @@ async function searchJunctionLabs(
   request: HostedRuntimeLabsSearchRequest,
   runtime: JunctionLabsRuntime,
 ): Promise<HostedRuntimeLabsSearchResponse> {
-  const page = request.page ?? 1;
   const limit = request.limit ?? 10;
   const kind = request.kind ?? "all";
   const providerSize = kind === "all"
@@ -95,7 +98,7 @@ async function searchJunctionLabs(
     a_la_carte_enabled: "true",
     include_pricing: "true",
     name: request.query,
-    page: String(page),
+    page: "1",
     size: String(providerSize),
   });
   const payload = await requestJunctionJson(runtime, url, {
@@ -107,65 +110,21 @@ async function searchJunctionLabs(
   const candidates = readMarkerArray(payload);
   const normalizedOfferings = candidates
     .map(normalizeJunctionOffering)
-    .filter((offering): offering is HostedRuntimeLabsOffering => offering !== null);
+    .filter((offering): offering is JunctionOfferingProjection => offering !== null);
   if (candidates.length > 0 && normalizedOfferings.length === 0) {
     throw labsUnavailableError(true);
   }
   const items = dedupeOfferings(normalizedOfferings)
-    .filter((offering) => kind === "all" || offering.kind === kind)
-    .slice(0, limit);
+    .filter(({ offering }) => kind === "all" || offering.kind === kind)
+    .slice(0, limit)
+    .map(({ offering }) => offering);
 
   return {
     action: "search",
     ...RESPONSE_BASE,
     checkedAt: runtime.now().toISOString(),
     items,
-    provider: {
-      page: readPositiveInteger(payload, "page") ?? page,
-      pages: kind === "all" ? readNonnegativeInteger(payload, "pages") : null,
-      total: kind === "all" ? readNonnegativeInteger(payload, "total") : null,
-    },
   };
-}
-
-async function showJunctionLabOffering(
-  request: HostedRuntimeLabsShowRequest,
-  runtime: JunctionLabsRuntime,
-): Promise<HostedRuntimeLabsShowResponse> {
-  const url = junctionUrl("/v3/lab_tests/markers", {
-    a_la_carte_enabled: "true",
-    include_pricing: "true",
-    lab_id: String(request.labId),
-    name: request.providerId,
-    page: "1",
-    size: "20",
-  });
-  const payload = await requestJunctionJson(runtime, url, {
-    maxResponseBytes: JUNCTION_SHOW_RESPONSE_MAX_BYTES,
-  });
-  const exactRows = readMarkerArray(payload)
-    .filter((candidate) => matchesJunctionOfferingIdentity(candidate, request));
-  const offering = exactRows
-    .map(normalizeJunctionOffering)
-    .find((candidate): candidate is HostedRuntimeLabsOffering => candidate !== null) ?? null;
-
-  if (offering) {
-    return {
-      action: "show",
-      ...RESPONSE_BASE,
-      checkedAt: runtime.now().toISOString(),
-      offering,
-    };
-  }
-
-  if (
-    exactRows.length === 0
-    || exactRows.every(isExplicitlyDisabledJunctionOffering)
-  ) {
-    throw labsOfferingNotFoundError();
-  }
-
-  throw labsUnavailableError(true);
 }
 
 async function findJunctionLabLocations(
@@ -182,9 +141,9 @@ async function findJunctionLabLocations(
     maxResponseBytes: JUNCTION_AREA_RESPONSE_MAX_BYTES,
   });
   const homeCollectionAvailable = readHomeCollectionAvailable(areaPayload);
-  const areaLabs = readEligibleAreaLabIds(areaPayload, request.labId);
+  const areaLabs = readEligibleAreaLabIds(areaPayload);
   const eligibleLabIds = areaLabs.labIds.slice(0, JUNCTION_MAX_PSC_LABS);
-  const locationGroups: HostedRuntimeLabsLocation[][] = [];
+  const locationGroups: JunctionLocationProjection[][] = [];
   let hadMalformedCoverageData = areaLabs.hadMalformedEntries;
 
   for (let index = 0; index < eligibleLabIds.length; index += JUNCTION_PSC_CONCURRENCY) {
@@ -206,7 +165,9 @@ async function findJunctionLabLocations(
     }
   }
 
-  const locations = dedupeAndSortLocations(locationGroups.flat()).slice(0, limit);
+  const locations = dedupeAndSortLocations(locationGroups.flat())
+    .slice(0, limit)
+    .map(({ location }) => location);
   const status = homeCollectionAvailable || locations.length > 0
     ? "available"
     : "not_served";
@@ -389,7 +350,7 @@ function readMarkerArray(value: unknown): unknown[] {
   return candidates;
 }
 
-function normalizeJunctionOffering(value: unknown): HostedRuntimeLabsOffering | null {
+function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -416,38 +377,22 @@ function normalizeJunctionOffering(value: unknown): HostedRuntimeLabsOffering | 
   const providerIncludedCount = readNonnegativeInteger(value, "expected_results_count");
 
   return {
-    catalogPrice: normalizeCatalogPrice(value.price),
-    commonTurnaroundDays: readNonnegativeInteger(value, "common_tat_days"),
-    description: readNullableBoundedText(value.description, 8_000),
-    includedMarkerCount: Math.max(
-      providerIncludedCount ?? includedMarkerProjection.total,
-      includedMarkerProjection.total,
-    ),
-    includedMarkers: includedMarkerProjection.markers,
-    junctionOrderable: true,
-    kind,
-    labId,
-    maximumTurnaroundDays: readNonnegativeInteger(value, "worst_case_tat_days"),
-    name,
-    offeringId: `${labId}:${providerId}`,
-    providerId,
-    slug: readNullableBoundedText(value.slug, 180),
-    unit: readNullableBoundedText(value.unit, 120),
+    identity: `${labId}:${providerId}`,
+    offering: {
+      catalogPrice: normalizeCatalogPrice(value.price),
+      commonTurnaroundDays: readNonnegativeInteger(value, "common_tat_days"),
+      description: readNullableBoundedText(value.description, 8_000),
+      includedMarkerCount: Math.max(
+        providerIncludedCount ?? includedMarkerProjection.total,
+        includedMarkerProjection.total,
+      ),
+      includedMarkers: includedMarkerProjection.markers,
+      kind,
+      maximumTurnaroundDays: readNonnegativeInteger(value, "worst_case_tat_days"),
+      name,
+      unit: readNullableBoundedText(value.unit, 120),
+    },
   };
-}
-
-function matchesJunctionOfferingIdentity(
-  value: unknown,
-  request: HostedRuntimeLabsShowRequest,
-): boolean {
-  return isRecord(value)
-    && readPositiveInteger(value, "lab_id") === request.labId
-    && readBoundedText(value.provider_id, 120) === request.providerId;
-}
-
-function isExplicitlyDisabledJunctionOffering(value: unknown): boolean {
-  return isRecord(value)
-    && (value.a_la_carte_enabled === false || value.is_orderable === false);
 }
 
 function normalizeCatalogPrice(
@@ -470,7 +415,6 @@ function normalizeCatalogPrice(
   return {
     amount,
     currency: "USD",
-    source: "junction_catalog",
   };
 }
 
@@ -490,10 +434,7 @@ function readIncludedMarkers(value: unknown): {
     if (name === null) {
       return [];
     }
-    return [{
-      name,
-      slug: readNullableBoundedText(candidate.slug, 180),
-    }];
+    return [{ name }];
   });
 
   return {
@@ -502,10 +443,7 @@ function readIncludedMarkers(value: unknown): {
   };
 }
 
-function readEligibleAreaLabIds(
-  value: unknown,
-  requestedLabId?: number,
-): JunctionAreaLabsProjection {
+function readEligibleAreaLabIds(value: unknown): JunctionAreaLabsProjection {
   if (!isRecord(value)) {
     throw labsUnavailableError(true);
   }
@@ -544,9 +482,7 @@ function readEligibleAreaLabIds(
 
   return {
     hadMalformedEntries,
-    labIds: requestedLabId === undefined
-      ? uniqueLabIds
-      : uniqueLabIds.includes(requestedLabId) ? [requestedLabId] : [],
+    labIds: uniqueLabIds,
   };
 }
 
@@ -584,10 +520,9 @@ function normalizeJunctionPscLocations(
     throw labsUnavailableError(true);
   }
 
-  const labSlug = readNullableBoundedText(root.slug, 180);
   let hadMalformedEntries = false;
   const locations = root.patient_service_centers.flatMap((candidate) => {
-    const location = normalizeJunctionPscLocation(candidate, requestedLabId, labSlug);
+    const location = normalizeJunctionPscLocation(candidate, requestedLabId);
     if (!location) {
       hadMalformedEntries = true;
       return [];
@@ -601,8 +536,7 @@ function normalizeJunctionPscLocations(
 function normalizeJunctionPscLocation(
   value: unknown,
   labId: number,
-  labSlug: string | null,
-): HostedRuntimeLabsLocation | null {
+): JunctionLocationProjection | null {
   if (!isRecord(value) || !isRecord(value.metadata)) {
     return null;
   }
@@ -630,21 +564,20 @@ function normalizeJunctionPscLocation(
   }
 
   return {
-    address: {
-      city,
-      line1,
-      line2: readNullableBoundedText(metadata.second_line, 240),
-      postalCode,
-      state,
+    identity: `${labId}:${siteCode}`,
+    location: {
+      address: {
+        city,
+        line1,
+        line2: readNullableBoundedText(metadata.second_line, 240),
+        postalCode,
+        state,
+      },
+      coordinates: normalizeCoordinates(value.location),
+      distanceMiles,
+      name,
+      phoneNumber: readNullableBoundedText(metadata.phone_number, 40),
     },
-    capabilities: readBoundedStringArray(value.capabilities, 20, 120),
-    coordinates: normalizeCoordinates(value.location),
-    distanceMiles,
-    labId,
-    labSlug,
-    name,
-    phoneNumber: readNullableBoundedText(metadata.phone_number, 40),
-    siteCode,
   };
 }
 
@@ -673,33 +606,32 @@ function normalizeCoordinates(
 }
 
 function dedupeAndSortLocations(
-  locations: HostedRuntimeLabsLocation[],
-): HostedRuntimeLabsLocation[] {
-  const bySite = new Map<string, HostedRuntimeLabsLocation>();
+  locations: JunctionLocationProjection[],
+): JunctionLocationProjection[] {
+  const bySite = new Map<string, JunctionLocationProjection>();
 
-  for (const location of locations) {
-    const key = `${location.labId}:${location.siteCode}`;
-    const previous = bySite.get(key);
-    if (!previous || location.distanceMiles < previous.distanceMiles) {
-      bySite.set(key, location);
+  for (const projection of locations) {
+    const previous = bySite.get(projection.identity);
+    if (!previous || projection.location.distanceMiles < previous.location.distanceMiles) {
+      bySite.set(projection.identity, projection);
     }
   }
 
   return [...bySite.values()].sort((left, right) =>
-    left.distanceMiles - right.distanceMiles
-      || left.name.localeCompare(right.name)
-      || left.siteCode.localeCompare(right.siteCode));
+    left.location.distanceMiles - right.location.distanceMiles
+      || left.location.name.localeCompare(right.location.name)
+      || left.identity.localeCompare(right.identity));
 }
 
 function dedupeOfferings(
-  offerings: HostedRuntimeLabsOffering[],
-): HostedRuntimeLabsOffering[] {
+  offerings: JunctionOfferingProjection[],
+): JunctionOfferingProjection[] {
   const seen = new Set<string>();
   return offerings.filter((offering) => {
-    if (seen.has(offering.offeringId)) {
+    if (seen.has(offering.identity)) {
       return false;
     }
-    seen.add(offering.offeringId);
+    seen.add(offering.identity);
     return true;
   });
 }
@@ -745,22 +677,6 @@ function readNullableBoundedText(value: unknown, maxLength: number): string | nu
   return readBoundedText(value, maxLength);
 }
 
-function readBoundedStringArray(
-  value: unknown,
-  maxEntries: number,
-  maxLength: number,
-): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const entries = value.flatMap((candidate) => {
-    const normalized = readBoundedText(candidate, maxLength);
-    return normalized ? [normalized] : [];
-  });
-  return [...new Set(entries)].slice(0, maxEntries);
-}
-
 function readFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -793,13 +709,5 @@ function labsUnavailableError(retryable: boolean) {
     httpStatus: 503,
     message: "Labs are temporarily unavailable. Please try again later.",
     retryable,
-  });
-}
-
-function labsOfferingNotFoundError() {
-  return hostedOnboardingError({
-    code: "LABS_OFFERING_NOT_FOUND",
-    httpStatus: 404,
-    message: "This lab offering is no longer available.",
   });
 }

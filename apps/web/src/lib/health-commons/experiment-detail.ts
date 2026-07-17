@@ -11,6 +11,7 @@ import type {
 import {
   createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsWebExperimentIndex,
+  isRunnableProtocolStatus,
   loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
@@ -82,7 +83,7 @@ export function listHealthCommonsExperimentProtocols(
   return catalog
     .listByEntityType("protocol_variant")
     .filter((protocol) => protocol.entityType === "protocol_variant")
-    .filter((protocol) => protocol.status !== "deprecated")
+    .filter((protocol) => isRunnableProtocolStatus(protocol.status))
     .filter((protocol) => protocol.hidden !== true)
     .sort(compareProtocolEntities)
     .map((protocol) => toExperimentDetail(protocol, catalog));
@@ -131,14 +132,14 @@ export function listHealthCommonsExperimentRouteParams(): { experimentId: string
 function isPublicExperimentIndexEntry(
   entry: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
 ): boolean {
-  return entry.status !== "deprecated" && entry.hidden !== true;
+  return isRunnableProtocolStatus(entry.status) && entry.hidden !== true;
 }
 
 function isPublicExperimentProtocol(
   entity: HealthCommonsEntity | null,
 ): entity is HealthCommonsEntity & { entityType: "protocol_variant" } {
   return entity?.entityType === "protocol_variant"
-    && entity.status !== "deprecated"
+    && isRunnableProtocolStatus(entity.status)
     && entity.hidden !== true;
 }
 

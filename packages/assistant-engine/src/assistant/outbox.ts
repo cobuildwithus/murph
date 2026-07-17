@@ -45,6 +45,7 @@ import {
   resolveAssistantOutboxIntentPath,
 } from './outbox/intents.js'
 import {
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   createAssistantDeliveryRetryExhaustedError,
@@ -95,6 +96,9 @@ import {
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
 } from './device-activity-cron-tags.js'
 import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
+import {
+  resolveAssistantOutboxAutomationAuthorityError,
+} from './outbox/automation-authority.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -108,6 +112,7 @@ export {
   isAssistantOutboxReplyBubbleSuccessor,
 } from './outbox/ordering.js'
 export {
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   isAssistantOutboxRetryableError,
@@ -232,6 +237,7 @@ export type DeliverAssistantOutboxMessageResult =
 export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -401,6 +407,7 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      automationAuthority: input.automationAuthority ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -871,14 +878,23 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       message: 'Injected assistant delivery failure.',
     })
 
-    const deviceActivityAuthorityError = await resolveDeviceActivityOutboxAuthorityError({
-      intent: dispatchIntent,
-      vault: input.vault,
-    })
-    if (deviceActivityAuthorityError) {
+    const deviceActivityAuthorityError =
+      await resolveDeviceActivityOutboxAuthorityError({
+        intent: dispatchIntent,
+        vault: input.vault,
+      })
+    const authorityError =
+      deviceActivityAuthorityError ??
+      (await resolveAssistantOutboxAutomationAuthorityError({
+        intent: dispatchIntent,
+        vault: input.vault,
+      }))
+    if (authorityError) {
       const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
-        error: deviceActivityAuthorityError,
-        failedAt: now,
+        error: authorityError,
+        // `now` may be the earlier drain-selection timestamp. Authority is
+        // evaluated at provider entry, so persist that wall-clock failure time.
+        failedAt: new Date(),
         intent: dispatchIntent,
         intentPath: dispatchIntentPath,
         status: 'failed',
@@ -1083,6 +1099,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1110,6 +1127,7 @@ export async function deliverAssistantOutboxMessage(input: {
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    automationAuthority: input.automationAuthority ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,

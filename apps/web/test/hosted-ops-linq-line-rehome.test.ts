@@ -651,6 +651,8 @@ function buildLine(
     activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
+    proactiveConversationCount: number | null;
+    proactiveConversationDayUtc: Date | null;
   }> = {},
 ): HostedLinqAssignableHomeLine {
   const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
@@ -665,6 +667,8 @@ function buildLine(
     phoneNumber,
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey,
+    proactiveConversationCount: overrides.proactiveConversationCount ?? null,
+    proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
   };
 }
 

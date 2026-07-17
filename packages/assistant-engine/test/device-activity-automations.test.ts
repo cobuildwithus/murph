@@ -1711,6 +1711,7 @@ function createDeviceActivityAutomation(input: {
 }): AutomationQueryRecord {
   const automationId = input.automationId ?? 'auto_walk'
   return {
+    activeUntil: null,
     automationId,
     assistantTargetOverride: input.assistantTargetOverride ?? null,
     continuityPolicy: input.continuityPolicy ?? 'preserve',
@@ -1739,6 +1740,7 @@ function createDeviceActivityAutomation(input: {
     slug: automationId,
     status: 'active',
     summary: null,
+    supportKind: null,
     tags: input.tags ?? [],
     title: 'After walk',
     updatedAt: '2026-06-07T10:00:00.000Z',

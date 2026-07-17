@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   access,
@@ -35,11 +36,17 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  createAssistantOutboxIntent,
+} from "@murphai/assistant-engine/assistant-outbox";
+import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
   withCanonicalWriteLock,
 } from "@murphai/core";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import {
   readHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
@@ -945,6 +952,56 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.evidence)).toBe(false);
     await expectMissing(path.join(vaultRoot, residuePaths.inputEvent));
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
+  });
+
+  it("checkpoints active runtime delivery refs without claiming the legacy public prefix", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
+    const activeContents = Buffer.from("active generated delivery\n");
+    const legacyRef = "exports/assistant-deliveries/base-era.pdf";
+    const legacyContents = "ordinary pre-existing vault file\n";
+    await mkdir(path.dirname(path.join(vaultRoot, activeRef)), { recursive: true });
+    await mkdir(path.dirname(path.join(vaultRoot, legacyRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    await writeFile(path.join(vaultRoot, legacyRef), legacyContents, "utf8");
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "active.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Generated delivery",
+      sessionId: "session-generated-delivery",
+      threadId: "thread-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-generated-delivery",
+      vault: vaultRoot,
+    });
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === activeRef)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === legacyRef)).toBe(true);
+    await expectPresent(path.join(vaultRoot, activeRef));
+    await expectPresent(path.join(vaultRoot, legacyRef));
   });
 
   it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {

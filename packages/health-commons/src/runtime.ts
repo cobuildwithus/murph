@@ -69,6 +69,7 @@ export type {
   HealthCommonsWebExperimentShell,
   HealthCommonsWebProjectionKey,
 } from "./web-artifacts.ts";
+export { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
 

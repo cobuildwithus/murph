@@ -12,6 +12,7 @@ import type {
 } from "@murphai/contracts";
 import {
   createHealthCommonsRouteBundleReader,
+  isRunnableProtocolStatus,
   loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
@@ -579,7 +580,7 @@ function compareProtocolRankings(
 
 function isRankableProtocolVariant(protocol: HealthCommonsEntity): boolean {
   return protocol.entityType === "protocol_variant"
-    && protocol.status !== "deprecated"
+    && isRunnableProtocolStatus(protocol.status)
     && protocol.hidden !== true;
 }
 

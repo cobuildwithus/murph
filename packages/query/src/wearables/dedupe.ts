@@ -62,6 +62,27 @@ export function dedupeSleepWindowCandidates(
       continue;
     }
 
+    existing.exactDuplicateCount =
+      (existing.exactDuplicateCount ?? 0)
+      + (candidate.exactDuplicateCount ?? 0)
+      + 1;
+    existing.evidenceOmittedCount =
+      (existing.evidenceOmittedCount ?? 0)
+      + (candidate.evidenceOmittedCount ?? 0);
+    existing.evidenceOmittedExactDuplicateCount =
+      (existing.evidenceOmittedExactDuplicateCount ?? 0)
+      + (candidate.evidenceOmittedExactDuplicateCount ?? 0);
+    if (
+      (existing.sleepType === undefined || existing.sleepType === "unknown")
+      && candidate.sleepType !== undefined
+      && candidate.sleepType !== "unknown"
+    ) {
+      existing.sleepType = candidate.sleepType;
+      existing.nap = candidate.sleepType === "nap";
+    }
+    if (!existing.timeZone && candidate.timeZone) {
+      existing.timeZone = candidate.timeZone;
+    }
     existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
     existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
     existing.recordedAt = latestIsoTimestamp([existing.recordedAt, candidate.recordedAt]);

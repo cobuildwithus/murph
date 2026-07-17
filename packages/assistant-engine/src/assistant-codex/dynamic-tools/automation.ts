@@ -2,9 +2,11 @@ import { z } from 'zod'
 
 import {
   automationAssistantTargetOverrideSchema,
+  automationActiveUntilSchema,
   automationContinuityPolicyValues,
   automationScheduleSchema,
   automationStatusValues,
+  automationSupportKindValues,
 } from '@murphai/contracts'
 import type {
   AssistantHostedAutomationTool,
@@ -18,6 +20,10 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const AUTOMATION_TOOL_RESULT_MAX_BYTES = 24_000
 const automationIdentifierSchema = z.string().trim().min(1).max(191)
+const automationSupportSeriesIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,199})$/u)
 const automationSlugSchema = z
   .string()
   .trim()
@@ -31,6 +37,7 @@ const automationTagsSchema = z
 
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
+  activeUntil: automationActiveUntilSchema.nullable().optional(),
   assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
   automationId: automationIdentifierSchema.optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
@@ -39,12 +46,15 @@ const saveAutomationArgumentsSchema = z.object({
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
   summary: automationSummarySchema.nullable().optional(),
+  supportKind: z.enum(automationSupportKindValues).nullable().optional(),
+  supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
 }).strict()
 
 const patchAutomationArgumentsSchema = z.object({
   action: z.literal('patch'),
+  activeUntil: automationActiveUntilSchema.nullable().optional(),
   assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema.optional(),
@@ -54,10 +64,13 @@ const patchAutomationArgumentsSchema = z.object({
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
   summary: automationSummarySchema.nullable().optional(),
+  supportKind: z.enum(automationSupportKindValues).nullable().optional(),
+  supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema.optional(),
 }).strict().superRefine((value, context) => {
   const patchKeys = [
+    'activeUntil',
     'assistantTargetOverride',
     'continuityPolicy',
     'instructions',
@@ -66,6 +79,8 @@ const patchAutomationArgumentsSchema = z.object({
     'slug',
     'status',
     'summary',
+    'supportKind',
+    'supportSeriesId',
     'tags',
     'title',
   ] as const
@@ -78,16 +93,23 @@ const patchAutomationArgumentsSchema = z.object({
   }
 })
 
+const reconcileAutomationArgumentsSchema = z.object({
+  action: z.literal('reconcile'),
+  desiredAutomationIds: z.array(automationIdentifierSchema).max(200),
+  supportSeriesId: automationSupportSeriesIdSchema,
+}).strict()
+
 const automationArgumentsSchema = z.discriminatedUnion('action', [
   saveAutomationArgumentsSchema,
   patchAutomationArgumentsSchema,
+  reconcileAutomationArgumentsSchema,
 ])
 
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
   description:
-    'Create or update one durable Murph automation for the current authenticated conversation. save binds delivery to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. Use patch status to pause, reactivate, or archive. The result identifies the automation, whether it was created, its route binding, and status. Never pass credentials, delivery targets, filesystem paths, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save binds delivery to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -113,6 +135,7 @@ export function readAutomationDynamicToolRequest(input: {
     schema: automationArgumentsSchema,
     schemaRootKeys: [
       'action',
+      'activeUntil',
       'assistantTargetOverride',
       'automationId',
       'continuityPolicy',
@@ -123,8 +146,11 @@ export function readAutomationDynamicToolRequest(input: {
       'slug',
       'status',
       'summary',
+      'supportKind',
+      'supportSeriesId',
       'tags',
       'title',
+      'desiredAutomationIds',
     ],
     toolName: 'murph.automation',
     value: input.arguments,
@@ -171,14 +197,23 @@ export async function executeAutomationDynamicTool(input: {
 function serializeAutomationToolResponse(
   response: AssistantHostedAutomationToolResponse,
 ): string | null {
-  const payload = {
-    action: response.action,
-    automationId: response.automationId,
-    created: response.created,
-    lookupId: response.lookupId,
-    routeBinding: response.routeBinding,
-    status: response.status,
-  }
+  const payload = response.action === 'reconcile'
+    ? {
+        action: response.action,
+        archivedCount: response.archivedCount,
+        matchedCount: response.matchedCount,
+        missingDesiredAutomationIds: response.missingDesiredAutomationIds,
+        supportSeriesId: response.supportSeriesId,
+        unchangedCount: response.unchangedCount,
+      }
+    : {
+        action: response.action,
+        automationId: response.automationId,
+        created: response.created,
+        lookupId: response.lookupId,
+        routeBinding: response.routeBinding,
+        status: response.status,
+      }
   try {
     const text = JSON.stringify(payload) ?? 'null'
     return new TextEncoder().encode(text).byteLength <= AUTOMATION_TOOL_RESULT_MAX_BYTES

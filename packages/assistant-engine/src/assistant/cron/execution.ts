@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
+import {
+  archiveAutomationIfActiveUntilElapsed,
+  isVaultError,
+  setScheduledLogStatus,
+  upsertAutomation,
+} from '@murphai/core'
 import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
@@ -16,6 +21,7 @@ import {
   type AssistantCronRunRecord,
   type AssistantCronRunOutcome,
   type AssistantCronTrigger,
+  type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -35,8 +41,12 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
-import { runExperimentLifecycleOutcomePrecondition } from '../experiment-support-automations.js'
 import {
+  runExperimentLifecycleDeliveryAuthorityPrecondition,
+  runExperimentLifecycleOutcomePrecondition,
+} from '../experiment-support-automations.js'
+import {
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   isAssistantOutboxRetryableError,
   markAssistantOutboxIntentMirrorTerminalById,
   type AssistantOutboxDispatchMode,
@@ -492,6 +502,8 @@ export async function executeClaimedAssistantCronJob(
   let outcome: AssistantCronRunOutcome = 'failed'
   let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
+  let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
+  let canonicalSourceSkipReason: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -544,6 +556,16 @@ export async function executeClaimedAssistantCronJob(
         job: input.job,
         paths: input.paths,
       })
+      const authority = await resolveAssistantCronCanonicalSourceAuthority({
+        job: input.job,
+        now: new Date(startedAt),
+        trigger: input.trigger,
+        vault: input.vault,
+      })
+      if (authority.kind !== 'current') {
+        canonicalSourceDisposition = authority.kind
+        canonicalSourceSkipReason = authority.reason
+      }
     }
 
     // Lifecycle-owned writes happen before notification expiry so a cleanup
@@ -552,6 +574,7 @@ export async function executeClaimedAssistantCronJob(
     let lifecycleSkipReason: string | null = null
     if (
       deviceActivityAuthority.error === null &&
+      canonicalSourceSkipReason === null &&
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
@@ -571,13 +594,17 @@ export async function executeClaimedAssistantCronJob(
       input.trigger === 'scheduled' &&
         !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
         ? resolveStaleAssistantCronNotificationError({
-            job: claimedJob,
+            job: input.job,
             nowIso: startedAt,
             occurrenceAt,
           })
         : null
 
-    if (deviceActivityAuthority.error !== null) {
+    if (canonicalSourceSkipReason !== null) {
+      outcome = 'skipped_gate'
+      reason = `canonical_source_${canonicalSourceDisposition}`
+      errorText = canonicalSourceSkipReason
+    } else if (deviceActivityAuthority.error !== null) {
       outcome = 'skipped_gate'
       reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
@@ -694,7 +721,37 @@ export async function executeClaimedAssistantCronJob(
                   },
                 }
               : {}),
+            beforeDelivery: async () => {
+              const authority = await resolveAssistantCronCanonicalSourceAuthority({
+                job: input.job,
+                now: new Date(),
+                trigger: input.trigger,
+                vault: input.vault,
+              })
+              if (authority.kind !== 'current') {
+                canonicalSourceDisposition = authority.kind
+                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
+              }
+              await assertAssistantCronLifecycleNotificationStillAuthorized({
+                job: input.job,
+                vault: input.vault,
+              })
+            },
             beforeCommit: async (context) => {
+              const authority = await resolveAssistantCronCanonicalSourceAuthority({
+                job: input.job,
+                now: new Date(),
+                trigger: input.trigger,
+                vault: input.vault,
+              })
+              if (authority.kind !== 'current') {
+                canonicalSourceDisposition = authority.kind
+                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
+              }
+              await assertAssistantCronLifecycleNotificationStillAuthorized({
+                job: input.job,
+                vault: input.vault,
+              })
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -709,7 +766,7 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
             },
-            instructions: buildAssistantCronExecutionInstructions(claimedJob),
+            instructions: buildAssistantCronExecutionInstructions(input.job),
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
               trigger: input.trigger,
@@ -728,6 +785,8 @@ export async function executeClaimedAssistantCronJob(
             channel: claimedJob.target.channel,
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
+            outboxAutomationAuthority:
+              resolveAssistantCronOutboxAutomationAuthority(input.job),
             participantId: claimedJob.target.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
@@ -832,6 +891,17 @@ export async function executeClaimedAssistantCronJob(
         outcome = 'failed'
         reason = errorCode ?? 'background_maintenance_yield_failed'
       }
+    } else if (error instanceof AssistantCronCanonicalSourceInvalidatedError) {
+      canonicalSourceDisposition = error.disposition
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = `canonical_source_${error.disposition}`
+    } else if (error instanceof AssistantCronLifecycleNotificationInvalidatedError) {
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = 'lifecycle_precondition'
     } else {
       const yieldedError =
         error instanceof AssistantCronForegroundYieldedError ||
@@ -847,7 +917,10 @@ export async function executeClaimedAssistantCronJob(
       } else {
         errorText = errorMessage(error)
         errorCode = readAssistantCronErrorCode(error)
-        failureConsumesOccurrence = assistantCronDeliveryFailureConsumesOccurrence(error)
+        failureConsumesOccurrence = assistantCronDeliveryFailureConsumesOccurrence(
+          error,
+          input.job,
+        )
         reason = errorCode ?? 'error'
       }
       outcome = 'failed'
@@ -973,7 +1046,15 @@ export async function executeClaimedAssistantCronJob(
     })
     let removedAfterRun = false
 
-    if (
+    if (canonicalSourceDisposition === 'inactive') {
+      removeAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        resolveCanonicalAssistantCronJobId(input.job.source),
+      )
+      removedAfterRun = true
+    } else if (canonicalSourceDisposition === 'changed') {
+      upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
+    } else if (
       shouldRemoveAssistantCronJobAfterRun(
         finalizedJob,
         run,
@@ -1064,8 +1145,169 @@ function isResearchOrientedManagedAutomationCronJob(
   )
 }
 
-function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
-  return job.prompt
+type AssistantCronCanonicalSourceDisposition =
+  | 'changed'
+  | 'current'
+  | 'inactive'
+
+type AssistantCronCanonicalSourceAuthority =
+  | { kind: 'current' }
+  | {
+      kind: Exclude<AssistantCronCanonicalSourceDisposition, 'current'>
+      reason: string
+    }
+
+async function resolveAssistantCronCanonicalSourceAuthority(input: {
+  job: ResolvedAssistantCronJob
+  now: Date
+  trigger: AssistantCronTrigger
+  vault: string
+}): Promise<AssistantCronCanonicalSourceAuthority> {
+  if (
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
+    return { kind: 'current' }
+  }
+
+  try {
+    const result = await archiveAutomationIfActiveUntilElapsed({
+      expectedUpdatedAt: input.job.source.updatedAt,
+      lookup: input.job.source.automationId,
+      now: input.now,
+      vaultRoot: input.vault,
+    })
+    if (result.archived) {
+      return {
+        kind: 'inactive',
+        reason: 'automation reached its activeUntil boundary',
+      }
+    }
+    const manualRunOfPausedSource =
+      input.trigger === 'manual' && input.job.source.status === 'paused'
+    if (
+      result.record.status !== 'active' &&
+      !(manualRunOfPausedSource && result.record.status === 'paused')
+    ) {
+      return {
+        kind: 'inactive',
+        reason: `automation status changed to ${result.record.status}`,
+      }
+    }
+    if (result.record.updatedAt !== input.job.source.updatedAt) {
+      return {
+        kind: 'changed',
+        reason: 'automation changed after this occurrence was claimed',
+      }
+    }
+    return { kind: 'current' }
+  } catch (error) {
+    if (isVaultError(error) && error.code === 'VAULT_AUTOMATION_MISSING') {
+      return {
+        kind: 'inactive',
+        reason: 'automation was removed after this occurrence was claimed',
+      }
+    }
+    throw error
+  }
+}
+
+async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
+  job: ResolvedAssistantCronJob
+  vault: string
+}): Promise<void> {
+  if (
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
+    return
+  }
+
+  const result = await runExperimentLifecycleDeliveryAuthorityPrecondition({
+    automationId: input.job.source.automationId,
+    tags: input.job.source.tags,
+    vault: input.vault,
+  })
+  if (result.kind === 'skip') {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(result.reason)
+  }
+}
+
+function resolveAssistantCronOutboxAutomationAuthority(
+  job: ResolvedAssistantCronJob,
+): AssistantOutboxIntent['automationAuthority'] {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return null
+  }
+
+  // A manual run is a distinct, current user authorization for a paused job.
+  // It intentionally does not inherit active automation lifecycle authority;
+  // active jobs always carry their exact revision even when the first provider
+  // attempt is immediate, because a transient failure can still enter outbox.
+  if (job.source.status !== 'active') {
+    return null
+  }
+
+  return {
+    automationId: job.source.automationId,
+    expectedUpdatedAt: job.source.updatedAt,
+  }
+}
+
+function buildAssistantCronExecutionInstructions(
+  job: ResolvedAssistantCronJob,
+): string {
+  const lastFailedAt = job.job.state.lastFailedAt
+  const retryEvidence =
+    !lastFailedAt ||
+    !assistantCronTimestampIsLater(lastFailedAt, job.job.state.lastSucceededAt)
+      ? null
+      : [
+          'Delivery integrity evidence (engine-supplied):',
+          `- A previous attempt failed or ended without confirmed delivery at ${lastFailedAt}.`,
+          '- Do not interpret the absence of a user reply to that attempt as silence, disengagement, or non-adherence.',
+          '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
+        ].join('\n')
+  const supportScope = buildAssistantCronSupportScopeInstructions(job)
+
+  return [job.job.prompt, retryEvidence, supportScope]
+    .filter((section): section is string => section !== null)
+    .join('\n\n')
+}
+
+function buildAssistantCronSupportScopeInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.supportKind === null
+  ) {
+    return null
+  }
+
+  const exactScope = job.source.supportKind === 'reminder'
+    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. Do not ask a proactive repair, accountability, reflection, or follow-up question.'
+    : job.source.supportKind === 'check_in'
+      ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
+      : job.source.supportKind === 'review'
+        ? "Conduct only the bounded review and ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
+        : 'Provide only the agreed weekly summary shape from current evidence. Do not append a surprise accountability, repair, or coaching question.'
+
+  return [
+    'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
+    `- Persisted support kind: ${job.source.supportKind}.`,
+    `- ${exactScope}`,
+  ].join('\n')
+}
+
+function assistantCronTimestampIsLater(
+  candidate: string,
+  reference: string | null | undefined,
+): boolean {
+  const candidateMs = Date.parse(candidate)
+  const referenceMs = reference ? Date.parse(reference) : Number.NEGATIVE_INFINITY
+  return Number.isFinite(candidateMs) && candidateMs > referenceMs
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
@@ -1353,7 +1595,9 @@ function shouldRemoveAssistantCronJobAfterRun(
 // A stale-skipped wake consumes its occurrence like a success so one-shots
 // archive and recurring schedules advance; a delivery-queued skip keeps the
 // occurrence pending until the outbound delivery confirms. Terminal delivery
-// failures also consume the occurrence while remaining failed for observability.
+// failures normally consume the occurrence while remaining failed for
+// observability. Automations explicitly requiring delivery keep the occurrence
+// retryable until their finite activeUntil boundary.
 function assistantCronRunConsumedOccurrence(
   run: AssistantCronRunRecord,
   pendingDeliveryIntentId: string | null,
@@ -1368,9 +1612,39 @@ function assistantCronRunConsumedOccurrence(
   )
 }
 
-function assistantCronDeliveryFailureConsumesOccurrence(error: unknown): boolean {
-  return assistantCronErrorHasNotificationDeliveryStage(error) &&
-    !isAssistantOutboxRetryableError(error)
+function assistantCronDeliveryFailureConsumesOccurrence(
+  error: unknown,
+  job: ResolvedAssistantCronJob,
+): boolean {
+  if (!assistantCronErrorHasNotificationDeliveryStage(error)) {
+    return false
+  }
+  if (assistantDeliveryErrorPreventsFreshIntentRetry(error)) {
+    return true
+  }
+  return !isAssistantOutboxRetryableError(error) &&
+    !assistantCronRequiredDeliveryCanRetry(job, new Date())
+}
+
+function assistantCronRequiredDeliveryCanRetry(
+  job: ResolvedAssistantCronJob,
+  now: Date,
+): boolean {
+  if (
+    !listAssistantCronNotificationTags(job).includes(
+      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+    )
+  ) {
+    return false
+  }
+
+  return (
+    job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.activeUntil !== null &&
+    Number.isFinite(Date.parse(job.source.activeUntil)) &&
+    now.getTime() < Date.parse(job.source.activeUntil)
+  )
 }
 
 function assistantCronErrorHasNotificationDeliveryStage(error: unknown): boolean {
@@ -1537,10 +1811,22 @@ async function resolveDeviceActivityParentAuthority(input: {
     }
   }
 
-  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+  let parentAutomation = await readAssistantDeviceActivityParentAutomation({
     metadata,
     vault: input.vault,
   })
+  if (
+    parentAutomation?.activeUntil &&
+    Date.now() >= Date.parse(parentAutomation.activeUntil)
+  ) {
+    const expiry = await archiveAutomationIfActiveUntilElapsed({
+      expectedUpdatedAt: parentAutomation.updatedAt,
+      lookup: parentAutomation.automationId,
+      now: new Date(),
+      vaultRoot: input.vault,
+    })
+    parentAutomation = expiry.record
+  }
   if (!parentAutomation || parentAutomation.status !== 'active') {
     return {
       assistantTargetOverride: null,
@@ -1636,17 +1922,21 @@ function normalizeAssistantCronRunReason(reason: string): string {
 }
 
 function resolveStaleAssistantCronNotificationError(input: {
-  job: AssistantCronJob
+  job: ResolvedAssistantCronJob
   nowIso: string
   occurrenceAt: string
 }): { latenessMinutes: number; message: string } | null {
-  if (input.job.scheduledLog) {
+  if (input.job.job.scheduledLog) {
     return null
   }
 
   const nowMs = Date.parse(input.nowIso)
   const occurrenceMs = Date.parse(input.occurrenceAt)
   if (!Number.isFinite(nowMs) || !Number.isFinite(occurrenceMs)) {
+    return null
+  }
+
+  if (assistantCronHasOpenFiniteOneShotActiveWindow(input.job, nowMs)) {
     return null
   }
 
@@ -1661,6 +1951,19 @@ function resolveStaleAssistantCronNotificationError(input: {
     message:
       `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`,
   }
+}
+
+function assistantCronHasOpenFiniteOneShotActiveWindow(
+  job: ResolvedAssistantCronJob,
+  nowMs: number,
+): boolean {
+  return (
+    job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.schedule.kind === 'at' &&
+    job.source.activeUntil !== null &&
+    nowMs < Date.parse(job.source.activeUntil)
+  )
 }
 
 function emitAssistantCronOccurrenceExpiredEvent(input: {
@@ -1789,6 +2092,24 @@ class AssistantCronForegroundYieldedError extends VaultCliError {
       'ASSISTANT_CRON_FOREGROUND_YIELDED',
       `Assistant cron job "${jobName}" yielded to fresh foreground input.`,
     )
+  }
+}
+
+class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
+  readonly disposition: Exclude<AssistantCronCanonicalSourceDisposition, 'current'>
+
+  constructor(input: Exclude<AssistantCronCanonicalSourceAuthority, { kind: 'current' }>) {
+    super(
+      'ASSISTANT_CRON_AUTHORITY_STALE',
+      input.reason,
+    )
+    this.disposition = input.kind
+  }
+}
+
+class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
+  constructor(reason: string) {
+    super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
   }
 }
 
