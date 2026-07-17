@@ -85,6 +85,39 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled notification turns receive no conversation-mutation tool, and unauthenticated group-email replies remain read-only: managed lifecycle cleanup stays deterministic in its existing owner. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
 
+## Hosted Labs Discovery
+
+`apps/web` is the sole credential, provider-egress, and normalization owner for
+read-only Labs discovery. It reads `JUNCTION_API_KEY`, targets the fixed
+production US Junction origin, and projects live provider-declared panels,
+biomarkers, catalog prices, ZIP coverage, and patient service centers into the
+strict `@murphai/hosted-execution/labs` contract. The authenticated Labs
+browser API at `POST /api/labs` and the signed hosted-runtime callback at
+`POST /api/internal/hosted-execution/labs/tool` call the same stateless service;
+neither path introduces a database, cache, sync job, search index, search
+history, or ZIP persistence. Junction's catalog and location read APIs require
+GET query parameters, so the Web owner sends the bounded catalog term or ZIP
+only to the fixed Junction origin and never records or logs the full outbound
+URL. The browser and Cloudflare boundaries remain semantic POST bodies.
+
+Cloudflare carries only an optional semantic Labs port over the existing signed
+`web-control.worker` boundary. `packages/assistant-runtime` passes that port
+into `packages/assistant-engine`, which registers the read-only `murph.labs`
+dynamic tool only for a verified private direct turn when the capability is
+present. Group and unverified contexts do not receive the tool. The assistant
+and browser receive only bounded normalized facts with provider provenance and
+check time; the provider credential, authorization header, raw body, and raw
+error remain inside Web.
+
+The authenticated, unlinked `/labs` page is a second consumer, not another
+catalog owner. It supports live search, offering detail, and a ZIP-based
+location list. Ordering, payment, booking, eligibility, requisitions, results,
+custom panels, maps, and navigation exposure remain absent. Provider amounts
+are current catalog prices rather than quotes, and a returned collection site
+is not an appointment or proof that a selected offering can be collected
+there. The behavior and deploy contract live in
+`agent-docs/product-specs/labs-discovery.md`.
+
 ## Hosted Clinical Records
 
 `apps/web` is the Clinical Records credential and provider-egress control plane.

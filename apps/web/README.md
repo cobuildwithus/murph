@@ -329,9 +329,18 @@ Required for production migrations:
 
 - `DIRECT_DATABASE_URL`
 
-Required for the hosted device-sync lane:
+Required for live Labs discovery:
 
 - `JUNCTION_API_KEY`
+
+This is the same canonical Junction credential used by hosted device sync.
+Labs discovery keeps the key server-only, targets the code-owned production US
+origin, and serves authenticated `POST /api/labs` plus signed
+`POST /api/internal/hosted-execution/labs/tool` through one stateless service.
+No catalog, query, or ZIP is persisted.
+
+Required for the hosted device-sync lane in addition:
+
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -815,11 +824,11 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 `PrismaPg`. The adapter owns external-pool disposal so `$disconnect()` retains
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
-transactions between backend connections. Pool limits remain five clients,
-five seconds for connection acquisition, and 30 seconds for idle retirement;
-tune those values only from measured pool and database pressure. Connection
-failure logs expose only a fixed failure category and numeric total, idle, and
-waiting counts.
+transactions between backend connections. The default pool limit is 15 clients
+per module runtime, with five seconds for connection acquisition and 30 seconds
+for idle retirement; tune those values only from measured pool and database
+pressure. Connection failure logs expose only a fixed failure category and
+numeric total, idle, and waiting counts.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the

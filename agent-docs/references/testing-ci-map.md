@@ -29,6 +29,20 @@ raw-first replay plus real multi-page importer resolution, assistant-runtime
 tests prove finite retry/preemption/reauthorization behavior, and Cloudflare
 tests prove the signed web-control adapter and POST-only outbound allowlist.
 
+Labs discovery coverage is likewise owner-split. Hosted-execution tests lock the
+strict `search` / `show` / `locations` request and response contracts. Hosted
+web tests cover the fixed Junction origin, provider normalization, bounds,
+timeouts, sanitized errors, browser-session API, signed callback, and the
+authenticated unlinked UI states. Cloudflare tests cover the signed semantic
+port and outbound allowlist. Assistant-runtime and assistant-engine tests cover
+port propagation, dynamic-tool registration, private-direct audience policy,
+action parsing/execution, and stable prompt guidance. Final change proof uses
+`pnpm test:diff` across every touched owner plus
+`pnpm test:scenario-integrity`, authenticated desktop/mobile browser proof,
+the required frontend and coverage specialist audits, the review-only Fable UI
+pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
+catalog or expose a production credential.
+
 Hosted personal usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
 included-first settlement, carryover balance, and crossing-operation behavior;
