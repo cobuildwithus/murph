@@ -1410,7 +1410,7 @@ describe('assistant skill assets', () => {
       'A bare outcome by itself is not enough to activate a durable support loop.',
     )
     expect(compact).toContain(
-      'make the value visible before asking about days, time, reminders, or support',
+      'make the value, schedule, and support concrete before any writes',
     )
     expect(compact).toContain(
       'A vague promise to "remind you" is not enough.',
@@ -1430,13 +1430,19 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('Offer it as a menu the user picks from')
     expect(raw).toContain('### 7. Mark the first launch')
     expect(compact).toContain(
+      'The launch close is not a movement-instruction turn.',
+    )
+    expect(compact).toContain(
+      'do not attach exercise-catalog images, cards, or carousels',
+    )
+    expect(compact).toContain(
       'one original 15–20 second standalone launch song',
     )
     expect(compact).toContain(
       'This is reply-time media, never a scheduled onboarding automation.',
     )
     expect(compact).toContain(
-      'Delight marks real value; it never substitutes for the launch preview or a working plan.',
+      'Delight marks real value; it never substitutes for the launch offer, working support, or mandatory text close.',
     )
     expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
@@ -1608,6 +1614,7 @@ describe('assistant skill assets', () => {
         readSkillFile(strengthTraining),
       ])
 
+    const compactCatalog = catalog.replace(/\s+/gu, ' ')
     const sharedReference =
       '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md'
     expect(physicalTherapyRaw).toContain(sharedReference)
@@ -1617,9 +1624,49 @@ describe('assistant skill assets', () => {
     expect(catalog).toContain(
       'vault-cli exercise show <id-or-slug>\n   --format json',
     )
-    expect(catalog).toContain('normally two to four and rarely more than five')
-    expect(catalog).toContain('attach returned\n   `images[]`')
-    expect(catalog).toContain('"no\n   catalog image yet"')
+    expect(compactCatalog).toContain(
+      'Decide likely familiarity per movement from the current conversation and durable context.',
+    )
+    expect(compactCatalog).toContain(
+      'Strong familiarity signals include stated experience in the relevant training modality, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
+    )
+    expect(compactCatalog).toContain(
+      'Let explicit modality experience cover common movements in that modality even when the user has not named them or used technical language',
+    )
+    expect(compactCatalog).toContain(
+      'regular calisthenics, for example, is a familiarity signal for ordinary push-up and pull-up variations.',
+    )
+    expect(compactCatalog).toContain(
+      'Treat stated novice status, expressed uncertainty about the movement, or no relevant experience signal as likely unfamiliar.',
+    )
+    expect(compactCatalog).toContain(
+      'A first plan with Murph is not itself novice evidence.',
+    )
+    expect(compactCatalog).toContain(
+      'Familiarity is still per movement: an experienced trainee can be new to an uncommon variation.',
+    )
+    expect(compactCatalog).toContain(
+      'Do not ask a separate experience question only to decide whether to include media.',
+    )
+    expect(compactCatalog).toContain(
+      'normally two to four and rarely more than five',
+    )
+    expect(compactCatalog).toContain(
+      'Exercise media belongs only in a response that is actually teaching or cueing a movement',
+    )
+    expect(compactCatalog).toContain(
+      'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
+    )
+    expect(compactCatalog).toContain(
+      'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+    )
+    expect(compactCatalog).toContain(
+      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+    )
+    expect(compactCatalog).toContain(
+      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+    )
+    expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )
@@ -1952,19 +1999,19 @@ describe('assistant skill assets', () => {
       'steer back to the goals they named and toward setting up the first habit or experiment below',
     )
     expect(compact).toContain(
-      'Before any scheduling or support logistics, create the first-value moment.',
+      'create the first-value launch offer before any plan or support write.',
     )
     expect(compact).toContain(
-      "follow `behavior-followthrough`'s launch-preview contract exactly",
+      "follow `behavior-followthrough`'s launch-offer contract exactly",
     )
     expect(compact).toContain(
-      'show the compact launch preview before asking about days, time, reminders, or support',
+      'the compact launch offer contains the proposed schedule, actionable reminder package, and early review.',
     )
     expect(compact).toContain(
-      "follow `behavior-followthrough`'s first-launch delight rule when it fits",
+      "always follow `behavior-followthrough`'s first-launch delight rule",
     )
     expect(compact).toContain(
-      'This is a reply-time celebration, not an onboarding automation',
+      'This is reply-time delight, not an onboarding automation',
     )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
