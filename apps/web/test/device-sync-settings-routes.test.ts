@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   getConnectionStatus: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
   listConfiguredDeviceSyncPublicProviderDescriptors: vi.fn(),
-  listConnectionSources: vi.fn(),
+  listConnectionSourcesForConnections: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
@@ -296,7 +296,7 @@ describe("device sync settings routes", () => {
       store: {
         getConnectionForUser: mocks.getConnectionForUser,
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
-        listConnectionSources: mocks.listConnectionSources,
+        listConnectionSourcesForConnections: mocks.listConnectionSourcesForConnections,
         listConnectionsForUser: mocks.listConnectionsForUser,
       },
     });
@@ -327,7 +327,7 @@ describe("device sync settings routes", () => {
     });
     mocks.getConnectionForUser.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
-    mocks.listConnectionSources.mockResolvedValue([]);
+    mocks.listConnectionSourcesForConnections.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.findManyDeviceConnections.mockResolvedValue([
       buildDeviceConnectionRecord({
@@ -860,7 +860,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource({
         resourceAvailabilitySummary: null,
       }),
@@ -989,7 +989,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource({
         resourceAvailabilitySummary: {
           steps: true,
@@ -1121,7 +1121,7 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       buildHostedDeviceConnectionSource(),
     ]);
 

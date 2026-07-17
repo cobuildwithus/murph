@@ -442,24 +442,24 @@ async function listDiagnosticConnectionEntries(input: {
   durableConnection: PublicDeviceSyncAccount;
 }>> {
   const durableConnections = await input.controlPlane.store.listConnectionsForUser(input.memberId);
-
-  return Promise.all(
-    durableConnections.map(async (durableConnection) => {
-      const browserConnection = toHostedBrowserDeviceSyncConnection(
-        durableConnection,
-        input.controlPlane.env.routingIndexKey,
-      );
-      const sources = await input.controlPlane.store.listConnectionSources(durableConnection.id);
-
-      return {
-        browserConnection,
-        browserConnectionSources: sources.map((source) =>
-          toHostedBrowserDeviceSyncConnectionSource(source, browserConnection.id)
-        ),
-        durableConnection,
-      };
-    }),
+  const sources = await input.controlPlane.store.listConnectionSourcesForConnections(
+    durableConnections.map((durableConnection) => durableConnection.id),
   );
+
+  return durableConnections.map((durableConnection) => {
+    const browserConnection = toHostedBrowserDeviceSyncConnection(
+      durableConnection,
+      input.controlPlane.env.routingIndexKey,
+    );
+
+    return {
+      browserConnection,
+      browserConnectionSources: sources
+        .filter((source) => source.connectionId === durableConnection.id)
+        .map((source) => toHostedBrowserDeviceSyncConnectionSource(source, browserConnection.id)),
+      durableConnection,
+    };
+  });
 }
 
 function redactDiagnosticProviderIdentifiers(value: Record<string, unknown>): Record<string, unknown> {

@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     requireHostedCloudflareCallbackRequest: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
+    listConnectionSourcesForConnections: vi.fn(),
     listConnectionsForUser: vi.fn(),
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
@@ -319,6 +320,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
     listConnectionSources = mocks.listConnectionSources;
+    listConnectionSourcesForConnections = mocks.listConnectionSourcesForConnections;
     listConnectionsForUser = mocks.listConnectionsForUser;
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
@@ -526,6 +528,7 @@ describe("hosted device-sync wakes", () => {
     mocks.markDirtyConnectionProcessed.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
     mocks.listConnectionSources.mockResolvedValue([]);
+    mocks.listConnectionSourcesForConnections.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.markConnectionSourcesDisconnected.mockResolvedValue(0);
     mocks.clearStoredProviderConfigCredential.mockResolvedValue(true);
@@ -2135,7 +2138,7 @@ describe("hosted device-sync wakes", () => {
         displayName: "Oura acct_sensitive",
       }),
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       {
         id: "src_123",
         connectionId: "dsc_123",
@@ -2194,6 +2197,107 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("groups batched connection sources by connection while preserving connection order", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({ id: "dsc_b" }),
+      buildHostedConnection({ id: "dsc_a" }),
+    ]);
+    const buildDurableSource = (overrides: {
+      id: string;
+      connectionId: string;
+      sourceProviderSlug: string;
+      lastSeenAt: string;
+      resourceAvailabilitySummary: Record<string, boolean>;
+    }) => ({
+      displayName: null,
+      status: "connected",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      sourceInstanceKey: "jxn_hidden",
+      firstSeenAt: "2026-03-26T12:00:00.000Z",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      updatedAt: "2026-03-26T12:00:00.000Z",
+      ...overrides,
+    });
+    // The batch query returns rows ordered by connectionId asc, which is NOT
+    // the order listConnectionsForUser returned the connections in.
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
+      buildDurableSource({
+        id: "src_a1",
+        connectionId: "dsc_a",
+        sourceProviderSlug: "oura",
+        lastSeenAt: "2026-03-26T12:00:00.000Z",
+        resourceAvailabilitySummary: { heartrate: true },
+      }),
+      buildDurableSource({
+        id: "src_b1",
+        connectionId: "dsc_b",
+        sourceProviderSlug: "garmin",
+        lastSeenAt: "2026-03-26T13:00:00.000Z",
+        resourceAvailabilitySummary: { sleep: true, workouts: true },
+      }),
+      buildDurableSource({
+        id: "src_b2",
+        connectionId: "dsc_b",
+        sourceProviderSlug: "whoop_v2",
+        lastSeenAt: "2026-03-26T11:00:00.000Z",
+        resourceAvailabilitySummary: { sleep: true },
+      }),
+    ]);
+
+    const result = await controlPlane.listConnections("user-123");
+
+    expect(mocks.listConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSourcesForConnections).toHaveBeenCalledWith(["dsc_b", "dsc_a"]);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+    expect(result.connections.map((connection) => connection.id)).toEqual([
+      buildPublicConnectionId("dsc_b"),
+      buildPublicConnectionId("dsc_a"),
+    ]);
+    // Sources are re-grouped per connection: dsc_b's sources first (in batch
+    // row order within the connection), then dsc_a's, matching the previous
+    // one-query-per-connection output exactly.
+    expect(result.connectionSources).toEqual([
+      expect.objectContaining({
+        connectionId: buildPublicConnectionId("dsc_b"),
+        sourceProviderSlug: "garmin",
+        resourceCount: 2,
+        lastSeenAt: "2026-03-26T13:00:00.000Z",
+      }),
+      expect.objectContaining({
+        connectionId: buildPublicConnectionId("dsc_b"),
+        sourceProviderSlug: "whoop_v2",
+        resourceCount: 1,
+        lastSeenAt: "2026-03-26T11:00:00.000Z",
+      }),
+      expect.objectContaining({
+        connectionId: buildPublicConnectionId("dsc_a"),
+        sourceProviderSlug: "oura",
+        resourceCount: 1,
+        lastSeenAt: "2026-03-26T12:00:00.000Z",
+      }),
+    ]);
+  });
+
+  it("lists no connection sources for members without connections", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([]);
+    mocks.listConnectionSourcesForConnections.mockResolvedValue([]);
+
+    await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
+      providers: [],
+      connections: [],
+      connectionSources: [],
+    });
+    expect(mocks.listConnectionSourcesForConnections).toHaveBeenCalledWith([]);
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+  });
+
   it("projects reconnect-needed source errors without exposing raw source error codes", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync"),
@@ -2205,7 +2309,7 @@ describe("hosted device-sync wakes", () => {
         provider: "junction",
       }),
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       {
         id: "src_whoop",
         connectionId: "dsc_junction_whoop",
@@ -2254,7 +2358,7 @@ describe("hosted device-sync wakes", () => {
         provider: "junction",
       }),
     ]);
-    mocks.listConnectionSources.mockResolvedValueOnce([
+    mocks.listConnectionSourcesForConnections.mockResolvedValueOnce([
       {
         id: "src_garmin",
         connectionId: "dsc_junction_garmin",

@@ -46,6 +46,7 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
+import type { HostedDeviceConnectionSource } from "./prisma-store";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 import { createHostedDeviceSyncRegistry } from "./providers";
 
@@ -110,25 +111,32 @@ export class HostedDeviceSyncPublicIngressService {
     connectionSources: HostedBrowserDeviceSyncConnectionSource[];
   }> {
     const connections = await this.context.store.listConnectionsForUser(userId);
-    const connectionEntries = await Promise.all(
-      connections.map(async (connection) => {
-        const browserConnection = this.toBrowserConnection(connection);
-        const sources = await this.context.store.listConnectionSources(connection.id);
-        return {
-          browserConnection,
-          sources,
-        };
-      }),
+    const connectionEntries = connections.map((connection) => ({
+      browserConnection: this.toBrowserConnection(connection),
+      connectionId: connection.id,
+    }));
+    const sourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
+    const sources = await this.context.store.listConnectionSourcesForConnections(
+      connectionEntries.map((entry) => entry.connectionId),
     );
+    for (const source of sources) {
+      const bucket = sourcesByConnectionId.get(source.connectionId);
+      if (bucket) {
+        bucket.push(source);
+      } else {
+        sourcesByConnectionId.set(source.connectionId, [source]);
+      }
+    }
 
     return {
       providers: this.describeProviders(),
       connections: connectionEntries.map((entry) => entry.browserConnection),
       connectionSources: connectionEntries.flatMap((entry) =>
-        entry.sources.map((source) => toHostedBrowserDeviceSyncConnectionSource(
-          source,
-          entry.browserConnection.id,
-        ))
+        (sourcesByConnectionId.get(entry.connectionId) ?? []).map((source) =>
+          toHostedBrowserDeviceSyncConnectionSource(
+            source,
+            entry.browserConnection.id,
+          ))
       ),
     };
   }

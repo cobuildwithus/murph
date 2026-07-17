@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   diagnoseBackfill: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
-  listConnectionSources: vi.fn(),
+  listConnectionSourcesForConnections: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
@@ -83,7 +83,7 @@ describe("hosted ops Junction diagnostics", () => {
       },
       store: {
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
-        listConnectionSources: mocks.listConnectionSources,
+        listConnectionSourcesForConnections: mocks.listConnectionSourcesForConnections,
         listConnectionsForUser: mocks.listConnectionsForUser,
       },
     });
@@ -106,7 +106,7 @@ describe("hosted ops Junction diagnostics", () => {
       provider: "junction",
     });
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
-    mocks.listConnectionSources.mockResolvedValue([
+    mocks.listConnectionSourcesForConnections.mockResolvedValue([
       {
         connectionId: "dsc_junction_123",
         createdAt: "2026-06-27T18:49:38.000Z",
@@ -425,6 +425,114 @@ describe("hosted ops Junction diagnostics", () => {
         timeseriesDays: 7,
         windowEnd: "2026-06-28T23:59:59.999Z",
         windowStart: "2025-12-30T23:59:59.999Z",
+      },
+    });
+  });
+
+  it("excludes batched sources belonging to the member's other connections from the selected projection", async () => {
+    const junctionConnection = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-06-27T18:49:38.000Z",
+      createdAt: "2026-06-27T18:49:38.000Z",
+      displayName: "Junction",
+      externalAccountId: "junction-user-raw-id",
+      id: "dsc_junction_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: "2026-06-28T16:00:00.000Z",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+      updatedAt: "2026-06-28T08:51:00.000Z",
+    };
+    mocks.listConnectionsForUser.mockResolvedValue([
+      junctionConnection,
+      {
+        ...junctionConnection,
+        displayName: "Oura",
+        externalAccountId: "oura-user-raw-id",
+        id: "dsc_aaa_oura",
+        provider: "oura",
+      },
+    ]);
+    // Single batch result covering both connections, ordered by connectionId
+    // asc, with the same source provider slug on both rows: the diagnostic
+    // must keep only the selected Junction connection's row.
+    mocks.listConnectionSourcesForConnections.mockResolvedValue([
+      {
+        connectionId: "dsc_aaa_oura",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: null,
+        firstSeenAt: "2026-06-27T18:49:38.000Z",
+        id: "dcs_oura_999",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-06-28T08:50:56.000Z",
+        resourceAvailabilitySummary: Object.fromEntries(
+          Array.from({ length: 5 }, (_, index) => [`other_resource_${index}`, true]),
+        ),
+        sourceInstanceKey: "oura:other",
+        sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+        status: "connected",
+        updatedAt: "2026-06-28T08:50:56.000Z",
+      },
+      {
+        connectionId: "dsc_junction_123",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: null,
+        firstSeenAt: "2026-06-27T18:49:38.000Z",
+        id: "dcs_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-06-28T08:50:56.000Z",
+        resourceAvailabilitySummary: Object.fromEntries(
+          Array.from({ length: 18 }, (_, index) => [`resource_${index}`, true]),
+        ),
+        sourceInstanceKey: "oura:default",
+        sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+        status: "connected",
+        updatedAt: "2026-06-28T08:50:56.000Z",
+      },
+    ]);
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+          windowEnd: "2026-06-28T23:59:59.999Z",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSourcesForConnections).toHaveBeenCalledWith([
+      "dsc_junction_123",
+      "dsc_aaa_oura",
+    ]);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      selectedConnection: {
+        connectionMatchCount: 1,
+        provider: "junction",
+      },
+      webSourceProjection: {
+        sourceCount: 1,
+        totalResourceCount: 18,
       },
     });
   });
