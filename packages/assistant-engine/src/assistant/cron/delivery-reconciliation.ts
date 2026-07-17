@@ -5,6 +5,7 @@ import {
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantStatePaths } from '../store/paths.js'
+import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
@@ -27,9 +28,11 @@ import {
   type CanonicalAssistantCronJobRecord,
 } from './canonical-jobs.js'
 import {
+  resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
 import { readAssistantOutboxIntent } from '../outbox/store.js'
+import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-policy.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
@@ -46,6 +49,8 @@ export interface AssistantCronPendingDeliveryRepairResult {
 type TerminalAssistantCronDeliveryOutcome =
   | {
       at: string
+      failureCode: string | null
+      failureStatus: 'abandoned' | 'failed' | 'missing'
       kind: 'failed'
       message: string
     }
@@ -103,7 +108,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       reconciled += 1
       localChanged = true
       if (
-        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal) &&
+        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal, null) &&
         shouldRemoveAssistantCronJobAfterDelivery(job)
       ) {
         localStore.jobs.splice(index, 1)
@@ -131,10 +136,12 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       ) ?? null
       reconciled += 1
       canonicalChanged = true
+      const deliveryConsumesOccurrence =
+        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal, source)
 
       if (
         source &&
-        assistantCronTerminalDeliveryConsumesOccurrence(input.terminal) &&
+        deliveryConsumesOccurrence &&
         shouldRemoveCanonicalAssistantCronSourceAfterDelivery({
           runtimeState,
           source,
@@ -154,6 +161,7 @@ async function reconcileAssistantCronTerminalDelivery(input: {
           runtimeState,
           source,
           terminal: input.terminal,
+          deliveryConsumesOccurrence,
         }),
       )
     }
@@ -224,6 +232,8 @@ export async function repairPendingAssistantCronDeliveries(input: {
         paths,
         terminal: {
           at: now.toISOString(),
+          failureCode: 'ASSISTANT_CRON_PENDING_DELIVERY_INTENT_MISSING',
+          failureStatus: 'missing',
           kind: 'failed',
           message:
             'Assistant cron pending delivery outbox intent is no longer available.',
@@ -352,6 +362,7 @@ function reconcileLocalAssistantCronJobAfterDelivery(input: {
 }
 
 function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
+  deliveryConsumesOccurrence: boolean
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord | null
   terminal: TerminalAssistantCronDeliveryOutcome
@@ -380,6 +391,35 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
     }
   }
 
+  if (!input.deliveryConsumesOccurrence) {
+    const failureCount = input.runtimeState.state.consecutiveFailures + 1
+    const retryAfterAt = input.source?.status === 'active'
+      ? new Date(
+          Date.parse(input.terminal.at) +
+            resolveAssistantCronFailureBackoffMs(failureCount),
+        ).toISOString()
+      : null
+    return {
+      ...input.runtimeState,
+      updatedAt: input.terminal.at,
+      state: {
+        ...runningClearedState,
+        pendingOccurrenceAt:
+          input.runtimeState.state.pendingOccurrenceAt ??
+          (input.source
+            ? resolveCanonicalAssistantCronOccurrenceAt(
+                input.source,
+                input.runtimeState,
+              )
+            : null),
+        retryAfterAt,
+        lastFailedAt: input.terminal.at,
+        lastError: input.terminal.message,
+        consecutiveFailures: failureCount,
+      },
+    }
+  }
+
   return {
     ...input.runtimeState,
     updatedAt: input.terminal.at,
@@ -396,8 +436,30 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
 
 function assistantCronTerminalDeliveryConsumesOccurrence(
   terminal: TerminalAssistantCronDeliveryOutcome,
+  source: CanonicalAssistantCronJobRecord | null,
 ): boolean {
-  return terminal.kind === 'sent' || terminal.kind === 'failed'
+  if (terminal.kind === 'sent') {
+    return true
+  }
+
+  if (
+    terminal.failureStatus !== 'failed' ||
+    assistantDeliveryErrorPreventsFreshIntentRetry({
+      code: terminal.failureCode,
+      message: terminal.message,
+    })
+  ) {
+    return true
+  }
+
+  return !(
+    source?.kind === 'automation' &&
+    source.status === 'active' &&
+    source.tags.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG) &&
+    source.activeUntil !== null &&
+    Number.isFinite(Date.parse(source.activeUntil)) &&
+    Date.parse(terminal.at) < Date.parse(source.activeUntil)
+  )
 }
 
 function resolveTerminalAssistantCronDeliveryOutcome(
@@ -413,6 +475,8 @@ function resolveTerminalAssistantCronDeliveryOutcome(
   if (intent.status === 'failed' || intent.status === 'abandoned') {
     return {
       at: intent.updatedAt,
+      failureCode: intent.lastError?.code ?? null,
+      failureStatus: intent.status,
       kind: 'failed',
       message:
         intent.lastError?.message ??

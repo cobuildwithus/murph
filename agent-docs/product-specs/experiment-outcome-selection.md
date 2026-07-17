@@ -1,6 +1,6 @@
 # Experiment Outcome Selection
 
-Last verified: 2026-07-12
+Last verified: 2026-07-16
 
 ## Product Boundary
 
@@ -31,8 +31,10 @@ Do not show or start a proposed experiment unless all of these are true:
 
 1. **The result matters to this member.** It connects to something they said
    they want. Available data is not evidence of value.
-2. **Murph can observe it credibly.** There is one primary outcome and only a
-   small number of supporting signals.
+2. **Murph can observe it credibly.** There is one primary outcome, it resolves
+   to a canonical metric, and only a small number of supporting signals. A
+   session-captured primary outcome also has exactly one declared matching
+   field with a usable type and range.
 3. **The result can plausibly change in the timeframe.** Otherwise lengthen
    the run, narrow the promise, or do not offer it.
 4. **The evidence can distinguish a worthwhile change from noise.** Define a
@@ -86,6 +88,15 @@ Wearable signals may be primary outcomes when the member explicitly cares
 about them and the protocol and duration make the claim credible. Otherwise
 they are supporting context.
 
+For wearable sleep evidence, use the provider-neutral sleep-pattern read model rather than interpreting a provider title or one nightly score. Keep these boundaries visible:
+
+- explicit naps are excluded from nightly-pattern dates, while legacy records with no explicit sleep type remain `unknown` and are included with a caveat rather than guessed from presentation text
+- missing dates remain missing and never mean zero sleep or no sleep
+- local clock statistics use each night's canonical IANA time zone, or an explicit validated reporting-zone fallback; without either, omit timing instead of inventing it
+- duration uses elapsed instants across DST, while bedtime, wake time, and midpoint use local clock time
+- provider and time-zone mixing, duplicate or overlapping windows, late arrivals, local-date mismatches, and both relative and absolute source freshness can weaken interpretation
+- session duration and selected total sleep are different quantities; provider-reported awake minutes are not automatically WASO or awakening count
+
 Duration must match the promise. A short run can fit a fast-moving sleep or
 symptom outcome. Strength, aerobic performance, body composition, visible
 physique change, and many lab outcomes often need longer windows or narrower
@@ -116,7 +127,9 @@ proxy.
 
 If the selected Health Commons protocol cannot credibly measure the promised
 result, clarify the mismatch, choose a better same-family protocol, narrow the
-promise, or offer a different option before creating a run.
+promise, or offer a different option before creating a run. Start must fail
+closed when the primary metric is unsupported or its session-captured field is
+undeclared; do not create the run and hope to repair outcome evidence later.
 
 ## Success Criteria
 

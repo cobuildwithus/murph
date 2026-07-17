@@ -117,6 +117,27 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+    expect(intent.automationAuthority).toBeUndefined()
+
+    const authorizedIntent = assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: ' automation_sleep_reminder ',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })
+    expect(authorizedIntent.automationAuthority).toEqual({
+      automationId: 'automation_sleep_reminder',
+      expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+    })
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: 'automation_sleep_reminder',
+        expectedStatus: 'active',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })).toThrow()
   })
 
   it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {
@@ -306,6 +327,41 @@ describe('assistant CLI delivery contracts', () => {
       'https://example.test/dead-bug/setup.txt',
     ]) {
       expect(() => normalizeAssistantResponseMediaUrl(url), url).toThrow()
+    }
+  })
+
+  it('accepts only the exact assistant runtime generated-delivery ref exception', () => {
+    const media = {
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      kind: 'vault_file' as const,
+      ref: '.runtime/operations/assistant/generated-deliveries/report.pdf',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }
+
+    expect(assistantResponseMediaSchema.parse(media)).toEqual(media)
+    expect(assistantResponseMediaSchema.parse({
+      ...media,
+      ref: 'documents/report.pdf',
+    })).toMatchObject({ ref: 'documents/report.pdf' })
+
+    for (const ref of [
+      '.runtime/operations/assistant/generated-deliveries-backup/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/nested/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/.hidden.pdf',
+      '.runtime/operations/assistant/generated-deliveries/report.pdf.tmp',
+      '.runtime/operations/assistant/outbox/intent.json',
+      '.hidden/report.pdf',
+      '../report.pdf',
+      '/report.pdf',
+    ]) {
+      expect(() => assistantResponseMediaSchema.parse({
+        ...media,
+        ref,
+      }), ref).toThrow()
     }
   })
 

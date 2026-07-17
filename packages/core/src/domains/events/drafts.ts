@@ -215,6 +215,7 @@ export function buildTypedEventRecord(
           startAt: draft.startAt,
           endAt: draft.endAt,
           durationMinutes: draft.durationMinutes,
+          sleepType: draft.sleepType,
         });
       case "intervention_session":
         return compactObject({
@@ -231,6 +232,7 @@ export function buildTypedEventRecord(
           afterExercise: draft.afterExercise,
           symptoms: draft.symptoms,
           confounders: draft.confounders,
+          fields: draft.fields,
         });
       case "experiment_context":
         return compactObject({

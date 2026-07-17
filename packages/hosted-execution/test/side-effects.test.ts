@@ -124,6 +124,50 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
+  it("accepts only the exact assistant runtime generated-delivery ref exception", () => {
+    const media = {
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: ".runtime/operations/assistant/generated-deliveries/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const build = (ref: string) => buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-generated-delivery",
+      effectId: "intent-generated-delivery",
+      payload: createHostedAssistantDeliveryPayload({
+        media: [{ ...media, ref }],
+      }),
+    });
+
+    const persistedEffect = build(media.ref);
+    const persistedEffects: unknown = JSON.parse(JSON.stringify([persistedEffect]));
+
+    expect(persistedEffect.payload.media).toEqual([media]);
+    expect(parseHostedAssistantDeliverySideEffects(persistedEffects)).toEqual([
+      persistedEffect,
+    ]);
+    expect(build("documents/report.pdf").payload.media).toMatchObject([
+      { ref: "documents/report.pdf" },
+    ]);
+
+    for (const ref of [
+      ".runtime/operations/assistant/generated-deliveries-backup/report.pdf",
+      ".runtime/operations/assistant/generated-deliveries/nested/report.pdf",
+      ".runtime/operations/assistant/generated-deliveries/.hidden.pdf",
+      ".runtime/operations/assistant/generated-deliveries/report.pdf.tmp",
+      ".runtime/operations/assistant/outbox/intent.json",
+      ".hidden/report.pdf",
+      "../report.pdf",
+      "/report.pdf",
+    ]) {
+      expect(() => build(ref), ref).toThrow();
+    }
+  });
+
   it("parses Telegram assistant-delivery voice memo media via the speech generation transport", () => {
     const payload = createHostedAssistantDeliveryPayload({
       media: [{

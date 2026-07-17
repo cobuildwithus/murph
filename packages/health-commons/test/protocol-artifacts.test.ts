@@ -43,9 +43,11 @@ function createFamily(input: {
 }
 
 function createProtocol(input: {
+  hidden?: boolean;
   key: string;
   relations?: HealthCommonsRelation[];
   slug: string;
+  status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community";
   title: string;
 }): HealthCommonsCatalogEntity {
   return {
@@ -54,6 +56,8 @@ function createProtocol(input: {
     key: input.key,
     slug: input.slug,
     title: input.title,
+    hidden: input.hidden,
+    status: input.status,
     relations: input.relations,
     body: `${input.title} body.`,
     relativePath: `${input.slug}.md`,
@@ -85,6 +89,44 @@ function createRouteIndex(): HealthCommonsWebRouteIndex {
 }
 
 describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
+  it("keeps legacy statusless protocols runnable and excludes every nonpublic protocol from run artifacts", () => {
+    const artifacts = buildHealthCommonsProtocolGeneratedArtifacts({
+      catalog: createCatalog([
+        createProtocol({
+          key: "protocol_variant:family/legacy",
+          slug: "protocols/family/legacy",
+          title: "Legacy Protocol",
+        }),
+        createProtocol({
+          key: "protocol_variant:family/draft",
+          slug: "protocols/family/draft",
+          status: "draft",
+          title: "Draft Protocol",
+        }),
+        createProtocol({
+          hidden: true,
+          key: "protocol_variant:family/hidden",
+          slug: "protocols/family/hidden",
+          title: "Hidden Protocol",
+        }),
+        createProtocol({
+          key: "protocol_variant:family/deprecated",
+          slug: "protocols/family/deprecated",
+          status: "deprecated",
+          title: "Deprecated Protocol",
+        }),
+      ]),
+      routeIndex: createRouteIndex(),
+    });
+
+    expect(artifacts.index.protocols.map((protocol) => protocol.key)).toEqual([
+      "protocol_variant:family/legacy",
+    ]);
+    expect(artifacts.runSpecs.protocols.map((protocol) => protocol.key)).toEqual([
+      "protocol_variant:family/legacy",
+    ]);
+  });
+
   it("keeps parent-owned child family edges and protocol parent family edges", () => {
     const artifacts = buildHealthCommonsProtocolGeneratedArtifacts({
       catalog: createCatalog([

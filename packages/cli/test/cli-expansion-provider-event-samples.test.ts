@@ -2109,6 +2109,7 @@ test.sequential(
           symptom: 'headache',
           intensity: 4,
           note: 'Resolved after breakfast.',
+          source: 'device',
           tags: ['symptom'],
         }),
         'utf8',
@@ -2238,6 +2239,7 @@ test.sequential(
       assert.equal(eventEdit.meta?.command, 'event edit')
       assert.equal(requireData(eventEdit).entity.kind, 'symptom')
       assert.equal(requireData(eventEdit).entity.data.note, 'Resolved after hydration.')
+      assert.equal(requireData(eventEdit).entity.data.source, 'device')
       assert.deepEqual(requireData(eventEdit).entity.data.tags, ['symptom', 'resolved'])
 
       const eventDelete = await runSliceCli<DeleteEnvelope>([

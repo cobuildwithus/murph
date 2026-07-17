@@ -6,6 +6,7 @@ import {
 
 import {
   ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   createAssistantDeliveryRetryExhaustedError,
@@ -203,6 +204,13 @@ describe('assistant outbox retry policy', () => {
       message:
         'Assistant outbound delivery reached its automatic retry limit and will not be retried automatically.',
     })
+  })
+
+  it('forbids a fresh intent after canonical automation authority is revoked', () => {
+    expect(assistantDeliveryErrorPreventsFreshIntentRetry({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      message: 'Automation authority changed before outbound delivery.',
+    })).toBe(true)
   })
 
   it('keeps message text from error-like objects', () => {

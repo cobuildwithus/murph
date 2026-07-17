@@ -40,6 +40,13 @@ export interface QueryWearableSummaryRowSet {
   rows: QueryWearableSummaryRow[];
 }
 
+export interface ReadWearableSummaryRowsFilters {
+  from?: string;
+  providers?: readonly string[];
+  summaryKinds?: readonly QueryWearableSummaryKind[];
+  to?: string;
+}
+
 export function insertWearableSummaryRows(
   database: DatabaseSync,
   wearableSummaries: readonly QueryWearableSummaryRow[],
@@ -71,12 +78,18 @@ export function insertWearableSummaryRows(
 
 export function readWearableSummaryRows(
   location: QueryProjectionLocation,
-  providerFilter: readonly string[] | undefined,
+  filters: ReadWearableSummaryRowsFilters = {},
 ): QueryWearableSummaryRowSet {
-  const providerFilterWasProvided = providerFilter !== undefined;
-  const providers = normalizeWearableProviders(providerFilter);
+  const providerFilterWasProvided = filters.providers !== undefined;
+  const providers = normalizeWearableProviders(filters.providers);
+  const summaryKinds = filters.summaryKinds === undefined
+    ? null
+    : [...new Set(filters.summaryKinds)];
 
-  if (providerFilterWasProvided && providers.length === 0) {
+  if (
+    (providerFilterWasProvided && providers.length === 0)
+    || (summaryKinds !== null && summaryKinds.length === 0)
+  ) {
     return {
       providerFilterWasProvided,
       providers,
@@ -95,7 +108,12 @@ export function readWearableSummaryRows(
     return {
       providerFilterWasProvided,
       providers,
-      rows: readRows(database, providers.length > 0 ? wearableProviderRowKeys(providers) : null),
+      rows: readRows(database, {
+        from: filters.from,
+        providerRowKeys: providers.length > 0 ? wearableProviderRowKeys(providers) : null,
+        summaryKinds,
+        to: filters.to,
+      }),
     };
   } finally {
     database.close();
@@ -104,12 +122,46 @@ export function readWearableSummaryRows(
 
 function readRows(
   database: DatabaseSync,
-  providerRowKeys: readonly string[] | null,
+  filters: {
+    from?: string;
+    providerRowKeys: readonly string[] | null;
+    summaryKinds: readonly QueryWearableSummaryKind[] | null;
+    to?: string;
+  },
 ): QueryWearableSummaryRow[] {
-  const parameters = providerRowKeys ? [...providerRowKeys] : [];
-  const whereSql = providerRowKeys
-    ? `WHERE provider_scope_key IN (${providerRowKeys.map(() => "?").join(", ")})`
-    : "";
+  const clauses: string[] = [];
+  const parameters: string[] = [];
+
+  if (filters.providerRowKeys) {
+    clauses.push(`provider_scope_key IN (${filters.providerRowKeys.map(() => "?").join(", ")})`);
+    parameters.push(...filters.providerRowKeys);
+  }
+
+  if (filters.summaryKinds) {
+    clauses.push(`summary_kind IN (${filters.summaryKinds.map(() => "?").join(", ")})`);
+    parameters.push(...filters.summaryKinds);
+  }
+
+  const dateClauses: string[] = [];
+  if (filters.from) {
+    dateClauses.push("summary_date >= ?");
+    parameters.push(filters.from);
+  }
+  if (filters.to) {
+    dateClauses.push("summary_date <= ?");
+    parameters.push(filters.to);
+  }
+  if (dateClauses.length > 0) {
+    const preserveSourceHealth = filters.summaryKinds === null
+      || filters.summaryKinds.includes("source_health");
+    clauses.push(
+      preserveSourceHealth
+        ? `(summary_kind = 'source_health' OR (${dateClauses.join(" AND ")}))`
+        : `(${dateClauses.join(" AND ")})`,
+    );
+  }
+
+  const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
   return database.prepare(`
     SELECT

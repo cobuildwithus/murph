@@ -11405,6 +11405,13 @@
         "durationMinutes": {
           "type": "integer",
           "minimum": 1
+        },
+        "sleepType": {
+          "type": "string",
+          "enum": [
+            "main_sleep",
+            "nap"
+          ]
         }
       },
       "required": [
@@ -12056,6 +12063,31 @@
               }
             }
           ]
+        },
+        "fields": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "required": [

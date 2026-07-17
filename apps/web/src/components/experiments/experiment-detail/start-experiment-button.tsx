@@ -25,6 +25,7 @@ import {
   type ExperimentStartContactChannels,
   type ExperimentStartContactKind,
   type ExperimentStartContactOption,
+  type ExperimentStartProtocolReference,
 } from "@/src/lib/experiments/start-experiment-contact";
 import { cn } from "@/src/lib/utils";
 import { useExperimentStartContactContext } from "./start-experiment-contact-context";
@@ -33,6 +34,7 @@ interface StartExperimentButtonProps {
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
   protocolDays: number;
+  protocolRef?: ExperimentStartProtocolReference | null;
   protocolTitle: string;
 }
 
@@ -54,6 +56,7 @@ export function StartExperimentButton({
   initialContactChannels = null,
   murphPhoneNumber = null,
   protocolDays,
+  protocolRef = null,
   protocolTitle,
 }: StartExperimentButtonProps) {
   const contactDefaults = useExperimentStartContactContext();
@@ -65,9 +68,10 @@ export function StartExperimentButton({
     () => resolveExperimentStartContactAction({
       initialContactChannels: resolvedInitialContactChannels,
       murphPhoneNumber: resolvedMurphPhoneNumber,
+      protocolRef,
       protocolTitle,
     }),
-    [protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
+    [protocolRef, protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
   );
 
   function handleAuthenticatedStartClick() {

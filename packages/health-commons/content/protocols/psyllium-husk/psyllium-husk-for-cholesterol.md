@@ -276,7 +276,7 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
   -
     biomarkerKey: "biomarker:triglycerides"
-    expected: "Small/no reliable change"
+    expected: "Small or no change"
     expectedDirection: mixed_or_contextual
     description: "Psyllium slows gut mixing and absorption but does not directly target liver triglyceride export."
     estimatedChange:

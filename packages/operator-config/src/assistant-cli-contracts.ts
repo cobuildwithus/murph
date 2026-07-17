@@ -12,6 +12,9 @@ import {
   type AutomationRoute,
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
+import {
+  isNormalizedAssistantVaultFileRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   gatewayDeliveryTargetKindValues,
@@ -333,6 +336,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
   })
   .strict()
 
+export const assistantOutboxAutomationAuthoritySchema = z
+  .object({
+    automationId: z.string().trim().min(1),
+    expectedUpdatedAt: isoTimestampSchema,
+  })
+  .strict()
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -412,7 +422,7 @@ const assistantVaultFileResponseMediaSchema = z
       .min(1)
       .max(1024)
       .refine(
-        (value) => isSafeAssistantVaultFileRef(value),
+        (value) => isNormalizedAssistantVaultFileRef(value),
         'Assistant vault file refs must be normalized vault-relative paths.',
       ),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -444,25 +454,6 @@ export const assistantResponseMediaSchema = z.union([
   assistantVoiceMemoResponseMediaSchema,
   assistantVaultFileResponseMediaSchema,
 ])
-
-function isSafeAssistantVaultFileRef(value: string): boolean {
-  if (
-    value.startsWith('/')
-    || /^[A-Za-z]:/u.test(value)
-    || value.includes('\\')
-    || /[\u0000-\u001F\u007F]/u.test(value)
-  ) {
-    return false
-  }
-
-  const segments = value.split('/')
-  return segments.every((segment) => (
-    segment.length > 0
-    && segment !== '.'
-    && segment !== '..'
-    && !segment.startsWith('.')
-  ))
-}
 
 export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
 
@@ -863,6 +854,9 @@ export const assistantOutboxIntentSchema = z
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+    automationAuthority: assistantOutboxAutomationAuthoritySchema
+      .nullable()
+      .optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -1661,6 +1655,9 @@ export type AssistantTurnReceiptSummary = z.infer<
   typeof assistantTurnReceiptSummarySchema
 >
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
+export type AssistantOutboxAutomationAuthority = z.infer<
+  typeof assistantOutboxAutomationAuthoritySchema
+>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
 >

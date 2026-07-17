@@ -291,6 +291,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
   answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: string;
+  directRecipientPhoneNumber?: string | null;
   failedAt?: string | null;
   failureCode?: string | null;
   failureReason?: string | null;

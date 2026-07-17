@@ -1,6 +1,6 @@
 # Experiment Adherence Confidence
 
-Last verified: 2026-07-07
+Last verified: 2026-07-16
 
 ## Current State
 
@@ -63,6 +63,15 @@ vault-cli experiment session log <id> --date <date> --status missed
 
 That explicit status flips the schedule cell from `assumed` to `missed` and reduces completed/assumed counts. Assistants should not delete events, write derived assumption events, or double-log confirmations. A user saying "yep all done" is conversational confirmation only; the assumed cells already count.
 
+## Typed Subjective Session Evidence
+
+An intervention-session event may be both confirmed adherence evidence and a typed subjective-outcome observation.
+
+- The run declares allowed field ids in `runPlan.logging.sessionFields`. `intervention_session.fields` accepts bounded strings, finite numbers, booleans, and `null`; undeclared fields, duplicate ids, duplicate aliases for one canonical metric, and recognized values outside their allowed type or range are rejected.
+- A recognized numeric field contributes a metric point only when the session is linked to this experiment by its id or slug. A simultaneous unrelated run must not inherit it.
+- The session event itself already supplies confirmed adherence. Do not emit a second event merely because one of its fields also supplies outcome evidence.
+- A missing subjective field is missing outcome evidence, not proof that the planned intervention was missed. Adherence state still follows the session event, explicit corrections, and the target's missing-evidence policy.
+
 ## Follow-Up Behavior
 
 Assumed-mode experiments do not send per-session missing-log nags. `experiment followup due --kind missed-log` should skip assumed targets with `session_assumed`.
@@ -82,6 +91,8 @@ Outcome confidence keeps the existing confidence enum. When `assumedSessions` is
 "Most sessions are assumed rather than confirmed."
 
 The existing reason-count mechanism demotes confidence. Results based mostly on assumptions should read as provisional; results with mostly sensed or confirmed adherence should not carry this reason.
+
+Subjective outcome confidence also depends on actual field coverage. Do not zero-fill missing ratings or substitute an adherence assumption for a sleep-quality, sleepiness, arousal, soreness, latency, or timing observation.
 
 ## Category Evidence
 

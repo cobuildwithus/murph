@@ -33,6 +33,15 @@ export default async function ExperimentDetailLayout({
   }
 
   const resultsPublic = resolveHealthCommonsExperimentResultsPublic(experimentId);
+  const runSpecRevisionId = resultsPublic?.commons.runSpecRevisionId ?? null;
+  if (!resultsPublic || !runSpecRevisionId) {
+    notFound();
+  }
+  const protocolRef = {
+    key: resultsPublic.commons.key,
+    pageRevisionId: resultsPublic.commons.pageRevisionId,
+    runSpecRevisionId,
+  };
   const protocolDays = Math.max(1, shell.durationDays - shell.baselineDays);
 
   return (
@@ -42,6 +51,7 @@ export default async function ExperimentDetailLayout({
           fallback={(
             <ExperimentStartButtonFallback
               protocolDays={protocolDays}
+              protocolRef={protocolRef}
               protocolTitle={shell.title}
             />
           )}
@@ -49,6 +59,7 @@ export default async function ExperimentDetailLayout({
           <HostedExperimentStartButton
             activeRunProtocol={resultsPublic}
             protocolDays={protocolDays}
+            protocolRef={protocolRef}
             protocolTitle={shell.title}
           />
         </Suspense>
