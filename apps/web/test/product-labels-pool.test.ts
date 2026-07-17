@@ -136,7 +136,7 @@ describe("product label database pool", () => {
         connectionString: "postgres://labels.example.test/labels",
         connectionTimeoutMillis: 5_000,
         idleTimeoutMillis: 30_000,
-        max: 3,
+        max: 15,
         statement_timeout: 8_000,
       },
     ]);

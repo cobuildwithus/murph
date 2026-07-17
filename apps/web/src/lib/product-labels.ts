@@ -10,7 +10,7 @@ export { normalizeProductLabelsConnectionString };
 const { Pool } = pg;
 
 const LABELS_DATABASE_ENV = "MURPH_LABELS_DB_URL";
-const DEFAULT_POOL_MAX = 3;
+const DEFAULT_POOL_MAX = 15;
 const DEFAULT_POOL_CONNECTION_TIMEOUT_MS = 5_000;
 const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
