@@ -85,63 +85,23 @@ export default async function SettingsPage({
   }
 
   const prisma = getPrisma();
-  const [
-    settingsSnapshot,
-    freshPrivySession,
-    familyOwner,
-    familyAccess,
-    secureApprovalStatus,
-    usageStatus,
-    usageCreditProjection,
-    usageTopUpOfferCodes,
-    usageTopUpActivePurchase,
-  ] =
-    authenticatedMember
-      ? await Promise.all([
-          readHostedAccountSettingsPageSnapshot({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          getHostedPrivySession().catch(() => null),
-          readHostedFamilyOwnerSnapshotForMember({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedFamilyAccessForMember({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedSecureApprovalStatus({
-            privyUserId: session?.privyUserId,
-          }),
-          readHostedPersonalAiUsageStatus({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedUsageCreditProjection({
-            beneficiaryMemberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedPersonalUsageCreditOfferCodes({
-            memberId: authenticatedMember.id,
-            prisma,
-          }).catch(() => []),
-          readHostedActiveUsageCreditPurchaseForPayer({
-            payerMemberId: authenticatedMember.id,
-            prisma,
-          }).catch(() => null),
-        ])
-      : [
-          null,
-          null,
-          null,
-          null,
-          { status: "unavailable" } as const,
-          null,
-          null,
-          [],
-          null,
-        ];
+  const settingsData = authenticatedMember
+    ? await readSettingsPageData({
+        memberId: authenticatedMember.id,
+        prisma,
+        privyUserId: session?.privyUserId,
+      })
+    : null;
+  const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
+  const freshPrivySession = settingsData?.freshPrivySession ?? null;
+  const familyOwner = settingsData?.familyOwner ?? null;
+  const familyAccess = settingsData?.familyAccess ?? null;
+  const secureApprovalStatus =
+    settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
+  const usageStatus = settingsData?.usageStatus ?? null;
+  const usageCreditProjection = settingsData?.usageCreditProjection ?? null;
+  const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
+  const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
@@ -346,6 +306,64 @@ export default async function SettingsPage({
       )}
     </div>
   );
+}
+
+async function readSettingsPageData(input: {
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+  privyUserId: string | null | undefined;
+}) {
+  const { memberId, prisma } = input;
+  // The Privy reads are network calls with no database cost, so they overlap
+  // the database reads below.
+  const freshPrivySessionPromise = getHostedPrivySession().catch(() => null);
+  const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
+    privyUserId: input.privyUserId,
+  });
+
+  // The database-backed reads run sequentially on purpose: several of them
+  // fan out parallel queries internally, and running the helpers concurrently
+  // let one settings render exhaust the shared connection pool.
+  const settingsSnapshot = await readHostedAccountSettingsPageSnapshot({
+    memberId,
+    prisma,
+  });
+  const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
+    memberId,
+    prisma,
+  });
+  const familyAccess = await readHostedFamilyAccessForMember({
+    memberId,
+    prisma,
+  });
+  const usageStatus = await readHostedPersonalAiUsageStatus({
+    memberId,
+    prisma,
+  });
+  const usageCreditProjection = await readHostedUsageCreditProjection({
+    beneficiaryMemberId: memberId,
+    prisma,
+  });
+  const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
+    memberId,
+    prisma,
+  }).catch(() => []);
+  const usageTopUpActivePurchase = await readHostedActiveUsageCreditPurchaseForPayer({
+    payerMemberId: memberId,
+    prisma,
+  }).catch(() => null);
+
+  return {
+    familyAccess,
+    familyOwner,
+    freshPrivySession: await freshPrivySessionPromise,
+    secureApprovalStatus: await secureApprovalStatusPromise,
+    settingsSnapshot,
+    usageCreditProjection,
+    usageStatus,
+    usageTopUpActivePurchase,
+    usageTopUpOfferCodes,
+  };
 }
 
 function readFirstSearchParamValue(
