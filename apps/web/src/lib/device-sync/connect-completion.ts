@@ -13,7 +13,7 @@ import {
 import type {
   DeviceSyncCompletionContactAction,
   DeviceSyncCompletionDialogModel,
-  DeviceSyncCompletionSetupAction,
+  DeviceSyncCompletionSetupGuide,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
@@ -124,7 +124,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     failed,
     kind: "device-sync",
     retryHref: failed ? "/connect" : null,
-    setupAction: needsWhoopAppleHealthRelay ? buildWhoopAppStoreAction() : null,
+    setupGuide: needsWhoopAppleHealthRelay ? buildWhoopAppleHealthSetupGuide() : null,
     title,
     unverified: !failed && !connected && successAsserted,
   };
@@ -382,7 +382,7 @@ function resolveCompletionDetail(input: {
   }
 
   if (input.connected && input.needsWhoopAppleHealthRelay) {
-    return "WHOOP limits what it shares through direct connections. For a fuller sync, open WHOOP, then go to More, App Settings, Integrations, Apple Health, and Connect. Turn on all categories and tap Allow, then download Murph and connect Apple Health.";
+    return "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.";
   }
 
   if (input.connected && !input.hasContactAction) {
@@ -396,13 +396,29 @@ function resolveCompletionDetail(input: {
   return "Your wearable is ready. Murph will start learning from your data.";
 }
 
-function buildWhoopAppStoreAction(): DeviceSyncCompletionSetupAction {
+function buildWhoopAppleHealthSetupGuide(): DeviceSyncCompletionSetupGuide {
   return {
-    ariaLabel: "Download Murph to sync WHOOP through Apple Health",
-    href: MURPH_IOS_APP_STORE_URL,
-    label: "Download Murph",
-    rel: "noopener noreferrer",
-    target: "_blank",
+    actionAriaLabel: "See how to sync all of your WHOOP data",
+    actionLabel: "Get full sync",
+    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
+    downloadAction: {
+      ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+      href: MURPH_IOS_APP_STORE_URL,
+      label: "Download Murph",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
+    steps: [
+      {
+        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
+        title: "Download Murph and sign in",
+      },
+      {
+        detail: "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
+        title: "Turn on Apple Health in WHOOP",
+      },
+    ],
+    title: "Get your full sync",
   };
 }
 

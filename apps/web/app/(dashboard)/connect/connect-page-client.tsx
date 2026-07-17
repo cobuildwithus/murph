@@ -60,6 +60,7 @@ export function ConnectSourcesGrid({
   initialConnectIntent = null,
   initialLoadError = null,
   sources,
+  whoopSyncVoiceMemoSrc = null,
 }: {
   authenticated?: boolean;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
@@ -67,6 +68,7 @@ export function ConnectSourcesGrid({
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
   sources: readonly ConnectSource[];
+  whoopSyncVoiceMemoSrc?: string | null;
 }) {
   const [notice, setNotice] = useState<ConnectCallbackNotice>(() =>
     createConnectCallbackNotice(initialCallback, sources),
@@ -338,6 +340,7 @@ export function ConnectSourcesGrid({
       {showWhoopAppleHealthFallback ? (
         <WhoopAppleHealthFallback
           onViewOtherSources={() => setShowWhoopAppleHealthFallback(false)}
+          voiceMemoSrc={whoopSyncVoiceMemoSrc}
         />
       ) : (
         <>
