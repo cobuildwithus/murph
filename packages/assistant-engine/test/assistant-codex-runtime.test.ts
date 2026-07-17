@@ -6931,9 +6931,10 @@ describe('assistant codex runtime', () => {
       ...stableInput,
       prompt: 'turn with failed teardown',
     })
-    const failureExpectation = expect(failedTurn).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-    })
+    const failureError = failedTurn.then(
+      () => null,
+      (error: unknown) => error,
+    )
     await firstTurnReady.promise
 
     try {
@@ -6941,7 +6942,9 @@ describe('assistant codex runtime', () => {
       requireMockChildProcess(spawnedChildren[0] ?? null).stdout.write('not-json\n')
       await waitForProcessKillWithFakeTimers(-25_500, 'SIGTERM')
       await vi.advanceTimersByTimeAsync(6_000)
-      await failureExpectation
+      expect(await failureError).toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -9520,15 +9523,18 @@ describe('assistant codex runtime', () => {
     vi.useFakeTimers()
     try {
       const externalStop = stopWarmCodexAppServer('operator-stop')
-      const externalStopExpectation = expect(externalStop).rejects.toMatchObject({
+      const externalStopError = externalStop.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await externalStopError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
-      await vi.advanceTimersByTimeAsync(6_000)
-      await externalStopExpectation
       vi.mocked(process.kill).mockClear()
 
       const replacementAttempt = executeCodexAppServerTurn({
@@ -9539,15 +9545,18 @@ describe('assistant codex runtime', () => {
         prompt: 'second stop failure launch',
         workingDirectory,
       })
-      const replacementExpectation = expect(replacementAttempt).rejects.toMatchObject({
+      const replacementError = replacementAttempt.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await replacementError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
-      await vi.advanceTimersByTimeAsync(6_000)
-      await replacementExpectation
     } finally {
       vi.useRealTimers()
     }
@@ -13941,14 +13950,17 @@ describe('assistant codex runtime', () => {
         closeStdin: () => null,
         processGroupPid: process.platform === 'win32' ? null : child.pid,
       })
-      const stopExpectation = expect(stopped).rejects.toMatchObject({
+      const stopError = stopped.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await stopError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await vi.advanceTimersByTimeAsync(6_000)
-      await stopExpectation
     } finally {
       vi.useRealTimers()
     }
