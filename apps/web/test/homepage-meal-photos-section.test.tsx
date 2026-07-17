@@ -19,12 +19,12 @@ test("MealPhotosSection renders the static photo calorie counting copy", () => {
   assert.match(markup, /You take the picture\./);
   assert.match(
     markup,
-    /Like you already do\. Don&#x27;t open anything, don&#x27;t type anything\./,
+    /The same photo you&#x27;d snap anyway\. Don&#x27;t open an app, don&#x27;t type a thing\./,
   );
   assert.match(markup, /Murph logs it by itself\./);
   assert.match(
     markup,
-    /The app spots new food photos in the background and reads them right on your phone\./,
+    /No app to open\. Murph sees the new photo and reads the whole meal right on your phone\./,
   );
   assert.match(markup, /Grain bowl/);
   assert.match(markup, /✓ LOGGED/);

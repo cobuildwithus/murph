@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   formatHostedLandingPricingLongSummary,
   formatHostedLandingPricingShortSummary,
+  formatHostedLandingTrialDurationPhrase,
+  formatHostedLandingTrialPricingNote,
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
@@ -254,6 +256,13 @@ describe("hosted billing launch plan Stripe configuration", () => {
   it("formats the homepage pricing summaries from the shared plan definitions", () => {
     expect(formatHostedLandingPricingShortSummary()).toBe("$8/mo");
     expect(formatHostedLandingPricingLongSummary()).toBe("$8/month");
+  });
+
+  it("formats the homepage trial copy from the shared trial-days constant", () => {
+    expect(formatHostedLandingTrialDurationPhrase()).toBe("2-week");
+    expect(formatHostedLandingTrialPricingNote()).toBe(
+      "Start with a 2-week free trial, then $8/mo. Cancel anytime.",
+    );
   });
 
   it("builds plan presentations with the updated displayed amounts", () => {

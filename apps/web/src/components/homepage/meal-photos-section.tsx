@@ -203,13 +203,13 @@ const STEPS = [
   {
     number: "01",
     heading: "You take the picture.",
-    body: "Like you already do. Don't open anything, don't type anything.",
+    body: "The same photo you'd snap anyway. Don't open an app, don't type a thing.",
     artifact: <CameraArtifact />,
   },
   {
     number: "02",
     heading: "Murph logs it by itself.",
-    body: "The app spots new food photos in the background and reads them right on your phone.",
+    body: "No app to open. Murph sees the new photo and reads the whole meal right on your phone.",
     artifact: <BackgroundLogArtifact />,
   },
   {
