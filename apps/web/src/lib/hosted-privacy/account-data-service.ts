@@ -1355,30 +1355,6 @@ async function signalHostedVaultShareCleanupRuntimesBestEffort(
   }));
 }
 
-async function countHostedUserCryptoEnvelopeRows(
-  prisma: HostedAccountDataPrisma,
-  memberIds: readonly string[],
-): Promise<number> {
-  const rows = await prisma.$queryRaw<RawCountRow[]>`
-    SELECT COUNT(*)::bigint AS count
-    FROM hosted_user_crypto_envelope
-    WHERE user_id IN (${Prisma.join(memberIds)})
-  `;
-  return normalizeRawCount(rows[0]?.count);
-}
-
-async function countHostedUserCryptoAuditRows(
-  prisma: HostedAccountDataPrisma,
-  memberIds: readonly string[],
-): Promise<number> {
-  const rows = await prisma.$queryRaw<RawCountRow[]>`
-    SELECT COUNT(*)::bigint AS count
-    FROM hosted_user_crypto_audit
-    WHERE user_id IN (${Prisma.join(memberIds)})
-  `;
-  return normalizeRawCount(rows[0]?.count);
-}
-
 async function deleteHostedUserCryptoEnvelopeRows(
   prisma: Prisma.TransactionClient,
   memberIds: readonly string[],
@@ -1399,23 +1375,6 @@ async function deleteHostedUserCryptoAuditRows(
     WHERE user_id IN (${Prisma.join(memberIds)})
   `;
   return { count };
-}
-
-type RawCountRow = {
-  count: bigint | number | string | null;
-};
-
-function normalizeRawCount(value: RawCountRow["count"] | undefined): number {
-  if (typeof value === "bigint") {
-    return Number(value);
-  }
-  if (typeof value === "number") {
-    return value;
-  }
-  if (typeof value === "string" && value.length > 0) {
-    return Number(value);
-  }
-  return 0;
 }
 
 async function listDeviceConnectionIdentities(input: {
