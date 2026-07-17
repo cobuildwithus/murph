@@ -31,6 +31,7 @@ import {
 } from "@/src/lib/clinical-records/client-contracts";
 
 const CONNECT_INTENT_PATH = "/api/clinical-records/connect-intents";
+const ACTIVE_IMPORT_REFRESH_INTERVAL_MS = 15_000;
 
 export function RecordsPageClient({
   authenticated,
@@ -78,6 +79,26 @@ export function RecordsPageClient({
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
     return () => window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
   }, []);
+
+  useEffect(() => {
+    if (!hasActiveImport) {
+      return;
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      router.refresh();
+    }
+
+    const timer = setInterval(refreshWhenVisible, ACTIVE_IMPORT_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [hasActiveImport, router]);
 
   async function createConnectIntent() {
     if (!authenticated) {
@@ -220,7 +241,9 @@ export function RecordsPageClient({
                   Epic organizations
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Latest state for each one-time import.
+                  {hasActiveImport
+                    ? "Latest state for each one-time import. This page updates on its own while an import runs."
+                    : "Latest state for each one-time import."}
                 </p>
               </div>
               {hasActiveImport ? (
@@ -284,6 +307,7 @@ function ConnectionRow({
 }) {
   const presentation = describeConnection(connection);
   const latestRun = connection.latestRun;
+  const importInProgress = isImportInProgress(connection);
 
   return (
     <li className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
@@ -306,7 +330,12 @@ function ConnectionRow({
           className="space-y-2 pl-12"
           role="status"
         >
-          <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
+            {importInProgress ? (
+              <Spinner aria-hidden="true" role="presentation" className="size-3.5 text-muted-foreground" />
+            ) : null}
+          </div>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             {presentation.detail}
           </p>

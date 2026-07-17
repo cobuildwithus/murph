@@ -109,6 +109,7 @@ afterEach(async () => {
     await cleanup();
     cleanup = null;
   }
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -278,6 +279,134 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(input.hasAttribute("readOnly")).toBe(false);
     });
+  });
+
+  it("marks earlier results stale while a new search is pending", async () => {
+    const claim = `cr_${"c".repeat(32)}`;
+    let resolveSecondSearch!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1",
+        ok: true,
+        providers: [{
+          brandName: "Piedmont Healthcare",
+          facilities: [{ city: "Atlanta", name: "Piedmont Atlanta", postalCode: "30309", state: "GA" }],
+          id: "epic-piedmont",
+          sourceSystem: "epic-fhir",
+        }],
+      })
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecondSearch = resolve;
+      }));
+
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Accept health-data consent");
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => {
+      setInputValue(rendered.window, input, "Piedmont");
+    });
+    await submitProviderSearch(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Piedmont Healthcare");
+    });
+
+    const results = rendered.container.querySelector("div[aria-busy]");
+    assert.ok(results instanceof rendered.window.HTMLElement);
+    expect(results.getAttribute("aria-busy")).toBe("false");
+    expect(results.className).not.toContain("opacity-60");
+
+    await submitProviderSearch(rendered);
+
+    expect(results.getAttribute("aria-busy")).toBe("true");
+    expect(results.className).toContain("opacity-60");
+
+    await act(async () => {
+      resolveSecondSearch({ directoryVersion: "test-v1", ok: true, providers: [] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent).toContain("No matching Epic organizations found");
+    expect(results.getAttribute("aria-busy")).toBe("false");
+    expect(results.className).not.toContain("opacity-60");
+  });
+
+  it("moves keyboard focus into the provider search field when it appears", async () => {
+    const claim = `cr_${"g".repeat(32)}`;
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    const focusSpy = vi.spyOn(rendered.window.HTMLInputElement.prototype, "focus");
+    await clickButton(rendered, "Accept health-data consent");
+
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    expect(focusSpy.mock.instances).toContain(input);
+  });
+
+  it("leaves focus alone when the member is already interacting elsewhere", async () => {
+    const claim = `cr_${"h".repeat(32)}`;
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    const pageDocument = rendered.container.ownerDocument;
+    assert.ok(pageDocument);
+    const consentButton = findButton(rendered, "Accept health-data consent");
+    Object.defineProperty(pageDocument, "activeElement", {
+      configurable: true,
+      value: consentButton,
+    });
+    const focusSpy = vi.spyOn(rendered.window.HTMLInputElement.prototype, "focus");
+    await clickButton(rendered, "Accept health-data consent");
+
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    expect(focusSpy.mock.instances).not.toContain(input);
   });
 
   it("uses native required validation for an empty provider search", async () => {
@@ -669,6 +798,231 @@ describe("Clinical Records status page", () => {
 
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
+
+  it("updates on its own and shows a live indicator while an import is running", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const connection = makeConnection();
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [{
+        ...connection,
+        lastSyncCompletedAt: null,
+        latestRun: {
+          completedAt: null,
+          importedCount: 0,
+          reviewCount: 0,
+          runId: "crr_1",
+          status: "importing",
+        },
+      }],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
+    });
+    cleanup = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain(
+      "This page updates on its own while an import runs.",
+    );
+    expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain("Loading");
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it("stays static without a live indicator once every import is settled", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [makeConnection()],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
+    });
+    cleanup = rendered.cleanup;
+
+    expect(rendered.container.textContent).not.toContain(
+      "This page updates on its own while an import runs.",
+    );
+    expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("skips the scheduled refresh while the tab is hidden and resumes when visible", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsPageClient, {
+        authenticated: true,
+        initialCallback: null,
+        initialConnections: [makeImportingConnection()],
+        initialLoadError: false,
+      }),
+      { location: makeRecordsLocation(), requireButton: false },
+    );
+    cleanup = rendered.cleanup;
+
+    const pageDocument = rendered.container.ownerDocument;
+    assert.ok(pageDocument);
+    Object.defineProperty(pageDocument, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+
+    Object.defineProperty(pageDocument, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("catches up as soon as a hidden tab becomes visible again", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsPageClient, {
+        authenticated: true,
+        initialCallback: null,
+        initialConnections: [makeImportingConnection()],
+        initialLoadError: false,
+      }),
+      { location: makeRecordsLocation(), requireButton: false },
+    );
+    cleanup = rendered.cleanup;
+
+    const pageDocument = rendered.container.ownerDocument;
+    assert.ok(pageDocument);
+    Object.defineProperty(pageDocument, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+
+    Object.defineProperty(pageDocument, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    await act(async () => {
+      pageDocument.dispatchEvent(new rendered.window.Event("visibilitychange"));
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops updating on its own once the last active import settles", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const renderWithConnection = (nextConnection: ClinicalRecordConnectionContract) =>
+      createElement(RecordsPageClient, {
+        authenticated: true,
+        initialCallback: null,
+        initialConnections: [nextConnection],
+        initialLoadError: false,
+      });
+    const rendered = await renderClientComponent(
+      renderWithConnection(makeImportingConnection()),
+      { location: makeRecordsLocation(), requireButton: false },
+    );
+    cleanup = rendered.cleanup;
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    await rendered.rerender(renderWithConnection({
+      ...makeConnection(),
+      latestRun: {
+        completedAt: "2026-07-16T18:15:00.000Z",
+        importedCount: 3,
+        reviewCount: 0,
+        runId: "crr_1",
+        status: "complete",
+      },
+    }));
+
+    expect(rendered.container.textContent).not.toContain(
+      "This page updates on its own while an import runs.",
+    );
+    expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
+    await act(async () => {
+      vi.advanceTimersByTime(45_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops updating on its own when the page unmounts mid-import", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsPageClient, {
+        authenticated: true,
+        initialCallback: null,
+        initialConnections: [makeImportingConnection()],
+        initialLoadError: false,
+      }),
+      { location: makeRecordsLocation(), requireButton: false },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    await rendered.cleanup();
+    vi.advanceTimersByTime(45_000);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
 });
 
 async function clickButton(
@@ -732,6 +1086,30 @@ function setInputValue(
     input.value = value;
   }
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
+function makeImportingConnection(): ClinicalRecordConnectionContract {
+  return {
+    ...makeConnection(),
+    lastSyncCompletedAt: null,
+    latestRun: {
+      completedAt: null,
+      importedCount: 0,
+      reviewCount: 0,
+      runId: "crr_1",
+      status: "importing",
+    },
+  };
+}
+
+function makeRecordsLocation(): Record<string, string> {
+  return {
+    hash: "",
+    href: "https://join.example.test/records",
+    origin: "https://join.example.test",
+    pathname: "/records",
+    search: "",
+  };
 }
 
 function makeConnection(): ClinicalRecordConnectionContract {

@@ -8,6 +8,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -132,6 +133,16 @@ function ProviderSearch({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
+  const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
+    searchInputRef.current = node;
+    if (!node) {
+      return;
+    }
+    const activeElement = node.ownerDocument.activeElement;
+    if (!activeElement || activeElement === node.ownerDocument.body) {
+      node.focus();
+    }
+  }, []);
 
   useEffect(() => {
     function restoreAfterHistoryNavigation(event: PageTransitionEvent) {
@@ -276,7 +287,7 @@ function ProviderSearch({
               name="provider-search"
               placeholder="Piedmont, Atlanta, GA, or 30309"
               readOnly={searchPending || Boolean(startingProviderId)}
-              ref={searchInputRef}
+              ref={attachSearchInput}
               required
             />
           </div>
@@ -308,7 +319,10 @@ function ProviderSearch({
       ) : null}
 
       {hasSearched ? (
-        <div className="space-y-3">
+        <div
+          aria-busy={searchPending}
+          className={cn("space-y-3 transition-opacity", searchPending && "opacity-60")}
+        >
           <div>
             <h3
               ref={resultsHeadingRef}
