@@ -145,24 +145,41 @@ test("only device-derived readings render, count, and decide the latest value", 
   }
 });
 
-test("an old device reading stays visible and is labeled out of date", async () => {
+test("out of date follows the metric-owned freshness policy", async () => {
+  // 76 days past a 14-day policy: visible and labeled.
   browserVaultMock.value.client = clientWithMetricRows([
     metricRow({ date: "2026-05-01", id: "w1", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 62 }),
   ]);
   browserVaultMock.value.status = "ready";
 
-  const rendered = await renderClientComponent(
+  const old = await renderClientComponent(
     <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
     { requireButton: false },
   );
-
   try {
-    const text = rendered.container.textContent ?? "";
+    const text = old.container.textContent ?? "";
     expect(text).toContain("Resting heart rate");
     expect(text).toContain("62 bpm");
     expect(text).toContain("Out of date");
   } finally {
-    await rendered.cleanup();
+    await old.cleanup();
+  }
+
+  // Eight days old is inside resting heart rate's 14-day policy, so no
+  // universal shorter window may label it.
+  browserVaultMock.value.client = clientWithMetricRows([
+    metricRow({ date: "2026-07-08", id: "w2", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 63 }),
+  ]);
+  const recent = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+  try {
+    const text = recent.container.textContent ?? "";
+    expect(text).toContain("63 bpm");
+    expect(text).not.toContain("Out of date");
+  } finally {
+    await recent.cleanup();
   }
 });
 

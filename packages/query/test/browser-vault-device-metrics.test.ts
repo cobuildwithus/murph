@@ -53,7 +53,7 @@ test("manual-only, lab-only, and empty histories produce no device summary", () 
   assert.equal(selectBrowserVaultDeviceMetricSummary(unknownKind, "resting-heart-rate"), null);
 });
 
-test("sleep and activity summaries count as device readings and age to stale", () => {
+test("sleep and activity summaries count as device readings", () => {
   const client = clientWithMetricRows([
     metricRow({ date: "2026-06-01", id: "s1", sourceKind: "sleep-summary", value: 48 }),
     metricRow({ date: "2026-06-05", id: "a1", sourceKind: "activity-summary", value: 52 }),
@@ -63,9 +63,41 @@ test("sleep and activity summaries count as device readings and age to stale", (
   assert.ok(summary);
   assert.equal(summary.readingCount, 2);
   assert.equal(summary.latest.date, "2026-06-05");
-  // Latest reading is well past the seven-day freshness window relative to
-  // the replica generatedAt of 2026-07-16.
-  assert.equal(summary.stale, true);
+});
+
+test("staleness follows each metric definition's own freshness policy", () => {
+  // Resting heart rate stales after 14 calendar days per its selection
+  // policy; the replica is generated 2026-07-16.
+  const rhrAt = (date: string) =>
+    selectBrowserVaultDeviceMetricSummary(
+      clientWithMetricRows([
+        metricRow({ date, id: `rhr-${date}`, sourceKind: "wearable-summary", value: 60 }),
+      ]),
+      "resting-heart-rate",
+    );
+  assert.equal(rhrAt("2026-07-08")?.stale, false);
+  assert.equal(rhrAt("2026-07-02")?.stale, false);
+  assert.equal(rhrAt("2026-07-01")?.stale, true);
+
+  // Estimated VO2 max stales after 45 days, so a reading far past the
+  // recovery-metric window stays current.
+  const vo2At = (date: string) =>
+    selectBrowserVaultDeviceMetricSummary(
+      clientWithMetricRows([
+        metricRow({
+          date,
+          id: `vo2-${date}`,
+          metricKey: "estimated-vo2-max",
+          sourceKind: "activity-summary",
+          unit: "mL/kg/min",
+          value: 41,
+        }),
+      ]),
+      "estimated-vo2-max",
+    );
+  assert.equal(vo2At("2026-07-08")?.stale, false);
+  assert.equal(vo2At("2026-06-01")?.stale, false);
+  assert.equal(vo2At("2026-05-31")?.stale, true);
 });
 
 function clientWithMetricRows(metricRows: BrowserVaultMetricRow[]) {

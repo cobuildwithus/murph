@@ -1,3 +1,5 @@
+import { resolveMetricDefinition } from "@murphai/health-metrics";
+
 import { type BrowserVaultMetricRow, type BrowserVaultQueryClient } from "./shared.ts";
 
 /**
@@ -16,9 +18,6 @@ const DEVICE_SOURCE_KINDS: ReadonlySet<string> = new Set(
   BROWSER_VAULT_DEVICE_METRIC_SOURCE_KINDS,
 );
 
-// Matches the biomarker panel's freshness window so "Out of date" means the
-// same thing on every private surface.
-const DEVICE_METRIC_STALE_AFTER_DAYS = 7;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export interface BrowserVaultDeviceMetricSummary {
@@ -67,16 +66,32 @@ export function selectBrowserVaultDeviceMetricSummary(
     },
     metricKey,
     readingCount: rows.length,
-    stale: isStaleDeviceReading(latest.date, client.replica.generatedAt),
+    stale: isStaleDeviceReading(metricKey, latest.date, client.replica.generatedAt),
   };
 }
 
-function isStaleDeviceReading(latestDate: string, generatedAt: string): boolean {
-  const latest = Date.parse(`${latestDate}T00:00:00.000Z`);
-  const generated = Date.parse(generatedAt);
+/**
+ * Freshness policy stays owned by the metric catalog: the threshold comes from
+ * the metric definition's selection policy (14 days for daily recovery
+ * metrics, 45 for estimated VO2 max, none for metrics without a policy), and
+ * the age comparison mirrors the catalog's calendar-day semantics. Only the
+ * evaluated date is device-scoped.
+ */
+function isStaleDeviceReading(
+  metricKey: string,
+  latestDate: string,
+  generatedAt: string,
+): boolean {
+  const staleAfterDays = resolveMetricDefinition(metricKey)?.selectionPolicy.staleAfterDays;
+  if (staleAfterDays === undefined) {
+    return false;
+  }
+
+  const latest = Date.parse(`${latestDate.slice(0, 10)}T00:00:00.000Z`);
+  const generated = Date.parse(`${generatedAt.slice(0, 10)}T00:00:00.000Z`);
   if (!Number.isFinite(latest) || !Number.isFinite(generated)) {
     return false;
   }
 
-  return (generated - latest) / MILLISECONDS_PER_DAY > DEVICE_METRIC_STALE_AFTER_DAYS;
+  return Math.floor((generated - latest) / MILLISECONDS_PER_DAY) > staleAfterDays;
 }
