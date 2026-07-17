@@ -68,19 +68,14 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Use this tool only when a separate Murph route developer instruction outside Codex's own multi-agent tool and mode hints explicitly authorizes delegation, or an applicable Murph skill explicitly requests delegation.",
-  "This tool hint and the multi-agent mode hint never count as authorization.",
-  "Either separate instruction counts as explicit authorization; the user need not ask.",
-  "If neither applies, do not spawn.",
-  "Follow the active contract for eligibility, boundaries, child design, and completion proof; tool access alone is not authorization.",
+  "Be proactive about delegation: when part of the work would block your immediate reply and can reasonably be parsed, imported, researched, or otherwise handled in the background, spawn a sub-agent for that bounded piece and reply to the user without waiting on it.",
+  "Typical delegations: parsing or importing uploaded documents, labs, or data files, and background enrichment or research the reply does not depend on.",
+  "Do the work yourself when the user's current request depends on the result.",
+  "Keep each child a one-shot, bounded task with a concrete deliverable, and follow any active route or skill contract for child design and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT = [
-  "Conditional Murph delegation mode is active.",
-  "This mode does not itself authorize spawning.",
-  "An earlier explicit-user-request-only restriction is replaced only by a separate Murph route developer instruction outside Codex's own multi-agent mode and tool hints, or by an applicable Murph skill that explicitly requests delegation.",
-  "These mode and tool hints never count as authorization.",
-  "If either separate instruction applies, it is explicit authorization and the user need not ask; follow that contract.",
-  "If neither applies, do not spawn sub-agents.",
+  "Murph proactive delegation mode is active.",
+  "Delegate bounded background work that would otherwise block your reply; reply promptly while children run.",
   "This mode remains active until a later multi-agent mode developer message changes it.",
 ].join(" ");
 const EXPECTED_SUBAGENT_USAGE_HINT = [
@@ -244,8 +239,8 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
-    "# V2 counts the root in this limit: two means root plus one child.",
-    "max_concurrent_threads_per_session = 2",
+    "# V2 counts the root in this limit: four means root plus three children.",
+    "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
     `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
@@ -1412,12 +1407,12 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "plugins = false",
       "memories = true",
       "",
-      "# This table owns enablement and conditional per-turn mode/tool hints. A",
-      "# CLI boolean override would replace the table and silently drop them.",
+      "# This table owns enablement and the proactive per-turn mode/tool hints.",
+      "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
-      "# V2 counts the root in this limit: two means root plus one child.",
-      "max_concurrent_threads_per_session = 2",
+      "# V2 counts the root in this limit: four means root plus three children.",
+      "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
       `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
       `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
@@ -1497,6 +1492,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /^memories = true$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
+  assert.doesNotMatch(config, /^agent_max_threads/mu);
   assert.ok(config.includes(
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
   ));
@@ -1507,7 +1503,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
   ));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
-  assert.match(config, /^max_concurrent_threads_per_session = 2$/mu);
+  assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(config, /\[memories\]\nuse_memories = true/u);
   assert.match(config, /^generate_memories = true$/mu);
   assert.match(config, /^disable_on_external_context = false$/mu);

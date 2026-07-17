@@ -56,7 +56,7 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # These are operator-level Worker vars, not per-user env overrides. The hosted runtime persists
 # the selected active profile during bootstrap so later runs stay explicit.
 # HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway
-# HOSTED_ASSISTANT_MODEL=openai/gpt-5.5
+# HOSTED_ASSISTANT_MODEL=openai/gpt-5.6-terra
 # HOSTED_ASSISTANT_CODEX_COMMAND=codex
 # HOSTED_ASSISTANT_APPROVAL_POLICY=on-request
 # HOSTED_ASSISTANT_SANDBOX=workspace-write
