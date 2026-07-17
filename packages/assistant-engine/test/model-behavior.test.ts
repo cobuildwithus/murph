@@ -1185,7 +1185,7 @@ describe('assistant consumption lookup guidance', () => {
       'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
-      'When any domain owner presents a named movement, let it choose the movement, then read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` for lookup and presentation.',
+      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
     )
     expect(prompt).toContain(
       'follow the owning skill\'s label or exercise-catalog workflow instead of estimating from memory or inventing details.',
@@ -1202,6 +1202,12 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).not.toContain('attach available catalog images')
     expect(prompt).not.toContain('Use returned catalog `images[]` as response media')
     expect(prompt).not.toContain('images are unavailable, or safety requires it')
+    expect(prompt).not.toContain(
+      'attach at least one useful returned catalog image',
+    )
+    expect(prompt).not.toContain(
+      'omit exercise images unless the user asks for them',
+    )
   })
 })
 
@@ -1335,7 +1341,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(64_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1905,7 +1911,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
-      'When any domain owner presents a named movement, let it choose the movement, then read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` for lookup and presentation.',
+      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
     )
     expect(prompt).toContain(
       'behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.',

@@ -1608,6 +1608,7 @@ describe('assistant skill assets', () => {
         readSkillFile(strengthTraining),
       ])
 
+    const compactCatalog = catalog.replace(/\s+/gu, ' ')
     const sharedReference =
       '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md'
     expect(physicalTherapyRaw).toContain(sharedReference)
@@ -1617,9 +1618,34 @@ describe('assistant skill assets', () => {
     expect(catalog).toContain(
       'vault-cli exercise show <id-or-slug>\n   --format json',
     )
-    expect(catalog).toContain('normally two to four and rarely more than five')
-    expect(catalog).toContain('attach returned\n   `images[]`')
-    expect(catalog).toContain('"no\n   catalog image yet"')
+    expect(compactCatalog).toContain(
+      'Decide likely familiarity per movement from the current conversation and durable context.',
+    )
+    expect(compactCatalog).toContain(
+      'Strong familiarity signals include stated training experience, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
+    )
+    expect(compactCatalog).toContain(
+      'Treat stated novice status, a first workout plan, uncertain language, or no clear familiarity signal as likely unfamiliar.',
+    )
+    expect(compactCatalog).toContain(
+      'Familiarity is per movement: an experienced trainee can still be new to an uncommon variation.',
+    )
+    expect(compactCatalog).toContain(
+      'Do not ask a separate experience question only to decide whether to include media.',
+    )
+    expect(compactCatalog).toContain(
+      'normally two to four and rarely more than five',
+    )
+    expect(compactCatalog).toContain(
+      'If any prescribed movement is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+    )
+    expect(compactCatalog).toContain(
+      'If the user clearly demonstrates relevant training fluency and every prescribed movement is common or already familiar, omit exercise images unless the user asks for them.',
+    )
+    expect(compactCatalog).toContain(
+      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+    )
+    expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )
