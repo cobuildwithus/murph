@@ -124,7 +124,13 @@ describe('assistant execution prompt contract', () => {
       'The child may outlive the reply.',
     )
     expect(prompt).toContain(
-      'Never call it pending, processing, or in progress',
+      'one short plain personable line about the kicked-off background work is welcome',
+    )
+    expect(prompt).toContain(
+      'on later turns do not call it pending, processing, or in progress',
+    )
+    expect(prompt).toContain(
+      'Keep internal machinery out of visible replies',
     )
     expect(prompt).toContain(
       'Claim child enrichment only after canonical readback confirms it',

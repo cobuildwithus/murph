@@ -38,7 +38,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain('An optional child may enrich only exact source refs or record ids')
     expect(prompt).toContain('idempotent, provenance-aware writes and dedupe')
     expect(prompt).toContain('A spawn is not durable parse state')
-    expect(prompt).toContain('otherwise say which details remain unconfirmed')
+    expect(prompt).toContain('otherwise say plainly which details you do not have yet')
     expect(prompt).not.toContain('A delegated parser may outlive the reply')
     expect(prompt).not.toContain('A spawn means parsing is pending, not saved')
     expect(prompt).not.toContain('keep the root turn open until the child is terminal')

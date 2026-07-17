@@ -67,104 +67,104 @@ export interface RenderedUserFacingMessage {
 
 const USER_FACING_MESSAGE_TEMPLATES = {
   "assistant.signup_welcome": [
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. I'll remember the useful context so my help gets more personal.
+Everyone's got something they want from their health. My job is to help you actually get there. Everything you share stays private to you, and the more I learn, the better my help fits.
 
 Ready to get started?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-You can talk to me about any health goal, question, decision, data, or task. The more I learn about your health, the more useful my help becomes.
+Whatever you're working toward with your health, you don't have to figure it out alone. This space is private to you, and I remember what matters so my help keeps getting better.
 
 Ready to start?`,
-    `Murph here, your private personal health assistant.
+    `Murph here.
 
-Start anywhere with your health: a change you want, something confusing, data to make sense of, or a task that needs doing. I'll remember what is useful so later help fits you better.
+Most people know roughly what they want from their health. The hard part is getting there, and that's my job. Everything stays private to you, and I learn what works for you so my help gets more personal.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me a health question, goal, decision, record, or task and we'll take it from there. I'll remember useful context so you don't have to start over each time.
+Think of me as someone in your corner for your health. What you share is private to you, and I keep the context that matters so you don't have to repeat yourself.
 
 Ready to start?`,
-    `Hi, Murph here, your private personal health assistant.
+    `Hi, Murph here.
 
-You can bring me whatever is happening with your health, from a question or goal to confusing data or a task you want handled. I'll keep the context that makes later help better.
+Whatever you want from your health, big or small, we can get after it together. This is private between us, and I remember the useful parts so my help improves over time.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-I'm here for health questions, decisions, data, goals, and the work of following through. I remember relevant context so my help becomes more personal over time.
+You've got things you want from your health, and I'm here to help you actually pull them off. Everything you tell me is private, and I learn as we go so my help gets better.
 
 Ready to start?`,
-    `Murph here, your private personal health assistant.
+    `Murph here.
 
-Ask me about your health, show me data you want understood, tell me something you want to change, or give me a task to help handle. I'll remember useful context so next time starts with a better picture.
+My job is simple: help you make real progress on whatever matters in your health. It all stays private to you, and I keep track of what I learn so next time starts from a better picture.
 
 Ready to get started?`,
-    `Hi, I'm Murph, a private personal health assistant for whatever comes up.
+    `Hi, I'm Murph.
 
-That can be a health question, decision, goal, data point, or task. I remember the context that helps me give better answers over time.
+Whether you're after more energy, better sleep, or something bigger, I'm in your corner. What you share stays private, and I remember it so my help gets more useful.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-You don't need a perfect goal to start. Bring me a health question, something you want to change, data you want understood, or a task that keeps slipping. I'll learn what matters as we go so my help becomes more personal.
+Health goals are easy to want and hard to hit alone. I'm here to change that. Everything here is private to you, and the more I learn about your life, the better I can help.
 
 Ready to get started?`,
-    `Hi, Murph here, your private personal health assistant.
+    `Murph here.
 
-I can help you think through health questions and decisions, understand your data, work toward a change, or handle the next task. I remember the context that matters so you don't have to repeat it.
+Whatever you're working toward with your health, I'll help you figure out what actually works and stick with it. It's all private, and I keep what I learn so you don't have to start from zero.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-Start with anything health-related: a question, a decision, a goal, a record, or something you want help getting done. I'll remember useful context so later help fits you better.
+I'm here for whatever your health throws at you and whatever you're chasing. This stays private to you, and I remember the context that makes my help better.
 
 Ready to get started?`,
-    `Murph here, your private personal health assistant.
+    `Hey, Murph here.
 
-You can ask me to explain something, help with a health decision, make sense of data, work on a goal, or handle a task. I keep the context that makes future help more useful.
+You bring what you want from your health, and I bring the follow-through. Everything is private between us, and I learn what fits your life so my help gets more personal.
 
 Ready to start?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-Whatever your health needs today, whether it is an answer, a plan, help understanding data, or something practical, we can start there. I'll remember the relevant context so later help starts from a better picture.
+Making progress on your health is a lot easier with someone in your corner. That's me. What you share is private, and I remember it so my help improves over time.
 
 Ready to get started?`,
-    `Hey, Murph here, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Bring me a health change you want, a question you can't settle, data that needs context, or a task you want handled. The more useful context I learn, the more personal my help becomes.
+Whatever you'd change about your health if it were easy, that's where I come in. It all stays private to you, and the more I learn, the more useful I get.
 
 Ready to start?`,
-    `Hello, I'm Murph, your private personal health assistant.
+    `Murph here.
 
-I can help across health goals, questions, decisions, records, and follow-through. I'll remember useful context so you don't have to rebuild the whole picture each time.
+I help you figure out what actually works for your health, then stick with it. Everything stays private to you, and I keep what I learn so you don't have to repeat yourself.
 
 Ready to get started?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hi, Murph here.
 
-You can start with a health goal, a confusing number, a decision, a practical task, or simply not knowing where to focus. I remember relevant context so later help gets better.
+Everyone's working on something with their health. Whatever yours is, we'll get after it together. This is private to you, and I learn as we go so my help keeps getting better.
 
 Ready to start?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hey, I'm Murph.
 
-Ask a health question, share data, tell me what you want to change, or let me help with something that needs doing. I'll remember the useful parts so next time starts with a better picture.
+Wanting something for your health is easy. Actually getting it is the hard part, and that's my job. Everything here is private, and I remember what matters so my help gets more personal.
 
 Ready to get started?`,
-    `Murph here, your private personal health assistant.
+    `Hi, I'm Murph.
 
-I'm here to help you understand, decide, act, and follow through across your health. I remember relevant context so my help improves over time.
+Whatever you want from your health, my job is to make it genuinely easier. What you share stays private to you, and I keep the useful context so my help gets better over time.
 
 Ready to start?`,
-    `Hey, I'm Murph, your private personal health assistant.
+    `Hey, Murph here.
 
-Bring me whatever is going on with your health: a goal, question, choice, data point, or task. I'll keep the useful context so you don't have to start from zero next time.
+I'm in your corner for all of it: the goals, the questions, the stuff you've been putting off. It stays private between us, and the more I learn about you, the better my help fits.
 
 Ready to get started?`,
-    `Hi, I'm Murph, your private personal health assistant.
+    `Hi, I'm Murph.
 
-You can come to me with something you want to change, understand, decide, or get done. I remember the context that helps me support you better over time.
+You don't need a plan or a perfect goal to start. Just tell me what you want from your health. Everything is private to you, and I remember what I learn so my help gets more useful.
 
 Ready to start?`,
   ],
