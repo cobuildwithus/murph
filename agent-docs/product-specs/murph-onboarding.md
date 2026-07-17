@@ -297,39 +297,48 @@ durable behavior-change setup while that grounding is insufficient or
 decision-changing background evidence remains unconfirmed, unless the member
 explicitly defers that evidence.
 
-Before scheduling or support logistics, onboarding must create a visible
-first-value moment. One compact message should make a decision-changing piece
-of context pay off, name the smallest useful next move, and reveal the specific
-just-in-time or adaptive advantage Murph will provide. It must not recap the
-intake, dump the full intervention, advertise capabilities, or reduce Murph's
-value to a generic reminder.
+After thread selection and behavioral-fit grounding, onboarding must create a
+visible first-value launch offer before any plan or support write. One compact
+message should make a decision-changing piece of context pay off, name the
+smallest useful next move, propose the exact local days/time or cue and next
+viable start, and reveal the finite actionable reminder-and-review package
+Murph will create. It must not recap the intake, dump the full intervention,
+advertise capabilities, or reduce Murph's value to a generic reminder.
 
-For a repeated behavior or bounded experiment, the member sees a launch
-preview: one contextual fit reason, one-line behavior shape, and one concrete
-support-and-review promise. Detailed programming or protocol steps stay in the
-canonical plan and are progressively disclosed at the moment they become
-useful. Timing and reminder questions come after this preview, not before it.
+For a repeated behavior or bounded experiment, the member sees one contextual
+fit reason, one-line behavior shape, the concrete next occurrence, and one
+specific support-and-review promise. Detailed programming or protocol steps
+stay in the canonical plan and are progressively disclosed at the moment they
+become useful. The launch offer ends with one accept-or-edit question. A clear
+yes authorizes the exact named plan, reminder, and review writes together; it
+must not be followed by a second reminder-consent question.
 
 Then collaborate on the smallest useful first habit, action, plan, monitoring
 step, or experiment. Murph may recommend a best-fit option and explain why, but
 the member chooses or adjusts what happens next. Do not dump a full protocol or
 multi-part plan before that choice.
 
-The member may leave the thread open without acting yet. If they choose an
-action, use its existing owner and authorization rules. A proactive check-in,
-reminder, group, external task, or experiment requires the owning canonical
-writes; the onboarding follow-up automation never owns that support.
+The member may leave the thread open without acting yet. If they accept a
+repeated behavior or bounded experiment, use its existing owner and create the
+exact finite reminder-and-review package named in the accepted launch offer in
+the same turn. Do not wait for the member to ask for reminders later. Default
+launch support is one actionable reminder for each planned occurrence in the
+initial support window plus one early review after the first two occurrences or
+within seven days. The member may edit or explicitly decline that package; a
+formal tone is not an opt-out. A real route, delivery, or safety blocker is
+stated rather than silently omitting support. The onboarding follow-up
+automation never owns that support.
 
-After the member's first accepted low-risk, non-sensitive repeated behavior or
-bounded experiment is successfully saved, mark the launch without another
-intake recap. On a route that can deliver generated music, a short original
-launch song is the default earned delight when known tone and privacy context
-make it fit; otherwise use one specific one-line celebration. The song may use
-the member's preferred name, a share-safe version of the chosen outcome, and
-one playful non-sensitive plan detail. It never includes clinical or
-potentially embarrassing facts, promises results, delays needed help, or
-substitutes for the plan. This is reply-time media, not a new onboarding
-automation.
+After the member's first accepted repeated behavior or bounded experiment and
+its support are successfully saved, send a mandatory short text close: celebrate
+the start, say Murph is excited to work with them, name the exact next scheduled
+touchpoint and early review, and end with one broad invitation to use Murph for
+anything else health-related. Formal or quiet style changes the wording and may
+skip music; it never removes the text celebration. A privacy-safe short original
+song may follow only when it fits and can be delivered without replacing or
+delaying that close. It never includes clinical or potentially embarrassing
+facts, promises results, delays needed help, or substitutes for the plan. This
+is reply-time delight, not a new onboarding automation.
 
 ## Persistence Contract
 
@@ -385,11 +394,16 @@ Use `user_answered` only when all of the following are true:
    member explicitly asked not to revisit it.
 7. The member chose which thread, if any, to work on now, then collaboratively
    chose a first step, explicitly chose to leave the thread open without acting,
-   or declined further help on it.
+   or declined further help on it. An activated repeated behavior or bounded
+   experiment had a concrete next occurrence and exact finite reminder-and-review
+   package in the accepted launch offer.
 8. Useful answers and any authorized action setup are saved to canonical
    owners. Each foundation-critical minimum fact or raw source has a verified
    durable receipt or is explicitly deferred; optional enrichment is confirmed,
-   not decision-changing, or handled in the parent before use.
+   not decision-changing, or handled in the parent before use. For an activated
+   repeated behavior or experiment, the named support writes succeeded or an
+   explicit opt-out or real blocker is recorded, and the mandatory text launch
+   close was delivered.
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required.
@@ -445,13 +459,14 @@ reflection-only scheduled message returns skip.
    experiment with the member rather than prescribing it. For repeated
    behavior, the choice reflects a bounded, early-stopping pass over the
    member's reason, current routine, relevant data, prior attempts, practical
-   influences, and support fit, with up to three missing-context questions.
-   Before timing or reminder setup, the member sees a compact launch preview
-   that makes Murph's contextual and just-in-time value concrete without a plan
-   dump.
-9. The first eligible plan ends on an earned, privacy-safe delight beat when the
-   route and member preferences support it; delight never substitutes for
-   useful action or creates another onboarding automation.
+   influences, schedule fit, and support fit, with up to three missing-context
+   questions. The accepted launch offer makes Murph's contextual value concrete,
+   names the next occurrence, and includes the finite actionable reminder and
+   early-review package without a plan dump.
+9. The first activated repeated plan ends with a mandatory privacy-safe text
+   celebration that names the next scheduled touchpoint and invites one other
+   health request. Music is optional; delight never substitutes for useful
+   action or creates another onboarding automation.
 10. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
 11. Supplement identity and medical context are durably saved in compact parent
