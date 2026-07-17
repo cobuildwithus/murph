@@ -1710,7 +1710,7 @@ describe('assistant skill assets', () => {
       'A child may enrich only the exact durable record ids or source refs returned by that save; it never owns a promised save or parse.',
     )
     expect(compact).toContain(
-      'The medical-and-safety checkpoint keeps its minimal save in one compact parent batch and always delegates the structured medical persistence to a child.',
+      'The medical-and-safety checkpoint is the one deliberate exception to this parent-first save rule: there the child owns the entire medical save, and the parent must not persist a medical answer in the foreground when a child can be spawned.',
     )
     expect(compact).toContain(
       'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
@@ -1844,16 +1844,19 @@ describe('assistant skill assets', () => {
       'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
     )
     expect(compact).toContain(
-      'Save every supported fact or negative clinical assertion in one compact parent batch across the named medical owners and verify its receipts before the next visible checkpoint.',
+      'Never persist the answer in the parent foreground.',
     )
     expect(compact).toContain(
-      'Do not run a separate foreground schema check and one command per negative assertion.',
+      'always spawn a child from the user\'s exact words to own the entire medical persistence: every supported fact and negative clinical assertion across the named medical owners, schema-correct record shape, detail fields, and cross-owner consistency',
     )
     expect(compact).toContain(
-      'always spawn one from the exact returned record ids to finish the structured medical persistence',
+      'This applies to every medical answer, including an all-negative one such as "no meds, no conditions."',
     )
     expect(compact).toContain(
-      'Do not hold the visible reply for that structuring work; send the next checkpoint as soon as the minimal receipts are verified.',
+      'Do not hold the visible reply for any medical saving or structuring; send the next checkpoint immediately after the spawn.',
+    )
+    expect(raw).not.toContain(
+      'one compact parent batch across the named medical owners',
     )
     expect(compact).not.toContain(
       'Do not spawn a child for this bounded persistence work.',
@@ -1899,6 +1902,15 @@ describe('assistant skill assets', () => {
       '“not lifting right now” can resolve movement context; it does not authorize a workout routine.',
     )
     expect(raw).toContain('### 6. Return to an open thread and choose together')
+    expect(compact).toContain(
+      'After the foundation is resolved, close it warmly before asking for anything else.',
+    )
+    expect(compact).toContain(
+      'Do not frame this as a completed intake, recite what was collected, or announce "we now have enough context."',
+    )
+    expect(compact).toContain(
+      'hear a bit more about what Murph can do for them, or dive into the goals they named earlier, in their words',
+    )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
     const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
