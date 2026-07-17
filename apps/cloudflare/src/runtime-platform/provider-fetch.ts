@@ -526,6 +526,7 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   assistant_runtime_issue_export: "Hosted assistant runtime issue export",
   browser_vault_replica_publish: "Hosted browser-vault replica publish",
   browser_vault_replica_write: "Hosted browser-vault replica write",
+  clinical_records_connect_link: "Hosted clinical records connect link",
   clinical_records_fetch_page: "Hosted clinical records fetch page",
   clinical_records_read_run: "Hosted clinical records read run",
   clinical_records_record_outcome: "Hosted clinical records record outcome",

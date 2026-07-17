@@ -237,6 +237,9 @@ import type {
 type RuntimeDeviceSyncPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
 >;
+type RuntimeClinicalRecordsPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["clinicalRecordsPort"]
+>;
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
@@ -5529,6 +5532,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
     expect(JSON.stringify(await deviceTool.request({ action: "list_accounts" })))
       .not.toContain("not-for-assistant");
+  });
+
+  it("exposes the existing Clinical Records link method to the hosted assistant context", async () => {
+    const createConnectLink = vi.fn<
+      NonNullable<RuntimeClinicalRecordsPort["createConnectLink"]>
+    >(async () => ({
+      connectUrl:
+        `https://app.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-16T12:15:00.000Z",
+      ok: true,
+    }));
+    const clinicalRecordsPort: RuntimeClinicalRecordsPort = {
+      createConnectLink,
+      async fetchPage() {
+        throw new Error("Clinical Records link test should not fetch a page.");
+      },
+      async readRun() {
+        throw new Error("Clinical Records link test should not read a run.");
+      },
+      async recordOutcome() {
+        throw new Error("Clinical Records link test should not record an outcome.");
+      },
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeClinicalRecordsPort: clinicalRecordsPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    const controller = new AbortController();
+    await expect(
+      hydratedContext?.hosted?.clinicalRecordsConnectLinkTool?.createConnectLink({
+        signal: controller.signal,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(createConnectLink).toHaveBeenCalledWith({ signal: controller.signal });
   });
 
   it("injects active hosted device connection status as dynamic context for due cron lanes", async () => {
@@ -13335,6 +13374,7 @@ function createPhaseInput(input: {
   prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
+  runtimeClinicalRecordsPort?: RuntimeClinicalRecordsPort;
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeGroupToolPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
@@ -13476,6 +13516,9 @@ function createPhaseInput(input: {
             }
           : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
+        ...(input.runtimeClinicalRecordsPort
+          ? { clinicalRecordsPort: input.runtimeClinicalRecordsPort }
+          : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),

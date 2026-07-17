@@ -1,7 +1,13 @@
+import {
+  hostedClinicalRecordsConnectLinkRequestSchema,
+} from "@murphai/hosted-execution/clinical-records";
+
 import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { clinicalJsonOk, withClinicalJsonError } from "@/src/lib/clinical-records/http";
+import { requireClinicalRecordsRuntimeWriteFence } from "@/src/lib/clinical-records/runtime-write-fence";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { readJsonObject } from "@/src/lib/http";
 
 const MAX_BODY_BYTES = 4 * 1_024;
@@ -14,11 +20,18 @@ export async function GET(): Promise<Response> {
 }
 
 export const POST = withClinicalJsonError(async (request: Request) => {
+  requireClinicalRecordsRuntimeWriteFence(request);
   const memberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: MAX_BODY_BYTES,
   });
-  const body = await readJsonObject(request, { limitBytes: MAX_BODY_BYTES });
-  if (Object.keys(body).length !== 0) throw invalidBodyError();
+  await requireHostedRuntimeActiveAccess(memberId, {
+    code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
+    message: "Clinical Records runtime access is inactive.",
+  });
+  const parsed = hostedClinicalRecordsConnectLinkRequestSchema.safeParse(
+    await readJsonObject(request, { limitBytes: MAX_BODY_BYTES }),
+  );
+  if (!parsed.success) throw invalidBodyError();
   const intent = await createClinicalRecordConnectIntent({
     memberId,
     request,

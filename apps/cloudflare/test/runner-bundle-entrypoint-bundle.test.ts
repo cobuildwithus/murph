@@ -530,11 +530,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // 230B provenance correction, its original 96,000B noise band, and the
     // same 250,000B operational headroom because the closure contains the
     // entry chunk.
+    // The static-closure baseline later advanced 24,408B to 7,121,190B on the
+    // 2026-07-16 mainline prompt integration, which landed without moving this
+    // lock; the lock is reconciled to that already-shipped ratchet here.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_096_782 + 96_000 + 250_000,
+      staticClosureBytes: 7_121_190 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });

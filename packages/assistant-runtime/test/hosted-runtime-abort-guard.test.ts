@@ -228,6 +228,14 @@ describe("hosted runtime abort guard", () => {
       }
       signal.addEventListener("abort", () => reject(signal.reason), { once: true });
     }));
+    const createConnectLink = vi.fn(async (
+      _options?: { signal?: AbortSignal | null },
+    ) => ({
+      connectUrl:
+        `https://app.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-16T12:15:00.000Z",
+      ok: true as const,
+    }));
 
     try {
       await initializeVault({
@@ -263,6 +271,7 @@ describe("hosted runtime abort guard", () => {
         platform: {
           ...createPlatform(vi.fn<typeof fetch>()),
           clinicalRecordsPort: {
+            createConnectLink,
             async fetchPage() {
               throw new Error("Clinical abort guard test should not fetch a page.");
             },
@@ -273,6 +282,9 @@ describe("hosted runtime abort guard", () => {
           },
         },
         async runAssistantPhase(input) {
+          await expect(input.platform.clinicalRecordsPort!.createConnectLink?.({
+            signal: requestAbortController.signal,
+          })).resolves.toMatchObject({ ok: true });
           const read = input.platform.clinicalRecordsPort!.readRun(
             { generation: 1, runId: "run_synthetic_clinical_guard" },
             { signal: requestAbortController.signal },
@@ -289,6 +301,9 @@ describe("hosted runtime abort guard", () => {
         { generation: 1, runId: "run_synthetic_clinical_guard" },
         { signal: requestAbortController.signal },
       );
+      expect(createConnectLink).toHaveBeenCalledWith({
+        signal: requestAbortController.signal,
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,

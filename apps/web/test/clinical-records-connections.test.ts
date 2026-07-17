@@ -37,6 +37,7 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   disconnectClinicalRecordConnection,
   listClinicalRecordConnections,
+  listClinicalRecordConnectionsForMember,
 } from "@/src/lib/clinical-records/connections";
 
 describe("Clinical Records connection lifecycle", () => {
@@ -114,8 +115,24 @@ describe("Clinical Records connection lifecycle", () => {
     ));
 
     expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        connectedAt: true,
+        displayName: true,
+        retrievalRuns: expect.objectContaining({
+          select: {
+            completedAt: true,
+            id: true,
+            importedCount: true,
+            reviewCount: true,
+            status: true,
+          },
+          take: 1,
+        }),
+      }),
+      take: 100,
       where: { memberId: "member_clinical_1", status: { not: "disconnected" } },
     }));
+    expect(mocks.connectionFindMany.mock.calls[0]?.[0]).not.toHaveProperty("include");
     expect(connections).toEqual([expect.objectContaining({
       connectionId: "crc_1",
       lastErrorCode: null,
@@ -124,6 +141,17 @@ describe("Clinical Records connection lifecycle", () => {
     })]);
     expect(JSON.stringify(connections)).not.toContain("sealed-");
     expect(JSON.stringify(connections)).not.toContain("patient context");
+  });
+
+  it("lets an authenticated server page reuse the member-bound safe projection", async () => {
+    await expect(
+      listClinicalRecordConnectionsForMember("member_server_page"),
+    ).resolves.toEqual([]);
+
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { memberId: "member_server_page", status: { not: "disconnected" } },
+    }));
   });
 
   it("rejects a disconnect for a connection outside the active member without mutation", async () => {
