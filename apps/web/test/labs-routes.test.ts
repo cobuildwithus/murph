@@ -46,7 +46,6 @@ const EMPTY_SEARCH_RESPONSE = {
   orderableThroughMurph: false,
   orderingStatus: "discovery_only",
   provider: { page: 1, pages: 0, total: 0 },
-  source: "junction",
 } as const;
 
 beforeAll(async () => {

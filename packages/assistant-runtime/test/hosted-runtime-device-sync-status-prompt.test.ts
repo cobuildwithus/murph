@@ -320,7 +320,7 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("WHOOP currently needs reconnect");
     expect(prompt).toContain("account is in error state `REAUTHORIZATION_REQUIRED`");
     expect(prompt).toContain("vault-cli device connect whoop --format json");
-    expect(prompt).not.toContain("Junction currently needs reconnect");
+    expect(prompt).not.toMatch(/junction/iu);
     expect(prompt).not.toContain("No hosted reconnect target");
   });
 

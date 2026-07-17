@@ -22,6 +22,10 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("keeps internal provider branding out of published changelog data", () => {
+    expect(JSON.stringify(listChangelogEditions())).not.toMatch(/junction/iu);
+  });
+
   it("applies independent feature and improvement candidate limits", () => {
     const items = queryChangelogItems({
       featureLimit: 1,

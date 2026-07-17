@@ -84,7 +84,6 @@ describe("Junction labs provider boundary", () => {
       orderableThroughMurph: false,
       orderingStatus: "discovery_only",
       provider: { page: 2, pages: null, total: null },
-      source: "junction",
     });
     if (result.action !== "search") {
       throw new Error("Expected a labs search result.");
@@ -94,13 +93,12 @@ describe("Junction labs provider boundary", () => {
       catalogPrice: {
         amount: "219.9900",
         currency: "USD",
-        source: "junction_catalog",
       },
       includedMarkerCount: 45,
-      junctionOrderable: true,
       kind: "panel",
       name: "Fixture health panel",
     });
+    expect(JSON.stringify(result)).not.toMatch(/junction/iu);
     expect(result.items[0]?.includedMarkers).toHaveLength(40);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });

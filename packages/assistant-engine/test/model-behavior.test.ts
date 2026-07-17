@@ -965,7 +965,7 @@ describe('assistant local PDF evidence guidance', () => {
       'do not use batch for interactive, server, or long-running assistant commands',
     )
     expect(prompt).toContain(
-      'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
+      'Keep the internal device-sync provider out of user-facing replies',
     )
     expect(prompt).toContain(
       'When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields.',
@@ -983,8 +983,9 @@ describe('assistant local PDF evidence guidance', () => {
       'Ask for subjective or protocol-specific details only when the wearable cannot answer them',
     )
     expect(prompt).toContain(
-      'mention Junction only when explicitly debugging low-level connection or runtime state',
+      'For low-level problems, say "device connection" or "sync service" rather than naming internal plumbing',
     )
+    expect(prompt).not.toMatch(/junction/iu)
     expect(prompt).toContain(
       'Never invent invite/share/auth/wearable URLs',
     )

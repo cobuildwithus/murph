@@ -62,7 +62,6 @@ interface JunctionPscProjection {
 const RESPONSE_BASE = {
   orderableThroughMurph: false,
   orderingStatus: "discovery_only",
-  source: "junction",
 } as const;
 
 export async function executeJunctionLabsTool(
@@ -424,7 +423,6 @@ function normalizeJunctionOffering(value: unknown): HostedRuntimeLabsOffering | 
       includedMarkerProjection.total,
     ),
     includedMarkers: includedMarkerProjection.markers,
-    junctionOrderable: true,
     kind,
     labId,
     maximumTurnaroundDays: readNonnegativeInteger(value, "worst_case_tat_days"),
@@ -470,7 +468,6 @@ function normalizeCatalogPrice(
   return {
     amount,
     currency: "USD",
-    source: "junction_catalog",
   };
 }
 

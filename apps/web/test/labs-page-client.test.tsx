@@ -70,8 +70,9 @@ describe("LabsPageClient", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain("Discovery only");
     expect(rendered.container.textContent).toContain(
-      "Ordering through Murph is not available yet",
+      "Ordering through Murph is planned for later",
     );
+    expect(rendered.container.textContent).not.toMatch(/junction/iu);
     expect(rendered.container.querySelectorAll("form")).toHaveLength(2);
 
     const actionLabels = [...rendered.container.querySelectorAll("button")]
@@ -147,7 +148,7 @@ describe("LabsPageClient", () => {
 
     await changeInput(rendered, "#labs-catalog-query", "lipids");
     await submitFormWithoutWaiting(rendered, 0);
-    expect(rendered.container.textContent).toContain("Searching Junction's live catalog");
+    expect(rendered.container.textContent).toContain("Searching the live catalog");
 
     await resolveDeferred(first, jsonResponse({}, 503));
     expect(rendered.container.textContent).toContain("Catalog temporarily unavailable");
@@ -224,6 +225,9 @@ describe("LabsPageClient", () => {
     expect(rendered.container.textContent).toContain(
       "A provider-authored cardiovascular panel description.",
     );
+    expect(rendered.container.textContent).toContain(
+      "Ordering through Murph is planned for later.",
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await clickButtonElement(rendered, detailsButton);
@@ -271,6 +275,22 @@ describe("LabsPageClient", () => {
       "does not confirm that a particular test can be collected there",
     );
     expect(rendered.container.textContent).not.toContain("supports Broad Heart Panel");
+  });
+
+  it("states listed home collection clearly when no walk-in sites are returned", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(locationsResponse({
+      homeCollectionAvailable: true,
+      locations: [],
+      status: "available",
+    })));
+    const rendered = await renderLabsPage();
+
+    await changeInput(rendered, "#labs-location-zip", "10001");
+    await submitForm(rendered, 1);
+
+    expect(rendered.container.textContent).toContain(
+      "Home collection is listed for this area, but no walk-in sites were found in this radius.",
+    );
   });
 
   it("keeps catalog results while locations fail, then renders a clean not-served result on retry", async () => {
@@ -333,7 +353,6 @@ const panelOffering: HostedRuntimeLabsOffering = {
   catalogPrice: {
     amount: "149.00",
     currency: "USD",
-    source: "junction_catalog",
   },
   commonTurnaroundDays: 3,
   description: "A synthetic panel used for interface coverage.",
@@ -343,7 +362,6 @@ const panelOffering: HostedRuntimeLabsOffering = {
     { name: "HDL cholesterol", slug: "hdl-cholesterol" },
     { name: "LDL cholesterol", slug: "ldl-cholesterol" },
   ],
-  junctionOrderable: true,
   kind: "panel",
   labId: 7,
   maximumTurnaroundDays: 7,
@@ -358,13 +376,11 @@ const biomarkerOffering: HostedRuntimeLabsOffering = {
   catalogPrice: {
     amount: "39.00",
     currency: "USD",
-    source: "junction_catalog",
   },
   commonTurnaroundDays: 2,
   description: "A synthetic biomarker used for interface coverage.",
   includedMarkerCount: 0,
   includedMarkers: [],
-  junctionOrderable: true,
   kind: "biomarker",
   labId: 7,
   maximumTurnaroundDays: 5,
@@ -411,7 +427,6 @@ function searchResponse(
       pages: 1,
       total,
     },
-    source: "junction",
   };
 }
 
@@ -426,7 +441,6 @@ function locationsResponse(
     orderableThroughMurph: false,
     orderingStatus: "discovery_only",
     radiusMiles: 25,
-    source: "junction",
     status: "available",
     zipCode: "10001",
     ...overrides,

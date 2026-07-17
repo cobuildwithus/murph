@@ -218,17 +218,17 @@ export function LabsPageClient() {
     <div className="flex flex-col gap-10 pb-8">
       <div className="flex flex-col gap-5">
         <PageHeader
-          eyebrow="Live catalog preview"
+          eyebrow="Live lab preview"
           title="Labs"
-          description="Search Junction's current test catalog and explore nearby collection sites. This preview reads live provider data without saving your searches."
+          description="Explore current lab tests and nearby collection sites. Searches are live and are not saved."
         />
 
         <Alert>
           <InfoIcon />
           <AlertTitle>Discovery only</AlertTitle>
           <AlertDescription>
-            Ordering through Murph is not available yet. Listed amounts are current Junction
-            catalog prices, not final quotes. Catalog and location listings do not confirm
+            You can explore available tests now. Ordering through Murph is planned for later.
+            Listed amounts are current catalog prices, not final quotes. Listings do not confirm
             eligibility or appointment availability.
           </AlertDescription>
         </Alert>
@@ -238,7 +238,7 @@ export function LabsPageClient() {
         <SectionHeading
           index="01"
           title="Search the live catalog"
-          description="Look for a test, panel, or named biomarker. Results stay in Junction's relevance order."
+          description="Look for a test, panel, or named biomarker. Results appear in the order returned by the live catalog."
           id="labs-catalog-heading"
         />
 
@@ -486,8 +486,8 @@ function CatalogResults({
         </AlertTitle>
         <AlertDescription>
           {filteredKind
-            ? "Try All catalog items or a shorter provider-facing name."
-            : "Try a shorter provider-facing name or a related term."}
+            ? "Try All catalog items or a shorter test name."
+            : "Try a shorter test name or a related term."}
         </AlertDescription>
       </Alert>
     );
@@ -503,7 +503,7 @@ function CatalogResults({
           {catalogResultSummary(state.data)}
         </p>
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Live Junction catalog · {formatCheckedAt(state.data.checkedAt)}
+          Live catalog · {formatCheckedAt(state.data.checkedAt)}
         </p>
       </div>
 
@@ -542,7 +542,7 @@ function CatalogResults({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Prices shown are current Junction catalog amounts and may not be the final quote.
+        Prices shown are current catalog amounts and may not be the final quote.
       </p>
     </div>
   );
@@ -631,11 +631,11 @@ function OfferingDetail({
             {formatOfferingKind(item.kind)}
           </Badge>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Listed in Junction&apos;s catalog
+            Live catalog listing
           </span>
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-foreground">
-          {item.description ?? "Junction does not provide a description for this catalog item."}
+          {item.description ?? "No description is available for this catalog item."}
         </p>
       </div>
 
@@ -670,7 +670,7 @@ function OfferingDetail({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        Ordering through Murph is not enabled yet. This listing does not confirm eligibility or a final quote.
+        Ordering through Murph is planned for later. This listing does not confirm eligibility or a final quote.
       </p>
     </>
   );
@@ -701,7 +701,7 @@ function CatalogLoading() {
   return (
     <div aria-busy="true" className="flex flex-col gap-3">
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Searching Junction&apos;s live catalog
+        <Spinner /> Searching the live catalog
       </p>
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <Table>
@@ -791,7 +791,7 @@ function LocationsResults({
       <Alert>
         <AlertTitle>No collection coverage found</AlertTitle>
         <AlertDescription>
-          Junction did not return home or walk-in collection options within {state.data.radiusMiles} miles.
+          No home or walk-in collection options were found within {state.data.radiusMiles} miles.
         </AlertDescription>
       </Alert>
     );
@@ -827,7 +827,7 @@ function LocationsResults({
         </ol>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Junction returned general coverage but no walk-in sites in this radius.
+          Home collection is listed for this area, but no walk-in sites were found in this radius.
         </p>
       )}
     </div>
@@ -967,7 +967,7 @@ function formatAddress(location: HostedRuntimeLabsLocation): string {
 
 function formatLabName(value: string | null): string {
   if (!value) {
-    return "Junction lab network";
+    return "Collection site";
   }
 
   return value
@@ -986,7 +986,7 @@ function formatDistance(value: number): string {
 
 function catalogStatusText(state: SearchState): string {
   if (state.status === "loading") {
-    return "Searching Junction's live catalog.";
+    return "Searching the live catalog.";
   }
   if (state.status !== "success") {
     return "";

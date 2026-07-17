@@ -75,7 +75,6 @@ const hostedRuntimeLabsCatalogPriceSchema = z
   .object({
     amount: z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u),
     currency: z.literal("USD"),
-    source: z.literal("junction_catalog"),
   })
   .strict();
 
@@ -99,7 +98,6 @@ export const hostedRuntimeLabsOfferingSchema = z
     catalogPrice: hostedRuntimeLabsCatalogPriceSchema.nullable(),
     commonTurnaroundDays: nonnegativeIntegerSchema.nullable(),
     maximumTurnaroundDays: nonnegativeIntegerSchema.nullable(),
-    junctionOrderable: z.boolean(),
     includedMarkers: z.array(hostedRuntimeLabsIncludedMarkerSchema).max(40),
     includedMarkerCount: nonnegativeIntegerSchema,
   })
@@ -146,7 +144,6 @@ export const hostedRuntimeLabsLocationSchema = z
   .strict();
 
 const hostedRuntimeLabsResponseBase = {
-  source: z.literal("junction"),
   checkedAt: z.string().datetime({ offset: true }),
   orderingStatus: z.literal("discovery_only"),
   orderableThroughMurph: z.literal(false),

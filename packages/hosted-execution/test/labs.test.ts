@@ -9,7 +9,6 @@ const offering = {
   catalogPrice: {
     amount: "42.50",
     currency: "USD" as const,
-    source: "junction_catalog" as const,
   },
   commonTurnaroundDays: 2,
   description: "A synthetic catalog fixture.",
@@ -18,12 +17,11 @@ const offering = {
     { name: "Marker Alpha", slug: "marker-alpha" },
     { name: "Marker Beta", slug: null },
   ],
-  junctionOrderable: true,
   kind: "panel" as const,
   labId: 7,
   maximumTurnaroundDays: 5,
   name: "Synthetic Panel",
-  offeringId: "junction:7:synthetic-panel",
+  offeringId: "7:synthetic-panel",
   providerId: "synthetic-panel",
   slug: "synthetic-panel",
   unit: null,
@@ -33,7 +31,6 @@ const responseBase = {
   checkedAt: "2026-07-16T12:00:00.000Z",
   orderableThroughMurph: false as const,
   orderingStatus: "discovery_only" as const,
-  source: "junction" as const,
 };
 
 describe("hosted Labs contract", () => {
@@ -100,16 +97,18 @@ describe("hosted Labs contract", () => {
   });
 
   it("parses normalized catalog search and detail responses", () => {
-    expect(parseHostedRuntimeLabsToolResponse({
+    const parsed = parseHostedRuntimeLabsToolResponse({
       action: "search",
       ...responseBase,
       items: [offering],
       provider: { page: 1, pages: 4, total: 67 },
-    })).toMatchObject({
+    });
+    expect(parsed).toMatchObject({
       action: "search",
       items: [{ name: "Synthetic Panel" }],
       orderableThroughMurph: false,
     });
+    expect(JSON.stringify(parsed)).not.toMatch(/junction/iu);
 
     expect(parseHostedRuntimeLabsToolResponse({
       action: "show",

@@ -104,6 +104,20 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Older");
   });
 
+  it("keeps internal provider branding out of every rendered archive page", async () => {
+    const editions = listChangelogEditions();
+    const pageStarts = editions.filter((_, index) => index % 7 === 0);
+
+    for (const [index, edition] of pageStarts.entries()) {
+      const markup = renderToStaticMarkup(
+        await ChangelogPage({
+          searchParams: Promise.resolve(index === 0 ? {} : { edition: edition.id }),
+        }),
+      );
+      expect(markup).not.toMatch(/junction/iu);
+    }
+  });
+
   it("publishes a canonical URL for each valid archive page", async () => {
     const editions = listChangelogEditions();
     const pageTwoEditions = editions.slice(7, 14);

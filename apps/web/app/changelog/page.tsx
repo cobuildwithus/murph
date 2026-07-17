@@ -776,7 +776,7 @@ const VISUALS: Record<string, ReactNode> = {
       caption="on cron rewind"
     />
   ),
-  "garmin-junction-sleep-records": (
+  "garmin-sleep-records": (
     <DeviceList
       devices={[
         { name: "Garmin", initial: "G", color: "#0078b8", status: "connected" },
@@ -944,9 +944,9 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "whoop-junction-local-day": (
+  "wearable-local-day": (
     <StatBlock
-      label="WHOOP / Junction days"
+      label="Wearable record days"
       before="UTC drift"
       after="Local day"
       caption="records line up with your calendar"
@@ -1425,7 +1425,7 @@ const VISUALS: Record<string, ReactNode> = {
       caption="History compacts itself in the background."
     />
   ),
-  "junction-hourly-reconcile": (
+  "hourly-wearable-reconcile": (
     <StatBlock
       label="Wearable refresh"
       before="6 hours"
@@ -1657,7 +1657,7 @@ const VISUALS: Record<string, ReactNode> = {
       caption="Visible on home as soon as you start."
     />
   ),
-  "junction-direct-provider-link": (
+  "direct-device-provider-link": (
     <DeviceList
       devices={[
         { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
@@ -1666,7 +1666,7 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "junction-source-reconnect": (
+  "device-source-reconnect": (
     <DeviceList
       devices={[
         { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
@@ -1695,7 +1695,7 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "junction-meal-imports": (
+  "connected-meal-imports": (
     <MealCard
       source="MyFitnessPal"
       time="1:12 PM"

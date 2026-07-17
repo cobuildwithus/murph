@@ -26,7 +26,7 @@ vi.mock("@/app/(dashboard)/labs/labs-page-client", () => ({
       "main",
       null,
       createElement("h1", null, "Labs"),
-      createElement("p", null, "Ordering through Murph is not available yet."),
+      createElement("p", null, "Ordering through Murph is planned for later."),
       createElement("form", { "aria-label": "Search live test catalog" }),
       createElement("form", { "aria-label": "Find collection locations" }),
     ),
@@ -58,6 +58,7 @@ describe("LabsPage", () => {
       follow: false,
       index: false,
     });
+    expect(JSON.stringify(metadata)).not.toMatch(/junction/iu);
   });
 
   it("redirects an unauthenticated visitor before rendering the catalog", async () => {
@@ -77,7 +78,8 @@ describe("LabsPage", () => {
     assert.match(markup, /Labs/);
     assert.match(markup, /Search live test catalog/);
     assert.match(markup, /Find collection locations/);
-    assert.match(markup, /Ordering through Murph is not available yet/);
+    assert.match(markup, /Ordering through Murph is planned for later/);
+    assert.doesNotMatch(markup, /junction/iu);
     assert.doesNotMatch(markup, />\s*(?:Buy|Book|Order)\s*</iu);
   });
 });

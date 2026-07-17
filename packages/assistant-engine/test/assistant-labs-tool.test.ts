@@ -35,6 +35,7 @@ describe('murph.labs dynamic tool', () => {
     expect(MURPH_LABS_TOOL.description).toContain(
       'do not prove member eligibility, appointment availability, final price',
     )
+    expect(MURPH_LABS_TOOL.description).not.toMatch(/junction/iu)
   })
 
   it('accepts every bounded action', () => {
@@ -137,6 +138,7 @@ describe('murph.labs dynamic tool', () => {
     )
     expect(result.rpcResult.success).toBe(true)
     expect(readResultPayload(result)).toEqual(createSearchResponse())
+    expect(readResultText(result)).not.toMatch(/junction/iu)
   })
 
   it('fails closed with generic text for missing transport, thrown errors, and extra fields', async () => {
@@ -284,13 +286,11 @@ function createOffering(): HostedRuntimeLabsOffering {
     catalogPrice: {
       amount: '42.00',
       currency: 'USD',
-      source: 'junction_catalog',
     },
     commonTurnaroundDays: 2,
     description: 'A focused cholesterol marker.',
     includedMarkerCount: 1,
     includedMarkers: [{ name: 'Total cholesterol', slug: 'total-cholesterol' }],
-    junctionOrderable: true,
     kind: 'biomarker',
     labId: 10,
     maximumTurnaroundDays: 4,
@@ -314,7 +314,6 @@ function createSearchResponse(): HostedRuntimeLabsSearchResponse {
       pages: 1,
       total: 1,
     },
-    source: 'junction',
   }
 }
 

@@ -21,7 +21,7 @@ export const MURPH_LABS_TOOL = {
   namespace: 'murph',
   name: 'labs',
   description:
-    'Read Junction\'s live lab catalog. This tool only discovers provider-declared panels and biomarkers, shows exact catalog details, and lists nearby collection sites from a user-provided 5-digit ZIP. It cannot order, book, pay for, reserve, start checkout, or promise a launch date. Catalog orderability and site listings do not prove member eligibility, appointment availability, final price, or that a particular test can be collected at a listed site.',
+    'Read the live lab test catalog. This tool discovers available panels and biomarkers, shows exact catalog details, and lists nearby collection sites from a user-provided 5-digit ZIP. It cannot order, book, pay for, reserve, start checkout, or promise a launch date. Catalog listings do not prove member eligibility, appointment availability, final price, or that a particular test can be collected at a listed site.',
   inputSchema: z.toJSONSchema(hostedRuntimeLabsToolRequestSchema, { io: 'input' }),
 } as const
 
