@@ -8,7 +8,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   experimentFrontmatterSchema,
@@ -568,34 +567,15 @@ function browserVaultOutcomeMatchesExperiment(
   frontmatter: ExperimentFrontmatter,
 ): boolean {
   const outcomeRef = frontmatter.outcomeRef;
-  if (
-    !outcomeRef ||
-    outcome.outcomeId !== outcomeRef.outcomeId ||
-    (outcomeRef.generatedAt !== undefined &&
-      outcome.generatedAt !== outcomeRef.generatedAt) ||
-    outcome.experiment.id !== frontmatter.experimentId ||
-    outcome.experiment.slug !== frontmatter.slug ||
-    outcome.experiment.status !== frontmatter.status ||
-    outcome.experiment.title !== frontmatter.title ||
-    !isDeepStrictEqual(
-      outcome.commonsProtocolRef,
-      frontmatter.commonsProtocolRef ?? null,
-    ) ||
-    !isDeepStrictEqual(outcome.protocolRef ?? null, frontmatter.protocolRef ?? null) ||
-    !isDeepStrictEqual(
-      outcome.effectiveProtocolSnapshot ?? null,
-      frontmatter.effectiveProtocolSnapshot ?? null,
-    )
-  ) {
+  if (!outcomeRef) {
     return false;
   }
 
-  return isDeepStrictEqual(outcome.windows, {
-    baselineEnd: frontmatter.runPlan?.baselineEnd ?? null,
-    baselineStart: frontmatter.runPlan?.baselineStart ?? null,
-    interventionEnd: frontmatter.runPlan?.interventionEnd ?? null,
-    interventionStart: frontmatter.runPlan?.interventionStart ?? null,
-  });
+  return outcome.outcomeId === outcomeRef.outcomeId &&
+    (outcomeRef.generatedAt === undefined ||
+      outcome.generatedAt === outcomeRef.generatedAt) &&
+    outcome.experiment.id === frontmatter.experimentId &&
+    outcome.experiment.slug === frontmatter.slug;
 }
 
 function measureHostedBrowserVaultReplicaBytes(replica: unknown): number {

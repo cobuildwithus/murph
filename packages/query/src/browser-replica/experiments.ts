@@ -316,8 +316,8 @@ interface BrowserVaultExperimentRunContext {
   adherenceEvents: BrowserVaultEntity[];
   adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
-  asOfDate: string;
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
+  evidenceThrough: string;
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
   eventTimeZone: string | null;
@@ -363,12 +363,14 @@ export function selectBrowserVaultExperimentResults(
   }
 
   const context = buildRunContext(client, entity, asOf);
-  const metricWindow = buildMetricWindowContext(context.run.windows, context.asOfDate);
-  const liveBiomarkers = buildBiomarkerResults(client, context, metricWindow);
   const persistedOutcome = findPersistedExperimentOutcome(client, context);
   const biomarkers = persistedOutcome
-    ? buildPersistedOutcomeBiomarkers(persistedOutcome, liveBiomarkers)
-    : liveBiomarkers;
+    ? buildPersistedOutcomeBiomarkers(persistedOutcome)
+    : buildBiomarkerResults(
+        client,
+        context,
+        buildMetricWindowContext(context.run.windows, context.evidenceThrough),
+      );
   const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule, adherence);
@@ -487,10 +489,10 @@ function buildRunContext(
     : parsedAdherenceTargets.targets;
   const runTimeZone = adherenceTargets.find((target) => target.calendar)?.calendar?.timeZone ?? schedule?.timeZone ?? null;
   const requestedAsOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
-  const asOfDate = endedEarly
+  const evidenceThrough = sourceStatus === "completed" && endedOn !== null
     ? minIsoDate(requestedAsOfDate, endedOn) ?? requestedAsOfDate
     : requestedAsOfDate;
-  const effectiveAsOf = endedEarly ? asOfDate : asOf;
+  const effectiveAsOf = endedEarly ? evidenceThrough : asOf;
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
   const runStart = windows.baselineStart ?? windows.interventionStart;
@@ -498,13 +500,13 @@ function buildRunContext(
     commonsProtocolRef: cloneRecordOrNull(attributes.commonsProtocolRef),
     completedAt,
     dayInRun: windows.interventionStart !== null && windows.interventionEnd !== null
-      ? computeDayInRun(runStart, asOfDate)
+      ? computeDayInRun(runStart, evidenceThrough)
       : null,
     effectiveProtocolSnapshot: cloneRecordOrNull(attributes.effectiveProtocolSnapshot),
     id: readString(attributes.experimentId) ?? entity.id,
     phase: endedEarly
       ? "abandoned"
-      : resolveExperimentPhase(sourceStatus, windows, asOfDate),
+      : resolveExperimentPhase(sourceStatus, windows, evidenceThrough),
     protocolRef: cloneRecordOrNull(attributes.protocolRef),
     runPlan: {
       ...windows,
@@ -520,10 +522,10 @@ function buildRunContext(
     title: entity.title ?? readString(attributes.title) ?? entity.id,
     windows,
   } satisfies BrowserVaultExperimentResultRun;
-  const events = selectExperimentEvents(client, entity, run, asOfDate, runTimeZone);
+  const events = selectExperimentEvents(client, entity, run, evidenceThrough, runTimeZone);
   const adherenceEvents = selectAdherenceEvidenceEvents({
-    asOfDate,
     client,
+    evidenceThrough,
     eventTimeZone: runTimeZone,
     linkedEvents: events,
     run,
@@ -534,9 +536,9 @@ function buildRunContext(
   return {
     adherenceEvents,
     asOf: effectiveAsOf,
-    asOfDate,
     diagnostics,
     entity,
+    evidenceThrough,
     events,
     eventTimeZone: runTimeZone,
     adherenceTargets,
@@ -613,42 +615,7 @@ function persistedOutcomeMatchesRun(
   run: BrowserVaultExperimentResultRun,
 ): boolean {
   return outcome.experiment.id === run.id &&
-    outcome.experiment.slug === run.slug &&
-    outcome.experiment.status === run.status &&
-    outcome.experiment.title === run.title &&
-    browserJsonValuesEqual(outcome.windows, run.windows) &&
-    browserJsonValuesEqual(outcome.commonsProtocolRef, run.commonsProtocolRef) &&
-    browserJsonValuesEqual(outcome.protocolRef ?? null, run.protocolRef) &&
-    browserJsonValuesEqual(
-      outcome.effectiveProtocolSnapshot ?? null,
-      run.effectiveProtocolSnapshot,
-    );
-}
-
-function browserJsonValuesEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) {
-    return true;
-  }
-
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((entry, index) => browserJsonValuesEqual(entry, right[index]));
-  }
-
-  const leftRecord = readRecord(left);
-  const rightRecord = readRecord(right);
-  if (!leftRecord || !rightRecord) {
-    return false;
-  }
-
-  const leftKeys = Object.keys(leftRecord);
-  const rightKeys = Object.keys(rightRecord);
-  return leftKeys.length === rightKeys.length && leftKeys.every((key) =>
-    Object.hasOwn(rightRecord, key) &&
-    browserJsonValuesEqual(leftRecord[key], rightRecord[key])
-  );
+    outcome.experiment.slug === run.slug;
 }
 
 function resolveSavedOutcomeStatus(
@@ -685,14 +652,8 @@ function buildPersistedOutcomeResult(
 
 function buildPersistedOutcomeBiomarkers(
   outcome: ExperimentOutcome,
-  liveBiomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
 ): BrowserVaultExperimentBiomarkerResult[] {
-  const liveByKey = new Map(
-    liveBiomarkers.map((biomarker) => [biomarker.biomarkerKey, biomarker]),
-  );
-
   return outcome.metricResults.map((metric) => {
-    const live = liveByKey.get(metric.biomarkerKey) ?? null;
     const baselineUnit = metric.baseline?.unit ?? metric.unit;
     const interventionUnit = metric.intervention?.unit ?? metric.unit;
     const expectedEffect: BrowserVaultExperimentExpectedEffect = {
@@ -730,8 +691,8 @@ function buildPersistedOutcomeBiomarkers(
       },
       label: metric.label,
       movedAsExpected: metric.movedAsExpected,
-      points: live?.points ?? [],
-      sourceMetric: live?.sourceMetric ?? resolveBiomarkerMetricSource(metric.biomarkerKey),
+      points: [],
+      sourceMetric: resolveBiomarkerMetricSource(metric.biomarkerKey),
       status: "available",
       statusReason: "Saved experiment analysis is available.",
       unit: metric.unit,
@@ -804,7 +765,7 @@ function selectExperimentEvents(
   client: BrowserVaultQueryClient,
   experiment: BrowserVaultEntity,
   run: BrowserVaultExperimentResultRun,
-  asOfDate: string,
+  evidenceThrough: string,
   eventTimeZone: string | null,
 ): BrowserVaultEntity[] {
   const from = run.windows.baselineStart ?? run.startedOn;
@@ -819,7 +780,7 @@ function selectExperimentEvents(
       return false;
     }
 
-    if (eventDate && eventDate > asOfDate) {
+    if (eventDate && eventDate > evidenceThrough) {
       return false;
     }
 
@@ -840,8 +801,8 @@ function selectExperimentEvents(
 }
 
 function selectAdherenceEvidenceEvents(input: {
-  asOfDate: string;
   client: BrowserVaultQueryClient;
+  evidenceThrough: string;
   eventTimeZone: string | null;
   linkedEvents: readonly BrowserVaultEntity[];
   run: BrowserVaultExperimentResultRun;
@@ -858,10 +819,10 @@ function selectAdherenceEvidenceEvents(input: {
 
   const interventionStart = input.run.windows.interventionStart;
   const interventionEnd = input.run.windows.interventionEnd;
-  if (!interventionStart || !interventionEnd || input.asOfDate < interventionStart) {
+  if (!interventionStart || !interventionEnd || input.evidenceThrough < interventionStart) {
     return [...byId.values()];
   }
-  const effectiveEnd = minIsoDate(interventionEnd, input.asOfDate);
+  const effectiveEnd = minIsoDate(interventionEnd, input.evidenceThrough);
   if (!effectiveEnd) {
     return [...byId.values()];
   }
@@ -901,12 +862,12 @@ function readSessionEventLocalDate(entity: BrowserVaultEntity): string | null {
 
 function buildMetricWindowContext(
   windows: BrowserVaultExperimentRunWindows,
-  asOfDate: string,
+  evidenceThrough: string,
 ): MetricWindowContext {
   const baselineDates = dateRange(windows.baselineStart, windows.baselineEnd);
   const interventionDates = dateRange(
     windows.interventionStart,
-    minIsoDate(windows.interventionEnd, asOfDate),
+    minIsoDate(windows.interventionEnd, evidenceThrough),
   );
 
   return {
@@ -986,7 +947,7 @@ function buildBiomarkerResult(
       totalDays: metricWindow.baselineDates.length,
     },
     comparisonWindow: {
-      end: minIsoDate(metricWindow.windows.interventionEnd, context.asOfDate),
+      end: minIsoDate(metricWindow.windows.interventionEnd, context.evidenceThrough),
       start: metricWindow.windows.interventionStart,
       totalDays: metricWindow.interventionDates.length,
     },
@@ -1086,11 +1047,13 @@ function buildAnchoredBiomarkerResult(input: {
     input.client,
     input.sourceMetric,
     baselineAnchors,
+    input.context.evidenceThrough,
   );
   const followupRows = collectAnchoredMetricRows(
     input.client,
     input.sourceMetric,
     followupAnchors,
+    input.context.evidenceThrough,
   );
   const baselinePoints = metricRowsToAnchoredExperimentPoints(
     baselineRows,
@@ -1194,6 +1157,7 @@ function collectAnchoredMetricRows(
   client: BrowserVaultQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   anchors: readonly BrowserMeasurementAnchor[],
+  evidenceThrough: string,
 ): BrowserVaultMetricRowWithValue[] {
   const anchorIds = new Set(anchors.map((anchor) => anchor.recordId));
   if (anchorIds.size === 0) {
@@ -1203,6 +1167,7 @@ function collectAnchoredMetricRows(
   return client.metrics.series({ metricKey: sourceMetric.metricKey })
     .filter((row): row is BrowserVaultMetricRowWithValue =>
       hasNumericMetricValue(row) &&
+      row.date <= evidenceThrough &&
       row.recordIds.some((recordId) => anchorIds.has(recordId))
     )
     .sort(compareMetricRowsAsc);
@@ -1486,12 +1451,12 @@ function buildAdherenceObservations(
             eventKind: event.kind,
             localDate:
               event.kind === "activity_session"
-                ? resolveActivityEvidenceLocalDate(event) ?? context.asOfDate
+                ? resolveActivityEvidenceLocalDate(event) ?? context.evidenceThrough
                 : readSessionEventLocalDate(event) ??
                   readEventLocalDate(event, target.calendar?.timeZone ?? context.eventTimeZone) ??
                   event.date ??
                   extractDate(event.occurredAt) ??
-                  context.asOfDate,
+                  context.evidenceThrough,
             source: readString(event.attributes.source),
             status: readSessionScheduleStatus(event),
             targetId: target.targetId,
@@ -1683,7 +1648,7 @@ function buildProgressResult(
     : [];
   const progressCounts = progressTarget && !progressTarget.calendar
     ? countCompletedAdherenceSessions({
-        asOfDate: context.asOfDate,
+        asOfDate: context.evidenceThrough,
         observations: progressObservations,
         target: progressTarget,
         windows: context.run.windows,
@@ -1737,7 +1702,7 @@ function buildProgressResult(
     ? null
     : computeExpectedSessionsByNow(
         context.run,
-        context.asOfDate,
+        context.evidenceThrough,
         targetSessions,
         progressSchedule,
       );

@@ -195,6 +195,40 @@ describe("hosted browser-vault replica refresh preparation", () => {
         requestId: null,
         vault: vaultRoot,
       });
+      await services.core.stopExperiment({
+        lookup: "writer-projection",
+        occurredAt: "2026-06-15T12:00:00.000Z",
+        requestId: null,
+        vault: vaultRoot,
+      });
+      await services.core.updateExperiment({
+        commonsProtocolRef: {
+          key: "protocol_variant:writer-projection/revised",
+          pageRevisionId: `sha256:${"1".repeat(64)}`,
+          runSpecRevisionId: `sha256:${"2".repeat(64)}`,
+          testPlanId: "writer-projection-revised",
+        },
+        effectiveProtocolSnapshot: {
+          doseSignature: "Revised writer-projection dose",
+          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+          modality: "custom",
+        },
+        lookup: "writer-projection",
+        protocolRef: {
+          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+          protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+          protocolRevisionId: `sha256:${"3".repeat(64)}`,
+        },
+        requestId: null,
+        runPlan: {
+          baselineEnd: "2026-06-04",
+          baselineStart: "2026-06-02",
+          interventionEnd: "2026-06-11",
+          interventionStart: "2026-06-05",
+        },
+        title: "Renamed writer projection",
+        vault: vaultRoot,
+      });
       const sourceHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
       const replica = await createHostedBrowserVaultReplicaForSourceState({
         generatedAt: "2027-06-20T12:00:00.000Z",
@@ -203,6 +237,29 @@ describe("hosted browser-vault replica refresh preparation", () => {
       });
 
       expect(replica.experimentOutcomes).toEqual([written.outcome]);
+
+      const {
+        createBrowserVaultQueryClient,
+        selectBrowserVaultExperimentResults,
+      } = await import("@murphai/query/browser");
+      const results = selectBrowserVaultExperimentResults(
+        createBrowserVaultQueryClient(replica),
+        "writer-projection",
+      );
+      expect(results?.savedOutcomeStatus).toBe("available");
+      expect(results?.persistedOutcome).toEqual(written.outcome);
+      expect(results?.experiment.windows).toEqual({
+        baselineEnd: "2026-06-04",
+        baselineStart: "2026-06-02",
+        interventionEnd: "2026-06-11",
+        interventionStart: "2026-06-05",
+      });
+      expect(results?.persistedOutcome?.windows).toEqual({
+        baselineEnd: "2026-06-03",
+        baselineStart: "2026-06-01",
+        interventionEnd: "2026-06-10",
+        interventionStart: "2026-06-04",
+      });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

@@ -78,10 +78,16 @@ function mapExperimentResultsProjection(
   const { experiment } = results;
   const status = normalizePrivateRunStatus(results);
   const startedOn = experiment.windows.baselineStart ?? experiment.startedOn;
+  const savedWindows = status === "finished"
+    ? results.persistedOutcome?.windows ?? null
+    : null;
+  const dateRangeStart = savedWindows
+    ? savedWindows.baselineStart ?? savedWindows.interventionStart ?? undefined
+    : startedOn;
   const referenceDate = resolveResultsReferenceDate(results, client);
   const analysisAvailableOn = status === "stopped"
     ? experiment.completedAt ?? experiment.windows.interventionEnd ?? undefined
-    : results.persistedOutcome?.windows.interventionEnd ??
+    : savedWindows?.interventionEnd ?? results.persistedOutcome?.asOf ??
       experiment.windows.interventionEnd ??
       experiment.completedAt ??
       undefined;
@@ -114,8 +120,8 @@ function mapExperimentResultsProjection(
     title: experiment.title,
     day,
     completionPercent,
-    dateRange: startedOn && analysisAvailableOn
-      ? formatDateRange(startedOn, analysisAvailableOn)
+    dateRange: dateRangeStart && analysisAvailableOn
+      ? formatDateRange(dateRangeStart, analysisAvailableOn)
       : undefined,
     analysisAvailableOn,
     signals: buildSignals(results),

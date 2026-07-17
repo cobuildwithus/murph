@@ -499,11 +499,13 @@ describe("experiment detail private-run composition", () => {
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
-  it("renders the exact canonical saved outcome without raw metric rows", async () => {
+  it("keeps the exact canonical saved outcome after normal lifecycle and title changes", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     const outcome = createSavedOutcome({
       id: "exp_sauna_saved_outcome",
       slug: "finnish-sauna",
+      status: "active",
+      title: "Original sauna run",
     });
 
     expect(protocol).not.toBeNull();
@@ -512,25 +514,34 @@ describe("experiment detail private-run composition", () => {
       client: await createClient({
         experimentOutcomes: [outcome],
         generatedAt: "2027-06-20T08:00:00.000Z",
-        metricRows: [],
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 99],
+          ["2026-04-04", 120],
+          ["2026-04-08", 130],
+        ]),
         trackedExperiments: [{
           frontmatter: createExperimentFrontmatter({
             analysisPlan: {
               desiredDirection: "decrease",
               primaryBiomarkerKey: "biomarker:resting-heart-rate",
             },
-            endedOn: "2026-04-06",
+            endedOn: "2026-04-07",
             id: "exp_sauna_saved_outcome",
             outcomeRef: {
               generatedAt: outcome.generatedAt,
               outcomeId: outcome.outcomeId,
               relativePath: "bank/experiments/outcomes/saved-sauna.json",
             },
-            runPlan: outcome.windows,
+            runPlan: {
+              baselineEnd: "2026-04-04",
+              baselineStart: "2026-04-02",
+              interventionEnd: "2026-04-07",
+              interventionStart: "2026-04-05",
+            },
             slug: "finnish-sauna",
             startedOn: "2026-04-01",
             status: "completed",
-            title: "Saved sauna run",
+            title: "Renamed sauna run",
           }),
           id: "exp_sauna_saved_outcome",
           slug: "finnish-sauna",
@@ -538,13 +549,15 @@ describe("experiment detail private-run composition", () => {
           status: "completed",
           summary: "The browser must use the canonical outcome.",
           tags: ["sauna"],
-          title: "Saved sauna run",
+          title: "Renamed sauna run",
         }],
       }),
       protocol: protocol!,
     });
 
     expect(privateRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-06",
+      dateRange: "Apr 1 – Apr 6",
       outcomeStatus: "available",
       status: "finished",
       summary: outcome.conclusion.headline,
@@ -1747,6 +1760,112 @@ describe("experiment detail private-run composition", () => {
     expect(stoppedMarkup).toContain("Resting Heart Rate");
     expect(stoppedMarkup).not.toContain("Continue the protocol");
   });
+
+  it("keeps a post-stop point measurement out of stopped Results", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: [
+          metricRow({
+            date: "2026-04-02",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_baseline"],
+            unit: "bpm",
+            value: 63,
+          }),
+          metricRow({
+            date: "2026-04-05",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_followup"],
+            unit: "bpm",
+            value: 59,
+          }),
+          metricRow({
+            date: "2026-04-06",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_late"],
+            unit: "bpm",
+            value: 40,
+          }),
+        ],
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              measurementAnchors: [
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_baseline",
+                  role: "baseline",
+                },
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_followup",
+                  role: "followup",
+                },
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_late",
+                  role: "followup",
+                },
+              ],
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-05",
+            id: "exp_sauna_stopped_anchor",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-10",
+              interventionStart: "2026-04-04",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "completed",
+            title: "Stopped anchor run",
+          }),
+          id: "exp_sauna_stopped_anchor",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "completed",
+          summary: "Stopped before the later lab result.",
+          tags: ["sauna"],
+          title: "Stopped anchor run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      outcomeStatus: "not_expected",
+      status: "stopped",
+    }));
+    expect(stoppedRun?.signals).toEqual([
+      expect.objectContaining({
+        label: "Resting Heart Rate",
+        value: "59",
+      }),
+    ]);
+    expect(stoppedRun?.trends[0]?.active).toEqual([{ day: 5, value: 59 }]);
+    expect(stoppedRun?.trends[0]?.active).not.toContainEqual({ day: 6, value: 40 });
+
+    const stoppedMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: stoppedRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+    expect(stoppedMarkup).toContain("Your experiment was stopped");
+    expect(stoppedMarkup).toContain("Resting Heart Rate");
+  });
 });
 
 function createEntity(
@@ -1841,6 +1960,8 @@ function createExperimentFrontmatter(input: {
 function createSavedOutcome(input: {
   id: string;
   slug: string;
+  status?: ExperimentOutcome["experiment"]["status"];
+  title?: string;
 }): ExperimentOutcome {
   return {
     adherenceSummary: {
@@ -1865,8 +1986,8 @@ function createSavedOutcome(input: {
     experiment: {
       id: input.id,
       slug: input.slug,
-      status: "completed",
-      title: "Saved sauna run",
+      status: input.status ?? "completed",
+      title: input.title ?? "Saved sauna run",
     },
     generatedAt: "2026-04-07T12:00:00.000Z",
     metricResults: [{
@@ -2003,6 +2124,7 @@ function restingHeartRateRows(entries: readonly (readonly [string, number])[]): 
 function metricRow(input: {
   date: string;
   metricKey: string;
+  recordIds?: string[];
   unit: string;
   value: number;
 }): BrowserVaultMetricRow {
@@ -2016,7 +2138,7 @@ function metricRow(input: {
     metricKey: input.metricKey,
     observedAt: `${input.date}T00:00:00.000Z`,
     pointIds: [`metric-point:${input.metricKey}:${input.date}`],
-    recordIds: [],
+    recordIds: input.recordIds ?? [],
     rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",

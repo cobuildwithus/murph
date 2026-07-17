@@ -27,9 +27,9 @@ The assistant is the interface into this loop, not the full category by itself.
 ## Implemented Now
 
 - The canonical experiment outcome writer saves one version-bound outcome with biomarker deltas, confidence, caveats, confounders, protocol references, and analysis windows.
-- The encrypted browser-vault replica dereferences only the validated `outcomeRef` on a canonical experiment. Experiment detail renders that saved outcome verbatim instead of rebuilding a second conclusion from its rolling metric rows.
+- The encrypted browser-vault replica dereferences only the validated `outcomeRef` on a canonical experiment and requires the saved artifact to match the stable experiment identity. The saved artifact owns its historical title, lifecycle status, protocol, windows, and metric summaries; supported later experiment edits do not revoke it, and Experiment detail does not overlay mutable live metric points on the completed result.
 - Experiment detail keeps a stable **Your results** route for the matching active run or newest completed run. A completed run with no saved outcome is shown as pending; an invalid, missing, or mismatched reference is unavailable and fails closed without hiding the run.
-- Canonical early stops are stored as `status: completed` with an `endedOn` before the planned intervention end. Browser Results presents those runs as stopped, clamps evidence to `endedOn`, and never shows a completed conclusion.
+- Completed browser Results use canonical `endedOn` as the single horizon for rolling and anchored measurements, events, adherence, schedule, context, signals, and trends. When `endedOn` is before the planned intervention end, Results presents the run as stopped and never shows a completed conclusion.
 - CLI and web surfaces keep those results private by default.
 - Consent scopes reserve space for future Health Commons contribution, but there is not yet a shipped share/contribute/cohort pipeline.
 

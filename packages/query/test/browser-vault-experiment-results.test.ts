@@ -1092,8 +1092,94 @@ test("treats canonical completed runs with an early endedOn as stopped and clamp
     result.biomarkers[0]?.points.map((point) => point.date),
     ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05"],
   );
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.schedule?.completedSessions, 2);
   assert.equal(result.schedule?.cells.at(-1)?.localDate, "2026-04-05");
   assert.equal(result.context.length, 0);
+});
+
+test("excludes point-measurement anchors observed after an early stop", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_baseline",
+                role: "baseline",
+              },
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_followup",
+                role: "followup",
+              },
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_late",
+                role: "followup",
+              },
+            ],
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          endedOn: "2026-04-05",
+          status: "completed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-10",
+          },
+        }),
+      ],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-02",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_baseline"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 63,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-05",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_followup"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 59,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-06",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_late"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 40,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-02", "2026-04-05"],
+  );
+  assert.equal(result.biomarkers[0]?.deltaAbs, -4);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 59);
 });
 
 test("keeps a completed run normal when endedOn equals the planned end", () => {
