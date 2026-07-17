@@ -946,7 +946,7 @@ const VISUALS: Record<string, ReactNode> = {
   ),
   "whoop-junction-local-day": (
     <StatBlock
-      label="WHOOP / Junction days"
+      label="Wearable record days"
       before="UTC drift"
       after="Local day"
       caption="records line up with your calendar"

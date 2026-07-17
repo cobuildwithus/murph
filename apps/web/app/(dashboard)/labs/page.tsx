@@ -9,8 +9,7 @@ import { LabsPageClient } from "./labs-page-client";
 export const metadata: Metadata = {
   ...createMurphPageMetadata({
     title: "Labs — Murph",
-    description:
-      "Search Junction's live lab catalog and explore nearby collection locations.",
+    description: "Explore available lab tests and nearby collection options.",
   }),
   robots: {
     follow: false,

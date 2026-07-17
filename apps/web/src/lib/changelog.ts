@@ -1367,7 +1367,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 3,
         title: "Cleaner Garmin sleep-stage imports",
         summary:
-          "Fixed the compact sleep-cycle import from Junction and stopped pulling unrelated provider records alongside it, so Garmin sleep stages land correctly in the vault.",
+          "Fixed the compact sleep-cycle import and stopped pulling unrelated records alongside it, so Garmin sleep stages land correctly in the vault.",
         relevanceTags: ["wearables", "garmin", "sleep"],
         sourcePullRequests: [353, 358],
       },
@@ -1481,17 +1481,17 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-06-29",
     publishedOn: "2026-06-29",
-    title: "Garmin sleep through Junction, and a smoother phone sign-in",
+    title: "Garmin sleep arrives cleanly, and a smoother phone sign-in",
     summary:
-      "Garmin sleep, cycles, and hypnograms imported through Junction now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
+      "Garmin sleep, cycles, and hypnograms now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
     items: [
       {
         id: "garmin-junction-sleep-records",
         kind: "feature",
         priority: 4,
-        title: "Garmin sleep arrives through Junction as real records",
+        title: "Garmin sleep arrives as real records",
         summary:
-          "Garmin sleep, sleep cycles, and hypnograms pushed through Junction now land as full records instead of being dropped as skeleton completion events.",
+          "Garmin sleep, sleep cycles, and hypnograms now land as full records instead of being dropped as skeleton completion events.",
         relevanceTags: ["wearables", "garmin", "junction", "sleep"],
         sourcePullRequests: [336],
       },
@@ -1664,7 +1664,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-26",
     title: "Murph can call you — and the noise level drops everywhere else",
     summary:
-      "Approve a brief and Murph can place an outbound phone call on your behalf. Health records you upload land in your vault, computer handoffs return on the channel that started them, WHOOP and Junction days line up with your calendar, and a wave of polish trims chat noise.",
+      "Approve a brief and Murph can place an outbound phone call on your behalf. Health records you upload land in your vault, computer handoffs return on the channel that started them, wearable records line up with your calendar, and a wave of polish trims chat noise.",
     items: [
       {
         id: "retell-phone-calls",
@@ -1724,9 +1724,9 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "whoop-junction-local-day",
         kind: "improvement",
         priority: 4,
-        title: "WHOOP and Junction days line up with your calendar",
+        title: "Wearable days line up with your calendar",
         summary:
-          "Closed a class of bugs where WHOOP or Junction records could drift into the next calendar day when the provider timestamp crossed UTC midnight — including WHOOP records flowing through Junction. Past records repair on replay.",
+          "Closed a class of bugs where wearable records could drift into the next calendar day when a source timestamp crossed UTC midnight. Past records repair on replay.",
         relevanceTags: ["wearables", "whoop", "junction", "data"],
         sourcePullRequests: [304],
       },
@@ -2711,7 +2711,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-16",
     title: "Devices connect in one tap, Telegram reminders land",
     summary:
-      "Picking a Junction provider skips the picker, scheduled Telegram reminders deliver reliably, and the mobile sidebar dismisses on navigation.",
+      "Picking a specific wearable source skips the picker, scheduled Telegram reminders deliver reliably, and the mobile sidebar dismisses on navigation.",
     items: [
       {
         id: "junction-direct-provider-link",
@@ -2719,7 +2719,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Picking a source skips the picker",
         summary:
-          "Choosing a specific Junction provider like Garmin now starts OAuth directly instead of showing a one-option provider picker first.",
+          "Choosing a specific wearable source like Garmin now starts OAuth directly instead of showing a one-option picker first.",
         relevanceTags: ["wearables", "junction", "connect"],
         sourcePullRequests: [179],
         tryIt: {
@@ -3146,7 +3146,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-09",
     title: "Sidebar contact picker and hourly wearable refresh",
     summary:
-      "Chat opens straight to a channel picker, email verification fits in one dialog, and Junction wearables refresh every hour instead of every six.",
+      "Chat opens straight to a channel picker, email verification fits in one dialog, and an affected wearable import path refreshes every hour instead of every six.",
     items: [
       {
         id: "sidebar-chat-contact-picker",
@@ -3168,7 +3168,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Hourly wearable refresh",
         summary:
-          "Junction-backed wearables — WHOOP, Oura, Garmin and friends — now reconcile every hour instead of every six. Morning sleep and recovery show up sooner.",
+          "An affected connected-wearable import path now reconciles every hour instead of every six. Morning sleep and recovery show up sooner.",
         relevanceTags: ["wearables", "junction", "whoop", "oura", "garmin"],
         sourcePullRequests: [73],
       },
