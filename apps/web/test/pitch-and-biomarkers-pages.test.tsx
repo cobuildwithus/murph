@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import {
+  BROWSER_VAULT_REPLICA_POLICY_ID,
+  BROWSER_VAULT_REPLICA_SCHEMA,
+  createBrowserVaultQueryClient,
+  type BrowserVaultReplica,
+} from "@murphai/query/browser";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getGeneratedBiomarkerIndex: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
-  shouldShowHomeDeviceSyncStep: vi.fn(),
   useBrowserVault: vi.fn(),
+  useBrowserVaultSelector: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -33,14 +38,7 @@ vi.mock("next/link", () => ({
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
   useBrowserVault: mocks.useBrowserVault,
-}));
-
-vi.mock("@/src/lib/health-commons/generated-biomarker-artifacts", () => ({
-  getGeneratedBiomarkerIndex: mocks.getGeneratedBiomarkerIndex,
-}));
-
-vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
-  shouldShowHomeDeviceSyncStep: mocks.shouldShowHomeDeviceSyncStep,
+  useBrowserVaultSelector: mocks.useBrowserVaultSelector,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -51,64 +49,29 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 import BiomarkersPage, {
   metadata as biomarkersMetadata,
 } from "../app/(dashboard)/biomarkers/page";
+import { BiomarkerLayoutClient } from "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client";
+import LabBiomarkerResultPage, {
+  metadata as biomarkerResultMetadata,
+} from "../app/(dashboard)/biomarkers/results/[metricKey]/page";
 import PitchPage, { metadata as pitchMetadata } from "../app/pitch/page";
+import { resolveHealthCommonsBiomarkerShell } from "../src/lib/health-commons/biomarker-projections";
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     deviceSyncImportPending: false,
+    error: null,
+    freshness: "fresh",
+    refresh: vi.fn(),
     refreshPending: false,
     status: "ready",
   });
+  mocks.useBrowserVaultSelector.mockReturnValue([]);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-    authenticatedMember: null,
-    session: null,
-  });
-  mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(false);
-  mocks.getGeneratedBiomarkerIndex.mockReturnValue({
-    biomarkers: [
-      {
-        aliases: ["Glycated hemoglobin"],
-        categories: ["metabolic_health"],
-        hidden: false,
-        key: "hba1c",
-        published: true,
-        routeId: "hba1c",
-        shortName: "HbA1c",
-        summary: "Longer-range blood sugar signal.",
-        title: "Hemoglobin A1c",
-        unit: "percent",
-      },
-      {
-        aliases: [],
-        categories: ["internal"],
-        hidden: true,
-        key: "internal-hidden-marker",
-        published: true,
-        routeId: "internal-hidden-marker",
-        shortName: "Hidden Marker",
-        summary: "This generated entry should not render.",
-        title: "Internal Hidden Marker",
-        unit: null,
-      },
-      {
-        aliases: [],
-        categories: ["draft"],
-        hidden: false,
-        key: "draft-marker",
-        published: false,
-        routeId: "draft-marker",
-        shortName: "Draft Marker",
-        summary: "This unpublished entry should not render.",
-        title: "Draft Marker",
-        unit: null,
-      },
-    ],
-    catalogHash: "test-catalog",
-    generatedAt: "2026-05-19T00:00:00.000Z",
-    schema: "health-commons.web.biomarker-index.v1",
+    authenticated: true,
+    authenticatedMember: {},
+    session: {},
   });
 });
 
@@ -147,11 +110,11 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /01 \/ 13/);
 });
 
-test("BiomarkersPage metadata and route entrypoint filter generated biomarkers", async () => {
-  assert.equal(biomarkersMetadata.title, "Biomarkers — Murph");
+test("BiomarkersPage is a private measured-results entrypoint", async () => {
+  assert.equal(biomarkersMetadata.title, "Your biomarkers — Murph");
   assert.equal(
     biomarkersMetadata.description,
-    "Browse the biomarker library. Track and understand the signals that move your health, then run experiments to see what changes.",
+    "See every biomarker in your lab history and follow how each result changes over time.",
   );
   assert.deepEqual(biomarkersMetadata.twitter?.images, [
     {
@@ -165,39 +128,140 @@ test("BiomarkersPage metadata and route entrypoint filter generated biomarkers",
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Library/);
-  assert.match(markup, /Biomarkers/);
-  assert.match(markup, /1 of 1 biomarkers/);
-  assert.match(markup, /href="\/biomarkers\/hba1c"/);
-  assert.match(markup, /HbA1c/);
-  assert.match(markup, /Longer-range blood sugar signal\./);
-  assert.doesNotMatch(markup, /Internal Hidden Marker/);
-  assert.doesNotMatch(markup, /Hidden Marker/);
-  assert.doesNotMatch(markup, /Draft Marker/);
+  assert.match(markup, /Lab history/);
+  assert.match(markup, /Your biomarkers/);
+  assert.match(markup, /No lab results yet/);
+  assert.doesNotMatch(markup, /Library/);
+  assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
 });
 
-test("BiomarkersPage does not show card syncing text when no device import is pending", async () => {
+test("BiomarkersPage shows a loading skeleton while the private vault opens", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
-    deviceSyncImportPending: false,
+    error: null,
+    freshness: "stale",
+    refresh: vi.fn(),
     refreshPending: false,
     status: "loading",
   });
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.doesNotMatch(markup, /Syncing\.\.\./);
+  assert.match(markup, /Loading your saved biomarker results/);
 });
 
-test("BiomarkersPage shows card syncing text when a device import is pending", async () => {
+test("BiomarkersPage shows preparation copy while its replica refresh is pending", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
-    deviceSyncImportPending: true,
+    error: null,
+    freshness: "stale",
+    refresh: vi.fn(),
     refreshPending: true,
     status: "empty",
   });
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Syncing\.\.\./);
+  assert.match(markup, /Preparing your lab history/);
 });
+
+test("BiomarkersPage asks signed-out visitors to sign in before offering lab sync", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    error: null,
+    freshness: "stale",
+    refresh: vi.fn(),
+    refreshPending: false,
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(await BiomarkersPage());
+
+  assert.match(markup, /Sign in to see your biomarkers/);
+  assert.match(markup, />Sign in</);
+  assert.doesNotMatch(markup, />Sync</);
+  assert.doesNotMatch(markup, /Send Murph a lab report/);
+});
+
+test("Biomarker result route binds server auth and metric params to private history", async () => {
+  const client = createBrowserVaultQueryClient(createBiomarkerRouteReplica());
+  mocks.useBrowserVaultSelector.mockImplementation(
+    (selector: (value: typeof client) => unknown) => selector(client),
+  );
+
+  assert.equal(biomarkerResultMetadata.title, "Biomarker history — Murph");
+  const markup = renderToStaticMarkup(await LabBiomarkerResultPage({
+    params: Promise.resolve({ metricKey: "hba1c" }),
+  }));
+
+  assert.match(markup, /HbA1c/);
+  assert.match(markup, /5\.4 %/);
+  assert.match(markup, /Your biomarkers/);
+  assert.doesNotMatch(markup, /All biomarkers/);
+  assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
+});
+
+test("legacy biomarker detail links back to the measured results page truthfully", () => {
+  const biomarker = resolveHealthCommonsBiomarkerShell("resting-heart-rate");
+  assert.ok(biomarker);
+
+  const markup = renderToStaticMarkup(
+    <BiomarkerLayoutClient biomarker={biomarker}>
+      <div>Legacy biomarker detail</div>
+    </BiomarkerLayoutClient>,
+  );
+
+  assert.match(markup, /href="\/biomarkers"[^>]*>[^<]*<svg[^>]*>[\s\S]*?Your biomarkers<\/a>/u);
+  assert.doesNotMatch(markup, />All biomarkers<\/a>/u);
+});
+
+function createBiomarkerRouteReplica(): BrowserVaultReplica {
+  return {
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    labResultRows: [{
+      analyte: "Hemoglobin A1c",
+      biomarkerKey: "biomarker:hba1c",
+      comparator: null,
+      date: "2026-06-14",
+      flag: null,
+      id: "route-hba1c",
+      labName: "Example Lab",
+      metricKey: "hba1c",
+      normalizedUnit: "percent",
+      normalizedValue: 5.4,
+      observedAt: "2026-06-14T08:00:00.000Z",
+      referenceRange: null,
+      rowSchema: "murph.browser-vault.lab-result-row.v1",
+      sourceLabel: "Lab result",
+      textValue: null,
+      unit: "%",
+      value: 5.4,
+    }],
+    metricGoalProgressRows: [],
+    metricRows: [],
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: BROWSER_VAULT_REPLICA_POLICY_ID,
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
+    schema: BROWSER_VAULT_REPLICA_SCHEMA,
+    searchRows: [],
+    source: {
+      dataVersion: "sha256:biomarker-route-test",
+      sourceBundleHash: "7".repeat(64),
+    },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  };
+}

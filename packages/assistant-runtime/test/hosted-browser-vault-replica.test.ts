@@ -27,13 +27,14 @@ beforeEach(() => {
 });
 
 describe("hosted browser-vault replica refresh preparation", () => {
-  it("builds metric rows from projection points while readVault stays sparse", async () => {
+  it("builds lab and metric rows from projection points while readVault stays sparse", async () => {
     const {
       listMetricPoints,
       readVault,
     } = await import("@murphai/query");
     const {
       createHostedBrowserVaultReplicaForSourceState,
+      summarizeHostedBrowserVaultReplicaContent,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
 
@@ -59,6 +60,79 @@ describe("hosted browser-vault replica refresh preparation", () => {
                 value: 87,
               },
             ],
+          }),
+          "",
+        ].join("\n"),
+      );
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/events/2020/2020-02.jsonl",
+        [
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_live_lab",
+            kind: "test",
+            occurredAt: "2020-02-01T08:00:00.000Z",
+            recordedAt: "2020-02-01T18:00:00.000Z",
+            dayKey: "2020-02-01",
+            source: "manual",
+            title: "Older blood panel",
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 5.1,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_live_lab",
+            kind: "test",
+            occurredAt: "2020-02-01T08:00:00.000Z",
+            recordedAt: "2020-02-02T18:00:00.000Z",
+            dayKey: "2020-02-01",
+            source: "manual",
+            title: "Corrected older blood panel",
+            lifecycle: { revision: 2 },
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 5.3,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_deleted_lab",
+            kind: "test",
+            occurredAt: "2020-02-03T08:00:00.000Z",
+            recordedAt: "2020-02-03T18:00:00.000Z",
+            dayKey: "2020-02-03",
+            source: "manual",
+            title: "Removed older blood panel",
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 9.9,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_deleted_lab",
+            kind: "test",
+            occurredAt: "2020-02-03T08:00:00.000Z",
+            recordedAt: "2020-02-04T18:00:00.000Z",
+            dayKey: "2020-02-03",
+            source: "manual",
+            title: "Removed older blood panel",
+            lifecycle: { revision: 2, state: "deleted" },
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 9.9,
+            }],
           }),
           "",
         ].join("\n"),
@@ -91,10 +165,43 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(vault.entities.some((entity) => entity.entityId === "smp_dense_glucose")).toBe(false);
       expect(vault.samples.some((sample) => sample.entityId === "smp_dense_glucose")).toBe(false);
       expect(points.some((point) => point.metricKey === "apob" && point.value === 87)).toBe(true);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 5.3)).toBe(true);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 5.1)).toBe(false);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 9.9)).toBe(false);
       expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
       expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
       expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
+      expect(replica.metricRows.some((row) => row.metricKey === "hba1c")).toBe(false);
       expect(replica.metricRows.some((row) => row.metricKey === "glucose" && row.value === 101)).toBe(false);
+      expect(replica.labResultRows).toHaveLength(2);
+      expect(replica.labResultRows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          analyte: "Apolipoprotein B",
+          metricKey: "apob",
+          value: 87,
+        }),
+        expect.objectContaining({
+          analyte: "Hemoglobin A1c",
+          metricKey: "hba1c",
+          value: 5.3,
+        }),
+      ]));
+      expect(replica.labResultRows.some((row) => row.value === 5.1 || row.value === 9.9)).toBe(false);
+
+      const labOnlyContent = summarizeHostedBrowserVaultReplicaContent({
+        ...replica,
+        entities: [],
+        metricGoalProgressRows: [],
+        metricRows: [],
+        searchRows: [],
+        sourceHealthRows: [],
+        timelineRows: [],
+        weeklySampleSummaries: [],
+      });
+      expect(labOnlyContent).toMatchObject({
+        hasPrivateContent: true,
+        labResultRows: 2,
+      });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

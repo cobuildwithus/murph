@@ -1,187 +1,347 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import type {
-  BrowserVaultMetricSelectionRow,
-  BrowserVaultQueryClient,
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
+import {
+  selectBrowserVaultMeasuredBiomarkers,
+  type BrowserVaultMeasuredBiomarker,
 } from "@murphai/query/browser-biomarkers";
 
-import {
-  BiomarkerBrowseCard,
-  type BiomarkerBrowsePrivateValue,
-} from "@/src/components/biomarkers/biomarker-browse-card";
-import { CategoryFilter } from "@/src/components/experiments/category-filter";
-import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
+import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { AuthButton } from "@/src/components/ui/auth-button";
+import { Badge } from "@/src/components/ui/badge";
+import { Button } from "@/src/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/src/components/ui/card";
 import { PageHeader } from "@/src/components/ui/page-header";
+import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   useBrowserVault,
-  type BrowserVaultStatus,
+  useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
-
-export interface BiomarkerBrowseEntry {
-  key: string;
-  routeId: string;
-  title: string;
-  shortName: string;
-  summary: string | null;
-  unit: string | null;
-  categories: string[];
-  aliases: string[];
-}
+import {
+  formatLabDate,
+  formatLabFlag,
+} from "@/src/lib/biomarkers/lab-result-display";
 
 interface BiomarkersPageClientProps {
-  biomarkers: BiomarkerBrowseEntry[];
-  showDeviceStep?: boolean;
+  authenticated: boolean;
   uploadLabsAction?: ReactNode;
 }
 
+interface MeasuredBiomarkerGroup {
+  id: string;
+  items: BrowserVaultMeasuredBiomarker[];
+  label: string;
+}
+
 export function BiomarkersPageClient({
-  biomarkers,
-  showDeviceStep = false,
+  authenticated,
   uploadLabsAction = null,
 }: BiomarkersPageClientProps) {
-  const [category, setCategory] = useState("All");
-  const { client, deviceSyncImportPending, status } = useBrowserVault();
-
-  const cards = useMemo(
-    () =>
-      biomarkers.map((entry) => ({
-        ...entry,
-        primaryCategory: entry.categories[0] ?? null,
-      })),
-    [biomarkers],
-  );
-
-  const categoryOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const card of cards) {
-      if (card.primaryCategory) seen.add(formatCategoryLabel(card.primaryCategory));
-    }
-    return [...seen].sort((a, b) => a.localeCompare(b));
-  }, [cards]);
-
-  const filtered = useMemo(() => {
-    return cards.filter((card) => {
-      const cardCategoryLabel = card.primaryCategory
-        ? formatCategoryLabel(card.primaryCategory)
-        : null;
-      return category === "All" || cardCategoryLabel === category;
-    });
-  }, [cards, category]);
+  const {
+    error,
+    freshness,
+    refresh,
+    refreshPending,
+    status,
+  } = useBrowserVault();
+  const biomarkers = useBrowserVaultSelector(selectBrowserVaultMeasuredBiomarkers) ?? [];
+  const groups = groupMeasuredBiomarkers(biomarkers);
+  const authRequired = !authenticated
+    || (status === "error" && isAuthRequiredBrowserVaultError(error));
+  const preparing = authenticated && refreshPending;
 
   return (
     <div className="flex flex-col gap-8">
-      <PageHeader
-        eyebrow="Library"
-        title="Biomarkers"
-        description="Track and understand the signals that move your health, then run experiments to see what changes."
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <PageHeader
+          eyebrow="Lab history"
+          title="Your biomarkers"
+          description="Every biomarker in your saved lab results, grouped by health area."
+        />
+        {authenticated && biomarkers.length > 0 ? (
+          <p className="text-sm tabular-nums text-muted-foreground">
+            {biomarkers.length} {biomarkers.length === 1 ? "biomarker" : "biomarkers"}
+          </p>
+        ) : null}
+      </div>
 
-      {showDeviceStep ? (
-        <BrowserVaultOnboardingStepsContent
-          showDeviceStep
-          hideExperimentStep
+      {authenticated && status === "loading" ? <BiomarkerListSkeleton /> : null}
+
+      {authenticated && status === "error" && !authRequired ? (
+        <Alert variant="destructive">
+          <AlertTitle>Could not load your biomarkers</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Your saved lab results are not available right now.</span>
+              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {authenticated && !authRequired && freshness === "stale"
+        && status !== "loading" && status !== "error"
+        && (biomarkers.length > 0 || !refreshPending) ? (
+        <Alert aria-live="polite">
+          <AlertTitle>
+            {refreshPending ? "Refreshing your lab history" : "Your lab history may be out of date"}
+          </AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                {refreshPending
+                  ? biomarkers.length > 0
+                    ? "Your saved results remain available while Murph checks for newer data."
+                    : "Murph is checking for newer saved lab results."
+                  : biomarkers.length > 0
+                    ? "These are the last saved results. Refresh to check for newer data."
+                    : "No lab results are available in this saved view. Refresh to check for newer data."}
+              </span>
+              <Button
+                disabled={refreshPending}
+                onClick={() => void refresh()}
+                size="sm"
+                variant="outline"
+              >
+                {refreshPending ? "Refreshing…" : "Refresh"}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {(authRequired || status === "empty" || status === "ready") && (!authenticated || biomarkers.length === 0) ? (
+        <EmptyBiomarkersState
+          authRequired={authRequired}
+          preparing={authenticated && preparing}
+          stale={freshness === "stale"}
           uploadLabsAction={uploadLabsAction}
         />
       ) : null}
 
-      <section className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Browse all
-            </span>
-            <p className="text-xs text-muted-foreground">
-              {filtered.length} of {cards.length} biomarkers
-            </p>
-          </div>
-          <CategoryFilter
-            value={category}
-            onChange={setCategory}
-            categories={categoryOptions}
-          />
+      {authenticated && groups.length > 0 ? (
+        <div className="flex flex-col gap-10">
+          {groups.map((group) => (
+            <MeasuredBiomarkerSection key={group.id} group={group} />
+          ))}
         </div>
-
-        {filtered.length === 0 ? (
-          <Alert>
-            <AlertTitle>No biomarkers in this category</AlertTitle>
-            <AlertDescription>
-              Switch back to All to see the full library.
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((card) => (
-              <BiomarkerBrowseCard
-                key={card.routeId}
-                routeId={card.routeId}
-                title={card.shortName}
-                category={card.primaryCategory}
-                unit={card.unit}
-                summary={card.summary}
-                privateValue={resolvePrivateBiomarkerValue({ biomarkerKey: card.key, client, status })}
-                privateValueSyncing={deviceSyncImportPending}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      ) : null}
     </div>
   );
 }
 
-function resolvePrivateBiomarkerValue(input: {
-  biomarkerKey: string;
-  client: BrowserVaultQueryClient | null;
-  status: BrowserVaultStatus;
-}): BiomarkerBrowsePrivateValue | null {
-  if (input.status !== "ready" || !input.client) {
-    return null;
-  }
+function MeasuredBiomarkerSection({ group }: { group: MeasuredBiomarkerGroup }) {
+  const headingId = `biomarker-area-${group.id}`;
 
-  const selection = input.client.metricSelections.getByBiomarker(input.biomarkerKey);
-  if (!isDisplayableMetricSelection(selection)) {
-    return null;
-  }
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2
+          className="font-serif text-xl font-semibold tracking-tight text-foreground"
+          id={headingId}
+        >
+          {group.label}
+        </h2>
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          {group.items.length} {group.items.length === 1 ? "biomarker" : "biomarkers"}
+        </span>
+      </div>
 
-  return {
-    dateLabel: formatDateLabel(selection.effectiveDate),
-    sourceLabel: selection.sourceLabel,
-    stale: selection.status === "stale",
-    unit: selection.unit,
-    valueLabel: selection.valueLabel,
-  };
-}
-
-type DisplayableMetricSelection = BrowserVaultMetricSelectionRow & {
-  effectiveDate: string;
-  value: number;
-  valueLabel: string;
-};
-
-function isDisplayableMetricSelection(
-  selection: BrowserVaultMetricSelectionRow | null,
-): selection is DisplayableMetricSelection {
-  return Boolean(
-    selection &&
-      typeof selection.effectiveDate === "string" &&
-      Number.isFinite(selection.value) &&
-      typeof selection.valueLabel === "string" &&
-      selection.valueLabel.length > 0,
+      <ul className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
+        {group.items.map((biomarker) => (
+          <li
+            className="border-b border-border/60 last:border-b-0"
+            key={biomarker.metricKey}
+          >
+            <MeasuredBiomarkerRow biomarker={biomarker} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
-function formatDateLabel(date: string): string {
-  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", timeZone: "UTC" }).format(
-    new Date(`${date}T00:00:00.000Z`),
+function MeasuredBiomarkerRow({
+  biomarker,
+}: {
+  biomarker: BrowserVaultMeasuredBiomarker;
+}) {
+  const historyLabel = formatHistorySpan(biomarker);
+  const flag = biomarker.latest.flag?.trim() ?? null;
+
+  return (
+    <Link
+      className="group grid min-h-24 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-4 py-4 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_minmax(9rem,auto)_auto] sm:px-5"
+      href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
+    >
+      <div className="min-w-0">
+        <h3 className="break-words font-serif text-lg font-semibold tracking-tight text-foreground">
+          {biomarker.displayName}
+        </h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {biomarker.resultCount} {biomarker.resultCount === 1 ? "result" : "results"}
+          <span aria-hidden="true"> · </span>
+          {historyLabel}
+        </p>
+      </div>
+
+      <div className="min-w-0 text-right sm:text-left">
+        <p className="break-words font-serif text-xl font-semibold tracking-tight tabular-nums text-foreground">
+          <LabResultValue result={biomarker.latest} />
+        </p>
+        <time
+          className="mt-1 block text-xs text-muted-foreground"
+          dateTime={biomarker.lastDate}
+        >
+          {formatLabDate(biomarker.lastDate)}
+        </time>
+      </div>
+
+      <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 sm:col-span-1 sm:justify-end">
+        {flag ? (
+          <Badge variant="outline">
+            {formatLabFlag(flag)}
+          </Badge>
+        ) : null}
+        <ChevronRight
+          aria-hidden="true"
+          className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground"
+          strokeWidth={1.75}
+        />
+      </div>
+    </Link>
   );
 }
 
-function formatCategoryLabel(value: string): string {
-  return value
-    .split(/[-_\s]+/u)
-    .filter((part) => part.length > 0)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
-    .join(" ");
+function EmptyBiomarkersState({
+  authRequired,
+  preparing,
+  stale,
+  uploadLabsAction,
+}: {
+  authRequired: boolean;
+  preparing: boolean;
+  stale: boolean;
+  uploadLabsAction: ReactNode;
+}) {
+  return (
+    <Card aria-live={preparing ? "polite" : undefined} role={preparing ? "status" : undefined}>
+      <CardHeader>
+        <CardTitle>
+          {preparing
+            ? "Preparing your lab history"
+            : authRequired
+              ? "Sign in to see your biomarkers"
+              : stale
+                ? "No saved lab results in this view"
+                : "No lab results yet"}
+        </CardTitle>
+        <CardDescription>
+          {preparing
+            ? "Murph is preparing your saved lab results."
+            : authRequired
+              ? "Your biomarker history is private and only appears after you sign in."
+              : stale
+                ? "Refresh to check for newer data, or send Murph a lab report."
+                : "Send Murph a lab report to start building your history."}
+        </CardDescription>
+      </CardHeader>
+      {!preparing ? (
+        <>
+          <CardContent>
+            <p className="max-w-xl text-sm text-muted-foreground">
+              {authRequired
+                ? "Sign in before viewing or adding private health information."
+                : "Murph will keep each measured biomarker together so future results can be compared over time."}
+            </p>
+          </CardContent>
+          {authRequired ? (
+            <CardFooter>
+              <AuthButton>Sign in</AuthButton>
+            </CardFooter>
+          ) : uploadLabsAction ? (
+            <CardFooter>{uploadLabsAction}</CardFooter>
+          ) : null}
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function BiomarkerListSkeleton() {
+  return (
+    <div aria-label="Loading biomarkers" className="flex flex-col gap-8" role="status">
+      {[0, 1].map((group) => (
+        <div className="flex flex-col gap-3" key={group}>
+          <Skeleton className="h-6 w-36 motion-reduce:animate-none" />
+          <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
+            {[0, 1, 2].map((row) => (
+              <div
+                className="grid min-h-24 grid-cols-[minmax(0,1fr)_8rem] items-center gap-4 border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5"
+                key={row}
+              >
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-5 w-40 motion-reduce:animate-none" />
+                  <Skeleton className="h-3 w-28 motion-reduce:animate-none" />
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <Skeleton className="h-6 w-24 motion-reduce:animate-none" />
+                  <Skeleton className="h-3 w-16 motion-reduce:animate-none" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading your saved biomarker results.</span>
+    </div>
+  );
+}
+
+function groupMeasuredBiomarkers(
+  biomarkers: readonly BrowserVaultMeasuredBiomarker[],
+): MeasuredBiomarkerGroup[] {
+  const groups = new Map<string, MeasuredBiomarkerGroup>();
+
+  for (const biomarker of biomarkers) {
+    const existing = groups.get(biomarker.healthArea.id);
+    if (existing) {
+      existing.items.push(biomarker);
+      continue;
+    }
+
+    groups.set(biomarker.healthArea.id, {
+      id: biomarker.healthArea.id,
+      items: [biomarker],
+      label: biomarker.healthArea.label,
+    });
+  }
+
+  return [...groups.values()];
+}
+
+function formatHistorySpan(biomarker: BrowserVaultMeasuredBiomarker): string {
+  const firstYear = biomarker.firstDate.slice(0, 4);
+  const lastYear = biomarker.lastDate.slice(0, 4);
+  return firstYear === lastYear ? firstYear : `${firstYear} to ${lastYear}`;
+}
+
+function isAuthRequiredBrowserVaultError(error: string | null): boolean {
+  const normalized = error?.toLowerCase() ?? "";
+  return normalized.includes("sign in")
+    || normalized.includes("auth_required")
+    || normalized.includes("unauthorized")
+    || normalized.includes("session expired");
 }

@@ -97,6 +97,32 @@ export interface BrowserVaultSummaryConfidence {
   level: MetricConfidence;
 }
 
+export interface BrowserVaultLabResultReferenceRange {
+  high?: number;
+  low?: number;
+  text?: string;
+}
+
+export interface BrowserVaultLabResultRow {
+  analyte: string;
+  biomarkerKey: string | null;
+  comparator: MetricComparator | null;
+  date: string;
+  flag: string | null;
+  id: string;
+  labName: string | null;
+  metricKey: string;
+  normalizedUnit: string | null;
+  normalizedValue: number | null;
+  observedAt: string;
+  referenceRange: BrowserVaultLabResultReferenceRange | null;
+  rowSchema: "murph.browser-vault.lab-result-row.v1";
+  sourceLabel: string | null;
+  textValue: string | null;
+  unit: string | null;
+  value: number | null;
+}
+
 export interface BrowserVaultMetricRow {
   biomarkerKey: string | null;
   comparator?: MetricComparator | null;
@@ -206,6 +232,7 @@ export interface BrowserVaultReplica {
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
   generatedAt: string;
+  labResultRows: BrowserVaultLabResultRow[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -244,6 +271,13 @@ export interface BrowserVaultMetricFilters {
   to?: string;
 }
 
+export interface BrowserVaultLabResultFilters {
+  biomarkerKey?: string;
+  from?: string;
+  metricKey?: string;
+  to?: string;
+}
+
 export type BrowserVaultMetricSelectionFilters = Pick<BrowserVaultMetricFilters, "biomarkerKey" | "metricKey">;
 
 export interface BrowserVaultTimelineFilters {
@@ -265,6 +299,9 @@ export interface BrowserVaultQueryClient {
   };
   metricGoals: {
     progress(filters?: { goalId?: string; metricKey?: string }): BrowserVaultMetricGoalProgressRow[];
+  };
+  labResults: {
+    list(filters?: BrowserVaultLabResultFilters): BrowserVaultLabResultRow[];
   };
   metrics: {
     latestRow(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;

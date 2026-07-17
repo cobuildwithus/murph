@@ -3316,6 +3316,7 @@ function createReplica(input: {
     },
     entities: input.entities ?? [],
     generatedAt: input.generatedAt ?? "2026-04-10T12:00:00.000Z",
+    labResultRows: [],
     metricGoalProgressRows: [],
     metricRows,
     metricSelectionRows: [],
