@@ -58,6 +58,7 @@ export type HostedLinqHomeLineRouteBindingResult =
       homeLineAssignedAt: Date | null;
       kind: "bind";
       recipientPhone: string | null;
+      selectedLine?: HostedLinqAssignableHomeLine;
     }
   | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
   | {
@@ -124,8 +125,8 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
       prisma: input.prisma,
     });
 
-    // Routing and capacity may have changed while another transaction held a
-    // lock, so the claim decision must be re-resolved under both owners.
+    // Routing and line eligibility may have changed while another transaction
+    // held a lock, so assignment must be re-resolved under both owners.
     const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
     if (lockedDecision.kind === "done") {
       return lockedDecision.result;
@@ -161,9 +162,6 @@ async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
   decision: Extract<HostedLinqHomeLineRouteBindingDecision, { kind: "reserve" }>;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
-  // Reserve from the whole assignable pool, preferring the line the member
-  // contacted. A same-line reply uses the member-created thread; switching to
-  // another line starts a proactive conversation and must reserve capacity.
   const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
     preferredRecipientPhone: input.decision.preferredRecipientPhone,
     now: new Date(),
@@ -181,6 +179,7 @@ async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
     homeLineAssignedAt: reservationResult.reservation.assignedAt,
     kind: "bind",
     recipientPhone: reservationResult.reservation.line.phoneNumber,
+    selectedLine: reservationResult.reservation.line,
   };
 }
 
@@ -489,6 +488,19 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
   });
+  if (input.reservationKind === "inbound") {
+    const selectedLine = proactiveLine ?? preferredOrFallbackLine;
+    if (!selectedLine) {
+      return null;
+    }
+
+    return {
+      assignedAt: now,
+      line: selectedLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
   const proactiveConversationReserved = proactiveLine
     ? await claimHostedLinqProactiveConversationCapacityTx({
         dayUtc,
@@ -504,10 +516,6 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       line: proactiveLine,
       proactiveConversationReserved: true,
     };
-  }
-
-  if (input.reservationKind === "inbound") {
-    return null;
   }
 
   return preferredOrFallbackLine
@@ -532,9 +540,6 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   const routing = input.routing;
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
 
-  // A participant-target signup welcome starts a new conversation even when a
-  // bare home recipient was assigned earlier. Re-reserve under the shared pool
-  // lock so a full preferred line can fall over before the welcome is queued.
   if (!input.claimNewHomeLine) {
     return "needs_claim";
   }

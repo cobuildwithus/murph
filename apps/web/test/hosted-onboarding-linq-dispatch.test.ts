@@ -3037,24 +3037,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("binds an active member home route even when proactive capacity is exhausted", async () => {
-    const homeLinePhone = "+15550000000";
-    const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
+  it("keeps active-member inbound work moving from a degraded line when fallback capacity is exhausted", async () => {
+    const incomingLinePhone = "+15550000000";
+    const fallbackLinePhone = "+15550100001";
+    const fallbackLineLookupKey = createHostedPhoneLookupKey(fallbackLinePhone);
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
-    hostedMemberRouting.groupBy.mockImplementation(
-      async (input: { where?: { linqHomeLineAssignedAt?: unknown } }) =>
-        input.where?.linqHomeLineAssignedAt
-          ? [{
-              linqRecipientPhoneLookupKey: homeLineLookupKey,
-              _count: { _all: 1 },
-            }]
-          : []
-    );
+    const hostedLinqLine = buildHostedLinqLinePoolFixture({
+      lines: [{
+        phoneNumber: fallbackLinePhone,
+        proactiveConversationCount: 50,
+        proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+      }],
+    });
     const prisma = asPrismaTransactionClient({
-      hostedLinqLine: buildHostedLinqLineFixture({
-        maxNewConversationsPerDay: 1,
-        phoneNumber: homeLinePhone,
-      }),
+      hostedLinqLine,
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
           accountGroupMemberships: [],
@@ -3082,6 +3078,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded_active",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded_active",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
         eventId: "evt_active_capacity_exhausted_line",
       }),
       signature: null,
@@ -3093,19 +3100,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(hostedMemberRouting.groupBy).not.toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        linqHomeLineAssignedAt: { gte: expect.any(Date) },
+    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqRecipientPhoneLookupKey: fallbackLineLookupKey,
       }),
     }));
-    expect(hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(hostedLinqLine.updateMany).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
+  it("accepts a Family invite from a degraded line when fallback capacity is exhausted", async () => {
+    const fallbackLinePhone = "+15550100001";
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: {
       onAcceptedMemberActivated: (result: {
         activated: boolean;
@@ -3136,11 +3144,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       };
     });
 
+    const hostedLinqLine = buildHostedLinqLinePoolFixture({
+      lines: [{
+        phoneNumber: fallbackLinePhone,
+        proactiveConversationCount: 50,
+        proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+      }],
+    });
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         create: vi.fn(),
       },
+      hostedLinqLine,
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(null),
       },
@@ -3196,13 +3212,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
-        linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(fallbackLinePhone),
         memberId: "member_family",
         pendingLinqChatLookupKey: null,
       }),
       update: expect.objectContaining({
         linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
-        linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(fallbackLinePhone),
         pendingLinqChatLookupKey: null,
       }),
       where: {
@@ -3248,6 +3264,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(hostedLinqLine.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_family",
@@ -6188,10 +6205,112 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
+  it("retries before claiming capacity when concurrent routing changes the fallback line", async () => {
+    const incomingLinePhone = "+15550000000";
+    const selectedFallbackPhone = "+15550100001";
+    const concurrentHomePhone = "+15550100002";
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    hostedMemberRouting.findUnique.mockResolvedValue({
+      linqChatIdEncrypted: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T11:59:00.000Z"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_123",
+        value: concurrentHomePhone,
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(concurrentHomePhone),
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const hostedLinqLine = buildHostedLinqLinePoolFixture({
+      lines: [{
+        phoneNumber: selectedFallbackPhone,
+      }],
+    });
+    const concurrentMember = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.not_started,
+      id: "member_123",
+      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      suspendedAt: null,
+    };
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqLine,
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue(concurrentMember),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded_concurrent_route",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded_concurrent_route",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_concurrent_route",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      retryable: true,
+    });
+
+    expect(hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
   it("does not open a fallback chat when every healthy line is at its proactive limit", async () => {
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const hostedLinqLine = buildHostedLinqLinePoolFixture({
+      lines: [{
+        maxNewConversationsPerDay: 10,
+        phoneNumber: fallbackLinePhone,
+        proactiveConversationCount: 10,
+        proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+      }],
+    });
+    const updateHostedLinqLine = hostedLinqLine.updateMany;
+    if (!updateHostedLinqLine) {
+      throw new Error("Expected hosted Linq line update fixture.");
+    }
+    updateHostedLinqLine.mockResolvedValue({ count: 0 });
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -6205,19 +6324,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedLinqLine: buildHostedLinqLinePoolFixture({
-        lines: [
-          {
-            maxNewConversationsPerDay: 10,
-            phoneNumber: fallbackLinePhone,
-            proactiveConversationCount: 10,
-            proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
-          },
-        ],
-      }),
+      hostedLinqLine,
       hostedMember: {
         create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+        }),
         update: vi.fn(),
       },
       hostedMemberRouting,
@@ -6250,10 +6366,89 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "home-line-capacity-exhausted",
     });
-    expect(prismaMocks.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    expect(updateHostedLinqLine).toHaveBeenCalledTimes(2);
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not open a fallback chat when the final capacity claim loses", async () => {
+    const incomingLinePhone = "+15550000000";
+    const fallbackLinePhone = "+15550100001";
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const hostedLinqLine = buildHostedLinqLinePoolFixture({
+      lines: [{
+        phoneNumber: fallbackLinePhone,
+        proactiveConversationCount: 49,
+        proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+      }],
+    });
+    const updateHostedLinqLine = hostedLinqLine.updateMany;
+    if (!updateHostedLinqLine) {
+      throw new Error("Expected hosted Linq line update fixture.");
+    }
+    updateHostedLinqLine.mockResolvedValue({ count: 0 });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqLine,
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+        }),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded_claim_lost",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded_claim_lost",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_claim_lost",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-line-capacity-exhausted",
+    });
+    expect(hostedLinqLine.updateMany).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
   });
 
   it("retries fallback signup delivery after provider failure instead of redirecting to the fallback line", async () => {

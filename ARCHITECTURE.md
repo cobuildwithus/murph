@@ -644,10 +644,11 @@ UTC day. If no line has welcome capacity, web still assigns a healthy home line
 but omits the participant-target welcome, preserving the member-initiated Text
 Murph path. Same-line inbound first binds and existing-thread replies do not
 consume this proactive budget. A degraded incoming line may fall back to a
-different line only after atomically claiming that fallback line's capacity,
-because the fallback creates a new participant-target chat; without capacity,
-web accepts the inbound event but sends no fallback chat. Member deletion cannot
-erase line-level capacity already claimed that day.
+different line only after the final member route agrees with the selected line
+and that line's capacity is atomically claimed, because the fallback creates a
+new participant-target chat; without capacity, web accepts the inbound event
+but sends no fallback chat. Member deletion cannot erase line-level capacity
+already claimed that day.
 
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active
 owner of execution and commit authority rather than mailbox-work truth. Exact

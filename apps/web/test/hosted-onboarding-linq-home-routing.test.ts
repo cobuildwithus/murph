@@ -182,7 +182,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
-  it("falls over when the preferred line is not in the assignable pool", async () => {
+  it("selects a fallback without claiming capacity during inbound routing", async () => {
     const fallbackLine = buildLine("+15550100002", {
       maxNewConversationsPerDay: 10,
       proactiveConversationCount: 10,
@@ -199,18 +199,14 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
       kind: "reserved",
       reservation: {
         line: fallbackLine,
+        proactiveConversationReserved: false,
       },
     });
 
-    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).toHaveBeenCalledWith({
-      dayUtc: expect.any(Date),
-      limit: 10,
-      phoneNumberLookupKey: fallbackLine.phoneNumberLookupKey,
-      prisma: {} as never,
-    });
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
-  it("does not switch lines when every fallback is at its proactive limit", async () => {
+  it("keeps inbound routing available when every fallback is at its proactive limit", async () => {
     const fallbackLine = buildLine("+15550100002", {
       maxNewConversationsPerDay: 10,
       proactiveConversationCount: 10,
@@ -223,32 +219,39 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
         preferredRecipientPhone: "+15550100001",
         prisma: {} as never,
       }),
-    ).resolves.toEqual({
-      kind: "capacity_exhausted",
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+        proactiveConversationReserved: false,
+      },
     });
 
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 
-  it("fails closed when a final fallback slot loses its atomic claim", async () => {
+  it("leaves the final fallback claim to the participant-chat planner", async () => {
     const fallbackLine = buildLine("+15550100002", {
       maxNewConversationsPerDay: 10,
       proactiveConversationCount: 9,
       proactiveConversationDayUtc: startOfUtcDay(new Date()),
     });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([fallbackLine]);
-    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(false);
 
     await expect(
       reserveHostedLinqHomeLineFromPoolTx({
         preferredRecipientPhone: "+15550100001",
         prisma: {} as never,
       }),
-    ).resolves.toEqual({
-      kind: "capacity_exhausted",
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+        proactiveConversationReserved: false,
+      },
     });
 
-    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).toHaveBeenCalledTimes(1);
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
   });
 });
 
