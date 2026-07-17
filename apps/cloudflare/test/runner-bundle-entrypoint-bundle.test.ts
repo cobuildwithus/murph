@@ -531,10 +531,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // same 250,000B operational headroom because the closure contains the
     // entry chunk.
     // Locking exact values makes any silent change to a ratchet a failing,
-    // reviewed diff.
+    // reviewed diff. The mainline prompt-growth ratchet advanced the static
+    // closure baseline to 7,121,190B without updating this mirror; align it.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_096_782 + 96_000 + 250_000,
+      staticClosureBytes: 7_121_190 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });
