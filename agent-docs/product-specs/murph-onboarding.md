@@ -297,6 +297,19 @@ durable behavior-change setup while that grounding is insufficient or
 decision-changing background evidence remains unconfirmed, unless the member
 explicitly defers that evidence.
 
+Before scheduling or support logistics, onboarding must create a visible
+first-value moment. One compact message should make a decision-changing piece
+of context pay off, name the smallest useful next move, and reveal the specific
+just-in-time or adaptive advantage Murph will provide. It must not recap the
+intake, dump the full intervention, advertise capabilities, or reduce Murph's
+value to a generic reminder.
+
+For a repeated behavior or bounded experiment, the member sees a launch
+preview: one contextual fit reason, one-line behavior shape, and one concrete
+support-and-review promise. Detailed programming or protocol steps stay in the
+canonical plan and are progressively disclosed at the moment they become
+useful. Timing and reminder questions come after this preview, not before it.
+
 Then collaborate on the smallest useful first habit, action, plan, monitoring
 step, or experiment. Murph may recommend a best-fit option and explain why, but
 the member chooses or adjusts what happens next. Do not dump a full protocol or
@@ -306,6 +319,17 @@ The member may leave the thread open without acting yet. If they choose an
 action, use its existing owner and authorization rules. A proactive check-in,
 reminder, group, external task, or experiment requires the owning canonical
 writes; the onboarding follow-up automation never owns that support.
+
+After the member's first accepted low-risk, non-sensitive repeated behavior or
+bounded experiment is successfully saved, mark the launch without another
+intake recap. On a route that can deliver generated music, a short original
+launch song is the default earned delight when known tone and privacy context
+make it fit; otherwise use one specific one-line celebration. The song may use
+the member's preferred name, a share-safe version of the chosen outcome, and
+one playful non-sensitive plan detail. It never includes clinical or
+potentially embarrassing facts, promises results, delays needed help, or
+substitutes for the plan. This is reply-time media, not a new onboarding
+automation.
 
 ## Persistence Contract
 
@@ -422,9 +446,15 @@ reflection-only scheduled message returns skip.
    behavior, the choice reflects a bounded, early-stopping pass over the
    member's reason, current routine, relevant data, prior attempts, practical
    influences, and support fit, with up to three missing-context questions.
-9. Context continues compounding after onboarding without a second profile
+   Before timing or reminder setup, the member sees a compact launch preview
+   that makes Murph's contextual and just-in-time value concrete without a plan
+   dump.
+9. The first eligible plan ends on an earned, privacy-safe delight beat when the
+   route and member preferences support it; delight never substitutes for
+   useful action or creates another onboarding automation.
+10. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
-10. Supplement identity and medical context are durably saved in compact parent
+11. Supplement identity and medical context are durably saved in compact parent
     batches, and onboarding lab evidence is durably preserved before the next
     reply. Optional children enrich exact supplement ids or lab source refs
     without owning promised work. Murph claims child enrichment only after

@@ -1410,6 +1410,35 @@ describe('assistant skill assets', () => {
       'A bare outcome by itself is not enough to activate a durable support loop.',
     )
     expect(compact).toContain(
+      'make the value visible before asking about days, time, reminders, or support',
+    )
+    expect(compact).toContain(
+      'A vague promise to "remind you" is not enough.',
+    )
+    expect(compact).toContain(
+      'two or three short sentences and one easy question',
+    )
+    expect(compact).toContain(
+      'Use one editable recommendation rather than a menu.',
+    )
+    expect(compact).toContain(
+      "If Murph's visible contribution is no better than a generic phone reminder, the loop is underspecified",
+    )
+    expect(compact).toContain(
+      'recommend one best-fit support pattern rather than presenting a menu',
+    )
+    expect(raw).not.toContain('Offer it as a menu the user picks from')
+    expect(raw).toContain('### 7. Mark the first launch')
+    expect(compact).toContain(
+      'one original 15–20 second standalone launch song',
+    )
+    expect(compact).toContain(
+      'This is reply-time media, never a scheduled onboarding automation.',
+    )
+    expect(compact).toContain(
+      'Delight marks real value; it never substitutes for the launch preview or a working plan.',
+    )
+    expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
     expect(compact).toContain(
@@ -1921,6 +1950,21 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain(
       'steer back to the goals they named and toward setting up the first habit or experiment below',
+    )
+    expect(compact).toContain(
+      'Before any scheduling or support logistics, create the first-value moment.',
+    )
+    expect(compact).toContain(
+      "follow `behavior-followthrough`'s launch-preview contract exactly",
+    )
+    expect(compact).toContain(
+      'show the compact launch preview before asking about days, time, reminders, or support',
+    )
+    expect(compact).toContain(
+      "follow `behavior-followthrough`'s first-launch delight rule when it fits",
+    )
+    expect(compact).toContain(
+      'This is a reply-time celebration, not an onboarding automation',
     )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')

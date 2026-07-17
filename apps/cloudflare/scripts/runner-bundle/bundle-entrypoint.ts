@@ -91,9 +91,11 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // onboarding clarifiers) measure 7,473,273B locally, 6,083B over the resulting
 // budget, the multi-agent V1 posture comment adds the same measured 71B, the
 // proactive-delegation hint rewrite adds the same measured 8,345B, and V2
-// subagent usage evidence adds the same measured 355B. Advance only by those
-// measured overages and preserve the separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_136_044;
+// subagent usage evidence adds the same measured 355B, and the merged hosted
+// concurrency bump to four onboarding children adds the same measured 3,867B.
+// Advance only by those measured overages and preserve the separate 96KB
+// noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_139_911;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.
