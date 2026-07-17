@@ -508,6 +508,7 @@ function createAutomationSource(
   overrides: Partial<CanonicalAutomationAssistantCronJobRecord> = {},
 ): CanonicalAutomationAssistantCronJobRecord {
   return {
+    activeUntil: null,
     automationId: 'automation_invalid_email',
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T07:00:00.000Z',
@@ -534,5 +535,6 @@ function createAutomationSource(
     title: 'Invalid email reminder',
     updatedAt: '2026-04-08T07:00:00.000Z',
     ...overrides,
+    supportKind: overrides.supportKind ?? null,
   }
 }

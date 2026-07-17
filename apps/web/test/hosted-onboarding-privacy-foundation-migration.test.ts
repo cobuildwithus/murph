@@ -629,6 +629,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqSignupWelcomeReservationMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260716190000_linq_signup_welcome_reservation/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
@@ -844,6 +851,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260715190000_hosted_assistant_personality_projection_watermarks",
       "20260715230000_hosted_mailbox_subscription_action_claim",
       "20260716160000_hosted_usage_credits",
+      "20260716190000_linq_signup_welcome_reservation",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
@@ -852,6 +860,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ADD COLUMN "subscription_action_claim" TEXT',
     );
+    expect(linqSignupWelcomeReservationMigrationSql).toContain(
+      'ADD COLUMN "proactive_conversation_day_utc" DATE',
+    );
+    expect(linqSignupWelcomeReservationMigrationSql).toContain(
+      'ADD COLUMN "proactive_conversation_count" INTEGER',
+    );
+    expect(linqSignupWelcomeReservationMigrationSql).not.toContain("UPDATE");
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
       'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
     );

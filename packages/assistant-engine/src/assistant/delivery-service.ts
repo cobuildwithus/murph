@@ -851,6 +851,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    automationAuthority: input.input.outboxAutomationAuthority ?? null,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

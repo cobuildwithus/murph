@@ -131,34 +131,35 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     ...hostedConnectionRecordArgs,
   });
 
-  const connections = await Promise.all(
-    records.map(async (record) => {
-      const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
-        input.trustedUserId,
-        record.id,
-      );
-      const durableConnection = storedAccount
-        ? null
-        : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
-      const sources = boundedSourceLimit && boundedSourceProviderKeys.length > 0
-        ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
-            connectionId: record.id,
-            limit: boundedSourceLimit,
-            sourceProviderSlugs: boundedSourceProviderKeys,
-          })
-        : await controlPlane.store.listConnectionSources(record.id);
+  // Sequential on purpose: each record fans out two to three store queries, so
+  // running records in parallel can pin most of the shared connection pool.
+  const connections: HostedRuntimeConnectionSnapshot[] = [];
+  for (const record of records) {
+    const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
+      input.trustedUserId,
+      record.id,
+    );
+    const durableConnection = storedAccount
+      ? null
+      : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
+    const sources = boundedSourceLimit && boundedSourceProviderKeys.length > 0
+      ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
+          connectionId: record.id,
+          limit: boundedSourceLimit,
+          sourceProviderSlugs: boundedSourceProviderKeys,
+        })
+      : await controlPlane.store.listConnectionSources(record.id);
 
-      return buildHostedRuntimeConnectionSnapshot(
-        record,
-        storedAccount,
-        storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
-        sources.map(toHostedRuntimeConnectionSourceSnapshot),
-        {
-          includeCredentialMaterial: parsed.includeCredentialMaterial,
-        },
-      );
-    }),
-  );
+    connections.push(buildHostedRuntimeConnectionSnapshot(
+      record,
+      storedAccount,
+      storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
+      sources.map(toHostedRuntimeConnectionSourceSnapshot),
+      {
+        includeCredentialMaterial: parsed.includeCredentialMaterial,
+      },
+    ));
+  }
 
   return {
     capabilities: {

@@ -1,4 +1,7 @@
 import {
+  isValidIanaTimeZone,
+} from "@murphai/contracts";
+import {
   selectMetricGoalProgress,
   selectMetricValue,
   type MetricGoalProgress,
@@ -24,6 +27,7 @@ import {
   summarizeWearableMetricTrendFromBundle,
   summarizeWearableRecoveryFromBundle,
   summarizeWearableSleepFromBundle,
+  summarizeWearableSleepPatternFromBundle,
   summarizeWearableSourceHealthFromBundle,
   type ProjectedWearableActivitySummary,
   type ProjectedWearableBodyStateSummary,
@@ -36,6 +40,8 @@ import {
   type ProjectedWearableSleepSummary,
   type ProjectedWearableSourceHealthSummary,
   type WearableMetricSummaryFilters,
+  type WearableSleepPatternFilters,
+  type WearableSleepPatternSummary,
   type WearableSummaryFilters,
 } from "./wearables.ts";
 import {
@@ -51,6 +57,7 @@ import type {
 } from "./search-shared.ts";
 import {
   listStoredCanonicalEntities,
+  readStoredVaultMetadata,
   readStoredVaultSource,
 } from "./projection/entity-store.ts";
 import {
@@ -80,6 +87,7 @@ import {
 import {
   readWearableSummaryRows,
 } from "./projection/wearable-summary-store.ts";
+import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -94,7 +102,7 @@ function readStoredPublicWearableSummaryBundle(
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
 ) {
   return composePublicWearableSummaryBundleFromStoredRows(
-    readWearableSummaryRows(location, filters.providers),
+    readWearableSummaryRows(location, { providers: filters.providers }),
     filters,
   );
 }
@@ -232,6 +240,39 @@ export async function summarizeWearableSleepRuntime(
   const location = await ensureFreshQueryProjection(vaultRoot);
   const bundle = readStoredPublicWearableSummaryBundle(location, filters);
   return summarizeWearableSleepFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableSleepPatternRuntime(
+  vaultRoot: string,
+  filters: WearableSleepPatternFilters = {},
+): Promise<WearableSleepPatternSummary> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const metadata = filters.timeZone === undefined
+    ? readStoredVaultMetadata(location)
+    : null;
+  const vaultTimeZone = typeof metadata?.timezone === "string"
+    && isValidIanaTimeZone(metadata.timezone)
+    ? metadata.timezone
+    : undefined;
+  const resolvedFilters = filters.timeZone === undefined && vaultTimeZone
+    ? { ...filters, timeZone: vaultTimeZone }
+    : filters;
+  const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(
+    readWearableSummaryRows(location, {
+      ...readFilters,
+      summaryKinds: ["sleep", "source_health"],
+    }),
+    readFilters,
+    { retainSourceHealthOutsideDateFilters: true },
+  );
+  return summarizeWearableSleepPatternFromBundle(bundle, resolvedFilters, {
+    reportingTimeZoneSource: filters.timeZone !== undefined
+      ? "user_filter"
+      : vaultTimeZone
+        ? "vault_metadata"
+        : undefined,
+  });
 }
 
 export async function summarizeWearableActivityRuntime(

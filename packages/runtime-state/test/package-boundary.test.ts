@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import * as runtimeState from "@murphai/runtime-state";
+import * as assistantGeneratedDeliveries from "@murphai/runtime-state/assistant-generated-deliveries";
 import * as assistantIds from "@murphai/runtime-state/assistant-ids";
 import * as hostedCodexSubscriptionAuth from "@murphai/runtime-state/hosted-codex-subscription-auth";
 import * as runtimeStateNode from "@murphai/runtime-state/node";
@@ -67,6 +68,23 @@ describe("@murphai/runtime-state package boundary", () => {
     expect(packageJson.exports?.["./assistant-ids"]).toEqual({
       default: "./dist/assistant-ids.js",
       types: "./dist/assistant-ids.d.ts",
+    });
+  });
+
+  it("exposes generated-delivery refs through a dedicated portable subpath", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      exports?: Record<string, { default?: string; types?: string }>;
+    };
+
+    expect(assistantGeneratedDeliveries.isAssistantGeneratedDeliveryRef)
+      .toBeTypeOf("function");
+    expect(assistantGeneratedDeliveries.isNormalizedAssistantVaultFileRef)
+      .toBeTypeOf("function");
+    expect(packageJson.exports?.["./assistant-generated-deliveries"]).toEqual({
+      default: "./dist/assistant-generated-deliveries.js",
+      types: "./dist/assistant-generated-deliveries.d.ts",
     });
   });
 

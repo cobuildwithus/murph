@@ -41,11 +41,15 @@ import {
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   automationRouteSchema,
+  buildAutomationSupportSeriesTag,
   type AutomationRoute,
 } from "@murphai/contracts";
 import {
   patchAutomation,
+  reconcileAutomationSupportSeries,
   showAutomation,
   upsertAutomation,
 } from "@murphai/core";
@@ -210,6 +214,23 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
+const HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS = [
+  30_000,
+  120_000,
+  600_000,
+] as const;
+const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY =
+  "murphManagedAutomationSetupRetryAttempt";
+const HOSTED_MANAGED_AUTOMATION_SETUP_TRANSIENT_ERROR_CODES = new Set([
+  "EAGAIN",
+  "EAI_AGAIN",
+  "EBUSY",
+  "ECONNRESET",
+  "EINTR",
+  "EMFILE",
+  "ENFILE",
+  "ETIMEDOUT",
+]);
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
@@ -619,12 +640,33 @@ function createHostedAssistantAutomationTool(input: {
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
+      if (request.action === "reconcile") {
+        const result = await reconcileAutomationSupportSeries({
+          desiredAutomationIds: request.desiredAutomationIds,
+          supportSeriesTag: buildAutomationSupportSeriesTag(
+            request.supportSeriesId,
+          ),
+          vaultRoot: input.vaultRoot,
+        });
+        context?.signal?.throwIfAborted();
+        return {
+          action: "reconcile",
+          archivedCount: result.archivedCount,
+          matchedCount: result.matchedCount,
+          missingDesiredAutomationIds: result.missingDesiredAutomationIds,
+          supportSeriesId: request.supportSeriesId,
+          unchangedCount: result.unchangedCount,
+        };
+      }
       if (request.action === "save") {
         assertActiveHostedAutomationRoute({
           route: currentRoute,
           status: request.status ?? "active",
         });
         const result = await upsertAutomation({
+          ...(request.activeUntil === undefined
+            ? {}
+            : { activeUntil: request.activeUntil }),
           ...(request.assistantTargetOverride === undefined
             ? {}
             : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -636,7 +678,19 @@ function createHostedAssistantAutomationTool(input: {
           ...(request.slug ? { slug: request.slug } : {}),
           status: request.status ?? "active",
           ...(request.summary === undefined ? {} : { summary: request.summary }),
-          ...(request.tags === undefined ? {} : { tags: [...request.tags] }),
+          ...(request.supportKind === undefined
+            ? {}
+            : { supportKind: request.supportKind }),
+          ...(
+            request.supportSeriesId === undefined && request.tags === undefined
+              ? {}
+              : {
+                  tags: normalizeHostedAutomationSupportTags({
+                    supportSeriesId: request.supportSeriesId,
+                    tags: request.tags,
+                  }),
+                }
+          ),
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
@@ -667,6 +721,9 @@ function createHostedAssistantAutomationTool(input: {
         status: request.status ?? existing.status,
       });
       const result = await patchAutomation({
+        ...(request.activeUntil === undefined
+          ? {}
+          : { activeUntil: request.activeUntil }),
         ...(request.assistantTargetOverride === undefined
           ? {}
           : { assistantTargetOverride: request.assistantTargetOverride }),
@@ -684,7 +741,20 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.slug === undefined ? {} : { slug: request.slug }),
         ...(request.status === undefined ? {} : { status: request.status }),
         ...(request.summary === undefined ? {} : { summary: request.summary }),
-        ...(request.tags === undefined ? {} : { tags: [...request.tags] }),
+        ...(request.supportKind === undefined
+          ? {}
+          : { supportKind: request.supportKind }),
+        ...(
+          request.supportSeriesId === undefined && request.tags === undefined
+            ? {}
+            : {
+                tags: normalizeHostedAutomationSupportTags({
+                  existingTags: existing.tags,
+                  supportSeriesId: request.supportSeriesId,
+                  tags: request.tags,
+                }),
+              }
+        ),
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
@@ -697,6 +767,34 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+function normalizeHostedAutomationSupportTags(input: {
+  existingTags?: readonly string[];
+  supportSeriesId?: string;
+  tags?: readonly string[];
+}): string[] {
+  if (
+    input.tags?.some((tag) =>
+      tag === AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG
+      || tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+    )
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Reserved automation support tags must be set through supportSeriesId.",
+    );
+  }
+
+  const existingSupportSeriesTag = input.existingTags?.find((tag) =>
+    tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+  );
+  const supportSeriesTag = input.supportSeriesId === undefined
+    ? existingSupportSeriesTag
+    : buildAutomationSupportSeriesTag(input.supportSeriesId);
+  const tags = [...(input.tags ?? input.existingTags ?? [])]
+    .filter((tag) => !tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX));
+  return supportSeriesTag === undefined ? tags : [...tags, supportSeriesTag];
 }
 
 function assertActiveHostedAutomationRoute(input: {
@@ -1669,8 +1767,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     return null;
   }
 
+  let result: Awaited<ReturnType<typeof applyMurphManagedAutomations>>;
   try {
-    const result = await applyMurphManagedAutomations({
+    result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       ...(input.defaultRoute !== undefined
@@ -1678,93 +1777,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
         : {}),
       routeValidationProfile: "hosted",
       runtimeEnv: input.input.runtimeEnv,
+      shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.input.restored.vaultRoot,
     });
-    const changed = result.created + result.updated;
-    const shouldRetryStableKey =
-      result.stableKeyRetryNeeded === true &&
-      (input.retryStableKeyFailure || changed > 0);
-    if (
-      result.stableKeyRetryNeeded === true &&
-      result.stableKeyFailure !== undefined
-    ) {
-      const failure = buildHostedRuntimeFailureDiagnostics(
-        result.stableKeyFailure,
-        "Hosted managed automation stable-key setup failed.",
-      );
-      await writeHostedRuntimeLogBestEffort({
-        entry: {
-          ...buildHostedRuntimeLogContextFields({
-            attemptId: input.input.request.attemptId,
-            leaseGeneration: input.input.request.leaseGeneration,
-            workspaceVersion: input.input.request.workspaceVersion,
-          }),
-          component: "runtime",
-          errorCode: failure.errorCode,
-          eventCode: "runner.error",
-          level: "warn",
-          phase: "error",
-          redactedJson: {
-            ...failure.redactedJson,
-            murphManagedAutomationCreated: result.created,
-            murphManagedAutomationFailed: true,
-            murphManagedAutomationSkipped: result.skipped,
-            murphManagedAutomationUpdated: result.updated,
-          },
-        },
-        platform: input.input.runtime.platform,
-      });
-    }
-    if (
-      changed === 0 &&
-      !shouldRetryStableKey
-    ) {
-      return null;
-    }
-
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields({
-          attemptId: input.input.request.attemptId,
-          leaseGeneration: input.input.request.leaseGeneration,
-          workspaceVersion: input.input.request.workspaceVersion,
-        }),
-        component: "runtime",
-        eventCode: "assistant.pass_finished",
-        level: "info",
-        phase: "invoke",
-        redactedJson: {
-          murphManagedAutomationCreated: result.created,
-          murphManagedAutomationSkipped: result.skipped,
-          ...(result.stableKeyRetryNeeded === true
-            ? { murphManagedAutomationFailed: true }
-            : {}),
-          murphManagedAutomationUpdated: result.updated,
-        },
-      },
-      platform: input.input.runtime.platform,
-    });
-
-    return {
-      checkpointReason: "assistant_runtime_commit",
-      ...(shouldRetryStableKey
-        ? {
-            nextWakeAt: new Date(
-              resolveHostedAssistantPhaseNowMs(input.input)
-                + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
-            ).toISOString(),
-          }
-        : {}),
-      progressed: true,
-      redactedStatus: {
-        murphManagedAutomationCreated: result.created,
-        ...(result.stableKeyRetryNeeded === true
-          ? { murphManagedAutomationFailed: true }
-          : {}),
-        murphManagedAutomationSkipped: result.skipped,
-        murphManagedAutomationUpdated: result.updated,
-      },
-    };
   } catch (error) {
     const failure = buildHostedRuntimeFailureDiagnostics(
       error,
@@ -1789,8 +1804,192 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
       platform: input.input.runtime.platform,
     });
+    return buildHostedManagedAutomationFailureResult({
+      error,
+      input: input.input,
+      redactedStatus: {
+        murphManagedAutomationFailed: true,
+      },
+    });
+  }
+
+  if (result.yielded === true) {
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: new Date(
+        resolveHostedAssistantPhaseNowMs(input.input)
+          + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+      ).toISOString(),
+      progressed: true,
+      redactedStatus: {
+        murphManagedAutomationCreated: result.created,
+        murphManagedAutomationSkipped: result.skipped,
+        murphManagedAutomationUpdated: result.updated,
+        murphManagedAutomationYielded: true,
+      },
+    };
+  }
+
+  if (result.stableKeyRetryNeeded === true) {
+    const stableKeyFailure = result.stableKeyFailure ?? new Error(
+      "Hosted managed automation stable-key setup requested a retry without a failure.",
+    );
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      stableKeyFailure,
+      "Hosted managed automation stable-key setup failed.",
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+    const changed = result.created + result.updated;
+    const retryable = isHostedManagedAutomationSetupRetryableError(
+      stableKeyFailure,
+    );
+    if (retryable || input.retryStableKeyFailure || changed > 0) {
+      const retryAttempt = readHostedManagedAutomationSetupRetryAttempt(
+        input.input,
+      );
+      if (!retryable && changed === 0 && retryAttempt === 0) {
+        return null;
+      }
+      return buildHostedManagedAutomationFailureResult({
+        error: stableKeyFailure,
+        input: input.input,
+        redactedStatus: {
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      });
+    }
     return null;
   }
+
+  const changed = result.created + result.updated;
+  const retryAttempt = readHostedManagedAutomationSetupRetryAttempt(input.input);
+  if (changed === 0 && retryAttempt === 0) {
+    return null;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "runtime",
+      eventCode: "assistant.pass_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        murphManagedAutomationCreated: result.created,
+        murphManagedAutomationFailed: false,
+        [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: 0,
+        murphManagedAutomationSetupRetryExhausted: false,
+        murphManagedAutomationSetupRetryable: false,
+        murphManagedAutomationSkipped: result.skipped,
+        murphManagedAutomationUpdated: result.updated,
+      },
+    },
+    platform: input.input.runtime.platform,
+  });
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    progressed: true,
+    redactedStatus: {
+      murphManagedAutomationCreated: result.created,
+      murphManagedAutomationFailed: false,
+      [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: 0,
+      murphManagedAutomationSetupRetryExhausted: false,
+      murphManagedAutomationSetupRetryable: false,
+      murphManagedAutomationSkipped: result.skipped,
+      murphManagedAutomationUpdated: result.updated,
+    },
+  };
+}
+
+function buildHostedManagedAutomationFailureResult(input: {
+  error: unknown;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  redactedStatus: Record<string, boolean | number>;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const retryable = isHostedManagedAutomationSetupRetryableError(input.error);
+  const previousRetryAttempt = readHostedManagedAutomationSetupRetryAttempt(
+    input.input,
+  );
+  const retryDelayMs = retryable
+    ? HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS[previousRetryAttempt]
+    : undefined;
+  const retryAttempt = retryDelayMs === undefined
+    ? previousRetryAttempt
+    : previousRetryAttempt + 1;
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(retryDelayMs === undefined
+      ? {}
+      : {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input.input) + retryDelayMs,
+          ).toISOString(),
+        }),
+    progressed: true,
+    redactedStatus: {
+      ...input.redactedStatus,
+      [HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY]: retryAttempt,
+      murphManagedAutomationSetupRetryExhausted:
+        retryable && retryDelayMs === undefined,
+      murphManagedAutomationSetupRetryable: retryable,
+    },
+  };
+}
+
+function readHostedManagedAutomationSetupRetryAttempt(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): number {
+  const attempt = readHostedRuntimeRedactedNumber(
+    input.workspace?.redactedStatus,
+    HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_ATTEMPT_STATUS_KEY,
+  );
+  return Number.isSafeInteger(attempt) && attempt > 0
+    ? Math.min(
+        attempt,
+        HOSTED_MANAGED_AUTOMATION_SETUP_FAILURE_RETRY_DELAYS_MS.length,
+      )
+    : 0;
+}
+
+function isHostedManagedAutomationSetupRetryableError(error: unknown): boolean {
+  if (error instanceof VaultCliError) {
+    return error.context?.retryable === true;
+  }
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = error.code;
+  return typeof code === "string"
+    && HOSTED_MANAGED_AUTOMATION_SETUP_TRANSIENT_ERROR_CODES.has(code);
 }
 
 function withFreshHostedManagedAutomationsAfterCheckpoint(input: {

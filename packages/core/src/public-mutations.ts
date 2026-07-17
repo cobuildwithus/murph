@@ -52,6 +52,7 @@ import {
   createExperiment as createExperimentInternal,
   stopExperiment as stopExperimentInternal,
   updateExperiment as updateExperimentInternal,
+  writeExperimentOutcome as writeExperimentOutcomeInternal,
 } from "./domains/experiments.ts";
 import {
   appendJournal as appendJournalInternal,
@@ -480,6 +481,12 @@ export async function updateExperiment(
   input: Parameters<typeof updateExperimentInternal>[0],
 ): ReturnType<typeof updateExperimentInternal> {
   return withCanonicalInputWriteLock(input, updateExperimentInternal);
+}
+
+export async function writeExperimentOutcome(
+  input: Parameters<typeof writeExperimentOutcomeInternal>[0],
+): ReturnType<typeof writeExperimentOutcomeInternal> {
+  return withCanonicalInputWriteLock(input, writeExperimentOutcomeInternal);
 }
 
 export async function checkpointExperiment(

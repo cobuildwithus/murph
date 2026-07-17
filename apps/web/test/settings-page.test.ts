@@ -943,6 +943,217 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   expect(mocks.HostedFamilySettings).toHaveBeenCalledTimes(1);
 });
 
+test("SettingsPage awaits database-backed settings reads one at a time", async () => {
+  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+
+  let databaseReadsInFlight = 0;
+  let maxDatabaseReadsInFlight = 0;
+  const databaseReadOrder: string[] = [];
+
+  function trackDatabaseRead<T>(name: string, value: T): () => Promise<T> {
+    return async () => {
+      databaseReadOrder.push(name);
+      databaseReadsInFlight += 1;
+      maxDatabaseReadsInFlight = Math.max(
+        maxDatabaseReadsInFlight,
+        databaseReadsInFlight,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      databaseReadsInFlight -= 1;
+      return value;
+    };
+  }
+
+  mocks.readHostedAccountSettingsPageSnapshot.mockImplementation(
+    trackDatabaseRead("settingsSnapshot", {
+      account: EMPTY_ACCOUNT_SETTINGS,
+      billingRef: null,
+      routing: null,
+    }),
+  );
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockImplementation(
+    trackDatabaseRead("familyOwner", null),
+  );
+  mocks.readHostedFamilyAccessForMember.mockImplementation(
+    trackDatabaseRead("familyAccess", null),
+  );
+  mocks.readHostedPersonalAiUsageStatus.mockImplementation(
+    trackDatabaseRead("usageStatus", {
+      generatedAt: "2026-07-10T12:00:00.000Z",
+      reason: "hosted_access_inactive",
+      recommendedAction: null,
+      status: "unavailable",
+    }),
+  );
+  mocks.readHostedUsageCreditProjection.mockImplementation(
+    trackDatabaseRead("usageCreditProjection", {
+      balanceUsdMicros: 0n,
+      ledgerVersion: 0n,
+    }),
+  );
+  mocks.readHostedPersonalUsageCreditOfferCodes.mockImplementation(
+    trackDatabaseRead("usageTopUpOfferCodes", []),
+  );
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockImplementation(
+    trackDatabaseRead("usageTopUpActivePurchase", null),
+  );
+  // Privy network reads resolve after every database read so the render
+  // proves the page still waits for their values.
+  mocks.getHostedPrivySession.mockImplementation(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return null;
+  });
+  mocks.readHostedSecureApprovalStatus.mockImplementation(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { status: "configured" };
+  });
+
+  try {
+    const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+    renderToStaticMarkup(await SettingsPage());
+
+    expect(maxDatabaseReadsInFlight).toBe(1);
+    expect(databaseReadOrder).toEqual([
+      "settingsSnapshot",
+      "familyOwner",
+      "familyAccess",
+      "usageStatus",
+      "usageCreditProjection",
+      "usageTopUpOfferCodes",
+      "usageTopUpActivePurchase",
+    ]);
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.readHostedFamilyAccessForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secureApprovalStatus: { status: "configured" },
+      }),
+      undefined,
+    );
+  } finally {
+    if (originalPrivyAppId === undefined) {
+      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    } else {
+      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+    }
+  }
+});
+
+test("SettingsPage falls back to empty offers, no purchase, and no Privy hints when those reads fail", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.getHostedPrivySession.mockRejectedValue(new Error("privy unavailable"));
+  mocks.readHostedPersonalUsageCreditOfferCodes.mockRejectedValue(
+    new Error("offer codes unavailable"),
+  );
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockRejectedValue(
+    new Error("purchase lookup failed"),
+  );
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
+    snapshot: EMPTY_ACCOUNT_SETTINGS,
+    serverApprovedPrivyLinkedAccounts: null,
+  });
+});
+
+test("SettingsPage renders fallback values without reading settings data when the session has no member", async () => {
+  const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+
+  try {
+    const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+    renderToStaticMarkup(await SettingsPage());
+
+    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
+    expect(mocks.readHostedFamilyAccessForMember).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
+    expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
+    expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authenticated: true,
+        usageCreditBalanceUsdMicros: null,
+        usageStatus: null,
+        usageTopUpActivePurchase: null,
+        usageTopUpOffers: [],
+      }),
+      undefined,
+    );
+    expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secureApprovalStatus: { status: "unavailable" },
+      }),
+      undefined,
+    );
+    expect(mocks.HostedAccountSettingsCards).not.toHaveBeenCalled();
+    expect(mocks.HostedFamilySettings).not.toHaveBeenCalled();
+  } finally {
+    if (originalPrivyAppId === undefined) {
+      delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    } else {
+      process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+    }
+  }
+});
+
 test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({

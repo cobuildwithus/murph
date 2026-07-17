@@ -646,7 +646,12 @@ export function normalizeWhoopSnapshot(
     const sleepRef = makeExternalRef("sleep", sleepId, version);
     const score = asPlainObject(sleep.score);
     const stageSummary = asPlainObject(score?.stage_summary);
-    const nap = Boolean(sleep.nap);
+    const nap = sleep.nap === true;
+    const sleepType = sleep.nap === true
+      ? "nap" as const
+      : sleep.nap === false
+        ? "main_sleep" as const
+        : undefined;
 
     pushEvidencePart(
       evidenceParts,
@@ -664,11 +669,12 @@ export function normalizeWhoopSnapshot(
           title: nap ? "WHOOP nap" : "WHOOP sleep",
           evidenceRoles: [sleepRole],
           externalRef: sleepRef,
-          fields: {
+          fields: stripUndefined({
             startAt,
             endAt,
             durationMinutes,
-          },
+            sleepType,
+          }),
         }),
       );
     }

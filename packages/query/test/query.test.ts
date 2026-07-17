@@ -100,6 +100,7 @@ test("root query export keeps runtime projection methods available as lazy wrapp
     "summarizeWearableMetricLatestRuntime",
     "summarizeWearableMetricTrendRuntime",
     "summarizeWearableSleepRuntime",
+    "summarizeWearableSleepPatternRuntime",
     "summarizeWearableActivityRuntime",
     "summarizeWearableBodyStateRuntime",
     "summarizeWearableRecoveryRuntime",
@@ -4563,7 +4564,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 16);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 17);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -6167,7 +6168,7 @@ test("wearable projection preserves valid Apple HealthKit cycle fallback zero st
   }
 });
 
-test("listMetricPointsRuntime rebuilds v15 metric projections before serving metric points", async () => {
+test("listMetricPointsRuntime rebuilds v15 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_caffeine_rebuild_01",

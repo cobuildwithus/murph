@@ -6,6 +6,7 @@ import type { DeviceDataOrigin } from "@murphai/contracts";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
 export type WearableCandidateSourceFamily = "canonical" | "event" | "sample" | "derived";
+export type WearableSleepSessionType = "main_sleep" | "nap" | "unknown";
 
 export interface WearableExternalRef {
   system: string | null;
@@ -129,17 +130,35 @@ export interface WearableSleepNight {
   remMinutes: WearableResolvedMetric;
   respiratoryRate: WearableResolvedMetric;
   sessionMinutes: WearableResolvedMetric;
+  sleepLatencyMinutes: WearableResolvedMetric;
   sleepEfficiency: WearableResolvedMetric;
   sleepEndAt: string | null;
   sleepPerformance: WearableResolvedMetric;
   sleepScore: WearableResolvedMetric;
   sleepStartAt: string | null;
+  sleepType: WearableSleepSessionType;
+  sleepWindowEvidence?: WearableSleepWindowEvidence[];
+  sleepWindowEvidenceOmittedCount?: number;
+  sleepWindowEvidenceOmittedExactDuplicateCount?: number;
   sleepWindowProvider: string | null;
   sleepConsistency: WearableResolvedMetric;
   spo2: WearableResolvedMetric;
   summaryConfidence: WearableSummaryConfidence;
+  timeZone: string | null;
   timeInBedMinutes: WearableResolvedMetric;
   totalSleepMinutes: WearableResolvedMetric;
+}
+
+export interface WearableSleepWindowEvidence {
+  date: string;
+  durationMinutes: number;
+  endAt: string | null;
+  exactDuplicateCount: number;
+  provider: string;
+  recordedAt: string | null;
+  sleepType: WearableSleepSessionType;
+  startAt: string | null;
+  timeZone: string | null;
 }
 
 export interface WearableRecoveryDay {
@@ -179,6 +198,7 @@ export interface WearableSourceHealth {
   firstDate: string | null;
   lastDate: string | null;
   latestRecordedAt: string | null;
+  lastSleepDate: string | null;
   metricsContributed: string[];
   notes: string[];
   provider: string;
@@ -186,6 +206,7 @@ export interface WearableSourceHealth {
   recoveryDays: number;
   selectedMetrics: number;
   sleepNights: number;
+  sleepStalenessVsNewestDays: number | null;
   stalenessVsNewestDays: number | null;
 }
 
@@ -212,6 +233,85 @@ export interface WearableFilters {
 
 export interface WearableSummaryFilters extends WearableFilters {
   limit?: number;
+}
+
+export interface WearableSleepPatternFilters extends WearableFilters {
+  now?: string;
+  timeZone?: string;
+  windowDays?: number;
+}
+
+export interface WearableSleepClockPattern {
+  count: number;
+  medianLocalMinutes: number | null;
+  medianLocalTime: string | null;
+  standardDeviationMinutes: number | null;
+}
+
+export interface WearableSleepNumericPattern {
+  average: number | null;
+  count: number;
+  median: number | null;
+  standardDeviation: number | null;
+}
+
+export interface WearableSleepSourceFreshness {
+  lastSleepEvidenceDate: string;
+  provider: string;
+  stalenessVsNewestDays: number;
+  stalenessVsNowDays: number;
+}
+
+export type WearableSleepReportingTimeZoneSource =
+  | "canonical"
+  | "none"
+  | "user_filter"
+  | "vault_metadata";
+
+export interface WearableSleepPatternSummary {
+  allSourcesStale: boolean;
+  asOfDate: string;
+  asOfInstant: string;
+  awakeMinutes: WearableSleepNumericPattern;
+  bedtime: WearableSleepClockPattern;
+  conflictingNightCount: number;
+  coveragePercent: number;
+  expectedNightCount: number;
+  excludedNapOnlyDateCount: number;
+  reportingTimeZoneFallbackNightCount: number;
+  from: string;
+  lateArrivingNightCount: number;
+  latestRecordedAt: string | null;
+  latestSleepEndAt: string | null;
+  latestNightAgeDays: number | null;
+  latestNightDate: string | null;
+  midpoint: WearableSleepClockPattern;
+  missingNightCount: number;
+  notes: string[];
+  overlappingNightCount: number;
+  providerMix: boolean;
+  providers: string[];
+  reportingTimeZone: string | null;
+  reportingTimeZoneSource: WearableSleepReportingTimeZoneSource;
+  sameDateSessionSuppressedCount: number;
+  sessionDurationMinutes: WearableSleepNumericPattern;
+  sleepLatencyMinutes: WearableSleepNumericPattern;
+  sourceFreshness: WearableSleepSourceFreshness[];
+  staleAfterDays: number;
+  suppressedExactDuplicateCount: number;
+  timeZones: string[];
+  timingTimeZoneMode: "per_night_canonical_with_reporting_fallback";
+  timingOmittedNightCount: number;
+  to: string;
+  totalSleepMinutes: WearableSleepNumericPattern;
+  unknownSleepTypeNightCount: number;
+  validNightCount: number;
+  wakeTime: WearableSleepClockPattern;
+  weekdayWeekendMidpointDriftMinutes: number | null;
+  weekdayWeekendMidpointSampleCounts: {
+    weekday: number;
+    weekend: number;
+  };
 }
 
 export interface WearableMetricSummaryFilters extends WearableFilters {
@@ -375,6 +475,9 @@ export interface WearableSleepWindowCandidate {
   date: string;
   durationMinutes: number;
   endAt: string | null;
+  evidenceOmittedCount?: number;
+  evidenceOmittedExactDuplicateCount?: number;
+  exactDuplicateCount?: number;
   externalRef: WearableExternalRef | null;
   nap: boolean;
   occurredAt: string | null;
@@ -385,6 +488,8 @@ export interface WearableSleepWindowCandidate {
   sourceFamily: WearableCandidateSourceFamily;
   sourceKind: string;
   startAt: string | null;
+  sleepType?: WearableSleepSessionType;
+  timeZone?: string | null;
   title: string | null;
 }
 
@@ -464,6 +569,7 @@ export const SLEEP_METRIC_KEYS = new Set<WearableMetricKey>([
   "sessionMinutes",
   "sleepConsistency",
   "sleepEfficiency",
+  "sleepLatencyMinutes",
   "sleepPerformance",
   "sleepScore",
   "spo2",

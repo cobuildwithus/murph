@@ -1249,6 +1249,16 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "activeUntil": {
+                          "description": "Exclusive automation end timestamp, including a one-shot retry deadline.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "clearActiveUntil": {
+                          "description": "Clear the automation end timestamp.",
+                          "type": "boolean"
+                        },
                         "slug": {
                           "description": "Optional stable lowercase kebab-case slug.",
                           "type": "string",
@@ -1270,7 +1280,7 @@
                           "maxLength": 4000
                         },
                         "tag": {
-                          "description": "Optional automation tag. Repeat --tag for multiple values.",
+                          "description": "Optional ordinary automation tag. Repeat --tag; use --support-series-id for reserved ownership.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1278,12 +1288,28 @@
                           }
                         },
                         "tags": {
-                          "description": "Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
+                          "description": "Legacy alias for --tag ordinary values. Reserved support-series tags are rejected.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1
                           }
+                        },
+                        "supportSeriesId": {
+                          "description": "Assign the canonical support-series id; reserved raw tags are not accepted.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "supportKind": {
+                          "description": "Persist the exact accepted support purpose for a plan-owned automation.",
+                          "type": "string",
+                          "enum": [
+                            "reminder",
+                            "check_in",
+                            "review",
+                            "weekly_digest"
+                          ]
                         },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
@@ -1446,6 +1472,16 @@
                           "minLength": 1,
                           "maxLength": 160
                         },
+                        "activeUntil": {
+                          "description": "Exclusive automation end timestamp, including a one-shot retry deadline.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "clearActiveUntil": {
+                          "description": "Clear the automation end timestamp.",
+                          "type": "boolean"
+                        },
                         "slug": {
                           "description": "Optional stable lowercase kebab-case slug.",
                           "type": "string",
@@ -1467,7 +1503,7 @@
                           "maxLength": 4000
                         },
                         "tag": {
-                          "description": "Optional automation tag. Repeat --tag for multiple values.",
+                          "description": "Optional ordinary automation tag. Repeat --tag; use --support-series-id for reserved ownership.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1475,12 +1511,28 @@
                           }
                         },
                         "tags": {
-                          "description": "Legacy alias for --tag. Repeat --tags for multiple values. Do not comma-delimit multiple tags.",
+                          "description": "Legacy alias for --tag ordinary values. Reserved support-series tags are rejected.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1
                           }
+                        },
+                        "supportSeriesId": {
+                          "description": "Assign the canonical support-series id; reserved raw tags are not accepted.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "supportKind": {
+                          "description": "Persist the exact accepted support purpose for a plan-owned automation.",
+                          "type": "string",
+                          "enum": [
+                            "reminder",
+                            "check_in",
+                            "review",
+                            "weekly_digest"
+                          ]
                         },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
@@ -1619,6 +1671,10 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "clearSupportKind": {
+                          "description": "Clear persisted plan-support consent metadata.",
+                          "type": "boolean"
+                        },
                         "clearAssistantTargetOverride": {
                           "description": "Clear the stored assistant target override.",
                           "type": "boolean"
@@ -1703,11 +1759,47 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "supportSeriesId": {
+                          "description": "Optional exact support-series id filter, for example experiment:exp_123.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "cursor": {
+                          "description": "Continue an exact support-series listing after this automation id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "limit": {
                           "default": 10,
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
+                        }
+                      }
+                    }
+                  }
+                },
+                "reconcile-support-series": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "desiredAutomationId": {
+                          "description": "Automation id to keep in the support series. Repeat for multiple ids; omit to archive the whole series.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
                         }
                       }
                     }
@@ -10284,6 +10376,59 @@
                               }
                             }
                           }
+                        },
+                        "pattern": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "date": {
+                                  "description": "Optional one-day filter. When present, Murph treats it as both --from and --to.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "from": {
+                                  "description": "Inclusive lower date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "to": {
+                                  "description": "Inclusive upper date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "provider": {
+                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "timeZone": {
+                                  "description": "Optional IANA fallback for nights whose provider did not report a canonical time zone. The vault time zone is used when omitted.",
+                                  "type": "string",
+                                  "minLength": 3
+                                },
+                                "windowDays": {
+                                  "default": 28,
+                                  "description": "Calendar-day sleep-pattern window. Defaults to 28 days and may be at most 366.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 366
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -10605,12 +10750,12 @@
                           "minLength": 1
                         },
                         "pageRevisionId": {
-                          "description": "Protocol page content revision id override. Only valid with --from-protocol.",
+                          "description": "Expected current protocol page revision. Fails on mismatch; only valid with --from-protocol.",
                           "type": "string",
                           "pattern": "^sha256:[a-f0-9]{64}$"
                         },
                         "runSpecRevisionId": {
-                          "description": "Protocol run spec revision id override. Only valid with --from-protocol.",
+                          "description": "Expected current protocol run-spec revision. Fails on mismatch; only valid with --from-protocol.",
                           "type": "string",
                           "pattern": "^sha256:[a-f0-9]{64}$"
                         },
@@ -11521,6 +11666,14 @@
                                 },
                                 "confounder": {
                                   "description": "Potential confounder map entry in key=value form. Repeat --confounder for multiple entries.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "field": {
+                                  "description": "Declared session field in id=value form. Repeat --field for multiple typed values.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",

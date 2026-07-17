@@ -1110,6 +1110,134 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toBeNull();
   });
 
+  it("serializes locked trace updates so multi-row calls hold one pool connection at a time", async () => {
+    const rows = [
+      { assistantInputId: "input_serial_1", id: "trace_serial_1" },
+      { assistantInputId: "input_serial_2", id: "trace_serial_2" },
+    ];
+    let activeTransactions = 0;
+    let maxActiveTransactions = 0;
+    const lockedRow = (row: { assistantInputId: string; id: string }) => ({
+      assistantInputId: row.assistantInputId,
+      assistantInputStagedAt: null,
+      id: row.id,
+      phaseBreakdownJson: null,
+      providerStartAt: null,
+      runnerJobAcceptedAt: null,
+      runtimeAttemptId: "attempt_serial_1",
+      runtimePhaseStartedAt: null,
+      workspaceRestoreDoneAt: null,
+    });
+    const tx = {
+      $queryRaw: vi.fn(
+        async (_strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+          const row = rows.find((candidate) => candidate.id === values[0]);
+          return row ? [lockedRow(row)] : [];
+        },
+      ),
+      hostedIngressLatencyTrace: {
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const prisma = {
+      $transaction: async <T>(callback: (client: typeof tx) => Promise<T>): Promise<T> => {
+        activeTransactions += 1;
+        maxActiveTransactions = Math.max(maxActiveTransactions, activeTransactions);
+        try {
+          await new Promise((resolve) => setImmediate(resolve));
+          return await callback(tx);
+        } finally {
+          activeTransactions -= 1;
+        }
+      },
+      hostedIngressLatencyTrace: {
+        findMany: vi.fn(async () => rows),
+      },
+    };
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_serial_1", "input_serial_2"],
+      at: instant("2026-06-02T21:00:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma: prisma as unknown as LatencyWritePrisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_serial_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 2, recorded: true, unmatchedCount: 0 });
+    expect(maxActiveTransactions).toBe(1);
+
+    maxActiveTransactions = 0;
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_serial_1", "input_serial_2"],
+      at: instant("2026-06-02T21:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma: prisma as unknown as LatencyWritePrisma,
+      runtimeAttemptId: "attempt_serial_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 2, recorded: true, unmatchedCount: 0 });
+    expect(maxActiveTransactions).toBe(1);
+  });
+
+  it("keeps processing later rows when an earlier sequential locked update misses", async () => {
+    const rows = [
+      { assistantInputId: "input_mixed_1", id: "trace_mixed_1" },
+      { assistantInputId: "input_mixed_2", id: "trace_mixed_2" },
+    ];
+    const lockedRow = (row: { assistantInputId: string; id: string }) => ({
+      assistantInputId: row.assistantInputId,
+      assistantInputStagedAt: null,
+      id: row.id,
+      phaseBreakdownJson: null,
+      providerStartAt: null,
+      runnerJobAcceptedAt: null,
+      runtimeAttemptId: row.id === "trace_mixed_1" ? "attempt_mixed_other" : "attempt_mixed_1",
+      runtimePhaseStartedAt: null,
+      workspaceRestoreDoneAt: null,
+    });
+    const tx = {
+      $queryRaw: vi.fn(
+        async (_strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+          const row = rows.find((candidate) => candidate.id === values[0]);
+          return row ? [lockedRow(row)] : [];
+        },
+      ),
+      hostedIngressLatencyTrace: {
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const prisma = {
+      $transaction: async <T>(callback: (client: typeof tx) => Promise<T>): Promise<T> =>
+        await callback(tx),
+      hostedIngressLatencyTrace: {
+        findMany: vi.fn(async () => rows),
+      },
+    };
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_mixed_1", "input_mixed_2"],
+      at: instant("2026-06-02T21:10:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma: prisma as unknown as LatencyWritePrisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_mixed_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 1 });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+
+    tx.$queryRaw.mockClear();
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_mixed_1", "input_mixed_2"],
+      at: instant("2026-06-02T21:10:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma: prisma as unknown as LatencyWritePrisma,
+      runtimeAttemptId: "attempt_mixed_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 1 });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it("persists conversation import phase timing with the staged input", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:30:20.000Z")),

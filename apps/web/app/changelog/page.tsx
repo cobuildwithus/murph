@@ -47,6 +47,111 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "sleep-support-that-stays": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "I keep waking up at 3am again" },
+        {
+          from: "murph",
+          body: "Your last two weeks show sleep splitting around 2:50am, mostly after late screens. Want to run a two-week wind-down experiment? I'd check in Fridays.",
+        },
+      ]}
+    />
+  ),
+  "usage-top-ups": (
+    <PreferenceCard
+      label="Add usage"
+      meta="Stripe Checkout"
+      entries={[
+        { label: "$5 pack", value: "Choose" },
+        { label: "$10 pack", value: "Choose" },
+        { label: "$25 pack", value: "Choose" },
+      ]}
+    />
+  ),
+  "murph-safe-product-search": (
+    <ChecklistMock
+      label="What a product record shows"
+      items={[
+        { label: "Label contents and doses", done: true },
+        { label: "Linked product-test observations", done: true },
+        { label: "Untested claims marked unknown", done: true },
+        { label: "A safe or unsafe verdict", done: false },
+      ]}
+    />
+  ),
+  "onboarding-asks-before-it-prescribes": (
+    <PhoneMock
+      channel="Private iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "What are one or two things you'd want different about your health this year?",
+        },
+        { from: "user", body: "sleep through the night, more energy" },
+        {
+          from: "murph",
+          body: "Saved. We'll work toward those. Nothing to start today unless you want to.",
+        },
+      ]}
+    />
+  ),
+  "family-member-plan-management": (
+    <PreferenceCard
+      label="Family plan"
+      meta="4 of 6 seats"
+      entries={[
+        { label: "You", value: "Edge" },
+        { label: "Partner", value: "Updating to Edge" },
+        { label: "Dad", value: "Pulse" },
+      ]}
+    />
+  ),
+  "leave-a-group-yourself": (
+    <PhoneMock
+      channel="Private iMessage"
+      messages={[
+        { from: "user", body: "leave the marathon group for me" },
+        {
+          from: "murph",
+          body: "Done. You've left Marathon Crew, and your sharing with that group has ended. The iMessage thread itself stays.",
+        },
+      ]}
+    />
+  ),
+  "replies-read-like-texting": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "what should I eat before tomorrow's race?" },
+        { from: "user", body: "also it starts at 7am" },
+        {
+          from: "murph",
+          body: "Early start changes it: light carbs tonight, then a small breakfast about 90 minutes out.",
+        },
+      ]}
+    />
+  ),
+  "model-settings-refresh": (
+    <PreferenceCard
+      label="AI model"
+      meta="Family Edge"
+      entries={[
+        { label: "Luna", note: "Fast everyday answers", value: "Available" },
+        { label: "Terra", note: "The default balance", value: "Current" },
+        { label: "GPT-5.6 Sol", note: "Deepest reasoning", value: "Selected" },
+      ]}
+    />
+  ),
+  "experiment-cards-honest-colors": (
+    <StatBlock
+      label="HRV up 6 ms on the card"
+      before="Flagged unfavorable"
+      after="Shown favorable"
+      caption="colored by the biomarker, not the hypothesis"
+    />
+  ),
   "model-and-reasoning-controls": (
     <PreferenceCard
       label="Thinking settings"
@@ -946,7 +1051,7 @@ const VISUALS: Record<string, ReactNode> = {
   ),
   "whoop-junction-local-day": (
     <StatBlock
-      label="WHOOP / Junction days"
+      label="Wearable record days"
       before="UTC drift"
       after="Local day"
       caption="records line up with your calendar"

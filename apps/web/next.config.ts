@@ -22,6 +22,7 @@ interface StaticHeader {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
+const MURPH_SAFE_HEADER_SOURCE = "/search/:path*";
 const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
 const PRIVY_BASE_DOMAIN_ENV_KEYS = ["PRIVY_BASE_DOMAIN"] as const;
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
@@ -326,6 +327,15 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
       {
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(process.env),
+      },
+      {
+        source: MURPH_SAFE_HEADER_SOURCE,
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
       },
     ],
   };

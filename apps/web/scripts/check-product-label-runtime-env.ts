@@ -14,7 +14,13 @@ export const PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE =
   "Could not verify the product contaminant schema on MURPH_LABELS_DB_URL.";
 
 const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
+  ["foods", "data_origin_url"],
+  ["foods", "fdc_release_date"],
+  ["foods", "imported_at"],
+  ["foods", "last_seen_at"],
   ["foods", "serving_grams"],
+  ["supplements", "data_origin_url"],
+  ["supplements", "imported_at"],
   ["supplements", "serving_grams"],
   ["product_tests", "food_id"],
   ["product_tests", "supplement_id"],
@@ -38,6 +44,9 @@ const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
   ["product_tests", "normalized_value"],
   ["product_tests", "normalized_unit"],
   ["product_tests", "normalized_basis"],
+  ["product_tests", "lab_name"],
+  ["product_tests", "test_method"],
+  ["product_tests", "imported_at"],
   ["contaminant_thresholds", "active"],
   ["contaminant_thresholds", "contaminant_key"],
   ["contaminant_thresholds", "threshold_value"],
@@ -129,6 +138,7 @@ async function readMissingRequiredProductLabelSchemaColumns(
 ): Promise<ProductLabelSchemaColumn[]> {
   const pool = new Pool({
     connectionString,
+    connectionTimeoutMillis: 5_000,
     max: 1,
     statement_timeout: 8_000,
   });
