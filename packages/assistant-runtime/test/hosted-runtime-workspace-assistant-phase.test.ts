@@ -1,7 +1,7 @@
 import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
@@ -841,7 +841,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("withholds the shared view and still runs the assistant lane when share authority is unavailable", async () => {
+  it("deletes the shared view and still runs the assistant lane when share authority is unavailable", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     await writeHostedPhaseSharedProjection({ vaultRoot });
     const request: NonNullable<
@@ -868,34 +868,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
       expect(request).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-      await expect(readFile(
-        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
-        "utf8",
-      )).rejects.toMatchObject({ code: "ENOENT" });
       const marker = JSON.parse(await readFile(
         path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
         "utf8",
       ));
       expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
-      const withheld = JSON.parse(await readFile(
-        path.join(
-          vaultRoot,
-          ".runtime",
-          "operations",
-          "assistant",
-          "state",
-          "vault-share-withheld.json",
-        ),
-        "utf8",
-      ));
-      expect(Object.keys(withheld.projections["profile-name.v0"].grantors))
-        .toEqual(["member_shared_current"]);
+      // Production-faithful visibility proof: foreground Codex runs with full
+      // container filesystem access, so no file anywhere under the workspace
+      // may still carry the unverified shared payload.
+      const files = await readdir(vaultRoot, { recursive: true, withFileTypes: true });
+      for (const entry of files) {
+        if (!entry.isFile()) {
+          continue;
+        }
+        const filePath = path.join(entry.parentPath, entry.name);
+        const contents = await readFile(filePath, "utf8").catch(() => "");
+        expect(contents, filePath).not.toContain("Shared member");
+        expect(contents, filePath).not.toContain("share_profile_current");
+      }
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
-  it("re-exposes withheld records without redelivery once share authority recovers", async () => {
+  it("clears the unavailable marker only after share authority recovers", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     await writeHostedPhaseSharedProjection({ vaultRoot });
     const responses = [
@@ -938,25 +934,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      const restored = JSON.parse(await readFile(
-        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
-        "utf8",
-      ));
-      expect(Object.keys(restored.projections["profile-name.v0"].grantors))
-        .toEqual(["member_shared_current"]);
       await expect(readFile(
         path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
         "utf8",
       )).rejects.toMatchObject({ code: "ENOENT" });
+      // Web re-delivers records after recovery; the runtime retains nothing.
       await expect(readFile(
-        path.join(
-          vaultRoot,
-          ".runtime",
-          "operations",
-          "assistant",
-          "state",
-          "vault-share-withheld.json",
-        ),
+        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
         "utf8",
       )).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
