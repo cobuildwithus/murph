@@ -165,6 +165,19 @@ After the grounding gate is satisfied, propose a low-burden behavior and let
 the user edit it. A bare outcome by itself is not enough to activate a durable
 support loop.
 
+Propose the behavior, not the programming. In the setup conversation the
+proposal is a sentence or two—what the behavior is and roughly how often—and
+the rest of setup stays conversational: which days and time are actually
+realistic, then what support helps (steps 5 and 6). Never send session
+contents—exercise lists, sets, reps, progression rules, low-motivation
+minimums—as a setup message; a wall of prescriptions right after a good
+conversation reads as homework and kills the momentum. Design that detail,
+save it in the canonical plan record, and deliver it where it lands as help:
+the night-before or day-of support message for the first session, framed
+against the user's own stated goal ("here's what I'm thinking for your first
+day"). The user can always ask to see the plan early; showing it on request
+is fine.
+
 ### 3. Capture the reason
 
 For a new goal or behavior, get the user's reason in their own words. If it is
@@ -236,6 +249,15 @@ Choose or infer one support style:
 - quiet: no reminders, only review or user-initiated support
 
 Ask only if the support style materially changes the plan.
+
+When setting up a new scheduled behavior and follow-through or motivation is
+the known blocker, pitch the support concretely in one short message: Murph
+can send a reminder around the chosen time and make it fun and motivating,
+can check in the night before to make sure tomorrow is still on, and—when
+more accountability would help—can join a group chat with a friend and keep
+them posted. Offer it as a menu the user picks from, not a default; each
+accepted piece still follows the opt-in accountability and automation rules
+below.
 
 ## Support and automation policy
 

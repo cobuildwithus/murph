@@ -10,9 +10,9 @@ ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-ca
 
 RUN mkdir -p /usr/local/share/murph \
   && codex debug models --bundled \
-    | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); (.models[] | select(.slug == "gpt-5.5" or .slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna")) |= add_flex' \
+    | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); (.models[] | select(.slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna")) |= add_flex' \
     > /tmp/murph-codex-model-catalog.openai-flex.json \
-  && jq -s -e 'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
+  && jq -s -e 'length == 1 and (.[0] as $catalog | all(["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
   && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
   && rm -f /tmp/murph-codex-model-catalog.openai-flex.json
 

@@ -12,6 +12,7 @@ import { PageHeader } from "@/src/components/ui/page-header";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
+import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/whoop-sync-voice-memo";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -68,7 +69,6 @@ const CONNECT_SOURCE_UI = {
     name: "Apple Health",
     unavailableActionLabel: "Download app",
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
-    unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -321,6 +321,9 @@ export default async function ConnectPage({
         initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
+        whoopSyncVoiceMemoSrc={await resolveWhoopSyncVoiceMemoSrc(
+          auth.authenticatedMember?.id ?? null,
+        )}
       />
     </div>
   );

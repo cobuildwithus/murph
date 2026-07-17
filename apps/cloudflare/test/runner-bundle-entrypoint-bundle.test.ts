@@ -529,16 +529,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // 233B integration, less the same 179B ownership reduction, plus the same
     // 230B provenance correction, its original 96,000B noise band, and the
     // same 250,000B operational headroom because the closure contains the
-    // entry chunk. The July 16 main merge then advanced the closure baseline
-    // by its exact measured 24,408B overage, phase-two generated-delivery
-    // staging advanced it by its exact measured 2,974B merged-base overage,
-    // and the review-remediation consume-into-owned-name path advanced it by
-    // its exact measured 3,566B overage.
+    // entry chunk.
+    // The static-closure baseline later advanced 24,408B to 7,121,190B on the
+    // 2026-07-16 mainline prompt integration and 14,854B more to 7,136,044B on
+    // the July 16-17 mainline (Epic clinical records beta, onboarding
+    // clarifiers, multi-agent posture/delegation/usage), both of which landed
+    // without moving this lock. Phase-two generated-delivery staging plus the
+    // review-remediation consume-into-owned-name path then advance the baseline
+    // by their exact measured 10,900B overage on that fully merged base.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_127_730 + 96_000 + 250_000,
+      staticClosureBytes: 7_146_944 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });

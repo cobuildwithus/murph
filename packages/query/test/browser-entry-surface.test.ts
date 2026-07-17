@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import * as queryRoot from "@murphai/query";
 import * as queryBrowser from "@murphai/query/browser";
+import * as queryBrowserBiomarkers from "@murphai/query/browser-biomarkers";
 import * as queryBrowserMurphAge from "@murphai/query/browser-murph-age";
 
 test("@murphai/query keeps browser-vault-only helpers on the browser subpath", () => {
@@ -18,6 +19,16 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);
+  }
+});
+
+test("@murphai/query exposes measured lab selectors through the biomarker browser subpath", () => {
+  for (const exportName of [
+    "selectBrowserVaultLabBiomarkerDetail",
+    "selectBrowserVaultMeasuredBiomarkers",
+  ]) {
+    assert.equal(exportName in queryRoot, false);
+    assert.equal(exportName in queryBrowserBiomarkers, true);
   }
 });
 

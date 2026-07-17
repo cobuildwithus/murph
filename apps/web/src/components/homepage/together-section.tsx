@@ -1,5 +1,9 @@
 import { WideFeature } from "./asks-section";
 import { ChallengeCard, NewsletterCard } from "./group-chat-cards";
+import {
+  DEFAULT_MURPH_HEADSHOT,
+  MurphHeadshotAvatar,
+} from "./murph-headshot-avatar";
 
 export function TogetherSection() {
   return (
@@ -30,8 +34,19 @@ export function TogetherSection() {
             artifact={
               <div className="mx-auto w-full max-w-[340px]">
                 <ChallengeCard />
-                <div className="mt-3 ml-auto w-fit max-w-[92%] rounded-2xl rounded-br-[6px] bg-white px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-[#2d3436] shadow-[0_8px_24px_-6px_rgba(60,40,20,0.2)]">
-                  Theo, bold words for a man who logged 11 minutes yesterday.
+                <div className="mt-3 flex items-end gap-1.5">
+                  <MurphHeadshotAvatar
+                    src={DEFAULT_MURPH_HEADSHOT}
+                    className="mb-0.5 size-[22px] shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#736a58]">
+                      Murph
+                    </p>
+                    <div className="w-fit rounded-2xl rounded-bl-[6px] bg-white px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-[#2d3436] shadow-[0_8px_24px_-6px_rgba(60,40,20,0.2)]">
+                      Theo, bold words for a man who logged 11 minutes yesterday.
+                    </div>
+                  </div>
                 </div>
               </div>
             }

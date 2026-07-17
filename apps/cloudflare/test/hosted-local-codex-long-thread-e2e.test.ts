@@ -32,7 +32,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const providerRequestBodyFingerprintSecret = randomUUID();
 const targetInputTokens = 50_000;
 const turnCount = readPositiveIntegerEnv("MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT", 75);

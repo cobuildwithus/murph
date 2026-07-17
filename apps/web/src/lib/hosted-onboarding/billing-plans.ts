@@ -421,6 +421,20 @@ export function formatHostedLandingPricingLongSummary(): string {
   )}/month`;
 }
 
+// Trial length as a human phrase ("2-week", "10-day") driven by the live
+// trial-days constant so landing copy never drifts from the granted trial.
+export function formatHostedLandingTrialDurationPhrase(): string {
+  return HOSTED_PULSE_TRIAL_DAYS % 7 === 0
+    ? `${HOSTED_PULSE_TRIAL_DAYS / 7}-week`
+    : `${HOSTED_PULSE_TRIAL_DAYS}-day`;
+}
+
+// One line for the homepage signup CTA: leads with the free trial so the
+// monthly price reads as what happens after, not an upfront charge.
+export function formatHostedLandingTrialPricingNote(): string {
+  return `Start with a ${formatHostedLandingTrialDurationPhrase()} free trial, then ${formatHostedLandingPricingShortSummary()}. Cancel anytime.`;
+}
+
 function buildHostedBillingPlanPresentation(
   code: HostedBillingPlanCode
 ): HostedBillingPlanPresentation {

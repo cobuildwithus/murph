@@ -14,6 +14,7 @@ import {
 
 import { WatchCheckIcon } from "@/src/components/icons/home-icons";
 import { Button, buttonVariants } from "@/src/components/ui/button";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 import {
   Dialog,
   DialogContent,
@@ -51,7 +52,9 @@ export function DeviceSyncCompletionDialog({
   model: DeviceSyncCompletionDialogModel;
 }) {
   const [open, setOpen] = useState(true);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
   const router = useRouter();
+  const setupGuide = model.setupGuide ?? null;
   const PrimaryIcon = model.failed
     ? RefreshCwIcon
     : model.contactAction?.kind === "telegram"
@@ -67,6 +70,87 @@ export function DeviceSyncCompletionDialog({
 
     stripCompletionQueryParams();
   }, [model, router]);
+
+  if (setupGuide && showSetupGuide) {
+    return (
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
+        >
+          <DialogHeader className="items-center gap-4 text-center">
+            <span
+              aria-hidden="true"
+              data-device-sync-icon="smartphone"
+              className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+            >
+              <SmartphoneIcon className="size-8" />
+            </span>
+            <div className="flex flex-col gap-2">
+              <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+                {setupGuide.title}
+              </DialogTitle>
+              <DialogDescription className="text-sm leading-6 text-muted-foreground">
+                {setupGuide.detail}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+
+          <VoiceMemoPlayer
+            src={setupGuide.voiceMemoSrc}
+            bars={24}
+            preload="metadata"
+            containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+            accentClassName="bg-primary"
+            fillClassName="bg-primary"
+            trackClassName="bg-primary/20"
+          />
+
+          <ol className="flex flex-col gap-4">
+            {setupGuide.steps.map((step, index) => (
+              <li key={step.title} className="flex items-start gap-3 text-left">
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-sm font-medium text-primary"
+                >
+                  {index + 1}
+                </span>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-sm font-medium text-foreground">{step.title}</p>
+                  <p className="text-sm leading-6 text-muted-foreground">{step.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex flex-col gap-2">
+            <a
+              aria-label={setupGuide.downloadAction.ariaLabel}
+              className={buttonVariants({
+                className: "w-full",
+                size: "xl",
+              })}
+              href={setupGuide.downloadAction.href}
+              rel={setupGuide.downloadAction.rel}
+              target={setupGuide.downloadAction.target}
+            >
+              <SmartphoneIcon data-icon="inline-start" />
+              {setupGuide.downloadAction.label}
+            </a>
+            <Button
+              type="button"
+              className="w-full"
+              size="xl"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+            >
+              Continue exploring
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -105,20 +189,17 @@ export function DeviceSyncCompletionDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-2">
-          {model.setupAction ? (
-            <a
-              aria-label={model.setupAction.ariaLabel}
-              className={buttonVariants({
-                className: "w-full",
-                size: "xl",
-              })}
-              href={model.setupAction.href}
-              rel={model.setupAction.rel}
-              target={model.setupAction.target}
+          {setupGuide ? (
+            <Button
+              type="button"
+              aria-label={setupGuide.actionAriaLabel}
+              className="w-full"
+              size="xl"
+              onClick={() => setShowSetupGuide(true)}
             >
-              <SmartphoneIcon data-icon="inline-start" />
-              {model.setupAction.label}
-            </a>
+              <RefreshCwIcon data-icon="inline-start" />
+              {setupGuide.actionLabel}
+            </Button>
           ) : null}
           {model.failed && model.retryHref ? (
             <Link
@@ -137,7 +218,7 @@ export function DeviceSyncCompletionDialog({
               className={buttonVariants({
                 className: "w-full",
                 size: "xl",
-                variant: model.setupAction ? "outline" : "default",
+                variant: setupGuide ? "outline" : "default",
               })}
               href={model.contactAction.href}
               rel={model.contactAction.rel}

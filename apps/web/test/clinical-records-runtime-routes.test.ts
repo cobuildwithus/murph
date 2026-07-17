@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  createClinicalRecordConnectIntent: vi.fn(),
   fetchClinicalRetrievalPage: vi.fn(),
   readClinicalRetrievalRun: vi.fn(),
   recordClinicalRetrievalOutcome: vi.fn(),
@@ -16,6 +17,10 @@ vi.mock("@/src/lib/clinical-records/retrieval", () => ({
   recordClinicalRetrievalOutcome: mocks.recordClinicalRetrievalOutcome,
 }));
 
+vi.mock("@/src/lib/clinical-records/connect-intents", () => ({
+  createClinicalRecordConnectIntent: mocks.createClinicalRecordConnectIntent,
+}));
+
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
@@ -25,16 +30,19 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 type ReadRunRoute = typeof import("../app/api/internal/clinical-records/runtime/read-run/route");
+type ConnectLinkRoute = typeof import("../app/api/internal/clinical-records/connect-link/route");
 type FetchPageRoute = typeof import("../app/api/internal/clinical-records/runtime/fetch-page/route");
 type RecordOutcomeRoute = typeof import("../app/api/internal/clinical-records/runtime/record-outcome/route");
 
 let readRunRoute: ReadRunRoute;
+let connectLinkRoute: ConnectLinkRoute;
 let fetchPageRoute: FetchPageRoute;
 let recordOutcomeRoute: RecordOutcomeRoute;
 
 describe("Clinical Records internal runtime routes", () => {
   beforeAll(async () => {
-    [readRunRoute, fetchPageRoute, recordOutcomeRoute] = await Promise.all([
+    [connectLinkRoute, readRunRoute, fetchPageRoute, recordOutcomeRoute] = await Promise.all([
+      import("../app/api/internal/clinical-records/connect-link/route"),
       import("../app/api/internal/clinical-records/runtime/read-run/route"),
       import("../app/api/internal/clinical-records/runtime/fetch-page/route"),
       import("../app/api/internal/clinical-records/runtime/record-outcome/route"),
@@ -46,6 +54,12 @@ describe("Clinical Records internal runtime routes", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_clinical_1");
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
+    mocks.createClinicalRecordConnectIntent.mockResolvedValue({
+      claim: `cr_${"a".repeat(32)}`,
+      connectUrl:
+        `https://join.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-10T12:15:00.000Z",
+    });
     mocks.readClinicalRetrievalRun.mockResolvedValue({
       errorCode: "family-unavailable",
       retryable: false,
@@ -59,8 +73,9 @@ describe("Clinical Records internal runtime routes", () => {
     mocks.recordClinicalRetrievalOutcome.mockResolvedValue(undefined);
   });
 
-  it("rejects all three operations before signed auth when the runtime write fence is absent", async () => {
+  it("rejects all four operations before signed auth when the runtime write fence is absent", async () => {
     const responses = await Promise.all([
+      connectLinkRoute.POST(jsonRequest("/api/internal/clinical-records/connect-link", {})),
       readRunRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/read-run", {
         generation: 1,
         runId: "run_1",
@@ -91,6 +106,7 @@ describe("Clinical Records internal runtime routes", () => {
       });
     }
     expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
+    expect(mocks.createClinicalRecordConnectIntent).not.toHaveBeenCalled();
     expect(mocks.readClinicalRetrievalRun).not.toHaveBeenCalled();
     expect(mocks.fetchClinicalRetrievalPage).not.toHaveBeenCalled();
     expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
@@ -98,6 +114,11 @@ describe("Clinical Records internal runtime routes", () => {
 
   it("accepts canonical forwarded fences and preserves strict runtime response shapes", async () => {
     const headers = runtimeWriteFenceHeaders();
+    const connectResponse = await connectLinkRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/connect-link",
+      {},
+      headers,
+    ));
     const readResponse = await readRunRoute.POST(jsonRequest(
       "/api/internal/clinical-records/runtime/read-run",
       { generation: 1, runId: "run_1" },
@@ -126,6 +147,12 @@ describe("Clinical Records internal runtime routes", () => {
       headers,
     ));
 
+    await expect(connectResponse.json()).resolves.toEqual({
+      connectUrl:
+        `https://join.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-10T12:15:00.000Z",
+      ok: true,
+    });
     await expect(readResponse.json()).resolves.toEqual({
       errorCode: "family-unavailable",
       retryable: false,
@@ -137,8 +164,12 @@ describe("Clinical Records internal runtime routes", () => {
       status: "unavailable",
     });
     await expect(outcomeResponse.json()).resolves.toEqual({ ok: true });
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(3);
-    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(3);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(4);
+    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(4);
+    expect(mocks.createClinicalRecordConnectIntent).toHaveBeenCalledWith({
+      memberId: "member_clinical_1",
+      request: expect.any(Request),
+    });
   });
 
   it("rejects inactive members before any Clinical Records read, egress, or outcome mutation", async () => {
@@ -149,6 +180,11 @@ describe("Clinical Records internal runtime routes", () => {
     }));
     const headers = runtimeWriteFenceHeaders();
     const responses = await Promise.all([
+      connectLinkRoute.POST(jsonRequest(
+        "/api/internal/clinical-records/connect-link",
+        {},
+        headers,
+      )),
       readRunRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/read-run", {
         generation: 1,
         runId: "run_1",
@@ -179,8 +215,20 @@ describe("Clinical Records internal runtime routes", () => {
       });
     }
     expect(mocks.readClinicalRetrievalRun).not.toHaveBeenCalled();
+    expect(mocks.createClinicalRecordConnectIntent).not.toHaveBeenCalled();
     expect(mocks.fetchClinicalRetrievalPage).not.toHaveBeenCalled();
     expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider or member selectors before creating a connect intent", async () => {
+    const response = await connectLinkRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/connect-link",
+      { providerDirectoryEntryId: "provider_1" },
+      runtimeWriteFenceHeaders(),
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createClinicalRecordConnectIntent).not.toHaveBeenCalled();
   });
 
   it("rejects non-canonical generations in otherwise present fences", async () => {

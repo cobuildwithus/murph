@@ -85,18 +85,17 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // overage; boundary-tail retry preservation added the same measured 233B, and
 // complete-tail wake ownership later removes 179B. Explicit invocation-local
 // wake provenance adds 230B. Preserve the separate 96KB noise band.
-// The July 16 main merge (through PR #772) measures a 7,467,190B local macOS
-// closure, 24,408B over the prior budget (CI linux measures 7,426,324B on the
-// same tree). Advance only by that measured overage and preserve the separate
-// 96KB noise band.
-// Phase-two generated-delivery staging (writer guidance, runtime-owned file
-// adoption, and quiescent pre-checkpoint cleanup) on the merged 2026-07-17
-// main base measures a 7,470,164B local macOS static boot closure, 2,974B
-// over the budget produced by main's July 16 ratchet. The review-remediation
+// same tree). The July 17 morning merges (Epic clinical records beta and
+// onboarding clarifiers) measure 7,473,273B locally, 6,083B over the resulting
+// budget, the multi-agent V1 posture comment adds the same measured 71B, the
+// proactive-delegation hint rewrite adds the same measured 8,345B, and V2
+// subagent usage evidence adds the same measured 355B, for a 7,136,044B main
+// baseline. Phase-two generated-delivery staging plus the review-remediation
 // consume-into-owned-name path (per-send collision-free staging refs) then
-// adds an exact measured 3,566B, for a 7,473,730B closure. Advance by that
-// exact overage and preserve the separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_127_730;
+// add an exact measured 10,900B on that fully merged base, for a 7,492,944B
+// closure. Advance by that exact overage and preserve the separate 96KB noise
+// band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_146_944;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.

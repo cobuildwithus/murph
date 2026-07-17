@@ -2,6 +2,8 @@ import type {
   HostedRuntimeClinicalRecordsPort,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -28,6 +30,36 @@ export function createHostedWebClinicalRecordsPort(input: {
   }
 
   return {
+    async createConnectLink(options) {
+      const {
+        parseHostedClinicalRecordsConnectLinkResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {},
+        boundUserId: input.boundUserId,
+        description: "Hosted clinical records connect link",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+        sensitiveResponseBody: {
+          maxBytes: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
+        },
+        signal: options?.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      const result = parseHostedClinicalRecordsConnectLinkResponse(payload);
+      if (
+        input.transport.mode === "direct"
+        && new URL(result.connectUrl).origin
+          !== new URL(input.transport.webControlBaseUrl).origin
+      ) {
+        throw new TypeError(
+          "Hosted clinical records connect link must use the configured Web origin.",
+        );
+      }
+      return result;
+    },
     async fetchPage(request, options) {
       const {
         parseHostedClinicalRecordsFetchPageResponse,

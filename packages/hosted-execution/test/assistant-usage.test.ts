@@ -25,7 +25,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     credentialSource: "platform",
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
     providerName: "hosted-openai",
     tokenPricingBasis: "openai-flex",
     triggerKind: "automation_idle_compact",
@@ -51,7 +51,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   // providerRequestId so the two identities can never be conflated.
   assert.equal(record.sessionId, "asst_123");
   assert.equal(record.providerRequestId, "thread_abc");
-  assert.equal(record.requestedModel, "gpt-5.5");
+  assert.equal(record.requestedModel, "gpt-5.6-terra");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
   assert.equal(
@@ -71,7 +71,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       memberId: "member_123",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       triggerKind: "automation_idle_compact",
       usage: {
         cachedInputTokens: null,
@@ -91,7 +91,7 @@ test("usage records default and validate token pricing basis", () => {
     credentialSource: "platform",
     featureKey: "assistant_turn",
     memberId: "member_123",
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
     triggerKind: "automation_cron",
     usage: {
       cachedInputTokens: null,

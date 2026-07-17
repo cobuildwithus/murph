@@ -6,7 +6,7 @@ import {
 } from "../hosted-crypto/secure-box";
 
 type ClinicalSecretPrismaClient = Parameters<typeof sealHostedUserSecureBoxString>[0]["prisma"];
-type ClinicalConnectionSecretField = "accessToken" | "patientId" | "refreshToken";
+type ClinicalConnectionSecretField = "accessToken" | "patientId";
 
 export async function sealClinicalConnectionFhirBaseUrl(input: {
   connectionId: string;

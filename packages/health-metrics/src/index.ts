@@ -11,3 +11,4 @@ export * from "./series.ts";
 export * from "./goals.ts";
 export * from "./format.ts";
 export * from "./windows.ts";
+export * from "./lab-health-areas.ts";

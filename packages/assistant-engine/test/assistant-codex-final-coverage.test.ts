@@ -519,10 +519,10 @@ describe('Codex model catalog', () => {
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
     const providerScopeEvents: string[] = []
-    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.5' })
+    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
       },
     })
@@ -1387,7 +1387,7 @@ describe('Codex model catalog', () => {
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
       },
     })
@@ -1480,7 +1480,7 @@ describe('Codex model catalog', () => {
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'vercel-ai-gateway',
       },
     })

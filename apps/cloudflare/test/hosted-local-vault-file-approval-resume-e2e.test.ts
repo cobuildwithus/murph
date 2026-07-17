@@ -49,7 +49,7 @@ const userId = `member_local_vault_file_approval_${runId}`;
 const chatId = `chat_local_vault_file_approval_${runId}`;
 const linqApiToken = "linq-local-vault-file-token";
 const linqWebhookSecret = "linq-local-vault-file-webhook-secret";
-const assistantModel = "gpt-5.5";
+const assistantModel = "gpt-5.6-terra";
 const requestInboundText = "Create the synthetic report PDF and attach it here.";
 const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";

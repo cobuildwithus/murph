@@ -142,7 +142,7 @@ describe('assistant store persistence seams', () => {
     })
     expect(roundTrippedSession.providerOptions).toMatchObject({
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
@@ -1169,7 +1169,7 @@ function createCodexSession(input?: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
@@ -1218,7 +1218,7 @@ function createSession(input?: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,

@@ -6,6 +6,7 @@ import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboa
 import { readJsonObject } from "@/src/lib/http";
 
 const MAX_BODY_BYTES = 4 * 1_024;
+const SEARCH_REQUEST_KEYS = new Set(["city", "query", "state"]);
 
 export async function GET(): Promise<Response> {
   return Response.json({ error: { code: "METHOD_NOT_ALLOWED", message: "Provider search only allows POST." } }, {
@@ -18,6 +19,13 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   await requireActiveHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request, { limitBytes: MAX_BODY_BYTES });
+  if (Object.keys(body).some((key) => !SEARCH_REQUEST_KEYS.has(key))) {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_PROVIDER_SEARCH_INVALID",
+      httpStatus: 400,
+      message: "Clinical Records provider search is invalid.",
+    });
+  }
   return clinicalJsonOk({
     ok: true,
     ...searchClinicalProviderDirectory({
