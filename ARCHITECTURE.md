@@ -55,9 +55,11 @@ recording is disabled, and account deletion removes connections before the
 profile. Completing a direct Live View login leaves the awaiting task browser
 as the sole profile writer so the public Done request can return without waiting
 for profile checkpoint and replacement. Only a later conversation-authorized
-resume stops that browser to save the profile, creates and durably publishes its
-replacement, and then returns browser control to the assistant; replacement
-failure leaves the completed handoff and browserless awaiting run retryable.
+resume may atomically claim the completed handoff as the sole `checkpointing`
+provider owner. That owner stops the browser to save the profile, creates and
+durably publishes its replacement, and atomically consumes the claim while
+returning browser control to the assistant. An ambiguous failure retains the
+claim for bounded stale-owner recovery; overlapping resumes cannot call Kernel.
 
 ## Hosted Phone Calls
 

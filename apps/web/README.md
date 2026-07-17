@@ -49,6 +49,26 @@ parked local item, committed snapshot, approved row, or in-flight reconciliation
 can depend on it. Disable and redeploy the producer gate before rollback, but do
 not roll web below this floor without a separate migration or a forward runtime
 that removes the dependency.
+
+## Direct-login deferred-checkpoint deployment compatibility
+
+A completed direct-login handoff now means "the user completed takeover; the
+profile checkpoint is pending until an authorized resume," rather than "the
+profile checkpoint already finished." That persisted semantic change is
+necessary for Done to return before Kernel stop/save/replacement work. A prior
+web bundle will instead reuse the old task browser, mark the run running, and
+consume `pendingHandoffId` without performing the deferred checkpoint.
+
+The first production web deployment containing the deferred-checkpoint claim is
+therefore the rollback floor while any matching active row can exist. Record the
+production alias at that head and confirm prior web functions have drained before
+treating the rollout as established. Do not roll below the floor until a database
+check proves there is no active `awaiting_user` run whose pending direct-login
+handoff has non-null `completedAt` and status `completed` or `checkpointing`.
+After deferred writes stop, waiting one full one-hour active-run TTL before that
+zero-row check provides the bounded drain condition. This is a web-only rollout;
+it does not require a coordinated Cloudflare deployment.
+
 When a valid `idle_shutdown` checkpoint matches the locked workspace version,
 web commits it even if a newer durable conversation row is pending. The same CAS
 commits the request snapshot, redacted watermarks, and wake projection as one
@@ -246,15 +266,19 @@ is active.
   handoff timestamps. For a direct `login` Live View handoff, Done durably
   completes the handoff and returns to the conversation while the existing task
   browser remains the sole profile writer. The next resume that proves a newer
-  mailbox item stops that browser so Kernel saves the profile, removes any stale
-  deterministic replacement, creates a replacement from the saved profile, and
-  only then marks the run `running`. A failed replacement leaves the completed
-  handoff and browserless `awaiting_user` run retryable without another login or
-  Done click. Managed Auth browser publication and handoff conversion or
+  mailbox item must first claim that exact completed handoff as `checkpointing`
+  under the member lock. Only the claim owner may stop the browser so Kernel
+  saves the profile, remove a stale deterministic replacement, create and
+  publish the replacement, and atomically mark the handoff completed while the
+  run becomes `running`. An overlapping open or start request returns a retryable
+  checkpoint-in-progress result without calling Kernel. A failed or ambiguous
+  replacement retains the `checkpointing` owner; stale-owner recovery can clean
+  a deterministic orphan and retry without another login or Done click. Managed
+  Auth browser publication and handoff conversion or
   completion commit in one transaction. If both idempotent terminal-write
   attempts return an error, Murph treats the outcome as unknown and leaves the
-  handoff checkpointing until durable state can be reread or safely reclaimed; it does
-  not provision or delete another task browser in that request. Every
+  handoff checkpointing until durable state can be reread or safely reclaimed;
+  it does not provision or delete another task browser in that request. Every
   nonterminal Managed Auth row remains on the provider-aware recovery path,
   including when its inter-request claim is yielded to `open`; generic
   completion and open/resume logic cannot replace, terminally expire, or
