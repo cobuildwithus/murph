@@ -537,7 +537,11 @@ async function runExperimentLifecyclePrecondition(
     return { kind: 'continue' }
   }
   const experimentLookup = isProgressMilestone
-    ? experimentLookupForProgressMilestone(input.tags)
+    ? await experimentLookupForProgressMilestone({
+        automationId: input.automationId,
+        tags: input.tags,
+        vaultRoot: input.vault,
+      })
     : experimentLookupForFinalResultsAutomationId(input.automationId)
   if (!experimentLookup) {
     return {
@@ -955,8 +959,12 @@ function isExperimentProgressMilestoneAutomation(tags: readonly string[]): boole
     tags.includes('milestone')
 }
 
-function experimentLookupForProgressMilestone(tags: readonly string[]): string | null {
-  for (const tag of tags) {
+async function experimentLookupForProgressMilestone(input: {
+  automationId: string
+  tags: readonly string[]
+  vaultRoot: string
+}): Promise<string | null> {
+  for (const tag of input.tags) {
     const parsed = parseAutomationSupportSeriesTag(tag)
     if (!parsed?.seriesId.startsWith(EXPERIMENT_LIFECYCLE_SERIES_ID_PREFIX)) {
       continue
@@ -968,7 +976,19 @@ function experimentLookupForProgressMilestone(tags: readonly string[]): string |
       return experimentId
     }
   }
-  return null
+
+  // Legacy progress automations predate immutable support-series ownership.
+  // Their deterministic automation id still identifies the experiment, but
+  // only by recomputing the one-way mapping over current canonical runs. Let
+  // read/parse failures propagate so cron retries rather than consuming a due
+  // legacy one-shot before managed setup can finish its migration.
+  const listed = await listExperimentLifecycleFrontmatter({
+    vaultRoot: input.vaultRoot,
+  })
+  return listed.experiments.find(
+    (experiment) =>
+      experimentProgressAutomationId(experiment.experimentId) === input.automationId,
+  )?.experimentId ?? null
 }
 
 function experimentLookupForFinalResultsAutomationId(

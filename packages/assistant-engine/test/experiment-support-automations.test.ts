@@ -1026,13 +1026,53 @@ it.each([
   expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
 })
 
-it('fails a progress milestone closed when its immutable lifecycle lookup tag is absent', async () => {
+it('resolves an untagged legacy progress milestone through its deterministic automation id', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-legacy-progress-owner-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot, timezone: 'UTC' })
+  const experiment = await createExperiment({
+    slug: 'legacy-progress-owner',
+    startedOn: '2026-04-01T09:00:00.000Z',
+    title: 'Legacy Progress Owner',
+    vaultRoot,
+  })
+  await updateExperiment({
+    assistantSupport: { notificationStyle: 'send_scheduled_summary' },
+    relativePath: experiment.experiment.relativePath,
+    runPlan: {
+      interventionStart: '2026-04-08',
+      interventionEnd: '2026-04-28',
+    },
+    vaultRoot,
+  })
+  const seeds = await buildExperimentLifecycleSeeds({
+    now: new Date('2026-04-10T00:00:00.000Z'),
+    vaultRoot,
+  })
+  const progress = seeds.find((seed) => seed.tags?.includes('milestone'))
+
+  await expect(runExperimentLifecycleOutcomePrecondition({
+    automationId: progress?.automationId ?? '',
+    now: '2026-04-11T09:00:00.000Z',
+    tags: ['experiment', 'progress-card', 'milestone'],
+    vault: vaultRoot,
+  })).resolves.toEqual({ kind: 'continue' })
+})
+
+it('fails a progress milestone closed when neither its tag nor deterministic id resolves an owner', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-missing-progress-owner-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot })
   resetPreconditionMocks()
 
   const result = await runExperimentLifecycleOutcomePrecondition({
     automationId: PROGRESS_MILESTONE_AUTOMATION_ID,
     tags: ['experiment', 'progress-card', 'milestone'],
-    vault: '/tmp/lifecycle-precondition/vault',
+    vault: vaultRoot,
   })
 
   expect(result).toEqual({

@@ -2448,6 +2448,7 @@ describe('applyMurphManagedAutomations', () => {
     managedAutomationMocks.records.set(previousFinal.automationId, previousFinal)
 
     const newSeed: MurphManagedAutomationSeed = {
+      activeUntil: '2026-05-05T21:00:00.000Z',
       automationId: previousFinal.automationId,
       slug: previousFinal.slug,
       title: 'Final results · NZ Run',
@@ -2466,6 +2467,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(managedAutomationMocks.records.get(previousFinal.automationId))
       .toMatchObject({
+        activeUntil: '2026-05-05T21:00:00.000Z',
         instructions: 'New persist-then-deliver prompt.',
         // Legacy stored schedule retained so the moment still fires.
         schedule: { kind: 'at', at: '2026-04-29T15:00:00.000Z' },

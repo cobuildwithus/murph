@@ -597,6 +597,42 @@ describe("markdown document primitives", () => {
     );
   });
 
+  it("retires reconciliation reactivation authority when the user archives an already archived record", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const supportSeriesTag = buildAutomationSupportSeriesTag(
+      "experiment-lifecycle:exp_explicit_archive",
+    );
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        automationId: "automation_01K00000000000000000000003",
+        slug: "reconcile-explicit-archive",
+        tags: [supportSeriesTag],
+      }),
+    });
+
+    await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment-lifecycle:",
+      desiredSeries: [],
+      now: new Date("2026-07-15T00:00:00.000Z"),
+    });
+    expect((await readAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    })).tags).toContain(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG);
+
+    const explicitlyArchived = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      status: "archived",
+      now: new Date("2026-07-16T00:00:00.000Z"),
+    });
+    expect(explicitlyArchived.record.tags).not.toContain(
+      AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    );
+  });
+
   it("patches one automation field while preserving omitted fields", async () => {
     const vaultRoot = await makeVaultRoot();
     const created = await upsertAutomation({

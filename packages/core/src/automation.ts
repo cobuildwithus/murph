@@ -1555,11 +1555,13 @@ async function upsertAutomationWithLatestRegistry(
     existingRecord,
     requestedTags,
   });
-  const tags = status === "archived"
-    ? requestedTags
-    : requestedTags.filter(
-      (tag) => tag !== AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
-    );
+  // Reconciliation is the only writer allowed to grant future automatic
+  // reactivation. Any ordinary upsert or patch consumes that authority,
+  // including an explicit archive of a record that reconciliation already
+  // archived.
+  const tags = requestedTags.filter(
+    (tag) => tag !== AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  );
   assertAutomationSupportSeriesOwnershipPreserved({
     existingRecord,
     nextTags: tags,

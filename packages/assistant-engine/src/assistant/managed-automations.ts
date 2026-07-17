@@ -748,7 +748,10 @@ export async function applyMurphManagedAutomations(
     // schedule (cron/every/dailyLocal) under one-shot instructions would
     // fire the final-review repeatedly, so it must be replaced with the
     // new desired schedule (and archived if that is itself stale).
-    const newDesiredStale = preserveExistingSchedule
+    const newDesiredOccurrenceStale = preserveExistingSchedule
+      ? false
+      : isStaleOneShotSchedule(seed.schedule, now)
+    const newDesiredWindowExpired = preserveExistingSchedule
       ? false
       : isStaleMurphManagedOneShotSeed(seed, now)
     const legacyOneShotStillFires = canPreserveLegacyOneShotSchedule({
@@ -762,9 +765,9 @@ export async function applyMurphManagedAutomations(
     let reconciledStatus: AutomationStatus = reactivateReconciledLifecycleOneShot
       ? 'active'
       : existing.status
-    if (newDesiredStale && legacyOneShotStillFires) {
+    if (newDesiredOccurrenceStale && legacyOneShotStillFires) {
       reconciledSchedule = existing.schedule
-    } else if (newDesiredStale) {
+    } else if (newDesiredWindowExpired) {
       reconciledStatus = 'archived'
     }
 
