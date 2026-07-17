@@ -6,6 +6,11 @@ export {
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
 } from "./browser-replica/lab-results.ts";
+export {
+  BROWSER_VAULT_DEVICE_METRIC_SOURCE_KINDS,
+  selectBrowserVaultDeviceMetricSummary,
+  type BrowserVaultDeviceMetricSummary,
+} from "./browser-replica/device-metrics.ts";
 export type {
   BrowserVaultLabResultRow,
   BrowserVaultMetricRow,
