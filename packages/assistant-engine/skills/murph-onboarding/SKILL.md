@@ -19,7 +19,8 @@ should start problem-solving before the foundation is understood.
 
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
-Do not create a second context-collection lifecycle or automation.
+Do not create a second context-collection lifecycle, and create no onboarding
+automation beyond the single scheduled early-stall check-in defined below.
 
 ## Resume without repeating
 
@@ -185,6 +186,33 @@ infer a birthday, sex, gender, or other identity detail.
 
 If the user gives only a name, continue. If they decline or skip any part,
 continue without pressing. Never re-ask solely for optional demographics.
+
+#### Arm the early-stall check-in
+
+Setup drop-off is most likely in these first minutes, so in the same turn
+that handles the user's minimal-identity answer, when `murph.automation` is
+available, save one scheduled one-shot before the visible reply. Arm it only
+in that turn: skip it when the minimal-identity prompt was never asked in this
+conversation or when the flow is resuming past this point. Saving the same
+slug twice converges on one automation, so a duplicate save is harmless, but
+never save it on a later turn. Read the current clock first (for example
+`date -u +%Y-%m-%dT%H:%M:%SZ` in the workspace) and compute `at` from that
+result; do not guess the time or offset. Use:
+
+- `action: "save"`
+- `slug: "onboarding-early-stall-check-in"`
+- `title: "Onboarding early-stall check-in"`
+- `summary: "One-shot check-in if the user goes quiet right after starting onboarding."`
+- `schedule: { "kind": "at", "at": "<now + 15 minutes, ISO with offset>" }`
+- `tags: ["assistant", "scheduled", "onboarding"]`
+- `instructions`: exactly the decision policy below.
+
+```text
+Onboarding just started and the user answered the first question or two. This one-shot exists only to notice a mid-setup stall. Read the recent conversation first. Return skip unless all of these hold: onboarding is still open, the latest message is Murph's own onboarding question, that question has gone unanswered for at least ten minutes, and the user has not asked to pause or continue later. Otherwise reply in chat with one short, light line in Murph's voice: check whether they are still around, keep it playful and pressure-free, and make clear they can pick this up anytime or tell Murph to take a different approach if this style is not working for them. The meaning is "hey, still there? don't leave me hanging - and if you'd rather do this differently, just say so." Use natural wording, not a fixed script. Do not repeat the open question verbatim, do not add a new setup question, and do not mention schedules, automations, or internal state. This check-in happens at most once; any later onboarding continuation belongs to the existing managed daily onboarding follow-up, not this one-shot.
+```
+
+If the save fails or the tool is unavailable, continue onboarding normally
+without retrying or mentioning it.
 
 ### 3. Find one or two aspiration anchors
 
@@ -587,7 +615,9 @@ skipped category, and do not require a plan or support loop merely to use
 - A deferred checkpoint remains open, but honor the requested timing.
 - If the last onboarding question is still unanswered, do not send a different
   setup question. Wait for a reply or later inbound message instead of
-  escalating a drip questionnaire.
+  escalating a drip questionnaire. The scheduled early-stall check-in above is
+  not a setup question and is the only permitted scheduled nudge inside this
+  window; it never repeats.
 - Skip visible onboarding advancement when the user asks for no follow-up, the
   situation is urgent or safety-sensitive, the immediate task failed and needs
   attention, or the current health-data reply should stand alone.
