@@ -359,15 +359,13 @@ async function planAssistantGeneratedDeliveryPrune(input: {
     }
     inventoryFiles.push(file)
     const activeMedia = activeMediaByRef.get(ref) ?? []
-    if (activeMedia.length > 0) {
-      await assertAssistantGeneratedDeliveryFileMatchesActiveMedia({
-        activeMedia,
-        filePath: absolutePath,
-        ref,
-        signal: input.signal,
-        stats,
-      })
-    } else {
+    if (!(await assistantGeneratedDeliveryFileMatchesActiveMedia({
+      activeMedia,
+      filePath: absolutePath,
+      ref,
+      signal: input.signal,
+      stats,
+    }))) {
       files.push(file)
     }
   }
@@ -398,40 +396,35 @@ async function planAssistantGeneratedDeliveryPrune(input: {
   }
 }
 
-async function assertAssistantGeneratedDeliveryFileMatchesActiveMedia(input: {
+async function assistantGeneratedDeliveryFileMatchesActiveMedia(input: {
   activeMedia: readonly AssistantVaultFileResponseMedia[]
   filePath: string
   ref: string
   signal?: AbortSignal | null
   stats: Stats
-}): Promise<void> {
+}): Promise<boolean> {
+  if (input.activeMedia.length === 0) {
+    return false
+  }
   const filename = path.posix.basename(input.ref)
   const contentType = resolveSupportedAssistantVaultFileContentType(filename)
   if (!contentType) {
-    throw new Error(
-      'An active assistant generated delivery has an unsupported file type.',
-    )
+    return false
   }
-  const metadataMatches = input.activeMedia.every(
+  const possibleMatches = input.activeMedia.filter(
     (media) =>
       media.filename === filename &&
       media.contentType === contentType &&
       media.sizeBytes === input.stats.size,
   )
-  if (!metadataMatches) {
-    throw new Error(
-      'An active assistant generated delivery no longer matches its persisted metadata.',
-    )
+  if (possibleMatches.length === 0) {
+    return false
   }
   const sha256 = await sha256AssistantGeneratedDeliveryFile(
     input.filePath,
     input.signal,
   )
-  if (!input.activeMedia.every((media) => media.sha256 === sha256)) {
-    throw new Error(
-      'An active assistant generated delivery no longer matches its persisted bytes.',
-    )
-  }
+  return possibleMatches.some((media) => media.sha256 === sha256)
 }
 
 async function sha256AssistantGeneratedDeliveryFile(
@@ -1120,6 +1113,18 @@ async function readOutboxInventory(
   for (const entry of await readDirectoryEntries(directory, signal)) {
     signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
+      if (entry.name === '.quarantine') {
+        const quarantineStats = await lstat(path.join(directory, entry.name))
+        signal?.throwIfAborted()
+        if (
+          entry.isDirectory()
+          && quarantineStats.isDirectory()
+          && !quarantineStats.isSymbolicLink()
+        ) {
+          continue
+        }
+      }
+      trusted = false
       continue
     }
     if (!entry.isFile()) {

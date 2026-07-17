@@ -3,9 +3,28 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
+
+const assistantStateOpenRace = vi.hoisted(() => ({
+  beforeNextOpen: null as null | (() => Promise<void>),
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+
+  return {
+    ...actual,
+    async open(filePath: string, flags: number) {
+      const beforeNextOpen = assistantStateOpenRace.beforeNextOpen;
+      assistantStateOpenRace.beforeNextOpen = null;
+      await beforeNextOpen?.();
+      return await actual.open(filePath, flags);
+    },
+  };
+});
 
 import {
+  adoptAssistantStateFile,
   appendAssistantStateJsonLine,
   appendAssistantStateText,
   ASSISTANT_STATE_DIRECTORY_MODE,
@@ -75,6 +94,130 @@ test("assistant-state append tightens permissive existing files before writing",
 
     assert.equal((await lstat(filePath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
     assert.equal(await readFile(filePath, "utf8"), "existing\nnext\n");
+  });
+});
+
+test("adoptAssistantStateFile tightens its assistant-state parents and exact file", async () => {
+  await withTempDir(async (root) => {
+    const vaultRoot = path.join(root, "vault");
+    const runtimeRoot = path.join(vaultRoot, ".runtime");
+    const operationsRoot = path.join(runtimeRoot, "operations");
+    const assistantRoot = path.join(operationsRoot, "assistant");
+    const deliveryDirectory = path.join(assistantRoot, "generated-deliveries");
+    const filePath = path.join(deliveryDirectory, "report.pdf");
+
+    await mkdir(deliveryDirectory, { mode: 0o755, recursive: true });
+    await chmod(vaultRoot, 0o755);
+    await chmod(runtimeRoot, 0o755);
+    await chmod(operationsRoot, 0o755);
+    await chmod(assistantRoot, 0o755);
+    await chmod(deliveryDirectory, 0o777);
+    await writeFile(filePath, "generated report", { mode: 0o666 });
+    await chmod(filePath, 0o666);
+
+    await adoptAssistantStateFile(filePath);
+
+    assert.equal((await lstat(vaultRoot)).mode & 0o777, 0o755);
+    assert.equal((await lstat(runtimeRoot)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(operationsRoot)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(assistantRoot)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(deliveryDirectory)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(filePath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
+    assert.equal(await readFile(filePath, "utf8"), "generated report");
+  });
+});
+
+test("adoptAssistantStateFile rejects symlinks and non-regular entries", async () => {
+  await withTempDir(async (root) => {
+    const assistantRoot = path.join(root, "vault", ".runtime", "operations", "assistant");
+    const deliveryDirectory = path.join(assistantRoot, "generated-deliveries");
+    const outsidePath = path.join(root, "outside.pdf");
+    const symlinkPath = path.join(deliveryDirectory, "linked.pdf");
+    const directoryPath = path.join(deliveryDirectory, "directory.pdf");
+
+    await mkdir(deliveryDirectory, { recursive: true });
+    await writeFile(outsidePath, "outside", { mode: 0o644 });
+    await chmod(outsidePath, 0o644);
+    await symlink(outsidePath, symlinkPath);
+    await mkdir(directoryPath);
+
+    await assert.rejects(
+      adoptAssistantStateFile(symlinkPath),
+      /must not contain symlinks/u,
+    );
+    await assert.rejects(
+      adoptAssistantStateFile(directoryPath),
+      /must be a regular file/u,
+    );
+
+    assert.equal((await lstat(outsidePath)).mode & 0o777, 0o644);
+    assert.equal(await readFile(outsidePath, "utf8"), "outside");
+    assert.equal((await lstat(symlinkPath)).isSymbolicLink(), true);
+    assert.equal((await lstat(directoryPath)).isDirectory(), true);
+  });
+});
+
+test("adoptAssistantStateFile rejects a symlink replacement between lstat and open", async () => {
+  await withTempDir(async (root) => {
+    const deliveryDirectory = path.join(
+      root,
+      "vault",
+      ".runtime",
+      "operations",
+      "assistant",
+      "generated-deliveries",
+    );
+    const filePath = path.join(deliveryDirectory, "report.pdf");
+    const outsidePath = path.join(root, "outside.pdf");
+
+    await mkdir(deliveryDirectory, { recursive: true });
+    await writeFile(filePath, "generated report", { mode: 0o666 });
+    await writeFile(outsidePath, "outside", { mode: 0o644 });
+    await chmod(filePath, 0o666);
+    await chmod(outsidePath, 0o644);
+
+    assistantStateOpenRace.beforeNextOpen = async () => {
+      await rm(filePath);
+      await symlink(outsidePath, filePath);
+    };
+
+    try {
+      await assert.rejects(adoptAssistantStateFile(filePath), /ELOOP/u);
+    } finally {
+      assistantStateOpenRace.beforeNextOpen = null;
+    }
+
+    assert.equal((await lstat(outsidePath)).mode & 0o777, 0o644);
+    assert.equal(await readFile(outsidePath, "utf8"), "outside");
+    assert.equal((await lstat(filePath)).isSymbolicLink(), true);
+  });
+});
+
+test("adoptAssistantStateFile fails before mutating paths outside assistant state or missing files", async () => {
+  await withTempDir(async (root) => {
+    const outsidePath = path.join(root, "vault", "exports", "report.pdf");
+    const missingAssistantPath = path.join(
+      root,
+      "vault",
+      ".runtime",
+      "operations",
+      "assistant",
+      "generated-deliveries",
+      "missing.pdf",
+    );
+
+    await mkdir(path.dirname(outsidePath), { recursive: true });
+    await writeFile(outsidePath, "ordinary vault data", { mode: 0o666 });
+    await chmod(outsidePath, 0o666);
+
+    await assert.rejects(
+      adoptAssistantStateFile(outsidePath),
+      /Expected assistant runtime state path/u,
+    );
+    await assert.rejects(adoptAssistantStateFile(missingAssistantPath), /ENOENT/u);
+
+    assert.equal((await lstat(outsidePath)).mode & 0o777, 0o666);
+    await assert.rejects(lstat(path.dirname(missingAssistantPath)), /ENOENT/u);
   });
 });
 

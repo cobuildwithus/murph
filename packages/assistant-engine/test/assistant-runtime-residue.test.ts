@@ -193,7 +193,7 @@ describe('assistant runtime residue pruning', () => {
     }
   })
 
-  it('fails closed before deleting anything when active delivery bytes changed', async () => {
+  it('reclaims an active ref whose bytes no longer match its persisted delivery snapshot', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-overwrite-',
     )
@@ -209,9 +209,39 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
     await writeFile(file.filePath, 'payload-b', 'utf8')
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(1)
+    expect(result.generatedDeliveryBytesPruned).toBe(
+      Buffer.byteLength('payload-b'),
+    )
+    await expectPathMissing(file.filePath)
+  })
+
+  it('fails closed when an active generated delivery is missing', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-missing-active-',
+    )
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active delivery',
+      refSuffix: 'missing.pdf',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'i',
+      status: 'pending',
+      vaultRoot,
+    })
+    await rm(active.filePath)
     const orphan = await writeGeneratedDeliveryFile({
-      contents: 'must remain after validation failure',
-      refSuffix: 'orphan-after-overwrite.pdf',
+      contents: 'must remain',
+      refSuffix: 'orphan.pdf',
       vaultRoot,
     })
 
@@ -221,10 +251,8 @@ describe('assistant runtime residue pruning', () => {
       pendingInputIds: [],
       vault: vaultRoot,
     })).rejects.toThrow(
-      'An active assistant generated delivery no longer matches its persisted bytes.',
+      'An active assistant generated delivery is missing from runtime staging.',
     )
-
-    await expectPathExists(file.filePath)
     await expectPathExists(orphan.filePath)
   })
 
@@ -267,6 +295,31 @@ describe('assistant runtime residue pruning', () => {
       secondResult.generatedDeliveryCleanupSkippedUntrustedOutbox,
     ).toBe(false)
     await expectPathMissing(file.filePath)
+  })
+
+  it('treats unexpected outbox entries as untrusted before generated cleanup', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-unexpected-outbox-',
+    )
+    const file = await writeGeneratedDeliveryFile({
+      contents: 'retain on incomplete inventory',
+      refSuffix: 'orphan.pdf',
+      vaultRoot,
+    })
+    const unexpectedPath = path.join(paths.outboxDirectory, 'unexpected.txt')
+    await writeFile(unexpectedPath, 'unexpected outbox entry', 'utf8')
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(0)
+    expect(result.generatedDeliveryCleanupSkippedUntrustedOutbox).toBe(true)
+    await expectPathExists(file.filePath)
+    await expectPathExists(unexpectedPath)
   })
 
   it('does not reconcile generated deliveries without an explicit quiescent boundary', async () => {

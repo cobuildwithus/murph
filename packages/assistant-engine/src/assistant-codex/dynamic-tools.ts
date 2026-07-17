@@ -818,7 +818,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Normalized vault-relative path, for example documents/report.pdf. Hidden paths, traversal, absolute paths, and unsupported file types are rejected.',
+          `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
       },
     },
     required: ['ref'],

@@ -52,5 +52,8 @@ describe('assistant generated delivery files', () => {
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
       'never move or copy existing, user-owned, canonical, or durable files there',
     )
+    expect(
+      MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.ref.description,
+    ).toContain('all other hidden paths')
   })
 })

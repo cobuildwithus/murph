@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type {
@@ -506,24 +507,21 @@ async function readAssistantVaultFileSnapshot(input: {
     ref,
     'file path',
   )
+  let metadata: Stats
+  let bytes: Uint8Array
   if (isAssistantGeneratedDeliveryRef(ref)) {
-    await adoptAssistantStateFile(absolutePath)
+    const snapshot = await readAdoptedAssistantGeneratedDeliveryFile({
+      absolutePath,
+      ref,
+      vaultRoot: input.vaultRoot,
+    })
+    metadata = snapshot.metadata
+    bytes = snapshot.bytes
+  } else {
+    metadata = await stat(absolutePath)
+    assertAssistantVaultFileMetadataSupported(metadata)
+    bytes = await readFile(absolutePath)
   }
-  const metadata = await stat(absolutePath)
-  if (!metadata.isFile()) {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
-      'The requested vault path is not a regular file.',
-    )
-  }
-  if (metadata.size <= 0 || metadata.size > assistantVaultFileMaxBytes) {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
-      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
-    )
-  }
-
-  const bytes = await readFile(absolutePath)
   if (bytes.byteLength <= 0 || bytes.byteLength > assistantVaultFileMaxBytes) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
@@ -545,6 +543,117 @@ async function readAssistantVaultFileSnapshot(input: {
       sizeBytes: bytes.byteLength,
     },
   }
+}
+
+async function readAdoptedAssistantGeneratedDeliveryFile(input: {
+  absolutePath: string
+  ref: string
+  vaultRoot: string
+}): Promise<{
+  bytes: Uint8Array
+  metadata: Stats
+}> {
+  await adoptAssistantStateFile(input.absolutePath)
+  const fileHandle = await open(
+    input.absolutePath,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  )
+  try {
+    const openedMetadata = await fileHandle.stat()
+    assertAssistantVaultFileMetadataSupported(openedMetadata)
+    assertAdoptedAssistantGeneratedDeliveryMode(openedMetadata)
+    await assertAssistantGeneratedDeliveryPathMatchesHandle({
+      ...input,
+      handleMetadata: openedMetadata,
+    })
+
+    const bytes = await fileHandle.readFile()
+    const readMetadata = await fileHandle.stat()
+    if (!assistantVaultFileStatsMatch(openedMetadata, readMetadata)) {
+      throw assistantVaultFileChangedDuringReadError()
+    }
+    assertAdoptedAssistantGeneratedDeliveryMode(readMetadata)
+    await assertAssistantGeneratedDeliveryPathMatchesHandle({
+      ...input,
+      handleMetadata: readMetadata,
+    })
+    return {
+      bytes,
+      metadata: readMetadata,
+    }
+  } finally {
+    await fileHandle.close()
+  }
+}
+
+async function assertAssistantGeneratedDeliveryPathMatchesHandle(input: {
+  absolutePath: string
+  handleMetadata: Stats
+  ref: string
+  vaultRoot: string
+}): Promise<void> {
+  const resolvedPath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    input.ref,
+    'file path',
+  )
+  if (resolvedPath !== input.absolutePath) {
+    throw assistantVaultFileChangedDuringReadError()
+  }
+  const pathMetadata = await lstat(resolvedPath)
+  if (
+    pathMetadata.isSymbolicLink()
+    || !pathMetadata.isFile()
+    || !assistantVaultFileIdentityMatches(input.handleMetadata, pathMetadata)
+  ) {
+    throw assistantVaultFileChangedDuringReadError()
+  }
+  assertAdoptedAssistantGeneratedDeliveryMode(pathMetadata)
+}
+
+function assertAssistantVaultFileMetadataSupported(metadata: Stats): void {
+  if (!metadata.isFile()) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
+      'The requested vault path is not a regular file.',
+    )
+  }
+  if (metadata.size <= 0 || metadata.size > assistantVaultFileMaxBytes) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
+      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
+    )
+  }
+}
+
+function assertAdoptedAssistantGeneratedDeliveryMode(metadata: Stats): void {
+  if ((metadata.mode & 0o777) !== 0o600) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
+      'The generated delivery file permissions changed before it could be read.',
+    )
+  }
+}
+
+function assistantVaultFileIdentityMatches(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+}
+
+function assistantVaultFileStatsMatch(left: Stats, right: Stats): boolean {
+  return (
+    assistantVaultFileIdentityMatches(left, right)
+    && left.mode === right.mode
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
+  )
+}
+
+function assistantVaultFileChangedDuringReadError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_VAULT_FILE_CHANGED_DURING_READ',
+    'The generated delivery file changed while it was being prepared.',
+  )
 }
 
 function applyAssistantVaultFileApprovalToMedia(input: {

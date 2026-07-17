@@ -149,6 +149,27 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('leaves ordinary vault-file permissions unchanged', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-ordinary-permissions-',
+    )
+    tempRoots.push(parentRoot)
+    const filePath = path.join(vaultRoot, 'documents', 'ordinary.pdf')
+    await mkdir(path.dirname(filePath), { recursive: true })
+    await writeFile(filePath, 'ordinary vault file')
+    await chmod(filePath, 0o666)
+
+    const media = await resolveAssistantVaultFileResponseMedia({
+      ref: 'documents/ordinary.pdf',
+      vaultRoot,
+    })
+    await expect(readVerifiedAssistantVaultFileBytes({
+      file: media,
+      vaultRoot,
+    })).resolves.toEqual(Buffer.from('ordinary vault file'))
+    expect((await stat(filePath)).mode & 0o777).toBe(0o666)
+  })
+
   it('adopts the exact assistant-owned runtime delivery for initial prep and persisted retries', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-runtime-delivery-',

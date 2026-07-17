@@ -85,7 +85,12 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // overage; boundary-tail retry preservation added the same measured 233B, and
 // complete-tail wake ownership later removes 179B. Explicit invocation-local
 // wake provenance adds 230B. Preserve the separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_096_782;
+// Phase-two generated-delivery staging (writer guidance, runtime-owned file
+// adoption, and quiescent pre-checkpoint cleanup) on the merged 2026-07-16
+// main base measures a 7,469,515B local macOS static boot closure, 26,733B
+// over the resulting budget. Advance by that exact overage and preserve the
+// separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_123_515;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.

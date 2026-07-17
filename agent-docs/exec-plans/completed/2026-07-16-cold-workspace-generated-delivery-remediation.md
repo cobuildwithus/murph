@@ -1,8 +1,8 @@
 # Cold workspace generated-delivery remediation
 
-Status: active
+Status: completed
 Created: 2026-07-16
-Updated: 2026-07-16
+Updated: 2026-07-17
 
 ## Goal
 
@@ -121,4 +121,4 @@ obligation and every user-owned vault file.
 ## Verification record
 
 - Pending implementation and final gates.
-
+Completed: 2026-07-17
