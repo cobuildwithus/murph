@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
+import { ErrandsSection } from "@/src/components/homepage/errands-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import {
   HeroClocksIn,
@@ -143,9 +144,10 @@ export default async function HomePage() {
         <MealPhotosSection />
         <NutritionSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
+        <ErrandsSection />
         <IntegrationsSection authenticated={authenticated} />
-        <HowItWorksSection />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
+        <HowItWorksSection />
         <SecurityTeaserSection />
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />

@@ -39,23 +39,35 @@ function LabelLookupArtifact() {
         ))}
       </div>
 
-      <div className="mt-4 rounded-xl bg-[#f6e3d3]/80 px-3.5 py-3 ring-1 ring-[#7d4a1a]/10">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#7d4a1a]">
-          Product test · PlasticList
-        </span>
-        <p className="mt-1.5 text-[0.8125rem] leading-[1.55] text-[#635a48]">
+      <div className="mt-4 rounded-xl bg-[#a04f30]/10 px-3.5 py-3 ring-1 ring-[#a04f30]/35">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#a04f30]">
+            <svg
+              viewBox="0 0 24 24"
+              className="size-3.5 shrink-0"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003ZM12 8.25a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75Zm0 8.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            High BPA
+          </span>
+          <a
+            href="https://plasticlist.org"
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#a04f30]/70 underline decoration-[#a04f30]/25 underline-offset-2 transition-colors hover:text-[#a04f30] hover:decoration-[#a04f30]/60"
+          >
+            plasticlist.org
+          </a>
+        </div>
+        <p className="mt-2 text-[0.875rem] font-medium leading-[1.5] text-[#5c3320]">
           BPA measured at 41 ng/g, near the top of everything PlasticList has
           tested.
-        </p>
-      </div>
-
-      <div className="mt-3 rounded-xl bg-[#f5f0e8]/70 px-3.5 py-3 ring-1 ring-black/[0.03]">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-          Murph&apos;s read
-        </span>
-        <p className="mt-1.5 text-[0.8125rem] leading-[1.55] text-[#635a48]">
-          The macros are solid, but that BPA number is high for an everyday
-          bar. Two bars with clean tests hit the same 20 g. Want the swap?
         </p>
       </div>
     </div>
