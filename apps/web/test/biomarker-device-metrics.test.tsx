@@ -1,12 +1,13 @@
 import { type ReactNode } from "react";
 import {
+  BROWSER_VAULT_REPLICA_POLICY_ID,
+  BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
-  createBrowserVaultReplica,
-  createVaultReadModel,
   parseBrowserVaultReplica,
+  type BrowserVaultMetricRow,
   type BrowserVaultQueryClient,
+  type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { buildMetricProjection } from "@murphai/query";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -52,7 +53,12 @@ import {
   type DeviceTrackedBiomarker,
 } from "../app/(dashboard)/biomarkers/biomarkers-page-client";
 
-type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+const TREND_DEFAULTS = {
+  aggregation: "mean",
+  comparisonWindowDays: 30,
+  latestWindowDays: 7,
+  minimumPoints: 3,
+} as const;
 
 const DEVICE_BIOMARKERS: DeviceTrackedBiomarker[] = [
   {
@@ -60,12 +66,7 @@ const DEVICE_BIOMARKERS: DeviceTrackedBiomarker[] = [
     privateMetricBindings: [{ metricKey: "resting-heart-rate", role: "primary" }],
     routeId: "resting-heart-rate",
     shortName: "Resting heart rate",
-    trendDefaults: {
-      aggregation: "mean",
-      comparisonWindowDays: 30,
-      latestWindowDays: 7,
-      minimumPoints: 3,
-    },
+    trendDefaults: TREND_DEFAULTS,
     unit: "bpm",
     valuePrecision: 0,
   },
@@ -74,14 +75,18 @@ const DEVICE_BIOMARKERS: DeviceTrackedBiomarker[] = [
     privateMetricBindings: [{ metricKey: "hrv", role: "primary" }],
     routeId: "hrv",
     shortName: "HRV",
-    trendDefaults: {
-      aggregation: "mean",
-      comparisonWindowDays: 30,
-      latestWindowDays: 7,
-      minimumPoints: 3,
-    },
+    trendDefaults: TREND_DEFAULTS,
     unit: "ms",
     valuePrecision: 0,
+  },
+  {
+    key: "biomarker:vo2-max",
+    privateMetricBindings: [{ metricKey: "vo2-max", role: "primary" }],
+    routeId: "vo2-max",
+    shortName: "VO2 max",
+    trendDefaults: TREND_DEFAULTS,
+    unit: "mL/kg/min",
+    valuePrecision: 1,
   },
 ];
 
@@ -96,8 +101,18 @@ beforeEach(() => {
   };
 });
 
-test("device-tracked biomarkers with private readings return to the index", async () => {
-  browserVaultMock.value.client = await clientWithRestingHeartRate();
+test("only device-derived readings render, count, and decide the latest value", async () => {
+  browserVaultMock.value.client = clientWithMetricRows([
+    // Device history for resting heart rate, plus newer manual and lab rows
+    // that must not surface under a device heading.
+    metricRow({ date: "2026-07-10", id: "w1", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 61 }),
+    metricRow({ date: "2026-07-14", id: "w2", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 59 }),
+    metricRow({ date: "2026-07-15", id: "m1", metricKey: "resting-heart-rate", sourceKind: "observation", value: 70 }),
+    metricRow({ date: "2026-07-15", id: "t1", metricKey: "resting-heart-rate", sourceKind: "test-result", value: 75 }),
+    // HRV has only manual entries; VO2 max has only lab values.
+    metricRow({ date: "2026-07-14", id: "hm1", metricKey: "hrv", sourceKind: "measurement", unit: "ms", value: 88 }),
+    metricRow({ date: "2026-07-14", id: "vt1", metricKey: "vo2-max", sourceKind: "test-result", unit: "mL/kg/min", value: 41 }),
+  ]);
   browserVaultMock.value.status = "ready";
 
   const rendered = await renderClientComponent(
@@ -109,16 +124,20 @@ test("device-tracked biomarkers with private readings return to the index", asyn
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("From your devices");
     expect(text).toContain("Resting heart rate");
-    expect(text).toContain("bpm");
-    expect(text).toContain("readings");
+    expect(text).toContain("2 readings");
+    expect(text).toContain("59 bpm");
+    expect(text).not.toContain("70");
+    expect(text).not.toContain("75");
+    expect(text).not.toContain("Out of date");
 
-    // Only measured metrics appear: HRV has no private data.
+    // Manual-only and lab-only histories never reach the device section.
     expect(text).not.toContain("HRV");
+    expect(text).not.toContain("VO2 max");
 
     const link = rendered.container.querySelector('a[href="/biomarkers/resting-heart-rate"]');
     expect(link).not.toBeNull();
 
-    // The header count includes device metrics even with zero lab results.
+    // The header count includes only the device metrics that render.
     expect(text).toContain("1 biomarker");
     expect(text).toContain("No lab results yet");
   } finally {
@@ -126,7 +145,28 @@ test("device-tracked biomarkers with private readings return to the index", asyn
   }
 });
 
-test("the device section stays hidden without data or authentication", async () => {
+test("an old device reading stays visible and is labeled out of date", async () => {
+  browserVaultMock.value.client = clientWithMetricRows([
+    metricRow({ date: "2026-05-01", id: "w1", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 62 }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("Resting heart rate");
+    expect(text).toContain("62 bpm");
+    expect(text).toContain("Out of date");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("the device section stays hidden without device data or authentication", async () => {
   const signedOut = await renderClientComponent(
     <BiomarkersPageClient authenticated={false} deviceBiomarkers={DEVICE_BIOMARKERS} />,
   );
@@ -136,81 +176,78 @@ test("the device section stays hidden without data or authentication", async () 
     await signedOut.cleanup();
   }
 
-  browserVaultMock.value.client = await clientWithoutMetrics();
+  browserVaultMock.value.client = clientWithMetricRows([
+    metricRow({ date: "2026-07-14", id: "m1", metricKey: "resting-heart-rate", sourceKind: "observation", value: 61 }),
+  ]);
   browserVaultMock.value.status = "ready";
-  const empty = await renderClientComponent(
+  const manualOnly = await renderClientComponent(
     <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
     { requireButton: false },
   );
   try {
-    expect(empty.container.textContent).not.toContain("From your devices");
-    expect(empty.container.textContent).not.toContain("Resting heart rate");
+    expect(manualOnly.container.textContent).not.toContain("From your devices");
+    expect(manualOnly.container.textContent).not.toContain("Resting heart rate");
   } finally {
-    await empty.cleanup();
+    await manualOnly.cleanup();
   }
 });
 
-async function clientWithRestingHeartRate(): Promise<BrowserVaultQueryClient> {
-  const dates = ["2026-07-10", "2026-07-11", "2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15"];
-  const vault = createVaultReadModel({
-    entities: dates.map((date, index) =>
-      createObservation(`evt_rhr_${date}`, `${date}T07:00:00.000Z`, {
-        metric: "resting-heart-rate",
-        source: "manual",
-        unit: "bpm",
-        value: 60 + (index % 2),
-      })),
-    metadata: null,
-    vaultRoot: "browser://vault",
-  });
-  return buildClient(vault);
+function clientWithMetricRows(metricRows: BrowserVaultMetricRow[]): BrowserVaultQueryClient {
+  return createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica(metricRows)));
 }
 
-async function clientWithoutMetrics(): Promise<BrowserVaultQueryClient> {
-  const vault = createVaultReadModel({
-    entities: [],
-    metadata: null,
-    vaultRoot: "browser://vault",
-  });
-  return buildClient(vault);
-}
-
-async function buildClient(
-  vault: Parameters<typeof buildMetricProjection>[0],
-): Promise<BrowserVaultQueryClient> {
-  const replica = await createBrowserVaultReplica({
-    generatedAt: "2026-07-16T12:00:00.000Z",
-    metricPoints: buildMetricProjection(vault).metricPoints,
-    sourceBundleHash: "f".repeat(64),
-    vault,
-  });
-  return createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
-}
-
-function createObservation(
-  entityId: string,
-  occurredAt: string,
-  attributes: Record<string, unknown>,
-): CanonicalEntity {
+function metricRow(
+  overrides: Partial<BrowserVaultMetricRow> & {
+    date: string;
+    id: string;
+    metricKey: string;
+    sourceKind: string | null;
+    value: number | null;
+  },
+): BrowserVaultMetricRow {
   return {
-    attributes,
-    body: null,
-    date: occurredAt.slice(0, 10),
-    entityId,
-    experimentSlug: null,
-    family: "event",
-    frontmatter: null,
-    kind: "observation",
-    links: [],
-    lookupIds: [entityId],
-    occurredAt,
-    path: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
-    primaryLookupId: entityId,
-    recordClass: "ledger",
-    relatedIds: [],
-    status: null,
-    stream: null,
-    tags: [],
-    title: "Observation",
-  } satisfies CanonicalEntity;
+    biomarkerKey: null,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    grain: "day",
+    observedAt: `${overrides.date}T07:00:00.000Z`,
+    pointIds: [],
+    recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row.v1",
+    sourceFamily: "derived",
+    sourceLabel: "wearable",
+    statistic: "mean",
+    unit: "bpm",
+    valueLabel: null,
+    ...overrides,
+  };
+}
+
+function createReplica(metricRows: BrowserVaultMetricRow[]): BrowserVaultReplica {
+  return {
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    labResultRows: [],
+    metricGoalProgressRows: [],
+    metricRows,
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: BROWSER_VAULT_REPLICA_POLICY_ID,
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
+    schema: BROWSER_VAULT_REPLICA_SCHEMA,
+    searchRows: [],
+    source: {
+      dataVersion: "sha256:device-metrics-web-test",
+      sourceBundleHash: "f".repeat(64),
+    },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  };
 }

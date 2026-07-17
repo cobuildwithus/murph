@@ -4,11 +4,11 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { useCallback, type ReactNode } from "react";
 import {
-  selectBrowserVaultBiomarkerPanel,
+  selectBrowserVaultDeviceMetricSummary,
   selectBrowserVaultMeasuredBiomarkers,
   type BrowserVaultBiomarkerMetricBinding,
-  type BrowserVaultBiomarkerMetricPanel,
   type BrowserVaultBiomarkerTrendDefaults,
+  type BrowserVaultDeviceMetricSummary,
   type BrowserVaultMeasuredBiomarker,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
@@ -51,9 +51,7 @@ export interface DeviceTrackedBiomarker {
 
 interface DeviceMetricListItem {
   entry: DeviceTrackedBiomarker;
-  latest: NonNullable<BrowserVaultBiomarkerMetricPanel["latest"]>;
-  series: BrowserVaultBiomarkerMetricPanel["series"];
-  stale: boolean;
+  summary: BrowserVaultDeviceMetricSummary;
 }
 
 interface BiomarkersPageClientProps {
@@ -179,34 +177,27 @@ export function BiomarkersPageClient({
 }
 
 /**
- * Only biomarkers with an actual private reading appear: the section shows
- * what your devices measured, not the library of what they could measure.
+ * Only biomarkers with an actual device-derived reading appear: the summary
+ * selector filters to wearable provenance, so manual entries and lab values
+ * can never render, count, or decide staleness under this heading.
  */
 function selectDeviceMetricItems(
   client: BrowserVaultQueryClient,
   deviceBiomarkers: readonly DeviceTrackedBiomarker[],
 ): DeviceMetricListItem[] {
   return deviceBiomarkers.flatMap((entry) => {
-    const panel = selectBrowserVaultBiomarkerPanel({
-      biomarkerKey: entry.key,
-      client,
-      label: entry.shortName,
-      privateMetricBindings: entry.privateMetricBindings,
-      trendDefaults: entry.trendDefaults,
-      unit: entry.unit,
-      valuePrecision: entry.valuePrecision,
-    });
-    const latest = panel.primary?.latest;
-    if ((panel.status !== "ready" && panel.status !== "stale") || !latest) {
+    const binding = entry.privateMetricBindings.find((candidate) => candidate.role === "primary")
+      ?? entry.privateMetricBindings[0];
+    if (!binding) {
       return [];
     }
 
-    return [{
-      entry,
-      latest,
-      series: panel.primary?.series ?? [],
-      stale: panel.status === "stale",
-    } satisfies DeviceMetricListItem];
+    const summary = selectBrowserVaultDeviceMetricSummary(client, binding.metricKey);
+    if (!summary) {
+      return [];
+    }
+
+    return [{ entry, summary } satisfies DeviceMetricListItem];
   });
 }
 
@@ -240,7 +231,7 @@ function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
 }
 
 function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
-  const { entry, latest, series, stale } = item;
+  const { entry, summary } = item;
 
   return (
     <Link
@@ -252,10 +243,10 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
           {entry.shortName}
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          {series.length} {series.length === 1 ? "reading" : "readings"}
+          {summary.readingCount} {summary.readingCount === 1 ? "reading" : "readings"}
           <span aria-hidden="true"> · </span>
-          {formatSeriesSpan(series, latest.date)}
-          {stale ? (
+          {formatDeviceSpan(summary)}
+          {summary.stale ? (
             <>
               <span aria-hidden="true"> · </span>
               Out of date
@@ -266,13 +257,13 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
 
       <div className="flex min-w-0 max-w-[55%] flex-col items-end text-right">
         <span className="break-words font-serif text-xl font-semibold tracking-tight tabular-nums text-foreground">
-          {formatMetricValue(latest.value, entry.valuePrecision)}{labUnitSuffix(entry.unit)}
+          {formatMetricValue(summary.latest.value, entry.valuePrecision)}{labUnitSuffix(summary.latest.unit ?? entry.unit)}
         </span>
         <time
           className="mt-1 block text-xs text-muted-foreground"
-          dateTime={latest.date}
+          dateTime={summary.latest.date}
         >
-          {formatLabDate(latest.date)}
+          {formatLabDate(summary.latest.date)}
         </time>
       </div>
 
@@ -285,13 +276,9 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
   );
 }
 
-function formatSeriesSpan(
-  series: BrowserVaultBiomarkerMetricPanel["series"],
-  latestDate: string,
-): string {
-  const firstDate = series[0]?.date ?? latestDate;
-  const firstYear = firstDate.slice(0, 4);
-  const lastYear = latestDate.slice(0, 4);
+function formatDeviceSpan(summary: BrowserVaultDeviceMetricSummary): string {
+  const firstYear = summary.firstDate.slice(0, 4);
+  const lastYear = summary.latest.date.slice(0, 4);
   return firstYear === lastYear ? firstYear : `${firstYear} to ${lastYear}`;
 }
 
