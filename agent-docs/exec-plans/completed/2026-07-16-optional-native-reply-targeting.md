@@ -1,6 +1,6 @@
 # Shared accepted-message targeting for replies and reactions
 
-Status: active
+Status: completed
 Created: 2026-07-16
 Updated: 2026-07-16
 
@@ -851,3 +851,4 @@ tests above prove those contracts directly.
   contracts on 2026-07-16.
 - This implementation branch carries the plan and production change together;
   completion evidence is recorded here before archival.
+Completed: 2026-07-16
