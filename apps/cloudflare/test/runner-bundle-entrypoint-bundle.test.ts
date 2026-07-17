@@ -529,12 +529,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // 233B integration, less the same 179B ownership reduction, plus the same
     // 230B provenance correction, its original 96,000B noise band, and the
     // same 250,000B operational headroom because the closure contains the
-    // entry chunk.
+    // entry chunk. The July 16 main merge then advanced the closure baseline
+    // by its exact measured 24,408B overage, and phase-two generated-delivery
+    // staging advances it by its exact measured 2,974B merged-base overage.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_096_782 + 96_000 + 250_000,
+      staticClosureBytes: 7_124_164 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });
