@@ -20,7 +20,7 @@ test('assistant target runtime exposes only Codex app-server execution and resum
 
   const codexTarget = resolveAssistantRuntimeTarget({
     provider: 'codex-cli',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
@@ -47,7 +47,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     provider: 'codex-cli',
     approvalPolicy: 'never',
     codexHome: '/tmp/codex-home',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: 'default',
@@ -78,7 +78,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'default',

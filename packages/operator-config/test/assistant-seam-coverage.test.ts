@@ -171,7 +171,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
 
   const mergedCodex = mergeAssistantProviderConfigs(null, {
     provider: 'codex-cli',
-    model: ' gpt-5.5 ',
+    model: ' gpt-5.6-terra ',
     modelProvider: ' Vercel-AI-Gateway ',
   })
   assert.deepEqual(mergedCodex, {
@@ -184,7 +184,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
       kind: 'codex-cli',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
@@ -210,7 +210,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
       .continuityFingerprint,
     executionDriver: 'codex-app-server',
     approvalPolicy: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
@@ -223,7 +223,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     approvalPolicy: null,
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
@@ -261,7 +261,7 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
     id: ' codex-profile ',
     providerConfig: {
       provider: 'codex-cli',
-      model: ' gpt-5.5 ',
+      model: ' gpt-5.6-terra ',
       modelProvider: ' vercel-ai-gateway ',
     },
   })
@@ -312,7 +312,7 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
         id: '   ',
         providerConfig: {
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'vercel-ai-gateway',
         },
       }),

@@ -29,7 +29,7 @@ export interface HostedContactPrivacyKeyring {
 
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
-const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.5";
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-terra";
 
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];

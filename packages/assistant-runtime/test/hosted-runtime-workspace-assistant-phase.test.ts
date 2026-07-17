@@ -719,7 +719,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
       codexCommand: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "openai",
       oss: false,
       profile: null,
@@ -928,7 +928,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: "https://linq.example.test",
     };
@@ -3726,7 +3726,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       await upsertAutomation({
         assistantTargetOverride: {
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           reasoningEffort: "medium",
         },
         continuityPolicy: "preserve",
@@ -3805,7 +3805,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
         assistantTargetOverride: {
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           reasoningEffort: "medium",
         },
         route: expect.objectContaining({
@@ -13612,10 +13612,10 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.5",
+    requestedModel: "gpt-5.6-terra",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.5",
+    servedModel: "gpt-5.6-terra",
     sessionId: "asst_direct_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -13697,7 +13697,7 @@ async function seedDirectLinqAssistantInputRoute(input: {
       approvalPolicy: "never",
       codexCommand: null,
       codexHome: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       oss: false,
       profile: null,

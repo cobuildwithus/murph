@@ -20,7 +20,7 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
         "provider-egress-signing-secret",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -32,7 +32,7 @@ describe("hosted assistant runner env policy", () => {
 
     expect(env).toMatchObject({
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -49,14 +49,14 @@ describe("hosted assistant runner env policy", () => {
   it("does not forward unsupported hosted assistant api key alias vars", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "PROVIDER_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       PROVIDER_API_KEY: "secret-value",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
-    expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
+    expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.6-terra");
     expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(env.PROVIDER_API_KEY).toBeUndefined();
@@ -64,7 +64,7 @@ describe("hosted assistant runner env policy", () => {
 
   it("does not forward the image-owned hosted Codex model catalog path", () => {
     const env = buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
         "/tmp/stale-forwarded-catalog.json",
@@ -77,7 +77,7 @@ describe("hosted assistant runner env policy", () => {
   it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_ENTERPRISE_API_KEY: "secret-value",
     });
@@ -88,7 +88,7 @@ describe("hosted assistant runner env policy", () => {
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
     });

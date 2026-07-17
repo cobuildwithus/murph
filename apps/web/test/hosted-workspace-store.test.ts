@@ -1657,7 +1657,7 @@ describe("hosted runtime log store", () => {
       jsonType: "object",
       jsonValid: true,
       methodKind: "POST",
-      modelKind: "gpt-5.5",
+      modelKind: "gpt-5.6-terra",
       previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
       previousResponseFingerprintPresent: true,
       previousResponsePresent: true,

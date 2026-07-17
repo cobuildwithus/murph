@@ -3096,7 +3096,7 @@ describe('assistant Codex turn planning', () => {
         executionContext: null,
         input: {
           ...createMessageInput(),
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           prompt: 'Use medium reasoning now.',
           vault,
         },

@@ -24,7 +24,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
-export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.5'
+export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.6-terra'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_CODEX_REASONING_EFFORT = 'low'
 const DEFAULT_SETUP_SANDBOX = 'danger-full-access' as const

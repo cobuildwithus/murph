@@ -69,7 +69,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
     providerConfig: {
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
-      model: ' gpt-5.5 ',
+      model: ' gpt-5.6-terra ',
       modelProvider: ' vercel-ai-gateway ',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
@@ -98,7 +98,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
@@ -114,7 +114,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         id: 'platform-default',
         managedBy: 'platform',
         providerConfig: {
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'vercel-ai-gateway',
           provider: 'codex-cli',
         },

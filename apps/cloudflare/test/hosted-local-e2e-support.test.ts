@@ -88,7 +88,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [],
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
             stream: true,
           }),
           headers: {
@@ -128,7 +128,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           stream: true,
         }),
         headers: {
@@ -148,7 +148,7 @@ describe("startAssistantProviderStubServer", () => {
       const followupResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           stream: true,
         }),
         headers: {
@@ -185,7 +185,7 @@ describe("startAssistantProviderStubServer", () => {
       const backgroundResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "background wake", role: "user" }],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -201,7 +201,7 @@ describe("startAssistantProviderStubServer", () => {
       const targetResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: "please handle this target message", role: "user" }],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -235,7 +235,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [{ content: "background wake", role: "user" }],
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -285,7 +285,7 @@ describe("startAssistantProviderStubServer", () => {
                 role: "user",
               },
             ],
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -329,7 +329,7 @@ describe("startAssistantProviderStubServer", () => {
       const toolCallResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [{ content: triggerText, role: "user" }],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           stream: true,
         }),
         headers: {
@@ -355,7 +355,7 @@ describe("startAssistantProviderStubServer", () => {
               role: "user",
             },
           ],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           stream: true,
         }),
         headers: {
@@ -395,7 +395,7 @@ describe("startAssistantProviderStubServer", () => {
         {
           body: JSON.stringify({
             input: [{ content: "please handle this target message", role: "user" }],
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -434,7 +434,7 @@ describe("startAssistantProviderStubServer", () => {
       const firstResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -444,7 +444,7 @@ describe("startAssistantProviderStubServer", () => {
       const secondResponse = await fetch(baseUrl, {
         body: JSON.stringify({
           input: [],
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -517,7 +517,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     );
 
     expect(env).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
@@ -574,7 +574,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(
       resolveHostedAssistantLocalDevEnv(
         {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4567/v1",

@@ -162,7 +162,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-a'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
         // Spawn evidence without a model: bills, stays unattributed.
         spawnEndEvent({
@@ -191,8 +191,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
         outputTokens: 1_000,
         providerName: 'openai',
         reasoningTokens: 120,
-        requestedModel: 'gpt-5.5-mini',
-        servedModel: 'gpt-5.5-mini',
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.6-terra-mini',
         totalTokens: 5_000,
         usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
       },
@@ -342,7 +342,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
         // A spawned child later also receives sendInput: the spawn model wins.
         spawnEndEvent({
           receiverThreadIds: ['thread-spawned-child'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
         {
           method: 'item/completed',
@@ -374,8 +374,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
     expect(drafts[1]).toMatchObject({
       usage: {
-        requestedModel: 'gpt-5.5-mini',
-        servedModel: 'gpt-5.5-mini',
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.6-terra-mini',
       },
     })
   })
@@ -452,7 +452,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
               type: 'collabAgentToolCall',
               tool: 'spawn_agent',
               receiver_thread_ids: ['thread-child-snake', 'thread-other'],
-              model: 'gpt-5.5',
+              model: 'gpt-5.6-terra',
             },
           },
         },
@@ -467,8 +467,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
       usage: {
         inputTokens: 40,
         outputTokens: 10,
-        requestedModel: 'gpt-5.5',
-        servedModel: 'gpt-5.5',
+        requestedModel: 'gpt-5.6-terra',
+        servedModel: 'gpt-5.6-terra',
         totalTokens: 50,
       },
     })
@@ -485,7 +485,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-a'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
       ],
       subagentTokenUsageByThread: new Map([
@@ -537,7 +537,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-empty'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
       ],
       subagentTokenUsageByThread: new Map([

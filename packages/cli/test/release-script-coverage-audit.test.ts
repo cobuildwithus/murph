@@ -1340,7 +1340,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
-    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.6-terra')
     expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('scope-anomaly signal')
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')

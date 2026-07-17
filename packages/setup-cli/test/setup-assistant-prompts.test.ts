@@ -38,7 +38,7 @@ function createSetupOptions(
 }
 
 test('setup assistant prompt flow asks directly for the Codex model id', async () => {
-  promptState.answers = ['gpt-5.5-medium']
+  promptState.answers = ['gpt-5.6-terra-medium']
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -66,13 +66,13 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
   })
 
   assert.deepEqual(promptState.prompts, [
-    'Model id to use with Codex [gpt-5.5]: ',
+    'Model id to use with Codex [gpt-5.6-terra]: ',
   ])
   assert.deepEqual(assistant, {
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-5.5-medium',
+    model: 'gpt-5.6-terra-medium',
     modelProvider: 'vercel-ai-gateway',
     codexCommand: null,
     codexHome: null,
@@ -83,7 +83,7 @@ test('setup assistant prompt flow asks directly for the Codex model id', async (
     oss: false,
     account: null,
     detail:
-      'Use Codex with gpt-5.5-medium. Use Codex model provider vercel-ai-gateway.',
+      'Use Codex with gpt-5.6-terra-medium. Use Codex model provider vercel-ai-gateway.',
   })
 })
 

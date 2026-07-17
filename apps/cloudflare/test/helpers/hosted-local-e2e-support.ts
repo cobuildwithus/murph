@@ -744,7 +744,7 @@ export async function startAssistantProviderStubServer(input: {
   responseState?: HostedLocalAssistantProviderStubState;
   usageMode?: HostedLocalAssistantProviderStubUsageMode;
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const modelId = input.modelId ?? "gpt-5.5";
+  const modelId = input.modelId ?? "gpt-5.6-terra";
   let responseSequence = 0;
   let responsesApiRequestBodyCount = 0;
 
@@ -1076,7 +1076,7 @@ export function resolveHostedAssistantLocalDevEnv(
 
     return {
       ...buildHostedAssistantStubEnvClearances(),
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:

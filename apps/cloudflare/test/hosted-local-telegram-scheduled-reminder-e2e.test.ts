@@ -37,7 +37,7 @@ const scheduledReminderInstructions =
 const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 30_000;
 const scheduledReminderSendWaitMs = 240_000;
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
