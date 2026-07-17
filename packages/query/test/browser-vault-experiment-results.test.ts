@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import type { ExperimentAdherenceTarget } from "@murphai/contracts";
+import type {
+  ExperimentAdherenceTarget,
+  ExperimentOutcome,
+} from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -967,12 +970,19 @@ test("browser count path treats partial intervention sessions as logged", () => 
   assert.notEqual(result?.progress?.adherence.status, "not_started");
 });
 
-test("builds finished outcomes when enough baseline and intervention data exists", () => {
+test("renders the exact saved outcome after raw metric rows age out", () => {
+  const outcome = savedOutcome();
   const client = createBrowserVaultQueryClient(
     createReplica({
-      generatedAt: "2026-04-20T12:00:00.000Z",
+      generatedAt: "2027-06-20T12:00:00.000Z",
       entities: [
         experimentEntity({
+          endedOn: "2026-04-06",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
           status: "completed",
           runPlan: {
             baselineStart: "2026-04-01",
@@ -988,18 +998,9 @@ test("builds finished outcomes when enough baseline and intervention data exists
             minimumUsefulSessions: 2,
           },
         }),
-        sessionEvent("2026-04-04", "completed"),
-        sessionEvent("2026-04-05", "completed"),
-        sessionEvent("2026-04-06", "completed"),
       ],
-      metricRows: restingHeartRateRows([
-        ["2026-04-01", 63],
-        ["2026-04-02", 62],
-        ["2026-04-03", 61],
-        ["2026-04-04", 59],
-        ["2026-04-05", 58],
-        ["2026-04-06", 57],
-      ]),
+      experimentOutcomes: [outcome],
+      metricRows: [],
     }),
   );
 
@@ -1007,15 +1008,362 @@ test("builds finished outcomes when enough baseline and intervention data exists
 
   assert.ok(result);
   assert.equal(result.experiment.phase, "completed");
-  assert.equal(result.progress?.dataCoverage.status, "ready_for_review");
+  assert.equal(result.savedOutcomeStatus, "available");
+  assert.deepEqual(result.persistedOutcome, outcome);
   assert.equal(result.outcome?.status, "enough_data");
-  assert.equal(result.outcome?.confidence.level, "high");
+  assert.deepEqual(result.outcome?.confidence, outcome.confidence);
   assert.equal(result.biomarkers[0]?.completeness, "good");
   assert.equal(result.biomarkers[0]?.deltaAbs, -4);
+  assert.equal(result.biomarkers[0]?.baseline.mean, 62);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 58);
+  assert.deepEqual(result.biomarkers[0]?.points, []);
   assert.equal(result.biomarkers[0]?.movedAsExpected, true);
 });
 
-test("browser outcome demotes confidence when most sessions are assumed", () => {
+test("treats canonical completed runs with an early endedOn as stopped and clamps evidence", () => {
+  const outcome = savedOutcome({
+    windows: {
+      baselineEnd: "2026-04-03",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-10",
+      interventionStart: "2026-04-04",
+    },
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          endedOn: "2026-04-05",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "paused",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-05",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 7,
+            minimumUsefulSessions: 4,
+          },
+        }),
+        sessionEvent("2026-04-04", "completed"),
+        sessionEvent("2026-04-05", "completed"),
+        sessionEvent("2026-04-06", "completed"),
+        contextEvent("2026-04-07", {
+          contextType: "travel",
+          note: "This happened after the run stopped.",
+          severity: "potential_confounder",
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 63],
+        ["2026-04-02", 62],
+        ["2026-04-03", 61],
+        ["2026-04-04", 60],
+        ["2026-04-05", 59],
+        ["2026-04-06", 50],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.asOf, "2026-04-05");
+  assert.equal(result.experiment.status, "paused");
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.equal(result.experiment.windows.interventionEnd, "2026-04-05");
+  assert.equal(result.progress?.phase, "abandoned");
+  assert.equal(result.progress?.dayInRun, 5);
+  assert.equal(result.savedOutcomeStatus, "not_expected");
+  assert.equal(result.persistedOutcome, null);
+  assert.equal(result.outcome, null);
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05"],
+  );
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.schedule?.completedSessions, 2);
+  assert.equal(result.schedule?.cells.at(-1)?.localDate, "2026-04-05");
+  assert.equal(result.context.length, 0);
+});
+
+test("excludes point-measurement anchors observed after an early stop", () => {
+  const outcome = savedOutcome({
+    windows: {
+      baselineEnd: "2026-04-03",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-10",
+      interventionStart: "2026-04-04",
+    },
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_baseline",
+                role: "baseline",
+              },
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_followup",
+                role: "followup",
+              },
+              {
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+                kind: "lab_panel",
+                recordId: "evt_stopped_anchor_late",
+                role: "followup",
+              },
+            ],
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          endedOn: "2026-04-05",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "abandoned",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-05",
+          },
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-02",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_baseline"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 63,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-05",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_followup"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 59,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-04-06",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_stopped_anchor_late"],
+          sourceKind: "test-result",
+          unit: "bpm",
+          value: 40,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.equal(result.savedOutcomeStatus, "not_expected");
+  assert.equal(result.persistedOutcome, null);
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-02", "2026-04-05"],
+  );
+  assert.equal(result.biomarkers[0]?.deltaAbs, -4);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 59);
+});
+
+test("projects suppressed-outcome stopped runs with live windows clamped to the stop date", () => {
+  const outcome = savedOutcome({
+    windows: {
+      baselineEnd: "2026-04-03",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-10",
+      interventionStart: "2026-04-04",
+    },
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          endedOn: "2026-04-05",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "paused",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-04",
+            interventionStart: "2026-04-05",
+            interventionEnd: "2026-04-05",
+          },
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-02", 62],
+        ["2026-04-04", 60],
+        ["2026-04-05", 58],
+        ["2026-04-06", 50],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.equal(result.persistedOutcome, null);
+  assert.equal(result.experiment.windows.baselineStart, "2026-04-01");
+  assert.equal(result.experiment.windows.baselineEnd, "2026-04-04");
+  assert.equal(result.experiment.windows.interventionStart, "2026-04-05");
+  assert.equal(result.experiment.windows.interventionEnd, "2026-04-05");
+  assert.equal(result.biomarkers[0]?.baseline.mean, 61);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 58);
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-02", "2026-04-04", "2026-04-05"],
+  );
+});
+
+test("fails closed on cross-run and stale outcome references", () => {
+  const outcome = savedOutcome();
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          id: "exp_cold_plunge",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          slug: "cold-plunge-run",
+          status: "completed",
+        }),
+        experimentEntity({
+          outcomeRef: {
+            generatedAt: "2027-01-01T00:00:00.000Z",
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "completed",
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+    }),
+  );
+
+  const crossRun = selectBrowserVaultExperimentResults(client, "cold-plunge-run");
+
+  assert.ok(crossRun);
+  assert.equal(crossRun.experiment.phase, "completed");
+  assert.equal(crossRun.savedOutcomeStatus, "unavailable");
+  assert.equal(crossRun.persistedOutcome, null);
+  assert.equal(crossRun.outcome, null);
+
+  const staleRef = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(staleRef);
+  assert.equal(staleRef.experiment.phase, "completed");
+  assert.equal(staleRef.savedOutcomeStatus, "unavailable");
+  assert.equal(staleRef.persistedOutcome, null);
+  assert.equal(staleRef.outcome, null);
+});
+
+test("keeps a stopped run stopped after a status edit even without a saved outcome", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          endedOn: "2026-04-05",
+          status: "paused",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-10",
+          },
+        }),
+      ],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 63],
+        ["2026-04-02", 62],
+        ["2026-04-03", 61],
+        ["2026-04-04", 60],
+        ["2026-04-05", 59],
+        ["2026-04-06", 50],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.asOf, "2026-04-05");
+  assert.equal(result.experiment.phase, "abandoned");
+  assert.equal(result.experiment.windows.interventionEnd, "2026-04-05");
+  assert.equal(result.savedOutcomeStatus, "not_expected");
+  assert.equal(result.persistedOutcome, null);
+  assert.deepEqual(
+    result.biomarkers[0]?.points.map((point) => point.date),
+    ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05"],
+  );
+});
+
+test("keeps a completed run normal when endedOn equals the planned end", () => {
+  const result = selectBrowserVaultExperimentResults(
+    createBrowserVaultQueryClient(createReplica({
+      entities: [experimentEntity({
+        endedOn: "2026-04-06",
+        status: "completed",
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-03",
+          interventionStart: "2026-04-04",
+          interventionEnd: "2026-04-06",
+        },
+      })],
+      generatedAt: "2026-04-20T12:00:00.000Z",
+    })),
+    "finnish-sauna-run",
+  );
+
+  assert.equal(result?.experiment.phase, "completed");
+  assert.equal(result?.savedOutcomeStatus, "pending");
+});
+
+test("does not manufacture a completed outcome when most sessions are assumed", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       generatedAt: "2026-04-20T12:00:00.000Z",
@@ -1069,13 +1417,11 @@ test("browser outcome demotes confidence when most sessions are assumed", () => 
   assert.equal(result?.progress?.adherence.completedSessions, 3);
   assert.equal(result?.progress?.adherence.confirmedSessions, 1);
   assert.equal(result?.progress?.adherence.assumedSessions, 2);
-  assert.equal(result?.outcome?.confidence.level, "medium");
-  assert.deepEqual(result?.outcome?.confidence.reasons, [
-    "Most sessions are assumed rather than confirmed.",
-  ]);
+  assert.equal(result?.savedOutcomeStatus, "pending");
+  assert.equal(result?.outcome, null);
 });
 
-test("browser outcome keeps confidence high when confirmed sessions are the majority", () => {
+test("keeps completed live measurements separate from a not-yet-saved outcome", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       generatedAt: "2026-04-20T12:00:00.000Z",
@@ -1127,8 +1473,8 @@ test("browser outcome keeps confidence high when confirmed sessions are the majo
 
   assert.equal(result?.progress?.adherence.assumedSessions, 1);
   assert.equal(result?.progress?.adherence.confirmedSessions, 2);
-  assert.equal(result?.outcome?.confidence.level, "high");
-  assert.deepEqual(result?.outcome?.confidence.reasons, []);
+  assert.equal(result?.savedOutcomeStatus, "pending");
+  assert.equal(result?.outcome, null);
 });
 
 test("treats done private runs as review-due outcomes", () => {
@@ -1172,11 +1518,11 @@ test("treats done private runs as review-due outcomes", () => {
   assert.ok(result);
   assert.equal(result.experiment.status, "done");
   assert.equal(result.experiment.phase, "review_due");
-  assert.equal(result.outcome?.status, "enough_data");
-  assert.equal(result.outcome?.confidence.level, "high");
+  assert.equal(result.savedOutcomeStatus, "pending");
+  assert.equal(result.outcome, null);
 });
 
-test("keeps sparse finished outcomes low-confidence instead of inventing certainty", () => {
+test("keeps sparse finished measurements as context without inventing an outcome", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       generatedAt: "2026-04-20T12:00:00.000Z",
@@ -1203,13 +1549,8 @@ test("keeps sparse finished outcomes low-confidence instead of inventing certain
   assert.ok(result);
   assert.equal(result.biomarkers[0]?.status, "available");
   assert.equal(result.biomarkers[0]?.completeness, "partial");
-  assert.equal(result.outcome?.status, "sparse_data");
-  assert.equal(result.outcome?.confidence.level, "low");
-  assert.ok(
-    result.outcome?.confidence.reasons.some((reason) =>
-      reason.includes("Primary biomarker coverage is insufficient"),
-    ),
-  );
+  assert.equal(result.savedOutcomeStatus, "pending");
+  assert.equal(result.outcome, null);
 });
 
 test("represents unsupported biomarkers instead of dropping them", () => {
@@ -2853,9 +3194,6 @@ test("does not replace metric adherence rollups with auxiliary session targets",
   assert.equal(result.progress?.adherence.targetSessions, null);
   assert.equal(result.progress?.adherence.status, "unknown");
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
-  assert.ok(result.outcome?.confidence.reasons.includes(
-    "Browser Results cannot evaluate this experiment's adherence target yet.",
-  ));
 });
 
 test("treats measurement anchors as browser analysis windows when run windows are absent", () => {
@@ -2920,7 +3258,7 @@ test("treats measurement anchors as browser analysis windows when run windows ar
   assert.equal(result.biomarkers[0]?.deltaAbs, -20);
 });
 
-test("treats completed lab anchor comparisons as enough browser outcome data", () => {
+test("keeps completed lab anchor comparisons pending until an outcome is saved", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       generatedAt: "2026-08-02T12:00:00.000Z",
@@ -2981,7 +3319,8 @@ test("treats completed lab anchor comparisons as enough browser outcome data", (
   assert.ok(result);
   assert.equal(result.progress?.dataCoverage.status, "ready_for_review");
   assert.equal(result.biomarkers[0]?.completeness, "good");
-  assert.equal(result.outcome?.status, "enough_data");
+  assert.equal(result.savedOutcomeStatus, "pending");
+  assert.equal(result.outcome, null);
 });
 
 test("treats lab measurement plans as setup-ready without a run baseline window", () => {
@@ -3304,6 +3643,7 @@ function canonicalInterventionSessionEvent(input: {
 
 function createReplica(input: {
   entities?: BrowserVaultEntity[];
+  experimentOutcomes?: ExperimentOutcome[];
   generatedAt?: string;
   metricRows?: BrowserVaultMetricRow[];
 } = {}): BrowserVaultReplica {
@@ -3315,6 +3655,7 @@ function createReplica(input: {
       latestDate: null,
     },
     entities: input.entities ?? [],
+    experimentOutcomes: input.experimentOutcomes ?? [],
     generatedAt: input.generatedAt ?? "2026-04-10T12:00:00.000Z",
     labResultRows: [],
     metricGoalProgressRows: [],
@@ -3339,12 +3680,96 @@ function createReplica(input: {
   };
 }
 
+function savedOutcome(input: {
+  confidence?: ExperimentOutcome["confidence"];
+  generatedAt?: string;
+  id?: string;
+  slug?: string;
+  windows?: ExperimentOutcome["windows"];
+} = {}): ExperimentOutcome {
+  const id = input.id ?? "exp_sauna";
+  const slug = input.slug ?? "finnish-sauna-run";
+  const windows = input.windows ?? {
+    baselineEnd: "2026-04-03",
+    baselineStart: "2026-04-01",
+    interventionEnd: "2026-04-06",
+    interventionStart: "2026-04-04",
+  };
+
+  return {
+    adherenceSummary: {
+      adherenceLevel: "good",
+      completedSessions: 3,
+      minimumUsefulSessions: 2,
+      status: "met_target",
+      targetSessions: 3,
+    },
+    asOf: windows.interventionEnd ?? "2026-04-06",
+    commonsProtocolRef: {
+      key: "protocol:finnish-sauna",
+      pageRevisionId: "sha256:page",
+      runSpecRevisionId: "sha256:run",
+      testPlanId: "rhr-21d",
+    },
+    conclusion: {
+      caveats: ["Travel overlapped the final two sessions."],
+      headline: "The saved outcome headline",
+      plainLanguage: "This is the exact saved plain-language conclusion.",
+    },
+    confidence: input.confidence ?? {
+      level: "medium",
+      reasons: ["The saved analysis accounted for a travel confounder."],
+    },
+    confounders: ["Travel"],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id,
+      slug,
+      status: "completed",
+      title: "Finnish sauna run",
+    },
+    generatedAt: input.generatedAt ?? "2026-04-07T12:00:00.000Z",
+    metricResults: [{
+      baseline: {
+        daysWithData: 3,
+        mean: 62,
+        totalDays: 3,
+        unit: "bpm",
+      },
+      baselineDayCount: 3,
+      baselineMean: 62,
+      biomarkerKey: "biomarker:resting-heart-rate",
+      completeness: "good",
+      deltaAbs: -4,
+      deltaPct: -6.45,
+      expectedDirection: "decrease",
+      intervention: {
+        daysWithData: 3,
+        mean: 58,
+        totalDays: 3,
+        unit: "bpm",
+      },
+      interventionDayCount: 3,
+      interventionMean: 58,
+      label: "Resting heart rate",
+      movedAsExpected: true,
+      unit: "bpm",
+    }],
+    outcomeId: `outcome_${id}`,
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v1",
+    windows,
+  };
+}
+
 function experimentEntity(input: {
   analysisPlan?: Record<string, unknown>;
+  endedOn?: string;
   expectedSignalDescriptions?: unknown[];
   id?: string;
   omitRunPlan?: boolean;
   occurredAt?: string;
+  outcomeRef?: Record<string, unknown>;
   runPlan?: Record<string, unknown>;
   slug?: string;
   status?: string;
@@ -3366,7 +3791,9 @@ function experimentEntity(input: {
         testPlanId: "rhr-21d",
       },
       expectedSignalDescriptions: input.expectedSignalDescriptions,
+      ...(input.endedOn ? { endedOn: input.endedOn } : {}),
       experimentId: id,
+      ...(input.outcomeRef ? { outcomeRef: input.outcomeRef } : {}),
       ...(input.omitRunPlan
         ? {}
         : {

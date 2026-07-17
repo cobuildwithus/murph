@@ -17,6 +17,7 @@ const sourceFiles: readonly string[] = [
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
+  "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
   "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;

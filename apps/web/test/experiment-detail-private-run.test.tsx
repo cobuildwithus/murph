@@ -8,6 +8,7 @@ import {
   type BrowserVaultQueryClient,
   type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
+import type { ExperimentOutcome } from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 
 import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
@@ -25,6 +26,7 @@ type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"]
 
 async function createClient(input: {
   additionalEntities?: BrowserVaultEntity[];
+  experimentOutcomes?: ExperimentOutcome[];
   generatedAt: string;
   metricRows?: BrowserVaultMetricRow[];
   trackedExperiments: Array<{
@@ -64,13 +66,10 @@ async function createClient(input: {
     }),
   });
 
-  if (!input.metricRows) {
-    return createBrowserVaultQueryClient(replica);
-  }
-
   return createBrowserVaultQueryClient({
     ...replica,
-    metricRows: input.metricRows,
+    experimentOutcomes: input.experimentOutcomes ?? [],
+    metricRows: input.metricRows ?? replica.metricRows,
   });
 }
 
@@ -136,6 +135,45 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(privateRun).toBeNull();
+  });
+
+  it("uses the newest completed matching run when no live run exists", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-30T08:00:00.000Z",
+        trackedExperiments: [
+          {
+            id: "exp_sauna_completed_old",
+            slug: "finnish-sauna",
+            startedOn: "2026-03-01",
+            status: "completed",
+            summary: "Older completed run.",
+            tags: ["sauna"],
+            title: "Older sauna run",
+          },
+          {
+            id: "exp_sauna_completed_new",
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "finished",
+            summary: "Newest completed run.",
+            tags: ["sauna"],
+            title: "Newest sauna run",
+          },
+        ],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      id: "exp_sauna_completed_new",
+      status: "finished",
+      title: "Newest sauna run",
+    }));
   });
 
   it("uses the run time zone for active timeline reference dates near UTC boundaries", async () => {
@@ -390,7 +428,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(loadingMarkup).toContain("Loading your private run");
+    expect(loadingMarkup).toContain("Loading your results");
     expect(loadingMarkup).not.toContain("No personal results yet");
 
     const emptyMarkup = renderToStaticMarkup(
@@ -401,7 +439,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(emptyMarkup).toContain("Run this on yourself");
+    expect(emptyMarkup).toContain("No results for this protocol yet");
 
     const finishedRun = resolveBrowserVaultExperimentRun({
       client: await createClient({
@@ -427,9 +465,9 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(finishedMarkup).toContain("No before-and-after comparison yet");
+    expect(finishedMarkup).toContain("Run complete, but there isn&#x27;t enough data for a clear comparison");
     expect(finishedMarkup).toContain("Private run recorded");
-    expect(finishedMarkup).toContain("The run is finished, but a full before-and-after window");
+    expect(finishedMarkup).toContain("does not have a canonical saved outcome to render");
 
     const finishedFallbackRun = resolveBrowserVaultExperimentRun({
       client: await createClient({
@@ -447,9 +485,8 @@ describe("experiment detail private-run composition", () => {
       protocol: protocol!,
     });
 
-    expect(finishedFallbackRun?.conclusions?.[0]?.items[0]?.text).toBe(
-      "This run doesn't have enough measured data for a before-and-after conclusion yet.",
-    );
+    expect(finishedFallbackRun?.outcomeStatus).toBe("not_expected");
+    expect(finishedFallbackRun?.conclusions).toBeUndefined();
 
     const staleMarkup = renderToStaticMarkup(
       <ResultsTab
@@ -459,8 +496,121 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(staleMarkup).toContain("but couldn&#x27;t refresh");
+    expect(staleMarkup).toContain("Showing saved results");
     expect(staleMarkup).toContain("The latest private refresh failed.");
+  });
+
+  it("keeps the exact canonical saved outcome after normal lifecycle and title changes", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const outcome = createSavedOutcome({
+      id: "exp_sauna_saved_outcome",
+      slug: "finnish-sauna",
+      status: "paused",
+      title: "Original sauna run",
+    });
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2027-06-20T08:00:00.000Z",
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 99],
+          ["2026-04-04", 120],
+          ["2026-04-08", 130],
+        ]),
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-07",
+            id: "exp_sauna_saved_outcome",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+              relativePath: "bank/experiments/outcomes/saved-sauna.json",
+            },
+            runPlan: {
+              baselineEnd: "2026-04-04",
+              baselineStart: "2026-04-02",
+              interventionEnd: "2026-04-10",
+              interventionStart: "2026-04-05",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "completed",
+            title: "Renamed sauna run",
+          }),
+          id: "exp_sauna_saved_outcome",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "completed",
+          summary: "The browser must use the canonical outcome.",
+          tags: ["sauna"],
+          title: "Renamed sauna run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-06",
+      dateRange: "Apr 1 – Apr 6",
+      outcomeStatus: "available",
+      status: "finished",
+      statusLabel: "Finished",
+      summary: outcome.conclusion.headline,
+    }));
+    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.plainLanguage);
+    expect(privateRun?.summaryDetail).toContain(outcome.confidence.reasons[0]);
+    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.caveats[0]);
+    expect(privateRun?.signals).toEqual([
+      expect.objectContaining({
+        baseline: "62 bpm",
+        delta: "-4 bpm",
+        label: "Resting heart rate",
+        value: "58",
+      }),
+    ]);
+    expect(privateRun?.trends).toEqual([]);
+    expect(privateRun?.conclusions?.[0]?.items[0]?.text).toBe(
+      outcome.conclusion.plainLanguage,
+    );
+
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(markup).toContain(outcome.conclusion.headline);
+    expect(markup).toContain(outcome.conclusion.plainLanguage);
+    expect(markup).toContain(outcome.confidence.reasons[0]);
+    expect(markup).toContain(outcome.conclusion.caveats[0]);
+
+    const emptyMetricMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({
+          protocol: protocol!,
+          privateRun: {
+            ...privateRun!,
+            signals: [],
+            trends: [],
+          },
+        })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(emptyMetricMarkup).toContain(outcome.conclusion.headline);
+    expect(emptyMetricMarkup).toContain("Your canonical saved analysis is shown below");
+    expect(emptyMetricMarkup).not.toContain("does not have a canonical saved outcome to render");
   });
 
   it("renders done private runs as finished results", async () => {
@@ -495,9 +645,9 @@ describe("experiment detail private-run composition", () => {
     expect(doneRun).toEqual(expect.objectContaining({
       status: "finished",
     }));
-    expect(doneMarkup).toContain("No before-and-after comparison yet");
+    expect(doneMarkup).toContain("Run complete, but there isn&#x27;t enough data for a clear comparison");
     expect(doneMarkup).toContain("Private run recorded");
-    expect(doneMarkup).toContain("The run is finished, but a full before-and-after window");
+    expect(doneMarkup).toContain("does not have a canonical saved outcome to render");
   });
 
   it("maps real browser-vault biomarker trends without inventing an expected range band", async () => {
@@ -1620,6 +1770,286 @@ describe("experiment detail private-run composition", () => {
     expect(pausedMarkup).toContain("Resume the protocol");
     expect(pausedMarkup).not.toContain("Continue the protocol");
   });
+
+  it("renders stopped runs as saved but incomplete results", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 63],
+          ["2026-04-02", 62],
+          ["2026-04-03", 61],
+          ["2026-04-08", 60],
+          ["2026-04-09", 59],
+          ["2026-04-10", 40],
+        ]),
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-09",
+            id: "exp_sauna_stopped",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-14",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "completed",
+            title: "Sauna protocol",
+          }),
+          id: "exp_sauna_stopped",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "completed",
+          summary: "Stopped after the first sauna session.",
+          tags: ["sauna"],
+          title: "Sauna protocol",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-09",
+      outcomeStatus: "not_expected",
+      status: "stopped",
+      statusLabel: "Stopped",
+    }));
+    expect(stoppedRun?.completionPercent).toBeLessThan(100);
+    expect(stoppedRun?.signals).toEqual([
+      expect.objectContaining({
+        label: "Resting Heart Rate",
+        value: "59.5",
+      }),
+    ]);
+    expect(stoppedRun?.trends).toHaveLength(1);
+    expect(stoppedRun?.conclusions).toBeUndefined();
+
+    const stoppedMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: stoppedRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(stoppedMarkup).toContain("Your experiment was stopped");
+    expect(stoppedMarkup).toContain(
+      "Measurements below are partial context, not a completed before-and-after result",
+    );
+    expect(stoppedMarkup).toContain("Resting Heart Rate");
+    expect(stoppedMarkup).not.toContain("Continue the protocol");
+  });
+
+  it("keeps a post-stop point measurement out of stopped Results", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const outcome = createSavedOutcome({
+      id: "exp_sauna_stopped_anchor",
+      slug: "finnish-sauna",
+      status: "paused",
+      title: "Stopped anchor run",
+      windows: {
+        baselineEnd: "2026-04-03",
+        baselineStart: "2026-04-01",
+        interventionEnd: "2026-04-10",
+        interventionStart: "2026-04-04",
+      },
+    });
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: [
+          metricRow({
+            date: "2026-04-02",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_baseline"],
+            unit: "bpm",
+            value: 63,
+          }),
+          metricRow({
+            date: "2026-04-05",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_followup"],
+            unit: "bpm",
+            value: 59,
+          }),
+          metricRow({
+            date: "2026-04-06",
+            metricKey: "resting-heart-rate",
+            recordIds: ["evt_web_stopped_anchor_late"],
+            unit: "bpm",
+            value: 40,
+          }),
+        ],
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              measurementAnchors: [
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_baseline",
+                  role: "baseline",
+                },
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_followup",
+                  role: "followup",
+                },
+                {
+                  biomarkerKeys: ["biomarker:resting-heart-rate"],
+                  kind: "lab_panel",
+                  recordId: "evt_web_stopped_anchor_late",
+                  role: "followup",
+                },
+              ],
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-05",
+            id: "exp_sauna_stopped_anchor",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+              relativePath: "bank/experiments/outcomes/stopped-anchor.json",
+            },
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-05",
+              interventionStart: "2026-04-04",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "paused",
+            title: "Stopped anchor run",
+          }),
+          id: "exp_sauna_stopped_anchor",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "paused",
+          summary: "Stopped before the later lab result.",
+          tags: ["sauna"],
+          title: "Stopped anchor run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      outcomeStatus: "not_expected",
+      status: "stopped",
+    }));
+    expect(stoppedRun?.signals).toEqual([
+      expect.objectContaining({
+        label: "Resting Heart Rate",
+        value: "59",
+      }),
+    ]);
+    expect(stoppedRun?.trends[0]?.active).toEqual([{ day: 5, value: 59 }]);
+    expect(stoppedRun?.trends[0]?.active).not.toContainEqual({ day: 6, value: 40 });
+
+    const stoppedMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: stoppedRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+    expect(stoppedMarkup).toContain("Your experiment was stopped");
+    expect(stoppedMarkup).toContain("Resting Heart Rate");
+  });
+
+  it("projects stopped runs from live boundaries when they diverge from a suppressed outcome", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const outcome = createSavedOutcome({
+      id: "exp_sauna_divergent_stop",
+      slug: "finnish-sauna",
+      title: "Divergent stop run",
+      windows: {
+        baselineEnd: "2026-04-03",
+        baselineStart: "2026-04-01",
+        interventionEnd: "2026-04-10",
+        interventionStart: "2026-04-04",
+      },
+    });
+
+    expect(protocol).not.toBeNull();
+
+    const stoppedRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        metricRows: [],
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            endedOn: "2026-04-05",
+            id: "exp_sauna_divergent_stop",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+              relativePath: "bank/experiments/outcomes/divergent-stop.json",
+            },
+            runPlan: {
+              baselineEnd: "2026-04-04",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-05",
+              interventionStart: "2026-04-05",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "paused",
+            title: "Divergent stop run",
+          }),
+          id: "exp_sauna_divergent_stop",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "paused",
+          summary: "Stopped with edited live boundaries.",
+          tags: ["sauna"],
+          title: "Divergent stop run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(stoppedRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-05",
+      outcomeStatus: "not_expected",
+      status: "stopped",
+    }));
+    expect(stoppedRun?.conclusions).toBeUndefined();
+    expect(stoppedRun?.timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        date: "Apr 5",
+        label: "Protocol",
+      }),
+    ]));
+    expect(stoppedRun?.timeline).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        date: "Apr 4",
+        label: "Protocol",
+      }),
+    ]));
+  });
 });
 
 function createEntity(
@@ -1666,7 +2096,9 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
 
 function createExperimentFrontmatter(input: {
   analysisPlan?: Record<string, unknown>;
+  endedOn?: string;
   id: string;
+  outcomeRef?: Record<string, unknown>;
   slug: string;
   startedOn: string;
   status: string;
@@ -1695,15 +2127,89 @@ function createExperimentFrontmatter(input: {
           minimumUsefulSessions: 4,
         }
       : undefined,
+    endedOn: input.endedOn,
     expectedSignalDescriptions: input.expectedSignalDescriptions,
     experimentId: input.id,
     hypothesis: "Test the canonical private-run metadata path.",
+    outcomeRef: input.outcomeRef,
     runPlan: input.runPlan,
     schemaVersion: "murph.frontmatter.experiment.v1",
     slug: input.slug,
     startedOn: input.startedOn,
     status: input.status,
     title: input.title,
+  };
+}
+
+function createSavedOutcome(input: {
+  id: string;
+  slug: string;
+  status?: ExperimentOutcome["experiment"]["status"];
+  title?: string;
+  windows?: ExperimentOutcome["windows"];
+}): ExperimentOutcome {
+  return {
+    adherenceSummary: {
+      completedSessions: 3,
+      minimumUsefulSessions: 2,
+      status: "met_target",
+      targetSessions: 3,
+    },
+    asOf: "2026-04-06",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: ["Travel overlapped the final session."],
+      headline: "The exact saved headline",
+      plainLanguage: "This is the exact saved plain-language conclusion.",
+    },
+    confidence: {
+      level: "medium",
+      reasons: ["The saved analysis accounted for travel."],
+    },
+    confounders: ["Travel"],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: input.id,
+      slug: input.slug,
+      status: input.status ?? "completed",
+      title: input.title ?? "Saved sauna run",
+    },
+    generatedAt: "2026-04-07T12:00:00.000Z",
+    metricResults: [{
+      baseline: {
+        daysWithData: 3,
+        mean: 62,
+        totalDays: 3,
+        unit: "bpm",
+      },
+      baselineDayCount: 3,
+      baselineMean: 62,
+      biomarkerKey: "biomarker:resting-heart-rate",
+      completeness: "good",
+      deltaAbs: -4,
+      deltaPct: -6.45,
+      expectedDirection: "decrease",
+      intervention: {
+        daysWithData: 3,
+        mean: 58,
+        totalDays: 3,
+        unit: "bpm",
+      },
+      interventionDayCount: 3,
+      interventionMean: 58,
+      label: "Resting heart rate",
+      movedAsExpected: true,
+      unit: "bpm",
+    }],
+    outcomeId: `outcome_${input.id}`,
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v1",
+    windows: input.windows ?? {
+      baselineEnd: "2026-04-03",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-06",
+      interventionStart: "2026-04-04",
+    },
   };
 }
 
@@ -1811,6 +2317,7 @@ function metricRows(
 function metricRow(input: {
   date: string;
   metricKey: string;
+  recordIds?: string[];
   unit: string;
   value: number;
 }): BrowserVaultMetricRow {
@@ -1831,7 +2338,7 @@ function metricRow(input: {
     metricKey: input.metricKey,
     observedAt: `${input.date}T00:00:00.000Z`,
     pointIds: [`metric-point:${input.metricKey}:${input.date}`],
-    recordIds: [],
+    recordIds: input.recordIds ?? [],
     rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",

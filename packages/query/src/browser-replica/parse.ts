@@ -1,6 +1,7 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import type { TimelineEntry } from "../timeline.ts";
+import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -31,6 +32,11 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
   return {
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) => parseEntity(entry, `${label}.entities[${index}]`)),
+    experimentOutcomes: record.experimentOutcomes === undefined
+      ? []
+      : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
+          experimentOutcomeSchema.parse(entry)
+        ),
     generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
