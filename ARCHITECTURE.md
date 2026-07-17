@@ -691,6 +691,28 @@ permanently dropped. Active members, explicit thread routes, own messages, group
 chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
+Hosted signup-welcome admission is a separate line-owned outbound guard. Under
+the existing transaction-scoped home-line pool advisory lock, web reads each
+healthy assignable `HostedLinqLine`'s UTC-day proactive-conversation counter,
+selects the preferred line or a lower-volume fallback, and conditionally claims
+one slot before appending activation work. The effective limit is the lower of
+the hard 50-conversation ceiling and the line's configured
+`maxNewConversationsPerDay`; the line row lazily rolls its counter to the new
+UTC day. If no line has welcome capacity, web still assigns a healthy home line
+but omits the participant-target welcome, preserving the member-initiated Text
+Murph path. Same-line inbound first binds and existing-thread replies do not
+consume this proactive budget. A degraded incoming line may fall back to a
+different line only after the final member route agrees with the selected line
+and that line's capacity is atomically claimed, because the fallback creates a
+new participant-target chat; without capacity, web accepts the inbound event
+but sends no fallback chat. For an unknown phone on a degraded incoming line,
+web materializes the member identity before that final claim so concurrently
+created route authority can be re-read. A rejected claim commits that inbound
+identity but creates no home or pending route, invite, delivery, fallback chat,
+or line-count increment; a later inbound resolves the same member and retries
+normal routing. Member deletion cannot erase line-level capacity already
+claimed that day.
+
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active
 owner of execution and commit authority rather than mailbox-work truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
