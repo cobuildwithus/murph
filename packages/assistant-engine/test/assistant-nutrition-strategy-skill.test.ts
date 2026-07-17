@@ -60,7 +60,7 @@ describe('assistant nutrition strategy skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      "Route by the user's visible outcome and read the primary owner.",
+      "Route by the current turn's outcome and read the primary owner.",
     )
     expect(prompt).toContain(
       'inspect at most two candidates; this cap is discovery-only',

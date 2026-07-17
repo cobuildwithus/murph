@@ -297,14 +297,22 @@ function createNotificationDecisionPromptInput(
   overrides: Partial<AssistantNotificationDecisionSystemPromptInput> = {},
 ): AssistantNotificationDecisionSystemPromptInput {
   return {
+    assistantCliContract: 'Stable CLI contract for notification decisions.',
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
     ],
+    assistantKnowledgeToolsAvailable: true,
+    assistantStyleSettingsAvailable: false,
     channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
+    modelBehaviorProfile: 'gpt5-agentic',
     ...overrides,
   }
 }

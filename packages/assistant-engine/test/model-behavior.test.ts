@@ -1318,7 +1318,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(63_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(64_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1409,7 +1409,7 @@ Execution context:
     expect(layers.prompt.endsWith(layers.dynamicTurnContextPrompt)).toBe(true)
   })
 
-  it('keeps notification decision context per-turn with no thread layer', () => {
+  it('reuses thread-stable context while keeping the notification decision overlay per-turn', () => {
     const input = createCommonNotificationPromptInput({
       assistantContextSnapshotPrompt: 'Notification layer partition snapshot.',
       currentLocalDate: '2026-04-15',
@@ -1417,8 +1417,19 @@ Execution context:
     })
     const layers = buildAssistantNotificationDecisionSystemPromptLayers(input)
 
-    expect(layers.threadContextPrompt).toBe('')
-    expect(layers.dynamicTurnContextPrompt).toContain(
+    expect(layers.threadContextPrompt).toContain(
+      "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
+    )
+    expect(layers.threadContextPrompt).not.toContain(
+      'Notification layer partition snapshot.',
+    )
+    expect(layers.threadContextPrompt).not.toContain(
+      "Today's date for the user is April 15, 2026.",
+    )
+    expect(layers.dynamicTurnContextPrompt).not.toContain(
       "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
     )
     expect(layers.dynamicTurnContextPrompt).toContain(
@@ -1427,16 +1438,19 @@ Execution context:
     expect(layers.dynamicTurnContextPrompt).toContain(
       'Notification layer partition snapshot.',
     )
+    expect(layers.dynamicTurnContextPrompt).toContain('Execution context:')
     expect(layers.dynamicTurnContextPrompt).toContain('Notification execution rules:')
     expect(layers.dynamicTurnContextPrompt).toContain(
       'If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.',
     )
-    expect(layers.dynamicTurnContextPrompt).toContain(
+    expect(layers.dynamicTurnContextPrompt).not.toContain(
       'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
     )
     expect(layers.prompt).toBe(
       [
-        [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt].join('\n\n'),
+        layers.staticCacheableCorePrompt,
+        layers.stableRouteCapabilityPrompt,
+        layers.threadContextPrompt,
         layers.dynamicTurnContextPrompt,
       ].join('\n\n'),
     )
@@ -1499,7 +1513,10 @@ Execution context:
     expect(notificationPrompt).toContain(
       'Today\'s date for the user is April 3, 2026.',
     )
-    expect(notificationPrompt).not.toContain('upcoming wake-day')
+    // Scheduled notification turns now share the interactive thread-context
+    // layer, so they carry the same natural date guidance (including the
+    // pre-sleep "upcoming wake-day" clause) rather than a stripped subset.
+    expect(notificationPrompt).toContain('upcoming wake-day')
     expect(notificationPrompt).not.toContain(
       'Today\'s date for the user is 2026-04-03.',
     )
@@ -1918,7 +1935,10 @@ describe('assistant experiment onboarding guidance', () => {
       'Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
     )
     expect(prompt).toContain(
-      'Route by the user\'s visible outcome and read the primary owner.',
+      'Route by the current turn\'s outcome and read the primary owner.',
+    )
+    expect(prompt).toContain(
+      'On a scheduled automation run, the persisted automation purpose is the outcome to route; do not collapse it into generic reminder copy.',
     )
     expect(prompt).toContain(
       'If routing is ambiguous, inspect at most two candidates; this cap is discovery-only.',
@@ -2009,6 +2029,18 @@ describe('assistant notification decision guidance', () => {
     ).prompt
 
     expect(prompt).toContain('Group notification execution rules:')
+    expect(prompt).toContain('Scheduled-turn capability:')
+    expect(prompt).toContain('Murph skill router:')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/group-challenge/SKILL.md',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/groupchat-comedy/SKILL.md',
+    )
+    expect(prompt).toContain(
+      'Do not flatten a skill-required comic, voice memo, song, or image into a generic text standings recap',
+    )
+    expect(prompt).toContain('Scheduled automation execution:')
     expect(prompt).toContain('Scheduled room turns do not own automation lifecycle.')
     expect(prompt).toContain('Occurrence instant: `2026-07-16T01:00:00.000Z`.')
     expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
@@ -2601,14 +2633,22 @@ function createCommonNotificationPromptInput(
   overrides: Partial<AssistantNotificationDecisionSystemPromptInput> = {},
 ): AssistantNotificationDecisionSystemPromptInput {
   return {
+    assistantCliContract: 'Stable CLI contract for notification decisions.',
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
     ],
+    assistantKnowledgeToolsAvailable: true,
+    assistantStyleSettingsAvailable: false,
     channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
+    modelBehaviorProfile: 'gpt5-agentic',
     assistantContextSnapshotPrompt: null,
     ...overrides,
   }

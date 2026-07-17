@@ -39,13 +39,20 @@ describe('assistant dynamic context prompt blocks', () => {
 
   it('injects runtime dynamic context into notification-decision turns too', () => {
     const layers = buildAssistantNotificationDecisionSystemPromptLayers({
+      assistantCliContract: null,
       assistantContextSnapshotPrompt: 'Context snapshot block.',
       assistantDynamicContextPrompts: [
         'Connected wearable sync status for this turn:\n- WHOOP currently needs reconnect.',
       ],
+      assistantStyleSettingsAvailable: false,
       channel: 'local',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
       currentLocalDate: '2026-06-29',
       currentTimeZone: 'America/New_York',
+      modelBehaviorProfile: 'gpt5-agentic',
     })
 
     expect(layers.dynamicTurnContextPrompt).toContain(

@@ -302,14 +302,19 @@ describe('assistant Codex turn planning', () => {
     expect(notificationToolNames).toContain('generate_image')
     expect(notificationToolNames).toContain('attach_response_media')
     expect(notificationToolNames).not.toContain('assistant_style')
+    expect(notificationPlan.assistantCliContract).toBe('bootstrap contract')
+    expect(notificationPlan.systemPrompt).toContain('bootstrap contract')
+    expect(notificationPlan.systemPrompt).toContain('Murph skill router:')
+    expect(notificationPlan.systemPrompt).toContain('Scheduled automation execution:')
     expect(notificationPlan.systemPrompt).toContain('hypertension')
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
     expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
     expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
-    expect(notificationPlan.systemPrompt).not.toContain(
-      'Assistant personality preferences',
+    expect(notificationPlan.systemPrompt).toContain(
+      'Assistant personality preferences for this private conversation',
     )
-    expect(notificationPlan.systemPrompt).not.toContain('Humor 10/10')
+    expect(notificationPlan.systemPrompt).toContain('Humor 10/10')
+    expect(planningMocks.readAssistantCliSurfaceBootstrapContext).toHaveBeenCalledTimes(1)
     expect(notificationPlan.sessionContext).toEqual({
       binding: expect.anything(),
     })

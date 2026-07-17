@@ -58,18 +58,11 @@ export interface AssistantSystemPromptInput {
   turnTrigger?: AssistantTurnTrigger | null;
 }
 
-export interface AssistantNotificationDecisionSystemPromptInput {
-  assistantContextSnapshotPrompt?: string | null;
-  assistantDynamicContextPrompts?: readonly string[] | null;
-  assistantHostedDeviceConnectAvailable?: boolean;
-  assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
-  assistantToolNameAliases?: Readonly<Record<string, string>> | null;
-  assistantTone?: AssistantTonePreference | null;
-  channel: string | null;
-  currentLocalDate: string;
-  currentTimeZone: string;
-  conversationScope?: AssistantConversationScope;
-  hostedRuntime?: boolean;
+export interface AssistantNotificationDecisionSystemPromptInput
+  extends Omit<
+    AssistantSystemPromptInput,
+    "onboardingGuidance" | "turnTrigger"
+  > {
   maintenanceTurn?: boolean;
   scheduledOccurrenceAt?: string | null;
 }
@@ -283,13 +276,14 @@ function buildStableRouteCapabilityPrompt(
   if (conversationScope === "unverified-external") {
     return "";
   }
+  const scheduledAutomationTurn = input.turnTrigger === "automation-cron";
   return joinPromptSections(
     buildAssistantTurnPriorityText(conversationScope),
-    conversationScope === "direct"
+    conversationScope === "direct" && !scheduledAutomationTurn
       ? buildAssistantNonBlockingDelegationText()
       : null,
-    buildAssistantCapabilityOffersText(),
-    buildAssistantMessageReactionGuidanceText(),
+    scheduledAutomationTurn ? null : buildAssistantCapabilityOffersText(),
+    scheduledAutomationTurn ? null : buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct" && input.assistantHostedLabsAvailable === true
       ? buildAssistantLabsGuidanceText()
@@ -344,6 +338,7 @@ function buildStableRouteCapabilityPrompt(
       input.hostedRuntime ?? false,
       input.assistantHostedAutomationAvailable ?? false,
       input.channel,
+      input.turnTrigger ?? null,
     ),
     buildAssistantCliGuidanceText(input.cliAccess),
     conversationScope === "group"
@@ -776,84 +771,45 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
   }
 
   const conversationScope = input.conversationScope ?? "direct";
-  const staticCacheableCorePrompt = buildStaticCacheableCorePrompt(
-    conversationScope
-  );
-  const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
-    conversationScope === "unverified-external"
-      ? ""
-      : joinPromptSections(
-          buildAssistantHealthCommonsGuidanceText(),
-          conversationScope === "direct"
-            ? buildAssistantAppleHealthRelayGuidanceText()
-            : null,
-          conversationScope === "direct"
-            ? buildAssistantHostedDeviceConnectGuidanceText({
-                assistantHostedDeviceConnectAvailable:
-                  input.assistantHostedDeviceConnectAvailable ?? false,
-                assistantHostedDeviceConnectProviders:
-                  input.assistantHostedDeviceConnectProviders ?? [],
-              })
-            : null
-        ),
-    input.assistantToolNameAliases
-  );
-  const dynamicTurnContextPrompt = renderAssistantToolNameAliases(
+  // Scheduled turns use the same capability and thread-context builders as
+  // interactive turns. The notification overlay below owns only occurrence
+  // context, scheduled authority, and the structured delivery envelope.
+  const sharedLayers = buildAssistantSystemPromptLayers({
+    ...input,
+    onboardingGuidance: false,
+    turnTrigger: "automation-cron",
+  });
+  const notificationTurnContextPrompt = renderAssistantToolNameAliases(
     joinPromptSections(
-      conversationScope === "unverified-external"
-        ? joinPromptSections(
-            buildAssistantCurrentDateLineText(input.currentLocalDate),
-            ASSISTANT_DATE_STYLE_GUIDANCE_TEXT
-          )
-        : buildAssistantCurrentDateContextText({
-            currentLocalDate: input.currentLocalDate,
-            currentMurphProductBaseUrl: null,
-            currentTimeZone: input.currentTimeZone,
-          }),
       conversationScope === "unverified-external"
         ? null
         : buildAssistantScheduledOccurrenceContextText({
             occurrenceAt: input.scheduledOccurrenceAt ?? null,
             timeZone: input.currentTimeZone,
           }),
-      ...(conversationScope === "unverified-external"
-        ? []
-        : normalizeAssistantDynamicContextPrompts(
-            input.assistantDynamicContextPrompts
-          )),
-      conversationScope === "direct"
-        ? input.assistantContextSnapshotPrompt ?? null
-        : null,
-      buildAssistantConversationScopeText(conversationScope),
-      conversationScope === "direct" || (
-        conversationScope === "group" && input.hostedRuntime === true
-      )
-        ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
-        : null,
       conversationScope === "unverified-external"
         ? buildAssistantUnverifiedExternalNotificationDecisionGuidanceText()
         : conversationScope === "group"
           ? buildAssistantGroupNotificationDecisionGuidanceText(input.channel)
-          : buildAssistantNotificationDecisionGuidanceText(input.channel),
-      buildAssistantUserFacingLinkSelfCheckText(conversationScope)
+          : buildAssistantNotificationDecisionGuidanceText(input.channel)
     ),
     input.assistantToolNameAliases
   );
-  const stablePrefix = joinPromptSections(
-    staticCacheableCorePrompt,
-    stableRouteCapabilityPrompt
+  const dynamicTurnContextPrompt = joinPromptSections(
+    sharedLayers.dynamicTurnContextPrompt,
+    notificationTurnContextPrompt
   );
-  const prompt = joinPromptSections(stablePrefix, dynamicTurnContextPrompt);
+  const prompt = joinPromptSections(
+    sharedLayers.staticCacheableCorePrompt,
+    sharedLayers.stableRouteCapabilityPrompt,
+    sharedLayers.threadContextPrompt,
+    dynamicTurnContextPrompt
+  );
 
   return {
-    dynamicContextStartsAfterStaticCore: stablePrefix.length,
+    ...sharedLayers,
     dynamicTurnContextPrompt,
     prompt,
-    stableRouteCapabilityPrompt,
-    staticCacheableCorePrompt,
-    // Notification decisions rebuild their decision contract and run context
-    // per execution; they do not have a separate thread-stable context layer.
-    threadContextPrompt: "",
   };
 }
 
@@ -1240,7 +1196,7 @@ function buildAssistantVaultFileSendGuidanceText(): string {
 function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
-    "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
+    "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the current turn's outcome and read the primary owner. On a scheduled automation run, the persisted automation purpose is the outcome to route; do not collapse it into generic reminder copy. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
     "- Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1254,7 +1210,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.",
     "- Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark. When any domain owner presents a named movement, let it choose the movement, then read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` for lookup and presentation.",
     "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; self-management-experiments owns low-burden chronic trials; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
-    "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter or dispatch voice, and group-newsletter for newsletter setup or a scheduled edition.",
+    "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat. For every challenge kickoff, setup, standings update, scheduled dispatch, ruling, or close-out, also read group-challenge and groupchat-comedy before acting; a scheduled challenge run is challenge lifecycle work, not generic notification copy. Add group-newsletter for newsletter setup or a scheduled edition.",
     "- Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill. Read music-generation before generating any song.",
   ].join("\n");
 }
@@ -1312,6 +1268,15 @@ function buildAssistantUnverifiedExternalNotificationDecisionGuidanceText(): str
 - Return exactly {"kind":"skip","privateSummary":"audience directness is unverified"} and nothing else.`;
 }
 
+function buildAssistantScheduledTurnCapabilityText(): string {
+  return `Scheduled-turn capability:
+- Use the same skill router, reasoning guidance, canonical data surfaces, saved personality and channel style, and available media tools as an interactive Murph turn. The scheduled profile changes initiation, automation-lifecycle authority, optional capability offers, and the final JSON envelope; it does not turn the task into a lesser generic reminder agent.
+- Treat the persisted automation purpose as the current request and load every owning skill before reading data or composing the dispatch.
+- Execute only that persisted purpose. Do not add setup, an adjacent coaching agenda, or a capability offer.
+- The structured decision contract is the finalization surface for this turn: return \`skip\` when no message should go out, never call \`finish_without_reply\`, and do not call progress-update, browser, phone, billing, configuration, or conversation-mutation tools unless they are actually present and the owning policy authorizes them.
+- When the automation instructions or an owning skill explicitly marks an image, voice memo, or song welcome and privacy-safe, use the available generation tool before returning. Generated response media is delivered with \`send_message\`; its nonempty \`text\` should be only the brief natural caption that belongs with the artifact. If required media is unavailable or fails, follow the owning skill's fallback and name the limitation in internal run notes rather than pretending a text-only substitute is equivalent.`;
+}
+
 function buildAssistantGroupNotificationDecisionGuidanceText(
   channel: string | null,
 ): string {
@@ -1319,20 +1284,22 @@ function buildAssistantGroupNotificationDecisionGuidanceText(
     ? `The bound outbound channel is ${channel}.`
     : null;
   return joinPromptSections(
+    buildAssistantScheduledTurnCapabilityText(),
     `Group notification execution rules:
-- Decide whether this room-owned reminder still earns one short message. Default to staying silent.
+- Execute the persisted room-owned purpose as one bounded, grounded dispatch. For a promised challenge dispatch or scheduled edition, prefer a timely send and skip only for a concrete current reason; for an opportunistic room reminder, default to staying silent.
 - Ground the decision only in the automation, recent room conversation, public sources, group-owned state, and server-approved shared projections. Never read or write a participant's personal records, memory, settings, accounts, devices, or preferences from the room container.
+- When the persisted purpose starts, runs, scores, rules on, or closes a challenge, read and follow ${code(buildAssistantSkillFileRef("group-chat"))}, ${code(buildAssistantSkillFileRef("group-challenge"))}, and ${code(buildAssistantSkillFileRef("groupchat-comedy"))} before acting. Read the active challenge page and sent log before composing. Do not flatten a skill-required comic, voice memo, song, or image into a generic text standings recap; if the chosen medium is a song, also load ${code(buildAssistantSkillFileRef("music-generation"))}.
 - Before treating a room report as completion, convert its timestamp to the scheduled occurrence timezone and verify that it belongs to this occurrence's relevant local action window. Evidence from another local action window cannot complete this occurrence; unclear attribution is unknown, not complete.
 - For an explicitly authorized accountability check-in, when completion is still unknown after that attribution check, send one neutral outcome question; never state or imply that anyone missed the activity.
 - Scheduled room turns do not own automation lifecycle. Do not create, update, archive, or reroute automations; use the current evidence only to decide whether this occurrence should send or skip.
-- Skip when the room already completed the activity, the reminder was declined or moved, the support window ended, or the message would expose or infer personal health data. The platform delivers the structured output; do not deliver it yourself.`,
+- Skip when the room already completed the activity, the reminder was declined or moved, the support window ended, or the message would expose or infer personal health data. The platform delivers the structured output and any response media attached during this turn; do not deliver either yourself.`,
     channelText,
     `Structured output contract:
 - Return exactly one JSON object and nothing else:
   {"kind":"skip","privateSummary":"..."}
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
-- Text is the single final room message. Subject applies only to a new outbound email.
+- Text is the caption or body for the single final room dispatch; response media attached by tools is delivered with it. Subject applies only to a new outbound email.
 - Never include personal settings, billing, device, account, authorization, or browser-handoff URLs, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings. Other URLs are allowed only for group-owned deliverables.`
   );
 }
@@ -1365,8 +1332,9 @@ function buildAssistantNotificationDecisionGuidanceText(
     : null;
 
   return joinPromptSections(
+    buildAssistantScheduledTurnCapabilityText(),
     `Notification execution rules:
-- This automation is authorized support. Decide whether its purpose still holds and, if so, return exactly one short, grounded message. Prefer a timely send; skip only for a concrete current reason. The user prompt carries the private instructions for this run.
+- This automation is authorized support. Decide whether its purpose still holds and, if so, return one bounded, grounded dispatch. Prefer a timely send; skip only for a concrete current reason. The user prompt carries the private instructions for this run.
 - You have the same vault read and write tools as an interactive Murph turn for the task's canonical data. Before deciding, ground yourself in what the user has actually done in the relevant local action window — meals, logs, sessions, recent conversation — alongside the experiment, protocol, and progress; read only what could change the decision, then stop. Scheduled turns do not own automation lifecycle: do not create, update, archive, or reroute automations. If current evidence makes a support loop stale, skip this occurrence; only an engine-supplied check-in or review purpose may instead ask one narrow repair question, and it still must not mutate future schedules. For missed-log or weekly-digest checks, \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json\` is the authoritative skip signal; for pre-bed sessions, the session date is the prior local day. For sleep support around midnight, distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target; calendar date alone does not establish that the upcoming action is complete.
 - Send when the check is genuinely actionable. Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing in that action window. The reminder's purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.
 - A good message reflects what the user has already done and asks only for the genuine gap. A first-timer gets a compact walkthrough, said once — or a short nudge if chat already covered it. Someone mid-run gets a brief reminder, not a re-explanation of a plan they know, with the stop rule raised only when newly relevant. Message text embedded in the instructions is context from when it was scheduled, not words to recite — compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore. Vary the approach from recent sends: choose a plain cue, curiosity hook, tiny/fallback version, callback, light question or challenge, or richer media only when the automation marks that modality welcome and privacy-safe. Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages. If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.
@@ -1381,7 +1349,7 @@ function buildAssistantNotificationDecisionGuidanceText(
   {"kind":"skip","privateSummary":"..."}
   {"kind":"send_message","text":"...","privateSummary":"..."}
   {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
-- \`text\` must contain only the final user-facing message to send once on the bound channel.
+- \`text\` must contain the nonempty final caption or message body to send once on the bound channel. Response media attached by tools is delivered with it.
 - \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
 - Never include Markdown links in \`text\`; use raw URLs only when the URL itself is the deliverable or the user asks for links.
@@ -1480,7 +1448,14 @@ function buildAssistantCronGuidanceText(
   hostedRuntime: boolean,
   hostedAutomationAvailable: boolean,
   channel: string | null,
+  turnTrigger: AssistantTurnTrigger | null,
 ): string {
+  if (turnTrigger === "automation-cron") {
+    return `Scheduled automation execution:
+- The current automation already exists and is active. Execute only its persisted purpose; do not create, patch, reconcile, pause, reactivate, archive, remove, or reroute this or another automation.
+- Canonical task-owned reads and writes required by the automation's owning skill remain allowed. Automation lifecycle and future schedule changes do not.
+- Do not broaden this run into setup, a new recurring loop, or an adjacent offer.`;
+  }
   return buildAssistantAvailableAutomationGuidanceText(
     conversationScope,
     hostedRuntime,

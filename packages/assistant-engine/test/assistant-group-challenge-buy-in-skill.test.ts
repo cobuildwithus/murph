@@ -74,6 +74,55 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
+  it('gates activation and rotates actual media rather than text frames', async () => {
+    const challengeRaw = await readSkill('group-challenge')
+    const challenge = challengeRaw.replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain('Activation gate')
+    expect(challenge).toContain(
+      'Do not activate the daily dispatch until the active challenge page exists',
+    )
+    expect(challenge).toContain(
+      'every confirmed participant has been asked once for a one-line intro or fun fact plus an optional photo',
+    )
+    expect(challenge).toContain(
+      'A photo is always optional; sending the request and recording the response or absence is mandatory.',
+    )
+    expect(challenge).toContain(
+      'label it as a group-challenge dispatch, name the exact challenge-page slug',
+    )
+    expect(challenge).toContain(
+      'require each run to read `group-chat`, `group-challenge`, and `groupchat-comedy`',
+    )
+    expect(challenge).toContain(
+      'The automation prompt is a pointer into this skill and durable page, not a copied lifecycle.',
+    )
+    expect(challenge).toContain(
+      'Medium means text, comic/image, voice memo, or song.',
+    )
+    expect(challenge).toContain(
+      'Audit, sportsbook, ruling, press conference, poem, and similar devices are creative frames, not different media',
+    )
+    expect(challenge).toContain(
+      'for a five-to-seven-day challenge use every available medium before repeating one',
+    )
+    expect(challenge).toContain(
+      'When a planned medium is blocked, record the concrete blocker and fallback in the sent log.',
+    )
+    expect(challenge).toContain(
+      'exactly one prepared-dispatch entry per scheduled occurrence',
+    )
+    expect(challenge).toContain(
+      'This is rotation and replay state, not proof that the provider or handset received the dispatch.',
+    )
+    expect(challenge).toContain(
+      'When retry evidence names the same occurrence and its entry already exists, reuse that medium and replay material',
+    )
+    expect(challenge).toContain(
+      'delivery status belongs to the engine and outbox.',
+    )
+  })
+
   it('separates conversational challenge buy-in from group data sharing', async () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 

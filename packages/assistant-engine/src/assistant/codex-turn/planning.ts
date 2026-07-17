@@ -451,6 +451,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const scheduledNotificationTurn =
+    input.profile.promptProfile === 'notification-decision' &&
+    input.profile.toolProfile === 'notification-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' || outputOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -479,6 +482,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedGroupRuntime &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const scheduledAssistantPersonalityPreferencesApply =
+    scheduledNotificationTurn &&
+    (privateInteractiveAudience || hostedGroupRuntime)
+  const assistantPersonalityPreferencesApply =
+    assistantStyleSettingsAvailable ||
+    groupAssistantStylePreferencesApply ||
+    scheduledAssistantPersonalityPreferencesApply
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
@@ -508,10 +518,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
         session: input.session,
         sharedPlan: input.sharedPlan,
       })
-  const shouldPrepareConversationThreadInstructions =
-    input.profile.promptProfile === 'conversation' && privateInteractiveAudience
+  const shouldPreparePrivateCliBootstrapContext =
+    (input.profile.promptProfile === 'conversation' && privateInteractiveAudience) ||
+    (privateInteractiveAudience && scheduledNotificationTurn)
   let cliBootstrapElapsedMs: number | null = null
-  const unscopedAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const unscopedAssistantCliContract = shouldPreparePrivateCliBootstrapContext
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
@@ -556,21 +567,38 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
     return input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
+            assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
-            maintenanceTurn,
+            assistantHostedAutomationAvailable:
+              input.hostedToolContext?.automationTool != null,
             assistantHostedDeviceConnectAvailable:
               privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantHostedLabsAvailable:
+              privateInteractiveProviderTurn &&
+              input.hostedToolContext?.labsTool != null,
+            assistantKnowledgeToolsAvailable:
+              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+            assistantPersonality: assistantPersonalityPreferencesApply
+              ? preferenceContext.assistantPersonality
+              : null,
+            assistantStyleSettingsAvailable,
             assistantToolNameAliases,
             assistantTone: preferenceContext.assistantTone,
             channel: resolvedChannel,
+            cliAccess: input.sharedPlan.cliAccess,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             conversationScope,
             hostedRuntime: input.executionContext?.hosted != null,
+            maintenanceTurn,
+            modelBehaviorProfile,
+            murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
+              input.sharedPlan.cliAccess.env,
+            ),
             scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
           }, {
             toolSchemaHash,
@@ -592,10 +620,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantToolNameAliases,
-            assistantPersonality:
-              assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
-                ? preferenceContext.assistantPersonality
-                : null,
+            assistantPersonality: assistantPersonalityPreferencesApply
+              ? preferenceContext.assistantPersonality
+              : null,
             assistantStyleSettingsAvailable,
             assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,

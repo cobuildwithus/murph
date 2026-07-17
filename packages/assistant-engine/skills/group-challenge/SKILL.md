@@ -111,9 +111,11 @@ The page carries these sections, kept current:
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
-- **Sent log** — every dispatch: date, format used, one-line summary, the
-  saved vault image ref of every generated image, and the full script or
-  lyrics of any voice memo or song.
+- **Sent log** — exactly one prepared-dispatch entry per scheduled occurrence,
+  keyed by occurrence instant and local date: medium, creative frame, one-line
+  summary, the saved vault image ref of every generated image, and the full
+  script or lyrics of any voice memo or song. This is rotation and replay
+  state, not proof that the provider or handset received the dispatch.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
   short sliding window, so yesterday's standings are only in this page).
 - **Confounders & protected notes** — declared confounders and who is having
@@ -124,10 +126,11 @@ warning, and anything that exists only in the chat scrollback is something
 tomorrow's referee never learned. So durable facts go onto the page with
 `vault-cli knowledge append-section` in the turn they happen — a ruling, a
 new stake, fresh canon, a commissioned bit, a declared confounder, a
-protected-status change, a pinned photo, a sent dispatch — not batched for
-later. The daily dispatch still appends its dated section; between
-dispatches, append as things land. If it isn't on the page, it didn't
-happen.
+protected-status change, a pinned photo, a prepared dispatch — not batched
+for later. The daily dispatch writes its occurrence-keyed prepared entry
+before returning; the engine and outbox, not the model-authored page, own
+whether delivery was accepted or received. Between dispatches, append as
+things land. If it isn't on the page, it didn't happen.
 
 Read the page with `vault-cli knowledge show <slug>` before composing any
 challenge message. Also save one pointer so a fresh session finds the page:
@@ -223,11 +226,26 @@ loses a reminder; it must never lose the challenge.
    opening artifact — it pays off the photos everyone just contributed and
    sets the tone for the whole run. Build it under the Comics rules below.
 
+**Activation gate.** Do not activate the daily dispatch until the active
+challenge page exists, the confirmed roster is recorded, the sent log is
+initialized with a medium plan for the challenge window, and every confirmed
+participant has been asked once for a one-line intro or fun fact plus an
+optional photo. A photo is always optional; sending the request and recording
+the response or absence is mandatory. Missing or declined photos never block
+the challenge after the one light follow-up above — those members appear by
+name rather than likeness.
+
 ## The daily loop
 
 Create one daily dispatch automation under the developer prompt's shared
 automation action rules with a `dailyLocal` schedule and
-`continuityPolicy: preserve`. Each run:
+`continuityPolicy: preserve`. Keep its instructions compact: label it as a
+group-challenge dispatch, name the exact challenge-page slug, require each run
+to read `group-chat`, `group-challenge`, and `groupchat-comedy`, state that
+rich media is welcome only within the recorded consent and privacy rules, and
+name the challenge page's sent log as the rotation source. The automation
+prompt is a pointer into this skill and durable page, not a copied lifecycle.
+Each run:
 
 1. Read the challenge page.
 2. Read fresh standings with the same scope shape used for the challenge
@@ -241,11 +259,18 @@ automation action rules with a `dailyLocal` schedule and
    the data is empty or missing for a member, say so plainly; never invent
    figures. Score only the people recorded as in; shared data does not add a
    pending or silent person to the challenge.
-3. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
-   Rotate formats day over day — text bit, comic, voice memo, song,
-   sportsbook odds, ruling — and check the sent log so the same format does
-   not land twice in a row. A voice memo or song cannot share a turn with
-   other media, so the day's format is a real choice.
+3. Compose ONE dispatch in ONE medium, in the `groupchat-comedy` voice.
+   Medium means text, comic/image, voice memo, or song. Audit, sportsbook,
+   ruling, press conference, poem, and similar devices are creative frames,
+   not different media; changing the frame while sending another plain-text
+   standings bubble does not count as rotation. Follow the planned sequence
+   in the sent log, never use the same medium twice in a row, and for a
+   five-to-seven-day challenge use every available medium before repeating
+   one. "Available" means the current channel and tool support it and the
+   required likeness/photo consent exists. When a planned medium is blocked,
+   record the concrete blocker and fallback in the sent log. A voice memo or
+   song cannot share a turn with other media, so the day's medium is a real
+   choice.
 4. For images, follow the Comics rules below. Pass the pinned capture paths
    of everyone appearing (plus your character sheet ref when you appear) as
    `referenceImageRefs`, and record the saved vault ref that
@@ -254,8 +279,13 @@ automation action rules with a `dailyLocal` schedule and
    the reference; an audio replay means regenerating from the full script
    or lyrics saved in the sent log (`music-generation` owns song prompt
    craft). Nothing sent is recoverable except through what the page saved.
-5. Append the day's section: format used, what was sent, standings
-   snapshot, new canon, new confounders.
+5. Before returning, append exactly one prepared-dispatch entry for the
+   engine-supplied occurrence key: planned medium and frame, what was prepared,
+   standings snapshot, saved media refs or full audio script, new canon, and
+   new confounders. When retry evidence names the same occurrence and its entry
+   already exists, reuse that medium and replay material; do not advance the
+   plan or append a duplicate occurrence. Never label the entry delivered from
+   model-side evidence — delivery status belongs to the engine and outbox.
 
 Between dispatches, the normal `group-chat` decision ladder applies. Answer
 rules questions with a real ruling plus a canon callback; take positions

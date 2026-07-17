@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-16
+Last verified: 2026-07-17
 
 ## Hosted Group Self-Awareness
 
@@ -46,6 +46,8 @@ Hosted group runtimes execute as synthetic thread-container members, not as any 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
 Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled notification turns receive no conversation-mutation tool, and unauthenticated group-email replies remain read-only: managed lifecycle cleanup stays deterministic in its existing owner. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
+
+Scheduled model turns reuse the interactive assistant's static core, stable capability router, thread context, canonical-data guidance, personality, and channel-style layers by construction. One scheduled overlay owns only the occurrence-local time anchor, the narrower automation authority, send-versus-skip policy, and structured delivery envelope. Dynamic tools remain independently authority-gated, so prompt capability parity never grants conversation-mutation, personal-account, browser, phone, billing, or other current-user-only authority. Exact maintenance turns remain a separate least-privilege prompt with no shared capability layer or delivery tools.
 
 ### Canonical Automation Support Lifecycles
 
