@@ -28,10 +28,6 @@ test("MealPhotosSection renders the static photo calorie counting copy", () => {
   );
   assert.match(markup, /Your camera roll/);
   assert.match(markup, /✓ Logged/);
-  assert.match(
-    markup,
-    /Your phone flags the food photos itself, so only your meals ever get logged\./,
-  );
   assert.match(markup, /Grain bowl/);
   assert.match(markup, /≈ 570 cal/);
   assert.match(markup, /Your tally texts you at night\./);

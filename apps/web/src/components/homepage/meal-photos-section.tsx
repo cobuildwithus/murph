@@ -133,12 +133,7 @@ function BackgroundLogArtifact() {
         </div>
       </div>
 
-      <p className="mt-3 px-1 text-[0.8125rem] leading-[1.5] text-[#635a48]">
-        Your phone flags the food photos itself, so only your meals ever get
-        logged.
-      </p>
-
-      <div className="mt-2.5 flex items-baseline justify-between border-t border-[#c4a882]/25 px-1 pt-2.5">
+      <div className="mt-3 flex items-baseline justify-between border-t border-[#c4a882]/25 px-1 pt-2.5">
         <span className="text-[0.875rem] font-semibold text-[#2d3436]">
           Grain bowl
         </span>
