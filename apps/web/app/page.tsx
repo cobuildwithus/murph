@@ -12,6 +12,8 @@ import { HowItWorksSection } from "@/src/components/homepage/how-it-works-sectio
 import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-browser-vault-warm";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
+import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section";
+import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
@@ -138,6 +140,8 @@ export default async function HomePage() {
         <TogetherSection />
         <AsksGridSection />
         <TrustSection />
+        <MealPhotosSection />
+        <NutritionSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
         <IntegrationsSection authenticated={authenticated} />
         <HowItWorksSection />
