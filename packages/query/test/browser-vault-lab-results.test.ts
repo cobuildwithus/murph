@@ -335,11 +335,19 @@ test("custom analyte detail charts the latest comparable unit without hiding oth
 
 test("custom analytes with no normalized characters keep a deterministic private route key", async () => {
   const vault = createVaultReadModel({
-    entities: [createLabTest("evt_custom_unicode", "2026-03-01T08:00:00.000Z", [{
-      analyte: "β?!",
-      unit: "index",
-      value: 1.25,
-    }])],
+    entities: [
+      createLabTest("evt_custom_unicode", "2026-03-01T08:00:00.000Z", [{
+        analyte: "β?!",
+        unit: "index",
+        value: 1.25,
+      }]),
+      createEvent("evt_custom_unicode_obs", "observation", "2026-04-01T08:00:00.000Z", {
+        metric: "β?!",
+        source: "manual",
+        unit: "index",
+        value: 1.5,
+      }),
+    ],
     metadata: null,
     vaultRoot: "browser://vault",
   });
@@ -360,6 +368,12 @@ test("custom analytes with no normalized characters keep a deterministic private
   assert.equal(measured[0]?.displayName, "β?!");
   assert.equal(measured[0]?.healthArea.id, "other");
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, metricKey)?.rows.length, 1);
+  // The hashed fallback is one identity across every scalar source: an
+  // observation with the same non-normalizable name lands on the same key.
+  assert.equal(
+    client.metrics.series({ metricKey }).map((row) => row.value).at(-1),
+    1.5,
+  );
 });
 
 test("qualitative rows cannot become comparable through normalized fields alone", async () => {

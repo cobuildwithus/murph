@@ -12,7 +12,7 @@ interface LabReferenceRangeInput {
 }
 
 export function formatLabResultValue(input: LabResultValueInput): string {
-  const unit = input.unit ? ` ${formatLabUnit(input.unit)}` : "";
+  const unit = labUnitSuffix(input.unit);
 
   if (input.value !== null && Number.isFinite(input.value)) {
     return `${input.comparator ?? ""}${formatLabNumber(input.value)}${unit}`;
@@ -35,7 +35,7 @@ export function formatLabReferenceRange(
     return text;
   }
 
-  const unitLabel = unit ? ` ${formatLabUnit(unit)}` : "";
+  const unitLabel = labUnitSuffix(unit);
   if (range.low !== undefined && range.high !== undefined) {
     return `${formatLabNumber(range.low)} to ${formatLabNumber(range.high)}${unitLabel}`;
   }
@@ -66,6 +66,16 @@ export function formatLabDate(date: string): string {
 export function formatLabUnit(unit: string): string {
   const normalized = unit.trim().toLowerCase();
   return normalized === "percent" || normalized === "percentage" ? "%" : unit;
+}
+
+/** Unit suffix for a number: "%" binds tightly, every other unit gets a space. */
+export function labUnitSuffix(unit: string | null): string {
+  if (!unit) {
+    return "";
+  }
+
+  const label = formatLabUnit(unit);
+  return label === "%" ? "%" : ` ${label}`;
 }
 
 export function formatLabNumber(value: number): string {

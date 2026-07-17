@@ -183,10 +183,10 @@ function MeasuredBiomarkerRow({
 
   return (
     <Link
-      className="group grid min-h-24 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-4 py-4 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_minmax(9rem,auto)_auto] sm:px-5"
+      className="group flex min-h-24 items-center gap-3 px-4 py-4 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 sm:px-5"
       href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <h3 className="break-words font-serif text-lg font-semibold tracking-tight text-foreground">
           {biomarker.displayName}
         </h3>
@@ -197,10 +197,17 @@ function MeasuredBiomarkerRow({
         </p>
       </div>
 
-      <div className="min-w-0 text-right sm:text-left">
-        <p className="break-words font-serif text-xl font-semibold tracking-tight tabular-nums text-foreground">
-          <LabResultValue result={biomarker.latest} />
-        </p>
+      <div className="flex min-w-0 max-w-[55%] flex-col items-end text-right">
+        <span className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {flag ? (
+            <Badge variant="outline">
+              {formatLabFlag(flag)}
+            </Badge>
+          ) : null}
+          <span className="break-words font-serif text-xl font-semibold tracking-tight tabular-nums text-foreground">
+            <LabResultValue result={biomarker.latest} />
+          </span>
+        </span>
         <time
           className="mt-1 block text-xs text-muted-foreground"
           dateTime={biomarker.lastDate}
@@ -209,18 +216,11 @@ function MeasuredBiomarkerRow({
         </time>
       </div>
 
-      <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 sm:col-span-1 sm:justify-end">
-        {flag ? (
-          <Badge variant="outline">
-            {formatLabFlag(flag)}
-          </Badge>
-        ) : null}
-        <ChevronRight
-          aria-hidden="true"
-          className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground"
-          strokeWidth={1.75}
-        />
-      </div>
+      <ChevronRight
+        aria-hidden="true"
+        className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground"
+        strokeWidth={1.75}
+      />
     </Link>
   );
 }

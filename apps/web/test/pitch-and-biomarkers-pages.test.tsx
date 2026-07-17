@@ -200,7 +200,7 @@ test("Biomarker result route binds server auth and metric params to private hist
   }));
 
   assert.match(markup, /HbA1c/);
-  assert.match(markup, /5\.4 %/);
+  assert.match(markup, /5\.4%/);
   assert.match(markup, /Your biomarkers/);
   assert.doesNotMatch(markup, /All biomarkers/);
   assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);

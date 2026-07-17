@@ -17,6 +17,7 @@ import {
 import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
+  type LabBiomarkerChartRange,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -36,9 +37,11 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   formatLabDate,
   formatLabFlag,
+  formatLabNumber,
   formatLabReferenceRange,
   formatLabUnit,
   labResultYear,
+  labUnitSuffix,
 } from "@/src/lib/biomarkers/lab-result-display";
 import {
   useBrowserVault,
@@ -189,6 +192,10 @@ function BiomarkerDetailContent({
     ? "Previous comparable"
     : "Latest comparable";
   const chartNotes = buildChartNotes(detail);
+  const chartRange = resolveChartedReferenceRange(detail);
+  const latestChangeNote = buildLatestChangeNote(detail);
+  const latestRange = formatLabReferenceRange(detail.latest.referenceRange, detail.latest.unit);
+  const latestRangeSource = detail.latest.labName ?? detail.latest.sourceLabel;
 
   return (
     <>
@@ -204,6 +211,7 @@ function BiomarkerDetailContent({
         <ResultSummaryItem
           flag={detail.latest.flag}
           label="Latest result"
+          note={latestChangeNote}
           row={detail.latest}
         />
         {comparisonRow ? (
@@ -220,17 +228,37 @@ function BiomarkerDetailContent({
             <p className="mt-2 text-sm text-muted-foreground">No earlier comparable result</p>
           </div>
         )}
-        <div className="flex min-h-28 flex-col justify-center border-t border-border/70 py-5 sm:border-t-0 sm:border-l sm:px-6">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Saved history
-          </span>
-          <p className="mt-2 font-serif text-2xl font-semibold tracking-tight tabular-nums text-foreground">
-            {detail.rows.length} {detail.rows.length === 1 ? "result" : "results"}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {formatHistorySpan(detail.rows)}
-          </p>
-        </div>
+        {latestRange ? (
+          <div className="flex min-h-28 flex-col justify-center border-t border-border/70 py-5 sm:border-t-0 sm:border-l sm:px-6">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Reference range
+            </span>
+            <p className="mt-2 break-words font-serif text-2xl font-semibold tracking-tight tabular-nums text-foreground">
+              {latestRange}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              With your latest result
+              {latestRangeSource ? (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  {latestRangeSource}
+                </>
+              ) : null}
+            </p>
+          </div>
+        ) : (
+          <div className="flex min-h-28 flex-col justify-center border-t border-border/70 py-5 sm:border-t-0 sm:border-l sm:px-6">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Saved history
+            </span>
+            <p className="mt-2 font-serif text-2xl font-semibold tracking-tight tabular-nums text-foreground">
+              {detail.rows.length} {detail.rows.length === 1 ? "result" : "results"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {formatHistorySpan(detail.rows)}
+            </p>
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="biomarker-change-heading" className="flex flex-col gap-5">
@@ -243,7 +271,7 @@ function BiomarkerDetailContent({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {chartPoints.length > 0 && detail.comparableUnit
-              ? `${chartPoints.length} comparable numeric ${chartPoints.length === 1 ? "result" : "results"} in ${formatLabUnit(detail.comparableUnit)}.`
+              ? `${chartPoints.length} comparable numeric ${chartPoints.length === 1 ? "result" : "results"} in ${formatLabUnit(detail.comparableUnit)}.${describeChartRange(chartRange, detail.comparableUnit)}`
               : "A numeric trend is not available for these results."}
           </p>
         </div>
@@ -252,6 +280,7 @@ function BiomarkerDetailContent({
           <LabBiomarkerHistoryChart
             displayName={detail.displayName}
             points={chartPoints}
+            referenceRange={chartRange}
             unit={detail.comparableUnit}
           />
         ) : (
@@ -310,10 +339,12 @@ function ResultSummaryItem({
   className,
   flag = null,
   label,
+  note = null,
   row,
 }: {
   flag?: string | null;
   label: string;
+  note?: string | null;
   row: BrowserVaultLabResultRow;
 } & Pick<ComponentProps<"div">, "className">) {
   return (
@@ -331,6 +362,9 @@ function ResultSummaryItem({
         {flag ? <Badge variant="outline">{formatLabFlag(flag)}</Badge> : null}
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{formatLabDate(row.date)}</p>
+      {note ? (
+        <p className="mt-1 text-xs tabular-nums text-muted-foreground">{note}</p>
+      ) : null}
     </div>
   );
 }
@@ -365,45 +399,60 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
 
             return (
               <li
-                className="grid gap-4 border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5 xl:grid-cols-[8rem_minmax(9rem,0.8fr)_minmax(12rem,1.2fr)_minmax(10rem,1fr)]"
+                className="border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5"
                 key={row.id}
               >
-                <div className="min-w-0">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground xl:sr-only">
-                    Date
-                  </span>
-                  <time className="mt-1 block text-sm font-medium text-foreground xl:mt-0" dateTime={row.date}>
-                    {formatLabDate(row.date)}
-                  </time>
-                </div>
-                <div className="min-w-0">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground xl:sr-only">
-                    Result
-                  </span>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 xl:mt-0">
-                    <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
-                      <LabResultValue result={row} />
+                <div className="flex flex-col gap-1.5 xl:hidden">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
+                        <LabResultValue result={row} />
+                      </span>
+                      {row.flag ? (
+                        <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
+                      ) : null}
                     </span>
-                    {row.flag ? (
-                      <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
-                    ) : null}
+                    <time className="shrink-0 text-sm text-muted-foreground" dateTime={row.date}>
+                      {formatLabDate(row.date)}
+                    </time>
                   </div>
-                </div>
-                <div className="min-w-0">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground xl:sr-only">
-                    Reference range
-                  </span>
-                  <p className="mt-1 break-words text-sm whitespace-normal text-muted-foreground xl:mt-0">
-                    {referenceRange ?? "Not supplied"}
+                  <p className="break-words text-xs text-muted-foreground">
+                    {referenceRange ? `Range ${referenceRange}` : "Range not supplied"}
+                    <span aria-hidden="true"> · </span>
+                    {source ?? "Source not listed"}
                   </p>
                 </div>
-                <div className="min-w-0">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground xl:sr-only">
-                    Source
-                  </span>
-                  <p className="mt-1 break-words text-sm whitespace-normal text-muted-foreground xl:mt-0">
-                    {source ?? "Not listed"}
-                  </p>
+
+                <div className="hidden gap-4 xl:grid xl:grid-cols-[8rem_minmax(9rem,0.8fr)_minmax(12rem,1.2fr)_minmax(10rem,1fr)]">
+                  <div className="min-w-0">
+                    <span className="sr-only">Date</span>
+                    <time className="block text-sm font-medium text-foreground" dateTime={row.date}>
+                      {formatLabDate(row.date)}
+                    </time>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="sr-only">Result</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
+                        <LabResultValue result={row} />
+                      </span>
+                      {row.flag ? (
+                        <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="sr-only">Reference range</span>
+                    <p className="break-words text-sm whitespace-normal text-muted-foreground">
+                      {referenceRange ?? "Not supplied"}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="sr-only">Source</span>
+                    <p className="break-words text-sm whitespace-normal text-muted-foreground">
+                      {source ?? "Not listed"}
+                    </p>
+                  </div>
                 </div>
               </li>
             );
@@ -559,6 +608,117 @@ function formatHistorySpan(rows: readonly BrowserVaultLabResultRow[]): string {
   return first.slice(0, 4) === last.slice(0, 4)
     ? first.slice(0, 4)
     : `${first.slice(0, 4)} to ${last.slice(0, 4)}`;
+}
+
+/**
+ * The chart plots normalized comparable values, so a reference band is only
+ * truthful when every charted row reported the same numeric bounds on the
+ * same scale as its plotted value. Any disagreement or missing range means
+ * no band.
+ */
+function resolveChartedReferenceRange(
+  detail: BrowserVaultLabBiomarkerDetail,
+): LabBiomarkerChartRange | null {
+  if (detail.chartSeries.length === 0) {
+    return null;
+  }
+
+  const plottedValueByRowId = new Map(
+    detail.chartSeries.map((point) => [point.rowId, point.value]),
+  );
+  let range: LabBiomarkerChartRange | null = null;
+
+  for (const row of detail.rows) {
+    const plottedValue = plottedValueByRowId.get(row.id);
+    if (plottedValue === undefined) {
+      continue;
+    }
+    // Equal values alone cannot prove no conversion happened (0 converts to
+    // 0), so the reported unit must also match the plotted unit.
+    if (
+      row.value !== plottedValue
+      || formatLabUnit(row.unit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
+    ) {
+      return null;
+    }
+
+    const low = row.referenceRange?.low ?? null;
+    const high = row.referenceRange?.high ?? null;
+    if (low === null && high === null) {
+      return null;
+    }
+    if (range === null) {
+      range = { high, low };
+      continue;
+    }
+    if (range.low !== low || range.high !== high) {
+      return null;
+    }
+  }
+
+  return range;
+}
+
+function describeChartRange(
+  range: LabBiomarkerChartRange | null,
+  unit: string | null,
+): string {
+  if (!range) {
+    return "";
+  }
+
+  const text = formatLabReferenceRange(
+    {
+      ...(range.high !== null ? { high: range.high } : {}),
+      ...(range.low !== null ? { low: range.low } : {}),
+    },
+    unit,
+  );
+  if (!text) {
+    return "";
+  }
+
+  const marker = range.low !== null && range.high !== null
+    ? "The shaded area marks"
+    : "The dashed line marks";
+  const midSentence = text.replace(/^(At least|Up to)/u, (match) => match.toLowerCase());
+  return ` ${marker} the reference range your labs reported, ${midSentence}.`;
+}
+
+function buildLatestChangeNote(detail: BrowserVaultLabBiomarkerDetail): string | null {
+  if (!detail.latestComparable || !detail.previousComparable) {
+    return null;
+  }
+  if (detail.latestComparable.id !== detail.latest.id) {
+    return null;
+  }
+
+  const valueByRowId = new Map(
+    detail.chartSeries.map((point) => [point.rowId, point.value]),
+  );
+  const latestValue = valueByRowId.get(detail.latestComparable.id);
+  const previousValue = valueByRowId.get(detail.previousComparable.id);
+  if (latestValue === undefined || previousValue === undefined) {
+    return null;
+  }
+  // The note sits under the raw "Latest result" value, so it may only speak
+  // when both rows were reported on the plotted scale; a normalized delta
+  // under a raw value in another unit would misattribute the change.
+  if (
+    detail.latestComparable.value !== latestValue
+    || detail.previousComparable.value !== previousValue
+  ) {
+    return null;
+  }
+
+  const since = formatLabDate(detail.previousComparable.date);
+  const difference = Math.abs(latestValue - previousValue);
+  if (difference < 1e-9) {
+    return `No change since ${since}`;
+  }
+
+  const direction = latestValue > previousValue ? "Up" : "Down";
+  return `${direction} ${formatLabNumber(difference)}${labUnitSuffix(detail.comparableUnit)} since ${since}`;
 }
 
 function buildChartNotes(detail: BrowserVaultLabBiomarkerDetail): string[] {
