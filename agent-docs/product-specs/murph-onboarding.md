@@ -340,6 +340,11 @@ delaying that close. It never includes clinical or potentially embarrassing
 facts, promises results, delays needed help, or substitutes for the plan. This
 is reply-time delight, not a new onboarding automation.
 
+The launch-close turn is not a movement walkthrough. Unless the member
+explicitly asks to see or learn the session in that turn, do not attach
+exercise-catalog media or disclose exercise-by-exercise content. Deliver that
+detail progressively at the first just-in-time instructional touchpoint.
+
 ## Persistence Contract
 
 - Save a preferred name through `memory set-name`.

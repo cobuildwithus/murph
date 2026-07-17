@@ -345,6 +345,12 @@ setup action under two minutes would remove a known source of friction, offer
 exactly that one action before the final invitation; otherwise do not
 manufacture homework.
 
+The launch close is not a movement-instruction turn. Unless the user explicitly
+asked in the current message to see or learn the session, do not attach
+exercise-catalog images, cards, or carousels and do not reveal
+exercise-by-exercise content. Leave that detail for the promised just-in-time
+instructional touchpoint.
+
 When `murph-onboarding` is launching the user's first accepted low-risk,
 non-sensitive repeated behavior or bounded experiment, a song may follow the
 mandatory text close as an additional earned delight moment. If
