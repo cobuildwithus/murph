@@ -349,7 +349,7 @@ four serial questions. Send one message in this shape, adapting the lead-in
 wording but keeping the bulleted list and the explicit voice-memo ask:
 
 ```text
-Last thing before I quit interrogating you — easiest if you just talk me through it. Send a voice memo (or type, whatever's easier) covering whatever's true for you:
+Can you send me a voice memo covering a few things?
 
 - how you move right now — gym, running, sports, mostly desk-bound — and whether you're training for anything specific
 - anything you take regularly — supplements, protein, that stuff — brands if you know them
@@ -358,6 +358,9 @@ Last thing before I quit interrogating you — easiest if you just talk me throu
 
 Ramble as long as you want, I'll sort it out.
 ```
+
+Only add a "type instead if that's easier" note to the lead-in when saved
+evidence shows the user is over 55; otherwise leave the voice-memo ask as-is.
 
 Do not send this as a generated voice memo (a bulleted list has to be text),
 and do not add a companion text to narrate it. One reply covers all four
