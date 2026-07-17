@@ -96,7 +96,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
               Before you choose an organization
             </h2>
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Review Murph&apos;s health-data terms. This beta makes one import of Epic laboratory results and supported diagnostic result summaries.
+              Review Murph&apos;s health-data terms. This beta makes one import of supported Epic laboratory results and diagnostic summaries.
             </p>
           </div>
           <HostedLegalConsentCard
@@ -133,12 +133,31 @@ function ProviderSearch({
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
 
+  useEffect(() => {
+    function restoreAfterHistoryNavigation(event: PageTransitionEvent) {
+      if (!event.persisted) {
+        return;
+      }
+      searchInFlightRef.current = false;
+      startInFlightRef.current = false;
+      setSearchPending(false);
+      setStartingProviderId(null);
+    }
+
+    window.addEventListener("pageshow", restoreAfterHistoryNavigation);
+    return () => window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
+  }, []);
+
   async function searchProviders() {
     const normalizedQuery = searchInputRef.current?.value.trim() ?? "";
-    if (!normalizedQuery || searchInFlightRef.current || startInFlightRef.current) {
-      if (!normalizedQuery) {
-        setSearchError("Enter an organization, facility, city, state, or ZIP code.");
+    if (!normalizedQuery) {
+      if (searchInputRef.current) {
+        searchInputRef.current.value = "";
+        searchInputRef.current.reportValidity();
       }
+      return;
+    }
+    if (searchInFlightRef.current || startInFlightRef.current) {
       return;
     }
 
@@ -253,20 +272,20 @@ function ProviderSearch({
               id="clinical-provider-search"
               autoComplete="off"
               className="pl-11"
-              disabled={searchPending || Boolean(startingProviderId)}
               inputSize="lg"
               name="provider-search"
               placeholder="Piedmont, Atlanta, GA, or 30309"
+              readOnly={searchPending || Boolean(startingProviderId)}
               ref={searchInputRef}
+              required
             />
           </div>
           <Button
             aria-busy={searchPending}
             className="w-full sm:w-auto"
             disabled={searchPending || Boolean(startingProviderId)}
-            onClick={() => void searchProviders()}
             size="lg"
-            type="button"
+            type="submit"
           >
             {searchPending ? <Spinner /> : <SearchIcon aria-hidden="true" />}
             {searchPending ? "Searching" : "Search"}
@@ -322,7 +341,7 @@ function ProviderSearch({
       ) : null}
 
       <p className="border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
-        This beta performs one import of supported Epic laboratory and diagnostic results. It does not continuously sync your chart.
+        This beta performs one import of supported Epic laboratory results and diagnostic summaries. It does not continuously sync your chart.
       </p>
     </section>
   );
@@ -382,7 +401,7 @@ function ProviderResult({
 
 function ConnectPageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Preparing Epic connection" className="max-w-3xl space-y-5">
+    <div aria-busy="true" aria-label="Preparing Epic connection" className="max-w-3xl space-y-5" role="status">
       <Skeleton className="h-6 w-56" />
       <Skeleton className="h-4 w-full max-w-xl" />
       <Skeleton className="h-32 w-full rounded-2xl" />

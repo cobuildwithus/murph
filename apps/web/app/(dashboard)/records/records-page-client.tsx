@@ -2,7 +2,7 @@
 
 import { FileTextIcon, LockKeyholeIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 
 import {
   HostedOnboardingApiError,
@@ -53,6 +53,7 @@ export function RecordsPageClient({
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
   const connectInFlightRef = useRef(false);
   const disconnectInFlightRef = useRef(false);
+  const disconnectNoticeRef = useRef<HTMLDivElement>(null);
   const [refreshPending, startRefreshTransition] = useTransition();
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -63,6 +64,19 @@ export function RecordsPageClient({
 
   useLayoutEffect(() => {
     stripClinicalRecordsCallbackFromCurrentUrl();
+  }, []);
+
+  useEffect(() => {
+    function restoreAfterHistoryNavigation(event: PageTransitionEvent) {
+      if (!event.persisted) {
+        return;
+      }
+      connectInFlightRef.current = false;
+      setConnectPending(false);
+    }
+
+    window.addEventListener("pageshow", restoreAfterHistoryNavigation);
+    return () => window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
   }, []);
 
   async function createConnectIntent() {
@@ -123,6 +137,7 @@ export function RecordsPageClient({
       setDisconnectNotice(
         `${target.displayName} was disconnected. Results already imported into your vault stay there.`,
       );
+      requestAnimationFrame(() => disconnectNoticeRef.current?.focus());
     } catch (error) {
       setDisconnectError(readRequestError(
         error,
@@ -143,7 +158,7 @@ export function RecordsPageClient({
       <PageHeader
         eyebrow="Medical records"
         title="Your Epic imports"
-        description="Import supported Epic laboratory results and inline diagnostic result summaries into your private vault. Each connection runs once and does not continuously sync your chart."
+        description="Import supported Epic laboratory results and diagnostic summaries into your private vault. Each connection runs once and does not continuously sync your chart."
       >
         <div className="mt-5">
           <Button
@@ -162,14 +177,23 @@ export function RecordsPageClient({
 
       <div className="max-w-4xl space-y-5">
         {callbackNotice ? (
-          <Alert variant={callbackNotice.kind === "error" ? "destructive" : "default"}>
+          <Alert
+            className={callbackNotice.kind === "neutral"
+              ? "border-border bg-card text-card-foreground before:bg-border"
+              : undefined}
+            variant={callbackNotice.kind === "error" ? "destructive" : "default"}
+          >
             <AlertTitle>{callbackNotice.title}</AlertTitle>
             <AlertDescription>{callbackNotice.message}</AlertDescription>
           </Alert>
         ) : null}
 
         {disconnectNotice ? (
-          <Alert>
+          <Alert
+            ref={disconnectNoticeRef}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            tabIndex={-1}
+          >
             <AlertTitle>Epic connection disconnected</AlertTitle>
             <AlertDescription>{disconnectNotice}</AlertDescription>
           </Alert>
@@ -336,20 +360,20 @@ function DisconnectDialog({
         <DialogFooter className="-mx-6 -mb-6 px-6 pb-6 md:-mx-7 md:-mb-7 md:px-7 md:pb-7">
           <Button
             disabled={pending}
+            onClick={() => onOpenChange(false)}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={pending}
             onClick={onConfirm}
             type="button"
             variant="destructive"
           >
             {pending ? <Spinner /> : null}
             {pending ? "Disconnecting" : "Disconnect"}
-          </Button>
-          <Button
-            disabled={pending}
-            onClick={() => onOpenChange(false)}
-            type="button"
-            variant="outline"
-          >
-            Cancel
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -393,14 +417,14 @@ function EmptyRecordsState() {
       </span>
       <h2 className="mt-5 font-serif text-2xl font-medium text-foreground">No active Epic connections</h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-        Use Connect Epic above to import supported laboratory and diagnostic results from the organization whose patient portal you use. Results from past imports stay in your vault after a connection is disconnected.
+        Use Connect Epic above to import supported laboratory results and diagnostic summaries from the organization whose patient portal you use. Results from past imports stay in your vault after a connection is disconnected.
       </p>
     </section>
   );
 }
 
 function describeConnection(connection: ClinicalRecordConnectionContract): {
-  badgeVariant: "destructive" | "outline" | "secondary";
+  badgeVariant: "default" | "destructive" | "outline" | "secondary";
   detail: string;
   label: string;
 } {
@@ -408,13 +432,13 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
     return {
       badgeVariant: "outline",
       detail: "Epic authorization ended before the one-time import finished. Reauthorization is not available in this beta.",
-      label: "Authorization required",
+      label: "Authorization ended",
     };
   }
   if (connection.status === "error") {
     return {
       badgeVariant: "destructive",
-      detail: "The one-time import could not finish. Your existing vault data is unchanged.",
+      detail: "The one-time import could not finish. Any results already saved remain in your private vault.",
       label: "Import failed",
     };
   }
@@ -423,7 +447,7 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
 }
 
 function describeRun(status: ClinicalRecordRunStatus | null): {
-  badgeVariant: "destructive" | "outline" | "secondary";
+  badgeVariant: "default" | "destructive" | "outline" | "secondary";
   detail: string;
   label: string;
 } {
@@ -431,17 +455,17 @@ function describeRun(status: ClinicalRecordRunStatus | null): {
     case "queued":
       return { badgeVariant: "secondary", detail: "Your one-time import is waiting to begin.", label: "Import queued" };
     case "retrieving":
-      return { badgeVariant: "secondary", detail: "Murph is retrieving supported laboratory and diagnostic results from Epic.", label: "Retrieving results" };
+      return { badgeVariant: "secondary", detail: "Murph is retrieving supported laboratory results and diagnostic summaries from Epic.", label: "Retrieving results" };
     case "importing":
       return { badgeVariant: "secondary", detail: "Murph is saving supported results into your private vault.", label: "Saving to vault" };
     case "complete":
-      return { badgeVariant: "outline", detail: "The one-time import of supported results finished.", label: "Import complete" };
+      return { badgeVariant: "default", detail: "The one-time import of supported results finished.", label: "Import complete" };
     case "partial":
       return { badgeVariant: "outline", detail: "Some supported results were imported, while other results could not be completed or need review.", label: "Partially imported" };
     case "needs_reauth":
-      return { badgeVariant: "outline", detail: "Epic authorization ended before the one-time import finished. Reauthorization is not available in this beta.", label: "Authorization required" };
+      return { badgeVariant: "outline", detail: "Epic authorization ended before the one-time import finished. Reauthorization is not available in this beta.", label: "Authorization ended" };
     case "failed":
-      return { badgeVariant: "destructive", detail: "The one-time import could not finish. Your existing vault data is unchanged.", label: "Import failed" };
+      return { badgeVariant: "destructive", detail: "The one-time import could not finish. Any results already saved remain in your private vault.", label: "Import failed" };
     case "canceled":
       return { badgeVariant: "outline", detail: "The one-time import was stopped.", label: "Import stopped" };
     default:
