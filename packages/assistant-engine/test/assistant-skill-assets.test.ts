@@ -1668,15 +1668,15 @@ describe('assistant skill assets', () => {
     )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
-    expect(raw).toContain('private personal health assistant')
+    expect(raw).not.toContain('personal health assistant')
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'help across your health',
+      "Everyone's got something they want from their health",
     )
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'build healthier habits',
+      'stays private to you',
     )
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'make progress toward outcomes you genuinely care about',
+      'the more I learn, the better my help fits',
     )
     expect(compact).toContain(
       'Do not turn memory controls into opening copy or a required onboarding talking point.',
@@ -1710,13 +1710,19 @@ describe('assistant skill assets', () => {
       'A child may enrich only the exact durable record ids or source refs returned by that save; it never owns a promised save or parse.',
     )
     expect(compact).toContain(
-      'The medical-and-safety checkpoint stays entirely in one compact parent batch.',
+      'The medical-and-safety checkpoint keeps its minimal save in one compact parent batch and always delegates the structured medical persistence to a child.',
     )
     expect(compact).toContain(
       'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
     )
     expect(compact).toContain(
-      'Its spawn is not durable operation state: do not say enrichment is pending, processing, or in progress',
+      "I've got my best man researching the exact ingredients.",
+    )
+    expect(compact).toContain(
+      'Its spawn is not durable operation state: do not promise it will finish, and on later turns do not say enrichment is pending, processing, or in progress.',
+    )
+    expect(compact).toContain(
+      'never expose internal subagent terminology, record ids, or save-status bookkeeping',
     )
     expect(compact).toContain(
       'Claim exact-label or structured child enrichment only after canonical readback confirms it.',
@@ -1748,6 +1754,15 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('If the user gives only a name, continue.')
     expect(raw).toContain(
       'What would you most like from your health—something you want to change, understand, handle, or be able to do?',
+    )
+    expect(compact).toContain(
+      'start the same reply by greeting them by the name they just gave, then give a short two- or three-sentence bridge on how Murph works before the question',
+    )
+    expect(compact).toContain(
+      "the hard part usually isn't knowing what to do. It's fitting it into your real life and following through.",
+    )
+    expect(compact).toContain(
+      'Do not frame the bridge around getting healthy, as if the user is starting from unhealthy.',
     )
     expect(raw).toContain('**Change:**')
     expect(raw).toContain('**Understand:**')
@@ -1813,16 +1828,25 @@ describe('assistant skill assets', () => {
       'This intentionally minimal record is durable reported context, not a claim that the exact label or ingredient panel is known.',
     )
     expect(compact).toContain(
+      'never recite bookkeeping such as "user-reported product names," "verified ingredient panel," or record status to the user',
+    )
+    expect(compact).toContain(
       'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
     )
     expect(compact).toContain(
       'Save every supported fact or negative clinical assertion in one compact parent batch across the named medical owners and verify its receipts before the next visible checkpoint.',
     )
     expect(compact).toContain(
-      'Do not spawn a child for this bounded persistence work.',
+      'Do not run a separate foreground schema check and one command per negative assertion.',
     )
     expect(compact).toContain(
-      'Do not run a separate foreground schema check and one command per negative assertion.',
+      'always spawn one from the exact returned record ids to finish the structured medical persistence',
+    )
+    expect(compact).toContain(
+      'Do not hold the visible reply for that structuring work; send the next checkpoint as soon as the minimal receipts are verified.',
+    )
+    expect(compact).not.toContain(
+      'Do not spawn a child for this bounded persistence work.',
     )
     expect(raw).toContain('https://my.functionhealth.com/documents')
     expect(compact).toContain(
@@ -1835,13 +1859,22 @@ describe('assistant skill assets', () => {
       'the parent must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
     )
     expect(compact).toContain(
-      'spawn one by default from that exact source when structured extraction can materially improve later help',
+      'always spawn one from that exact source unless the source is already structured',
     )
     expect(compact).toContain(
-      'Send the next visible onboarding step after the durable-source receipt instead of waiting for optional extraction.',
+      'Send the next visible onboarding step after the durable-source receipt instead of waiting for extraction.',
     )
     expect(compact).toContain(
-      'Do not describe extraction as pending or in progress; until canonical readback proves it, say structured lab details are unconfirmed.',
+      'A lab drop during onboarding is not a request for interpretation: do not parse the panel in the parent foreground merely to summarize it.',
+    )
+    expect(compact).toContain(
+      'Keep the parse in the parent only when the user explicitly asks for an answer that needs it now or a safety concern requires it; then follow the global progress-update contract.',
+    )
+    expect(compact).toContain(
+      'until canonical readback proves the extraction, do not state structured lab details as fact',
+    )
+    expect(compact).toContain(
+      'Checkpoints, records, receipts, and open/resolved status are internal bookkeeping, never conversation copy.',
     )
     expect(raw).toContain(
       'Route useful answers to their existing canonical owner in the same turn',
