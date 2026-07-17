@@ -1220,19 +1220,40 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).toContain('Message reactions:')
     expect(prompt).toContain('Use reactions sparingly')
     expect(prompt).toContain(
+      'A reaction is a public stance toward the exact current inbound message',
+    )
+    expect(prompt).toContain(
+      'mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣"',
+    )
+    expect(prompt).toContain(
+      'If what remains is not independently funny',
+    )
+    expect(prompt).toContain(
+      'A bare or mostly laughter reply usually points back to an earlier turn',
+    )
+    expect(prompt).toContain(
+      'prefer no reaction over laugh-reacting to it as a proxy for the earlier joke',
+    )
+    expect(prompt).toContain(
+      'Laughter can also signal affiliation, politeness, tension relief, disbelief, embarrassment, or topic closure',
+    )
+    expect(prompt).toContain(
       'A reaction can stand alone only when it fully satisfies the turn',
     )
     expect(prompt).toContain(
       'if no text reply should be sent after reacting, also use `finish_without_reply`',
     )
     expect(prompt).toContain(
-      'Use `heart` when Murph genuinely loves what the user said or finds it really funny',
+      'Use `heart` for genuine warmth, affection, pride, or strong celebration',
     )
     expect(prompt).toContain(
-      'Use `laugh` for a dry or mildly funny joke',
+      'Use `laugh` only for a clearly shared joke or comic moment in the current message',
     )
     expect(prompt).toContain(
       'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',
+    )
+    expect(prompt).not.toContain(
+      'Use `laugh` for a dry or mildly funny joke',
     )
     expect(prompt).not.toContain('`question_mark`')
     expect(prompt).not.toContain('`exclamation`')
