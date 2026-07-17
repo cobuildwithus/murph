@@ -239,8 +239,8 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
-    "# V2 counts the root in this limit: two means root plus one child.",
-    "max_concurrent_threads_per_session = 2",
+    "# V2 counts the root in this limit: four means root plus three children.",
+    "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
     `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
@@ -1411,8 +1411,8 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
-      "# V2 counts the root in this limit: two means root plus one child.",
-      "max_concurrent_threads_per_session = 2",
+      "# V2 counts the root in this limit: four means root plus three children.",
+      "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
       `multi_agent_mode_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_MODE_HINT)}`,
       `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
@@ -1503,7 +1503,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
   ));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
-  assert.match(config, /^max_concurrent_threads_per_session = 2$/mu);
+  assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(config, /\[memories\]\nuse_memories = true/u);
   assert.match(config, /^generate_memories = true$/mu);
   assert.match(config, /^disable_on_external_context = false$/mu);
