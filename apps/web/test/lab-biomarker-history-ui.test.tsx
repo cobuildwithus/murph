@@ -304,8 +304,9 @@ test("detail charts comparable results across years and keeps excluded values in
       .find((row) => row.textContent?.includes("Less than 5.4%"));
     expect(comparatorRow?.querySelector('[aria-hidden="true"]')?.textContent)
       .toBe("<5.4%");
-    expect(comparatorRow?.querySelector(".sr-only")?.textContent?.trim())
-      .toBe("Less than 5.4%");
+    const spokenComparator = [...(comparatorRow?.querySelectorAll(".sr-only") ?? [])]
+      .find((label) => label.textContent?.includes("Less than"));
+    expect(spokenComparator?.textContent?.trim()).toBe("Less than 5.4%");
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
     ).not.toBeNull();
@@ -399,20 +400,17 @@ test("detail history rows stay stacked through tablet widths", async () => {
   try {
     const historyRow = rendered.container.querySelector("ol > li");
     expect(historyRow).not.toBeNull();
-    expect(historyRow?.className).not.toMatch(/grid-cols-/u);
+    expect(historyRow?.className).toContain("xl:grid-cols-");
+    expect(historyRow?.className).not.toMatch(/\b(?:sm|md|lg):grid-cols-/u);
 
-    const compact = historyRow?.querySelector(".xl\\:hidden");
-    expect(compact).not.toBeNull();
-    expect(compact?.textContent).toContain("Range not supplied");
-    expect(compact?.textContent).toContain("Example Lab");
+    // One render per fact across breakpoints: the value, range, and source
+    // each occur exactly once in the accessible DOM.
+    const rowText = historyRow?.textContent ?? "";
+    expect(rowText.match(/5\.6%/gu)).toHaveLength(1);
+    expect(rowText.match(/No reference range/gu)).toHaveLength(1);
+    expect(rowText.match(/Example Lab/gu)).toHaveLength(1);
 
-    const table = [...(historyRow?.querySelectorAll("div") ?? [])]
-      .find((element) => element.className.includes("xl:grid-cols-"));
-    expect(table).not.toBeNull();
-    expect(table?.className).toContain("hidden");
-    expect(table?.className).not.toMatch(/\b(?:sm|md|lg):grid-cols-/u);
-
-    const columnLabels = [...(table?.querySelectorAll("span.sr-only") ?? [])]
+    const columnLabels = [...(historyRow?.querySelectorAll("span.sr-only") ?? [])]
       .filter((label) => ["Date", "Result", "Reference range", "Source"]
         .includes(label.textContent?.trim() ?? ""));
     expect(columnLabels).toHaveLength(4);

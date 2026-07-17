@@ -128,9 +128,13 @@ test("a shared reference range renders a band, dashed bounds, and a data-safe do
   expect(captured.gridRendered).toBe(false);
   expect(captured.yAxisPadding).toMatchObject({ bottom: 16, top: 16 });
 
-  // Domain covers the band and the out-of-range data point, rounded outward
-  // to tick-friendly values.
-  expect(captured.yAxisDomain).toEqual([4, 6]);
+  // The axis keeps its automatic domain; reference elements extend it when a
+  // bound sits outside the data so neither data nor band is ever clipped.
+  expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
+  expect(captured.referenceAreas[0]).toMatchObject({ ifOverflow: "extendDomain" });
+  for (const line of captured.referenceLines) {
+    expect(line).toMatchObject({ ifOverflow: "extendDomain" });
+  }
 
   const tooltip = captured.tooltipFormatter?.(5.8);
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("5.8%");

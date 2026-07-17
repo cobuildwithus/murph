@@ -399,60 +399,46 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
 
             return (
               <li
-                className="border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-1.5 border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5 xl:grid-cols-[8rem_minmax(9rem,0.8fr)_minmax(12rem,1.2fr)_minmax(10rem,1fr)] xl:gap-4"
                 key={row.id}
               >
-                <div className="flex flex-col gap-1.5 xl:hidden">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
-                        <LabResultValue result={row} />
-                      </span>
-                      {row.flag ? (
-                        <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
-                      ) : null}
+                <div className="order-1 min-w-0 xl:order-none">
+                  <span className="sr-only">Result</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
+                      <LabResultValue result={row} />
                     </span>
-                    <time className="shrink-0 text-sm text-muted-foreground" dateTime={row.date}>
-                      {formatLabDate(row.date)}
-                    </time>
+                    {row.flag ? (
+                      <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
+                    ) : null}
                   </div>
-                  <p className="break-words text-xs text-muted-foreground">
-                    {referenceRange ? `Range ${referenceRange}` : "Range not supplied"}
-                    <span aria-hidden="true"> · </span>
+                </div>
+                <div className="order-2 min-w-0 justify-self-end xl:-order-1 xl:justify-self-start">
+                  <span className="sr-only">Date</span>
+                  <time
+                    className="block text-sm text-muted-foreground xl:font-medium xl:text-foreground"
+                    dateTime={row.date}
+                  >
+                    {formatLabDate(row.date)}
+                  </time>
+                </div>
+                <div className="order-3 col-span-2 flex min-w-0 flex-wrap gap-x-1 text-xs text-muted-foreground xl:contents">
+                  <p className="break-words whitespace-normal xl:min-w-0 xl:text-sm">
+                    <span className="sr-only">Reference range</span>
+                    {referenceRange ? (
+                      <>
+                        <span aria-hidden="true" className="xl:hidden">Range </span>
+                        {referenceRange}
+                      </>
+                    ) : (
+                      "No reference range"
+                    )}
+                    <span aria-hidden="true" className="xl:hidden"> ·</span>
+                  </p>
+                  <p className="break-words whitespace-normal xl:min-w-0 xl:text-sm">
+                    <span className="sr-only">Source</span>
                     {source ?? "Source not listed"}
                   </p>
-                </div>
-
-                <div className="hidden gap-4 xl:grid xl:grid-cols-[8rem_minmax(9rem,0.8fr)_minmax(12rem,1.2fr)_minmax(10rem,1fr)]">
-                  <div className="min-w-0">
-                    <span className="sr-only">Date</span>
-                    <time className="block text-sm font-medium text-foreground" dateTime={row.date}>
-                      {formatLabDate(row.date)}
-                    </time>
-                  </div>
-                  <div className="min-w-0">
-                    <span className="sr-only">Result</span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="break-words font-serif text-lg font-semibold tabular-nums text-foreground">
-                        <LabResultValue result={row} />
-                      </span>
-                      {row.flag ? (
-                        <Badge variant="outline">{formatLabFlag(row.flag)}</Badge>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <span className="sr-only">Reference range</span>
-                    <p className="break-words text-sm whitespace-normal text-muted-foreground">
-                      {referenceRange ?? "Not supplied"}
-                    </p>
-                  </div>
-                  <div className="min-w-0">
-                    <span className="sr-only">Source</span>
-                    <p className="break-words text-sm whitespace-normal text-muted-foreground">
-                      {source ?? "Not listed"}
-                    </p>
-                  </div>
                 </div>
               </li>
             );

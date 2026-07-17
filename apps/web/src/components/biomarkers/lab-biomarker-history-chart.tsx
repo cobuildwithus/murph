@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type ComponentProps } from "react";
+import { useMemo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -76,10 +76,6 @@ export function LabBiomarkerHistoryChart({
   );
   const xDomain = useMemo(() => resolveTimeDomain(data.map((point) => point.time)), [data]);
   const range = normalizeRange(referenceRange);
-  const yDomain = useMemo(
-    () => resolveValueDomain(range, data.map((point) => point.value)),
-    [data, range],
-  );
 
   return (
     <ChartContainer
@@ -108,7 +104,7 @@ export function LabBiomarkerHistoryChart({
         />
         <YAxis
           axisLine={false}
-          domain={yDomain}
+          domain={["auto", "auto"]}
           padding={range ? { bottom: 16, top: 16 } : undefined}
           tickFormatter={(value) => formatLabNumber(Number(value))}
           tickLine={false}
@@ -187,30 +183,6 @@ function normalizeRange(
   }
 
   return { high, low };
-}
-
-function resolveValueDomain(
-  range: LabBiomarkerChartRange | null,
-  values: readonly number[],
-): ComponentProps<typeof YAxis>["domain"] {
-  if (!range || values.length === 0) {
-    return ["auto", "auto"];
-  }
-
-  // Keep every reference bound and data point visible, rounded outward to
-  // tick-friendly values; pixel padding on the axis provides the headroom so
-  // data and band never touch the plot edges.
-  const min = Math.min(...values, range.low ?? Infinity, range.high ?? Infinity);
-  const max = Math.max(...values, range.high ?? -Infinity, range.low ?? -Infinity);
-  if (min === max) {
-    return ["auto", "auto"];
-  }
-
-  const step = 10 ** Math.floor(Math.log10(max - min)) / 2;
-  return [
-    Math.floor(min / step) * step,
-    Math.ceil(max / step) * step,
-  ];
 }
 
 function resolveTimeDomain(times: readonly number[]): [number, number] | ["dataMin", "dataMax"] {
