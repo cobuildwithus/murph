@@ -82,7 +82,13 @@ export type HostedLinqDailyQuotaPayload = {
 export type HostedLinqAiUsageQuotaClaimToken = {
   periodStart: string;
   sentAt: string;
+  usageCreditLedgerVersion: string;
 };
+
+type HostedLinqPersistedAiUsageQuotaClaimToken =
+  Omit<HostedLinqAiUsageQuotaClaimToken, "usageCreditLedgerVersion"> & {
+    usageCreditLedgerVersion?: string;
+  };
 
 type HostedLinqUsageLimitNoticeCode = Exclude<
   HostedAiUsageGateNoticeCode,
@@ -102,7 +108,7 @@ type HostedLinqAiUsageQuotaBasePayload = {
 
 export type HostedLinqAiUsageQuotaPayload =
   | (HostedLinqAiUsageQuotaBasePayload & {
-    claimToken: HostedLinqAiUsageQuotaClaimToken;
+    claimToken: HostedLinqPersistedAiUsageQuotaClaimToken;
     noticeCode: HostedLinqUsageLimitNoticeCode;
   })
   | (HostedLinqAiUsageQuotaBasePayload & {
@@ -264,6 +270,9 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: input.memberId,
       periodStart: input.claimToken.periodStart,
+      usageCreditLedgerVersion: parseHostedAiUsageCreditLedgerVersion(
+        input.claimToken.usageCreditLedgerVersion,
+      ),
     });
   }
 
@@ -318,11 +327,17 @@ type HostedLinqProviderDispatchPreparation =
   | "in_flight"
   | "target_unauthorized";
 
+type HostedLinqSideEffectSendSkip = {
+  reason: Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved">;
+  retryAt?: Date;
+};
+
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
   skipped: readonly {
     effectId: string;
     reason: HostedLinqSideEffectDrainSkipReason;
+    retryAt?: Date;
     template: HostedLinqMessagePayload["template"];
   }[];
 };
@@ -352,12 +367,9 @@ export async function drainHostedLinqSideEffectsDirect(
       });
       continue;
     }
-    let sendSkipReason: Exclude<
-      HostedLinqSideEffectDrainSkipReason,
-      "effect_unresolved"
-    > | null;
+    let sendSkip: HostedLinqSideEffectSendSkip | null;
     try {
-      sendSkipReason = await sendHostedLinqSideEffect(effect, {
+      sendSkip = await sendHostedLinqSideEffect(effect, {
         prisma: input.prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
@@ -366,10 +378,11 @@ export async function drainHostedLinqSideEffectsDirect(
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
     }
-    if (sendSkipReason) {
+    if (sendSkip) {
       skipped.push({
         effectId: effect.effectId,
-        reason: sendSkipReason,
+        reason: sendSkip.reason,
+        ...(sendSkip.retryAt ? { retryAt: sendSkip.retryAt } : {}),
         template: effect.payload.template,
       });
       continue;
@@ -436,7 +449,7 @@ async function sendHostedLinqSideEffect(
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved"> | null> {
+): Promise<HostedLinqSideEffectSendSkip | null> {
   const startedAtMs = Date.now();
   const usageLimitPayload =
     effect.payload.template === "ai_usage_quota" && effect.payload.claimToken
@@ -450,14 +463,15 @@ async function sendHostedLinqSideEffect(
         startedAtMs,
       });
   let deliveryEffect = effect;
+  let usageLimitDispatchClaimed = false;
 
   try {
     const preparation = await deliveryAttemptTask;
     if (preparation === "target_unauthorized") {
-      return "notice_target_unauthorized";
+      return { reason: "notice_target_unauthorized" };
     }
     if (preparation === "in_flight") {
-      return "notice_in_flight";
+      return { reason: "notice_in_flight" };
     }
 
     if (effect.payload.template === "invite_signup_fallback") {
@@ -502,17 +516,24 @@ async function sendHostedLinqSideEffect(
         periodStart: new Date(usageLimitPayload.claimToken.periodStart),
         prisma: requireHostedLinqTransportPrismaClient(options.prisma),
         source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
+        sourceRef: usageLimitPayload.sourceEventId,
         targetKind: "thread",
+        usageCreditLedgerVersion: parseHostedAiUsageCreditLedgerVersion(
+          usageLimitPayload.claimToken.usageCreditLedgerVersion,
+        ),
       });
       if (dispatch.status !== "claimed") {
         if (dispatch.status === "not_authorized") {
-          return "notice_target_unauthorized";
+          return { reason: "notice_target_unauthorized" };
         }
         return dispatch.status === "already_notified"
-          ? "notice_already_claimed"
-          : "notice_in_flight";
+          ? { reason: "notice_already_claimed" }
+          : {
+              reason: "notice_in_flight",
+              ...(dispatch.retryAt ? { retryAt: dispatch.retryAt } : {}),
+            };
       }
+      usageLimitDispatchClaimed = true;
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
@@ -567,6 +588,14 @@ async function sendHostedLinqSideEffect(
       effect.payload.template === "ai_usage_quota"
       && usageLimitPayload
     ) {
+      if (usageLimitDispatchClaimed) {
+        await markHostedLinqDeliverySendFailedTx({
+          expectedAttemptedAt: new Date(usageLimitPayload.claimToken.sentAt),
+          failureCode: "linq_usage_limit_dispatch_retryable",
+          idempotencyKey: deliveryEffect.effectId,
+          prisma: options.prisma,
+        });
+      }
       console.error(
         "Hosted Linq side-effect delivery failed.",
         buildHostedLinqSideEffectLogDetails(deliveryEffect, error, Date.now() - startedAtMs),
@@ -591,6 +620,18 @@ async function sendHostedLinqSideEffect(
   }
 
   return null;
+}
+
+function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
+  if (value === undefined) {
+    return 0n;
+  }
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    throw new TypeError(
+      "Hosted AI usage-limit claim ledger version must be a non-negative integer.",
+    );
+  }
+  return BigInt(value);
 }
 
 function queueHostedLinqContactCardSideEffectShare(share: {

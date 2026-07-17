@@ -119,6 +119,8 @@ const mocks = vi.hoisted(() => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     })),
     getHostedLinqChatSummary: vi.fn(async (): Promise<{
       handles: string[];
@@ -589,6 +591,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
     mocks.sendHostedLinqChatMessage.mockResolvedValue({

@@ -37,6 +37,7 @@ import {
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
+  HOSTED_RUNTIME_LABS_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
@@ -89,6 +90,7 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_runtime_snapshot"
   | "family_plan_tool"
   | "group_tool"
+  | "labs_tool"
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
@@ -136,6 +138,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
+  [HOSTED_RUNTIME_LABS_TOOL_PATH, "labs_tool"],
   [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],
   [HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH, "plan_usage_tool"],
   [HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH, "subscription_tool"],

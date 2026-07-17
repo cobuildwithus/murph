@@ -1166,6 +1166,7 @@ describe('assistant codex runtime', () => {
         model: 'gpt-5',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
+        providerRequestOrdinal: 3,
         prompt: 'Explain this',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -1232,16 +1233,21 @@ describe('assistant codex runtime', () => {
         ],
       }),
     )
-    expect(onTraceEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          codexTimingStage: 'turn-completed',
-          schema: 'murph.assistant-codex-app-server-timing.v1',
-          type: 'assistant.codex.app_server_timing',
-        }),
-        updates: [],
-      }),
-    )
+    const turnCompletedTiming = onTraceEvent.mock.calls
+      .map(([event]) => event?.rawEvent)
+      .find((event) =>
+        event?.type === 'assistant.codex.app_server_timing' &&
+        event.codexTimingStage === 'turn-completed'
+      )
+    expect(turnCompletedTiming).toEqual(expect.objectContaining({
+      codexTimingProviderRequestOrdinal: 3,
+      codexTimingTurnCompleteElapsedMs: expect.any(Number),
+      codexTimingTurnCompletedNotificationElapsedMs: expect.any(Number),
+      codexTimingTurnStartAckElapsedMs: expect.any(Number),
+      codexTimingTurnStartedNotificationElapsedMs: expect.any(Number),
+      schema: 'murph.assistant-codex-app-server-timing.v1',
+      type: 'assistant.codex.app_server_timing',
+    }))
     expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
@@ -5624,6 +5630,13 @@ describe('assistant codex runtime', () => {
   it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
+    const realDateNow = Date.now.bind(Date)
+    let controlledNowMs: number | null = null
+    vi.spyOn(Date, 'now').mockImplementation(
+      () => controlledNowMs ?? realDateNow(),
+    )
+    const onProviderRequestStarted = vi.fn()
+    const onTraceEvent = vi.fn()
     const spawnedChildren: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(spawnedChildren)
 
@@ -5663,6 +5676,11 @@ describe('assistant codex runtime', () => {
             },
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          const secondProviderStartedAtMs = Date.parse(
+            onProviderRequestStarted.mock.calls.at(-1)?.[0]?.startedAt ?? '',
+          )
+          expect(Number.isFinite(secondProviderStartedAtMs)).toBe(true)
+          controlledNowMs = secondProviderStartedAtMs + 10
           child.stdout.write(jsonLine({
             method: 'turn/started',
             params: {
@@ -5671,10 +5689,21 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          controlledNowMs = secondProviderStartedAtMs + 20
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-tagged-2',
+              },
+            },
+          }))
+          controlledNowMs = secondProviderStartedAtMs + 30
           child.stdout.write(jsonLine({
             id: secondTurn.id,
             result: {},
           }))
+          controlledNowMs = secondProviderStartedAtMs + 40
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
             params: {
@@ -5686,6 +5715,7 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-local-prestart-tagged-2',
             },
           }))
+          controlledNowMs = secondProviderStartedAtMs + 50
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -5707,6 +5737,8 @@ describe('assistant codex runtime', () => {
       env: {
         PATH: '/custom/bin',
       },
+      onProviderRequestStarted,
+      onTraceEvent,
       sandbox: 'workspace-write' as const,
       workingDirectory,
     }
@@ -5724,6 +5756,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
+        providerRequestOrdinal: 7,
         prompt: 'second local turn with tagged prestart turn/started',
       }),
     ).resolves.toMatchObject({
@@ -5731,6 +5764,22 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-local-prestart-tagged-2',
       turnId: 'turn-local-prestart-tagged-2',
     })
+    controlledNowMs = null
+
+    const secondTurnCompletedTiming = onTraceEvent.mock.calls
+      .map(([event]) => event?.rawEvent)
+      .filter((event) =>
+        event?.type === 'assistant.codex.app_server_timing' &&
+        event.codexTimingStage === 'turn-completed'
+      )
+      .at(-1)
+    expect(secondTurnCompletedTiming).toEqual(expect.objectContaining({
+      codexTimingProviderRequestOrdinal: 7,
+      codexTimingTurnCompleteElapsedMs: 50,
+      codexTimingTurnCompletedNotificationElapsedMs: 50,
+      codexTimingTurnStartAckElapsedMs: 30,
+      codexTimingTurnStartedNotificationElapsedMs: 10,
+    }))
   })
 
   it('accepts tagged warm server requests after turn/started establishes the current turn', async () => {

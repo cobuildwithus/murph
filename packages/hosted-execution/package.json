@@ -78,6 +78,10 @@
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"
     },
+    "./labs": {
+      "types": "./dist/labs.d.ts",
+      "default": "./dist/labs.js"
+    },
     "./subscription": {
       "types": "./dist/subscription.d.ts",
       "default": "./dist/subscription.js"

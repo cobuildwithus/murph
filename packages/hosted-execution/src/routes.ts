@@ -28,6 +28,8 @@ export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
 export const HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH =
   "/api/internal/hosted-execution/subscription/tool";
+export const HOSTED_RUNTIME_LABS_TOOL_PATH =
+  "/api/internal/hosted-execution/labs/tool";
 export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
   "/api/internal/hosted-execution/assistant-configuration/tool";
 

@@ -447,6 +447,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const privateInteractiveProviderTurn =
+    privateInteractiveAudience &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' || outputOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -582,6 +586,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantHostedLabsAvailable:
+              privateInteractiveProviderTurn &&
+              input.hostedToolContext?.labsTool != null,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantToolNameAliases,
@@ -674,6 +681,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
+        labsAvailable:
+          privateInteractiveProviderTurn &&
+          input.hostedToolContext?.labsTool != null,
         planUsageAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.planUsageTool != null,

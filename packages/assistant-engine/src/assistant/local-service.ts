@@ -712,6 +712,7 @@ export async function sendAssistantMessageLocal(
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               deviceTool: hostedExecutionContext.deviceTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
+              labsTool: hostedExecutionContext.labsTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,
               planUsageTool: hostedExecutionContext.planUsageTool ?? null,
