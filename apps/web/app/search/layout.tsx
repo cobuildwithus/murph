@@ -1,14 +1,24 @@
 import type { ReactNode } from "react";
 
-import {
-  MurphSafeFooter,
-  MurphSafeHeader,
-} from "@/src/components/murph-safe/murph-safe-shell";
+import { MurphSafeFooter } from "@/src/components/murph-safe/murph-safe-shell";
+import { getMurphGithubStarCount } from "@/src/lib/github-stars";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
-export default function MurphSafeLayout(input: { children: ReactNode }) {
+import { StickyNav } from "../sticky-nav";
+
+export default async function MurphSafeLayout(input: { children: ReactNode }) {
+  const [{ authenticated }, githubStarCount] = await Promise.all([
+    getHostedPageAuthSnapshot(),
+    getMurphGithubStarCount(),
+  ]);
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <MurphSafeHeader />
+      <StickyNav
+        authenticated={authenticated}
+        githubStarCount={githubStarCount}
+        preloadAuthPanel
+      />
       <div className="flex-1">{input.children}</div>
       <MurphSafeFooter />
     </div>
