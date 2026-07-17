@@ -483,6 +483,11 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
     ]);
+    // Responses Lite models (e.g. gpt-5.6-terra) relocate the structured
+    // namespace into an additional_tools input item; it must still be read.
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "additional-tools"),
+    ]);
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
@@ -654,19 +659,32 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
+  toolLocation: "additional-tools" | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
+  const tools = [
+    {
+      name: "murph",
+      tools: namespacedToolNames.map((name) => ({
+        name: name.replace(/^murph\./u, ""),
+      })),
+      type: "namespace",
+    },
+  ];
+
   return {
-    body: JSON.stringify({
-      tools: [
-        {
-          name: "murph",
-          tools: namespacedToolNames.map((name) => ({
-            name: name.replace(/^murph\./u, ""),
-          })),
-          type: "namespace",
-        },
-      ],
-    }),
+    body: JSON.stringify(
+      toolLocation === "additional-tools"
+        ? {
+            input: [
+              {
+                role: "developer",
+                tools,
+                type: "additional_tools",
+              },
+            ],
+          }
+        : { tools },
+    ),
     method: "POST",
     url: "/v1/responses",
   };

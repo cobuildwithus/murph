@@ -235,6 +235,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       "u",
     ),
   );
+  assert.match(
+    config,
+    /\[code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
+  );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
@@ -1400,6 +1404,9 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
       "enabled = false",
+      "",
+      "[code_mode]",
+      'direct_only_tool_namespaces = ["murph"]',
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",

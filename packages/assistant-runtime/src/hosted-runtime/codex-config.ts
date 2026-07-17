@@ -567,6 +567,13 @@ export function buildHostedCodexConfigToml(input: {
     "",
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
+    // Murph dynamic tools are dispatched through the app-server item/tool/call
+    // path. Keep the "murph" namespace advertised as structured function tools
+    // even when a model enables code_mode_only (e.g. gpt-5.6-terra in Codex
+    // >= 0.144), instead of being folded into the exec tool's description.
+    "[code_mode]",
+    'direct_only_tool_namespaces = ["murph"]',
+    "",
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
