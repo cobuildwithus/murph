@@ -223,6 +223,51 @@ describe('assistant runtime residue pruning', () => {
     await expectPathMissing(file.filePath)
   })
 
+  it('fails closed when active descriptors claim one ref with conflicting fingerprints', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-conflict-',
+    )
+    const file = await writeGeneratedDeliveryFile({
+      contents: 'conflicted payload',
+      refSuffix: 'conflicted.zip',
+      vaultRoot,
+    })
+    const orphan = await writeGeneratedDeliveryFile({
+      contents: 'orphan payload',
+      refSuffix: 'conflict-orphan.zip',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: file.media,
+      seed: 'p',
+      status: 'pending',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: {
+        ...file.media,
+        sha256: 'f'.repeat(64),
+        sizeBytes: file.media.sizeBytes + 1,
+      },
+      seed: 'q',
+      status: 'awaiting_approval',
+      vaultRoot,
+    })
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryCleanupSkippedUntrustedOutbox).toBe(true)
+    expect(result.generatedDeliveryFilesPruned).toBe(0)
+    expect(result.generatedDeliveryBytesPruned).toBe(0)
+    await expectPathExists(file.filePath)
+    await expectPathExists(orphan.filePath)
+  })
+
   it('fails closed when an active generated delivery is missing', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-missing-active-',

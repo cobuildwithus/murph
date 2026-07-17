@@ -23,6 +23,7 @@ import {
 } from '@murphai/runtime-state/assistant-generated-deliveries'
 import {
   adoptAssistantStateFile,
+  adoptAssistantStateFileIntoExclusiveName,
 } from '@murphai/runtime-state/node/assistant-state-fs'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
@@ -41,6 +42,7 @@ import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import {
+  buildAssistantGeneratedDeliveryOwnedRef,
   isAssistantGeneratedDeliveryRef,
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
@@ -80,8 +82,20 @@ export async function requestAssistantVaultFileSend(input: {
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
+  const normalizedRef = normalizeVaultFileRef(input.ref)
+  let mediaRef = normalizedRef
+  let displayFilename: string | undefined
+  if (isAssistantGeneratedDeliveryRef(normalizedRef)) {
+    const consumed = await consumeAssistantGeneratedDeliveryStagingRef({
+      ref: normalizedRef,
+      vaultRoot: input.vault,
+    })
+    mediaRef = consumed.ownedRef
+    displayFilename = consumed.displayFilename
+  }
   const file = await resolveAssistantVaultFileResponseMedia({
-    ref: input.ref,
+    ...(displayFilename === undefined ? {} : { displayFilename }),
+    ref: mediaRef,
     vaultRoot: input.vault,
   })
   const approval = await input.actionApprovalPort.request(
@@ -169,10 +183,36 @@ export function buildAssistantVaultFileApprovalFallbackWakeAt(
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {
+  displayFilename?: string
   ref: string
   vaultRoot: string
 }): Promise<AssistantVaultFileResponseMedia> {
   return (await readAssistantVaultFileSnapshot(input)).file
+}
+
+// Consuming the model-selected staging file into a runtime-generated
+// collision-free name happens before hashing or approval so a later turn that
+// reuses the same friendly staging name can no longer truncate bytes this
+// delivery has already committed to.
+async function consumeAssistantGeneratedDeliveryStagingRef(input: {
+  ref: string
+  vaultRoot: string
+}): Promise<{ displayFilename: string; ownedRef: string }> {
+  const displayFilename = path.posix.basename(input.ref)
+  resolveAssistantVaultFileContentType(displayFilename)
+  const ownedRef = buildAssistantGeneratedDeliveryOwnedRef(displayFilename)
+  const sourcePath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    input.ref,
+    'file path',
+  )
+  const targetPath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    ownedRef,
+    'file path',
+  )
+  await adoptAssistantStateFileIntoExclusiveName(sourcePath, targetPath)
+  return { displayFilename, ownedRef }
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {
@@ -180,6 +220,7 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
   vaultRoot: string
 }): Promise<Uint8Array> {
   const snapshot = await readAssistantVaultFileSnapshot({
+    displayFilename: input.file.filename,
     ref: input.file.ref,
     vaultRoot: input.vaultRoot,
   })
@@ -495,6 +536,7 @@ export function deferAssistantVaultFileApprovalCheck(input: {
 }
 
 async function readAssistantVaultFileSnapshot(input: {
+  displayFilename?: string
   ref: string
   vaultRoot: string
 }): Promise<{
@@ -534,7 +576,7 @@ async function readAssistantVaultFileSnapshot(input: {
     bytes,
     file: {
       contentType: resolveAssistantVaultFileContentType(filename),
-      filename,
+      filename: input.displayFilename ?? filename,
       kind: 'vault_file',
       approvalGeneration: null,
       approvalId: null,

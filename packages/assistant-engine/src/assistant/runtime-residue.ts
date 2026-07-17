@@ -289,6 +289,27 @@ async function planAssistantGeneratedDeliveryPrune(input: {
       }
     }
   }
+  // Every active descriptor sharing one ref must agree on the exact byte
+  // fingerprint. Conflicting active claims mean the outbox no longer proves
+  // which bytes the ref must retain, so cleanup fails closed and keeps the
+  // whole inventory instead of guessing.
+  for (const mediaList of activeMediaByRef.values()) {
+    const [first, ...rest] = mediaList
+    if (
+      first !== undefined
+      && rest.some((media) =>
+        media.contentType !== first.contentType
+        || media.sizeBytes !== first.sizeBytes
+        || media.sha256 !== first.sha256)
+    ) {
+      return {
+        files: [],
+        inventoryFiles: [],
+        root: null,
+        skippedUntrustedOutbox: true,
+      }
+    }
+  }
   const root = await resolveAssistantVaultPath(
     input.vault,
     ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
@@ -406,14 +427,17 @@ async function assistantGeneratedDeliveryFileMatchesActiveMedia(input: {
   if (input.activeMedia.length === 0) {
     return false
   }
-  const filename = path.posix.basename(input.ref)
-  const contentType = resolveSupportedAssistantVaultFileContentType(filename)
+  // The staged basename is runtime-owned while the descriptor's filename is
+  // the user-facing display name, so matching binds on the physical ref's
+  // content type plus exact size and SHA-256 rather than filename equality.
+  const contentType = resolveSupportedAssistantVaultFileContentType(
+    path.posix.basename(input.ref),
+  )
   if (!contentType) {
     return false
   }
   const possibleMatches = input.activeMedia.filter(
     (media) =>
-      media.filename === filename &&
       media.contentType === contentType &&
       media.sizeBytes === input.stats.size,
   )
@@ -424,7 +448,7 @@ async function assistantGeneratedDeliveryFileMatchesActiveMedia(input: {
     input.filePath,
     input.signal,
   )
-  return possibleMatches.some((media) => media.sha256 === sha256)
+  return possibleMatches.every((media) => media.sha256 === sha256)
 }
 
 async function sha256AssistantGeneratedDeliveryFile(

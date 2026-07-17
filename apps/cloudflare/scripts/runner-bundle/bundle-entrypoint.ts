@@ -92,9 +92,11 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // Phase-two generated-delivery staging (writer guidance, runtime-owned file
 // adoption, and quiescent pre-checkpoint cleanup) on the merged 2026-07-17
 // main base measures a 7,470,164B local macOS static boot closure, 2,974B
-// over the budget produced by main's July 16 ratchet. Advance by that exact
-// overage and preserve the separate 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_124_164;
+// over the budget produced by main's July 16 ratchet. The review-remediation
+// consume-into-owned-name path (per-send collision-free staging refs) then
+// adds an exact measured 3,566B, for a 7,473,730B closure. Advance by that
+// exact overage and preserve the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_127_730;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.

@@ -25,6 +25,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
 import {
   adoptAssistantStateFile,
+  adoptAssistantStateFileIntoExclusiveName,
   appendAssistantStateJsonLine,
   appendAssistantStateText,
   ASSISTANT_STATE_DIRECTORY_MODE,
@@ -124,6 +125,82 @@ test("adoptAssistantStateFile tightens its assistant-state parents and exact fil
     assert.equal((await lstat(deliveryDirectory)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
     assert.equal((await lstat(filePath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
     assert.equal(await readFile(filePath, "utf8"), "generated report");
+  });
+});
+
+test("adoptAssistantStateFileIntoExclusiveName renames the adopted file without clobbering", async () => {
+  await withTempDir(async (root) => {
+    const deliveryDirectory = path.join(
+      root,
+      "vault",
+      ".runtime",
+      "operations",
+      "assistant",
+      "generated-deliveries",
+    );
+    const sourcePath = path.join(deliveryDirectory, "report.pdf");
+    const targetPath = path.join(deliveryDirectory, "report-owned.pdf");
+
+    await mkdir(deliveryDirectory, { recursive: true });
+    await writeFile(sourcePath, "generated report", { mode: 0o666 });
+    await chmod(sourcePath, 0o666);
+
+    await adoptAssistantStateFileIntoExclusiveName(sourcePath, targetPath);
+
+    await assert.rejects(lstat(sourcePath), /ENOENT/u);
+    assert.equal((await lstat(targetPath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
+    assert.equal(await readFile(targetPath, "utf8"), "generated report");
+
+    await writeFile(sourcePath, "second report", { mode: 0o666 });
+    await assert.rejects(
+      adoptAssistantStateFileIntoExclusiveName(sourcePath, targetPath),
+      /already in use/u,
+    );
+    assert.equal(await readFile(targetPath, "utf8"), "generated report");
+    assert.equal(await readFile(sourcePath, "utf8"), "second report");
+  });
+});
+
+test("adoptAssistantStateFileIntoExclusiveName rejects cross-directory and symlink sources", async () => {
+  await withTempDir(async (root) => {
+    const assistantRoot = path.join(
+      root,
+      "vault",
+      ".runtime",
+      "operations",
+      "assistant",
+    );
+    const deliveryDirectory = path.join(assistantRoot, "generated-deliveries");
+    await mkdir(deliveryDirectory, { recursive: true });
+
+    const outsideSource = path.join(assistantRoot, "report.pdf");
+    await writeFile(outsideSource, "outside", { mode: 0o600 });
+    await assert.rejects(
+      adoptAssistantStateFileIntoExclusiveName(
+        outsideSource,
+        path.join(deliveryDirectory, "report-owned.pdf"),
+      ),
+      /one directory/u,
+    );
+
+    const samePath = path.join(deliveryDirectory, "same.pdf");
+    await writeFile(samePath, "same", { mode: 0o600 });
+    await assert.rejects(
+      adoptAssistantStateFileIntoExclusiveName(samePath, samePath),
+      /distinct exclusive name/u,
+    );
+
+    const linkTargetPath = path.join(deliveryDirectory, "real.pdf");
+    const symlinkPath = path.join(deliveryDirectory, "link.pdf");
+    await writeFile(linkTargetPath, "real", { mode: 0o600 });
+    await symlink(linkTargetPath, symlinkPath);
+    await assert.rejects(
+      adoptAssistantStateFileIntoExclusiveName(
+        symlinkPath,
+        path.join(deliveryDirectory, "link-owned.pdf"),
+      ),
+    );
+    assert.equal(await readFile(linkTargetPath, "utf8"), "real");
   });
 });
 

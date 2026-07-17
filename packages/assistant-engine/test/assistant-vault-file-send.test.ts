@@ -208,7 +208,6 @@ describe('assistant vault-file send', () => {
       status: 'pending',
     })
     expect(approvalRequest).toHaveBeenCalledTimes(1)
-    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
 
     const [persistedIntent] = await listAssistantOutboxIntents(vaultRoot)
     const [persistedMedia] = persistedIntent?.media ?? []
@@ -216,17 +215,28 @@ describe('assistant vault-file send', () => {
       throw new Error('Expected one persisted vault-file descriptor.')
     }
 
+    expect(persistedMedia.filename).toBe('report.pdf')
+    expect(persistedMedia.ref).not.toBe(ref)
+    expect(persistedMedia.ref.startsWith(
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report-`,
+    )).toBe(true)
+    expect(persistedMedia.ref.endsWith('.pdf')).toBe(true)
+    const ownedPath = path.join(vaultRoot, ...persistedMedia.ref.split('/'))
+    await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await stat(ownedPath)).mode & 0o777).toBe(0o600)
+
     await expect(resolveAssistantVaultFileResponseMedia({
-      ref,
+      displayFilename: persistedMedia.filename,
+      ref: persistedMedia.ref,
       vaultRoot,
     })).resolves.toEqual(persistedMedia)
 
-    await chmod(filePath, 0o666)
+    await chmod(ownedPath, 0o666)
     await expect(readVerifiedAssistantVaultFileBytes({
       file: persistedMedia,
       vaultRoot,
     })).resolves.toEqual(contents)
-    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+    expect((await stat(ownedPath)).mode & 0o777).toBe(0o600)
 
     for (const rejectedRef of [
       '.runtime/operations/assistant/outbox/intent.json',
@@ -243,6 +253,75 @@ describe('assistant vault-file send', () => {
       })).rejects.toMatchObject({
         code: 'ASSISTANT_VAULT_FILE_REF_INVALID',
       })
+    }
+  })
+
+  it('keeps an earlier pending delivery intact when a later turn reuses the same staging name', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-staging-collision-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const stagingPath = path.join(vaultRoot, ...ref.split('/'))
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+
+    const contentsA = Buffer.from('generated report A')
+    const contentsB = Buffer.from('generated report B bytes')
+    const sendWithPendingApproval = async (approvalSlug: string) => {
+      const approvalRequest = vi.fn().mockResolvedValue({
+        approvalId: `haa_${approvalSlug.repeat(32).slice(0, 32)}`,
+        approvalUrl: `https://murph.test/approve/${approvalSlug}`,
+        expiresAt: '2026-06-24T12:15:00.000Z',
+        status: 'pending' as const,
+      })
+      return await requestAssistantVaultFileSend({
+        actionApprovalPort: { request: approvalRequest },
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'chat-staging-collision',
+        },
+        channel: 'linq',
+        identityId: 'identity-staging-collision',
+        ref,
+        sessionId: 'session-staging-collision',
+        threadId: 'thread-staging-collision',
+        threadIsDirect: true,
+        turnId: `turn-staging-collision-${approvalSlug}`,
+        vault: vaultRoot,
+      })
+    }
+
+    await writeFile(stagingPath, contentsA)
+    await sendWithPendingApproval('a')
+    await writeFile(stagingPath, contentsB)
+    await sendWithPendingApproval('b')
+
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    const media = intents
+      .flatMap((intent) => intent.media)
+      .filter((item) => item.kind === 'vault_file')
+    expect(media).toHaveLength(2)
+    const [first, second] = media
+    if (!first || first.kind !== 'vault_file'
+      || !second || second.kind !== 'vault_file') {
+      throw new Error('Expected two persisted vault-file descriptors.')
+    }
+    expect(first.filename).toBe('report.pdf')
+    expect(second.filename).toBe('report.pdf')
+    expect(first.ref).not.toBe(second.ref)
+
+    const byteLengths = new Set([first.sizeBytes, second.sizeBytes])
+    expect(byteLengths).toEqual(
+      new Set([contentsA.byteLength, contentsB.byteLength]),
+    )
+    for (const descriptor of [first, second]) {
+      const expected = descriptor.sizeBytes === contentsA.byteLength
+        ? contentsA
+        : contentsB
+      await expect(readVerifiedAssistantVaultFileBytes({
+        file: descriptor,
+        vaultRoot,
+      })).resolves.toEqual(expected)
     }
   })
 

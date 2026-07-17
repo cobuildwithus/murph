@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat, open, rename } from "node:fs/promises";
+import path from "node:path";
 
 import {
   appendTextFileWithMode,
@@ -73,6 +74,51 @@ export async function adoptAssistantStateFile(filePath: string): Promise<void> {
   } finally {
     await fileHandle.close();
   }
+}
+
+export async function adoptAssistantStateFileIntoExclusiveName(
+  sourcePath: string,
+  targetPath: string,
+): Promise<void> {
+  assertAssistantStatePath(targetPath);
+  if (path.dirname(sourcePath) !== path.dirname(targetPath)) {
+    throw new Error(
+      `Assistant state file adoption must stay inside one directory: ${targetPath}`,
+    );
+  }
+  if (sourcePath === targetPath) {
+    throw new Error(
+      `Assistant state file adoption requires a distinct exclusive name: ${targetPath}`,
+    );
+  }
+
+  await adoptAssistantStateFile(sourcePath);
+  const adoptedEntry = await lstat(sourcePath);
+  assertRegularAssistantStateFile(sourcePath, adoptedEntry);
+  assertAssistantStateFileMode(sourcePath, adoptedEntry.mode);
+
+  let targetExists = true;
+  try {
+    await lstat(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    targetExists = false;
+  }
+  if (targetExists) {
+    throw new Error(
+      `Assistant state file exclusive name is already in use: ${targetPath}`,
+    );
+  }
+
+  await rename(sourcePath, targetPath);
+
+  await assertAssistantStatePathHasNoSymlinks(targetPath);
+  const renamedEntry = await lstat(targetPath);
+  assertRegularAssistantStateFile(targetPath, renamedEntry);
+  assertSameAssistantStateFile(targetPath, adoptedEntry, renamedEntry);
+  assertAssistantStateFileMode(targetPath, renamedEntry.mode);
 }
 
 export async function writeAssistantStateText(
