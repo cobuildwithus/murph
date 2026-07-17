@@ -86,6 +86,7 @@ class AssistantActiveTurnInputController {
   private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private manualCompletions: AssistantActiveTurnManualInputCompletion[] = []
+  private availableInputIds = new Set<string>()
 
   constructor(
     private readonly input: {
@@ -140,6 +141,7 @@ class AssistantActiveTurnInputController {
   }
 
   notifyInputAvailable(input?: {
+    inputIds?: readonly string[]
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     if (
@@ -147,6 +149,13 @@ class AssistantActiveTurnInputController {
       this.liveProviderTurnEnded
     ) {
       return Promise.resolve(undefined)
+    }
+
+    for (const inputId of input?.inputIds ?? []) {
+      const normalized = normalizeNullableString(inputId)
+      if (normalized) {
+        this.availableInputIds.add(normalized)
+      }
     }
 
     return this.runInputAvailableAdmission(input)
@@ -297,7 +306,21 @@ class AssistantActiveTurnInputController {
 
     do {
       this.inputAvailableAdmissionRerunRequested = false
-      result = await this.runAdmissionHook(() => this.buildAdmissionInput(input))
+      const admissionInput = this.buildAdmissionInput(input)
+      result = await this.runAdmissionHook(() => admissionInput)
+      let acceptedAvailableInputCount = 0
+      if (result?.kind === 'accepted') {
+        // Delete only proven admissions. Rejected exact IDs stay in insertion
+        // order as a barrier, so A-B-A cannot leapfrog the intervening B.
+        for (const acceptedInput of result.acceptedInputs) {
+          if (this.availableInputIds.delete(acceptedInput.id)) {
+            acceptedAvailableInputCount += 1
+          }
+        }
+      }
+      if (acceptedAvailableInputCount > 0 && this.availableInputIds.size > 0) {
+        this.inputAvailableAdmissionRerunRequested = true
+      }
       if (result?.kind === 'accepted') {
         acceptedResult = result
       }
@@ -362,8 +385,10 @@ class AssistantActiveTurnInputController {
   private buildAdmissionInput(input: {
     signal?: AbortSignal
   }): AssistantActiveTurnInputAdmissionInput {
+    const availableInputIds = [...this.availableInputIds]
     return {
       ...this.resolveKnownAdmissionInput(),
+      ...(availableInputIds.length > 0 ? { availableInputIds } : {}),
       sessionId: this.input.sessionId,
       signal: input.signal,
       turnId: this.input.turnId,
@@ -601,6 +626,7 @@ export function createAssistantActiveTurnInputController(input: {
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
   notifyInputAvailable(input?: {
+    inputIds?: readonly string[]
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
@@ -695,6 +721,7 @@ export function enqueueManualActiveTurnInput(
 
 export async function notifyAssistantActiveTurnInputAvailable(
   input: AssistantActiveTurnInputControllerKeyInput & {
+    inputIds?: readonly string[]
     signal?: AbortSignal
   },
 ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
@@ -702,6 +729,7 @@ export async function notifyAssistantActiveTurnInputAvailable(
     const controller = activeTurnInputControllers.get(key)
     if (controller) {
       return controller.notifyInputAvailable({
+        inputIds: input.inputIds,
         signal: input.signal,
       })
     }
@@ -714,7 +742,10 @@ export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: 
   signal?: AbortSignal
   vault: string
 }): Promise<void> {
-  const conversationsByKey = new Map<string, ConversationRef>()
+  const notificationsByKey = new Map<string, {
+    conversation: ConversationRef
+    inputIds: string[]
+  }>()
   for (const inputId of new Set(input.inputIds)) {
     try {
       const event = await readAssistantInputEvent({
@@ -727,8 +758,17 @@ export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: 
 
       const conversation = conversationRefFromAssistantInputConversation(event.conversation)
       const key = resolveAssistantConversationLookupKey({ conversation })
-      if (key) {
-        conversationsByKey.set(key, conversation)
+      if (!key) {
+        continue
+      }
+      const existing = notificationsByKey.get(key)
+      if (existing) {
+        existing.inputIds.push(inputId)
+      } else {
+        notificationsByKey.set(key, {
+          conversation,
+          inputIds: [inputId],
+        })
       }
     } catch (error: unknown) {
       warnAssistantBestEffortFailure({
@@ -738,9 +778,10 @@ export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: 
     }
   }
 
-  for (const conversation of conversationsByKey.values()) {
+  for (const notification of notificationsByKey.values()) {
     await notifyAssistantActiveTurnInputAvailable({
-      conversation,
+      conversation: notification.conversation,
+      inputIds: notification.inputIds,
       ...(input.signal ? { signal: input.signal } : {}),
       vault: input.vault,
     }).catch((error: unknown) => {

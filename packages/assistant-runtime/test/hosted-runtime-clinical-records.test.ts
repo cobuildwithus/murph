@@ -63,6 +63,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await rm(vaultRoot, { force: true, recursive: true });
 });
 
@@ -1241,6 +1242,7 @@ describe("hosted clinical records maintenance", () => {
   });
 
   it("reuses the same generation after preemption and then completes", async () => {
+    vi.useFakeTimers();
     const fetchPage = vi.fn()
       .mockResolvedValueOnce({
         body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
@@ -1267,14 +1269,10 @@ describe("hosted clinical records maintenance", () => {
       reviewDecisionCount: 0,
     });
 
-    let preemptionChecks = 0;
     await expect(runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      shouldYieldClinicalRecords: () => {
-        preemptionChecks += 1;
-        return preemptionChecks === 6;
-      },
+      shouldYieldClinicalRecords: () => fetchPage.mock.calls.length === 1,
       vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });

@@ -1,17 +1,22 @@
 import "server-only";
 
 import {
-  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-  type HostedRuntimeAssistantPreferenceCausalSeqResponse,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+  type HostedRuntimeAssistantPersonalitySettings,
+  type HostedRuntimeAssistantPersonalityUpdate,
+  type HostedRuntimeAssistantPersonalityUpdateOutcomes,
   type HostedRuntimeAssistantPersonalizationToolAuthority,
   type HostedRuntimeAssistantPersonalizationSnapshot,
   type HostedRuntimeAssistantPersonalizationToolRequest,
   type HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
+  assistantPersonalitySettingIds,
   assistantPersonalityCausalWritesEnabled,
+  defaultAssistantPersonalityScores,
   defaultAssistantTonePreference,
   defaultAssistantVoiceOptionId,
+  type AssistantPreferenceFieldId,
 } from "@murphai/contracts";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -20,9 +25,11 @@ import {
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { assertActiveHostedMemberAccessAllowed } from "@/src/lib/hosted-onboarding/member-access";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedMemberAssistantPreferences,
   upsertHostedMemberAssistantPreferencesTx,
+  type HostedMemberAssistantPersonalitySnapshot,
 } from "@/src/lib/hosted-onboarding/member-preferences";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -34,31 +41,14 @@ import {
   type HostedMailboxStoreClient,
 } from "@/src/lib/hosted-mailbox/store";
 
-type HostedRuntimeAssistantPersonalizationUpdateResponse = Extract<
+type HostedRuntimeAssistantPersonalityUpdateResponse = Extract<
   HostedRuntimeAssistantPersonalizationToolResponse,
-  { action: "update" }
+  { action: typeof HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION }
 >;
 
-interface HostedRuntimeAssistantPersonalizationTransactionResult {
+interface HostedRuntimeAssistantPersonalityTransactionResult {
   dispatch: { mailboxItemId: string } | null;
-  response: HostedRuntimeAssistantPersonalizationUpdateResponse;
-}
-
-export async function resolveHostedRuntimeAssistantPreferenceCausalSeq(input: {
-  authority: HostedRuntimeAssistantPersonalizationToolAuthority;
-  memberId: string;
-}): Promise<HostedRuntimeAssistantPreferenceCausalSeqResponse> {
-  const prisma = getPrisma();
-  return prisma.$transaction(async (tx) => ({
-    action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-    result: {
-      causalSeq: await requireHostedRuntimeAssistantPreferenceCausalSeq({
-        assistantInputId: input.authority.assistantInputId,
-        memberId: input.memberId,
-        prisma: tx,
-      }),
-    },
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  response: HostedRuntimeAssistantPersonalityUpdateResponse;
 }
 
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
@@ -86,9 +76,30 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   const request = input.request;
+  if (
+    request.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION
+    && !assistantPersonalityCausalWritesEnabled(process.env)
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
+      httpStatus: 503,
+      message: "Personality settings are temporarily unavailable during rollout.",
+      retryable: true,
+    });
+  }
   const authority = input.authority;
   if (!authority) {
     throw new TypeError("Assistant personalization update requires assistant input authority.");
+  }
+  if (request.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
+    return handleHostedRuntimeAssistantPersonalityUpdate({
+      authority,
+      memberId: input.memberId,
+      personality: request.personality,
+      ...(input.scheduleMailboxWake
+        ? { scheduleMailboxWake: input.scheduleMailboxWake }
+        : {}),
+    });
   }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
@@ -156,6 +167,112 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   return transactionResult.response;
+}
+
+async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
+  authority: HostedRuntimeAssistantPersonalizationToolAuthority;
+  memberId: string;
+  personality: HostedRuntimeAssistantPersonalityUpdate;
+  scheduleMailboxWake?: (input: {
+    expectedUserId: string;
+    mailboxItemId: string;
+  }) => void;
+}): Promise<HostedRuntimeAssistantPersonalityUpdateResponse> {
+  const prisma = getPrisma();
+  const transactionResult = await prisma.$transaction(async (tx) => {
+    const preferenceCausalSeq =
+      await requireHostedRuntimeAssistantPreferenceCausalSeq({
+        assistantInputId: input.authority.assistantInputId,
+        memberId: input.memberId,
+        prisma: tx,
+      });
+    const styleResult = await upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "sparse_delta",
+      memberId: input.memberId,
+      occurredAt: new Date().toISOString(),
+      preferenceCausalSeq,
+      preferences: {
+        personality: input.personality,
+      },
+      prisma: tx,
+    });
+    const outcomes = buildHostedAssistantPersonalityUpdateOutcomes({
+      appliedFields: styleResult.appliedFields,
+      personality: styleResult.assistantPersonality,
+      requested: input.personality,
+    });
+
+    return {
+      dispatch: styleResult.dispatch,
+      response: {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        result: {
+          outcomes,
+          settings: buildHostedAssistantPersonalitySettings(
+            styleResult.assistantPersonality,
+          ),
+        },
+      },
+    } satisfies HostedRuntimeAssistantPersonalityTransactionResult;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (transactionResult.dispatch) {
+    input.scheduleMailboxWake?.({
+      expectedUserId: input.memberId,
+      mailboxItemId: transactionResult.dispatch.mailboxItemId,
+    });
+  }
+
+  return transactionResult.response;
+}
+
+function buildHostedAssistantPersonalityUpdateOutcomes(input: {
+  appliedFields: ReadonlyArray<AssistantPreferenceFieldId>;
+  personality: HostedMemberAssistantPersonalitySnapshot;
+  requested: HostedRuntimeAssistantPersonalityUpdate;
+}): HostedRuntimeAssistantPersonalityUpdateOutcomes {
+  const outcomes: HostedRuntimeAssistantPersonalityUpdateOutcomes = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const requestedValue = input.requested[settingId];
+    if (requestedValue === undefined) {
+      continue;
+    }
+    outcomes[settingId] = input.appliedFields.includes(settingId)
+      ? "saved"
+      : input.personality[settingId] === requestedValue
+        ? "unchanged"
+        : "superseded";
+  }
+  return outcomes;
+}
+
+function buildHostedAssistantPersonalitySettings(
+  personality: HostedMemberAssistantPersonalitySnapshot,
+): HostedRuntimeAssistantPersonalitySettings {
+  return {
+    detail: buildHostedAssistantPersonalitySetting({
+      defaultValue: defaultAssistantPersonalityScores.detail,
+      value: personality.detail,
+    }),
+    humor: buildHostedAssistantPersonalitySetting({
+      defaultValue: defaultAssistantPersonalityScores.humor,
+      value: personality.humor,
+    }),
+    push: buildHostedAssistantPersonalitySetting({
+      defaultValue: defaultAssistantPersonalityScores.push,
+      value: personality.push,
+    }),
+  };
+}
+
+function buildHostedAssistantPersonalitySetting(input: {
+  defaultValue: number;
+  value: number | null;
+}): { source: "custom" | "default"; value: number } {
+  return input.value === null
+    ? { source: "default", value: input.defaultValue }
+    : { source: "custom", value: input.value };
 }
 
 async function requireHostedRuntimeAssistantPreferenceCausalSeq(input: {

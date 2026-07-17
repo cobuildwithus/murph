@@ -226,6 +226,9 @@ importers:
       '@vercel/analytics':
         specifier: 2.0.1
         version: 2.0.1(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
+      '@vercel/functions':
+        specifier: 3.4.6
+        version: 3.4.6(@aws-sdk/credential-provider-web-identity@3.972.13)
       '@vercel/oidc':
         specifier: ^3.4.1
         version: 3.4.1
@@ -251,7 +254,7 @@ importers:
         specifier: ^16.2.6
         version: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       pg:
-        specifier: ^8.16.3
+        specifier: 8.20.0
         version: 8.20.0
       react:
         specifier: ^19.2.6
@@ -387,9 +390,6 @@ importers:
       '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murphai/health-commons':
-        specifier: workspace:*
-        version: link:../health-commons
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution
@@ -948,6 +948,9 @@ importers:
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
+      '@murphai/health-commons':
+        specifier: workspace:*
+        version: link:../health-commons
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers

@@ -20,7 +20,7 @@ export function createHostedRuntimePlanUsageToolPort(input: {
   return {
     async read() {
       const payload = await fetchHostedWebControlPlaneJson({
-        body: {},
+        body: { includeSubscriptionActionQuote: true },
         boundUserId: input.boundUserId,
         description: "Hosted plan usage tool",
         fetchImpl: input.fetchImpl,

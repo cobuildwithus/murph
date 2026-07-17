@@ -18,7 +18,7 @@ import {
 const mocks = vi.hoisted(() => ({
   appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
-  readHostedMemberIdentity: vi.fn(),
+  readHostedMemberPhoneNumberSnapshots: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
@@ -47,7 +47,8 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+  readHostedMemberPhoneNumberSnapshots:
+    mocks.readHostedMemberPhoneNumberSnapshots,
 }));
 
 import {
@@ -1131,7 +1132,13 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     vi.clearAllMocks();
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.readHostedMemberIdentity.mockResolvedValue({ phoneNumber: "+15551110000" });
+    mocks.readHostedMemberPhoneNumberSnapshots.mockImplementation(
+      async (input: { memberIds: readonly string[] }) =>
+        input.memberIds.map((memberId) => ({
+          memberId,
+          phoneNumber: "+15551110000",
+        })),
+    );
   });
 
   it("requires the signed-in actor to own the thread container", async () => {
@@ -1295,6 +1302,11 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         groupId: "group_1",
         revokedAt: null,
       },
+    });
+    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledWith({
+      memberIds: ["member_owner"],
+      prisma: tx,
     });
   });
 
@@ -2068,7 +2080,7 @@ describe("readHostedGroupMembershipsForMember", () => {
         status: "granted",
       },
     }));
-    expect(mocks.readHostedMemberIdentity).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberPhoneNumberSnapshots).not.toHaveBeenCalled();
   });
 
   it("returns at most 25 memberships and reports when more exist", async () => {

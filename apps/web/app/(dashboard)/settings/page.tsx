@@ -4,7 +4,6 @@ import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistan
 import { assistantPersonalityCausalWritesEnabled } from "@murphai/contracts";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
@@ -16,7 +15,7 @@ import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
-  readHostedAccountSettingsSnapshot,
+  readHostedAccountSettingsPageSnapshot,
   withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
@@ -29,14 +28,13 @@ import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
+import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Settings — Murph",
@@ -67,9 +65,7 @@ export default async function SettingsPage({
 
   const prisma = getPrisma();
   const [
-    routing,
-    account,
-    billingRef,
+    settingsSnapshot,
     freshPrivySession,
     familyOwner,
     familyAccess,
@@ -78,14 +74,7 @@ export default async function SettingsPage({
   ] =
     authenticatedMember
       ? await Promise.all([
-          readHostedMemberRoutingState({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedAccountSettingsSnapshot({
-            memberId: authenticatedMember.id,
-          }),
-          readHostedMemberStripeBillingRef({
+          readHostedAccountSettingsPageSnapshot({
             memberId: authenticatedMember.id,
             prisma,
           }),
@@ -106,7 +95,10 @@ export default async function SettingsPage({
             prisma,
           }),
         ])
-      : [null, null, null, null, null, null, { status: "unavailable" } as const, null];
+      : [null, null, null, null, { status: "unavailable" } as const, null];
+  const account = settingsSnapshot?.account ?? null;
+  const billingRef = settingsSnapshot?.billingRef ?? null;
+  const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const canStartFamily =
@@ -140,13 +132,21 @@ export default async function SettingsPage({
   // The member sends this to Murph right after picking a voice, so the reply
   // comes back as a voice memo in the new voice. Voice memos only deliver over
   // text and Telegram, so an email-only member gets no redirect.
-  const resolvedVoiceTestOption = authenticatedMember
-    ? await resolveHostedMurphContactOption({
+  const resolvedVoiceTestOption = account
+    ? resolveMurphContactOptions({
+        contactChannels: {
+          email: Boolean(account.email.murphEmailAddress),
+          telegram: Boolean(account.telegram.telegramUserId),
+          text: Boolean(account.phone.number),
+        },
         message: {
           body: "just picked a new voice for you! send me a voice memo so I can hear it",
         },
+        murphEmailAddress: account.email.murphEmailAddress ?? null,
+        murphPhoneNumber: routing?.linqRecipientPhone ?? null,
         preferredKind: "text",
-      })
+        userEmailAddress: account.email.address,
+      })[0] ?? null
     : null;
   const voiceTestContactOption =
     resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"

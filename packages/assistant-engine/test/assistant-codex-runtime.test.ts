@@ -11,6 +11,14 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantProductModel,
+  type HostedAssistantReasoningEffort,
+} from '@murphai/hosted-execution/assistant-model'
+import {
   initializeVault,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
@@ -124,6 +132,8 @@ function executeCodexAppServerTurn(
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
       allowMessageReactions: input.allowMessageReactions,
+      assistantConfigurationAvailable:
+        input.hostedToolContext?.assistantConfigurationTool != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
@@ -596,6 +606,14 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        environments: [],
+      }),
+    ).toMatchObject({
+      environments: [],
+    })
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
         modelProvider: 'venice',
       }),
     ).toMatchObject({
@@ -696,6 +714,7 @@ describe('assistant codex runtime', () => {
           text: 'User message:\nWhat changed?',
         },
       ],
+      model: 'gpt-5',
       serviceTier: null,
       threadId: 'thread-1',
     })
@@ -727,6 +746,64 @@ describe('assistant codex runtime', () => {
       serviceTier: null,
       threadId: 'thread-1',
     })
+
+    const outputSchema = {
+      properties: {
+        answer: { type: 'string' },
+      },
+      type: 'object',
+    }
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
+        ephemeral: true,
+        permissions: 'murph-group-read',
+        runtimeWorkspaceRoots: ['/group-vault'],
+        sandbox: undefined,
+        threadConfig: {
+          project_doc_max_bytes: 0,
+          'features.multi_agent_v2': false,
+        },
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      config: {
+        project_doc_max_bytes: 0,
+        'features.multi_agent_v2': false,
+      },
+      cwd: '/workspace',
+      developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      ephemeral: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: ['/group-vault'],
+      serviceName: 'murph',
+    })
+    expect(
+      buildCodexTurnStartParams({
+        imagePaths: [],
+        input: {
+          ...baseInput,
+          outputSchema,
+        },
+        codexThreadId: 'thread-structured',
+      }),
+    ).toMatchObject({
+      outputSchema,
+      threadId: 'thread-structured',
+    })
+    expect(() =>
+      buildCodexThreadStartParams({
+        ...baseInput,
+        permissions: 'murph-group-read',
+        runtimeWorkspaceRoots: ['/group-vault'],
+      }),
+    ).toThrowError(
+      'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
+    )
   })
 
   it('resolves display options from config files and explicit overrides', async () => {
@@ -846,13 +923,13 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
+              model: 'gpt-5',
               serviceTier: null,
               threadId,
             },
           })
           expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
           expect(asRecord(turnStart.params).cwd).toBeUndefined()
-          expect(asRecord(turnStart.params).model).toBeUndefined()
           expect(asRecord(turnStart.params).modelProvider).toBeUndefined()
           expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
           const inputItems = readTurnStartInputItems(turnStart)
@@ -1090,6 +1167,7 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           kind: 'image',
@@ -1103,6 +1181,7 @@ describe('assistant codex runtime', () => {
       sessionId: threadId,
       stderr: 'Retrying after timeout',
       threadId,
+      transcriptMessage: 'Hello world',
       turnId: 'turn-1',
     })
 
@@ -1251,6 +1330,7 @@ describe('assistant codex runtime', () => {
   it('keeps Telegram voice memo media attached to an empty final response', async () => {
     await expect(runCodexTelegramVoiceMemoOnlyTurn()).resolves.toMatchObject({
       finalMessage: '',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
@@ -1267,6 +1347,7 @@ describe('assistant codex runtime', () => {
           },
         },
       ],
+      transcriptMessage: '',
     })
   })
 
@@ -1457,19 +1538,329 @@ describe('assistant codex runtime', () => {
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
+  it('applies overlapping assistant configuration updates in request order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-configuration-order-work-',
+    )
+    const firstUpdateStarted = createDeferred<void>()
+    const releaseFirstUpdate = createDeferred<void>()
+    const configurationCalls: string[] = []
+    let savedModel: HostedAssistantProductModel = HOSTED_ASSISTANT_TERRA_MODEL
+    let savedReasoningEffort: HostedAssistantReasoningEffort = 'low'
+    let updateCount = 0
+
+    const configurationSnapshot = () => ({
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: savedModel,
+      reasoningEffort: savedReasoningEffort,
+      solAvailable: true,
+    })
+    const assistantConfigurationTool: NonNullable<
+      AssistantHostedToolContext['assistantConfigurationTool']
+    > = {
+      async request(request) {
+        if (request.action === 'read') {
+          configurationCalls.push(`read:${savedModel}`)
+          return {
+            action: 'read',
+            result: configurationSnapshot(),
+          }
+        }
+
+        updateCount += 1
+        configurationCalls.push(`update:${request.model ?? savedModel}`)
+        if (updateCount === 1) {
+          firstUpdateStarted.resolve()
+          await releaseFirstUpdate.promise
+        }
+        savedModel = request.model ?? savedModel
+        savedReasoningEffort = request.reasoningEffort ?? savedReasoningEffort
+        return {
+          action: 'update',
+          result: {
+            ...configurationSnapshot(),
+            appliesAt: 'next_turn',
+            requiredPlan: null,
+            status: 'updated',
+          },
+        }
+      },
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      assistantConfigurationTool,
+      currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
+      currentAssistantTarget: () => ({
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: 'low',
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-configuration-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-configuration-order' } },
+          }))
+          child.stdout.write(jsonLine({
+            id: 71,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_SOL_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 72,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_TERRA_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+
+          await firstUpdateStarted.promise
+          try {
+            expect(configurationCalls).toEqual([
+              `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+              `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            ])
+          } finally {
+            releaseFirstUpdate.resolve()
+          }
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 71,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 72,
+            result: { success: true },
+          })
+          expect(configurationCalls).toEqual([
+            `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+            `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `read:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `update:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+          ])
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-configuration-order',
+                message: 'Configuration updates complete',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-configuration-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      hostedToolContext,
+      prompt: 'switch to Sol, then back to Terra',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Configuration updates complete',
+    })
+    expect(savedModel).toBe(HOSTED_ASSISTANT_TERRA_MODEL)
+  })
+
+  it('allows only the first overlapping subscription action in a provider turn', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-subscription-order-work-',
+    )
+    const firstRequestStarted = createDeferred<void>()
+    const releaseFirstRequest = createDeferred<void>()
+    const subscriptionCalls: string[] = []
+    const subscriptionTool: NonNullable<
+      AssistantHostedToolContext['subscriptionTool']
+    > = {
+      async request(request) {
+        subscriptionCalls.push(request.action)
+        if (subscriptionCalls.length === 1) {
+          firstRequestStarted.resolve()
+          await releaseFirstRequest.promise
+        }
+
+        return request.action === 'upgrade_edge'
+          ? {
+              action: request.action,
+              plan: {
+                code: 'launch_edge_monthly',
+                displayName: 'Edge',
+                interval: 'month',
+                recurringAmountUsdCents: 2_000,
+              },
+              status: 'completed',
+            }
+          : {
+              action: request.action,
+              plan: {
+                code: 'launch_monthly',
+                displayName: 'Pulse',
+                interval: 'month',
+                recurringAmountUsdCents: 800,
+              },
+              status: 'completed',
+            }
+      },
+    }
+    let subscriptionActionClaimed = false
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      claimSubscriptionAssistantInputId: () => {
+        if (subscriptionActionClaimed) {
+          return null
+        }
+        subscriptionActionClaimed = true
+        return `ain_${'b'.repeat(32)}`
+      },
+      subscriptionTool,
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-subscription-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-subscription-order' } },
+          }))
+          child.stdout.write(jsonLine({
+            id: 73,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'start_pulse_now' },
+              namespace: 'murph',
+              tool: 'subscription',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 74,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'upgrade_edge' },
+              namespace: 'murph',
+              tool: 'subscription',
+            },
+          }))
+
+          await firstRequestStarted.promise
+          try {
+            expect(subscriptionCalls).toEqual(['start_pulse_now'])
+          } finally {
+            releaseFirstRequest.resolve()
+          }
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 73,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 74,
+            result: { success: false },
+          })
+          expect(subscriptionCalls).toEqual(['start_pulse_now'])
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-subscription-order',
+                message: 'Subscription actions complete',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-subscription-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: false,
+        subscriptionAvailable: true,
+      }),
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      hostedToolContext,
+      prompt: 'start Pulse, then upgrade to Edge',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Subscription actions complete',
+    })
+  })
+
   const computerPauseFinalMessageScenarios = [
     {
-      expectedFinalMessage:
-        'Paused for confirmation.\n\nTake over here: https://web.example.test/computer/handoff/raw-token',
+      expectedFinalMessage: 'Paused for confirmation.',
       modelMessage: 'Paused for confirmation.',
-      name: 'appends an omitted handoff URL',
+      name: 'does not append an omitted handoff URL',
     },
     {
       expectedFinalMessage:
-        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
       modelMessage:
-        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
-      name: 'preserves a model-supplied handoff URL once',
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      name: 'preserves a model-supplied handoff URL',
     },
   ] as const
 
@@ -1801,10 +2192,12 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('overrides an earlier no-reply and rejects a later one when a handoff URL must be delivered', async () => {
+  it('clears an earlier no-reply and rejects overlapping and later ones after a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
+    const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1861,7 +2254,7 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
-              id: 60,
+              id: 59,
               method: 'item/tool/call',
               params: {
                 namespace: 'murph',
@@ -1870,12 +2263,21 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
-            id: 60,
+          await expect(waitForRpcResponse(child, 59)).resolves.toMatchObject({
+            id: 59,
             result: { success: true },
           })
 
-          child.stdout.write(
+          child.stdout.write([
+            jsonLine({
+              id: 60,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
             jsonLine({
               id: 61,
               method: 'item/tool/call',
@@ -1890,7 +2292,11 @@ describe('assistant codex runtime', () => {
                 },
               },
             }),
-          )
+          ].join(''))
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: false },
+          })
           await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
             id: 61,
             result: { success: true },
@@ -1902,13 +2308,41 @@ describe('assistant codex runtime', () => {
               method: 'item/tool/call',
               params: {
                 namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
+                tool: 'computer_act',
+                arguments: {
+                  code: "await page.getByRole('button', { name: 'Place your order' }).click();",
+                  runId: 'run_123',
+                  timeoutMs: 25000,
+                },
               },
             }),
           )
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              id: 63,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 63)).resolves.toEqual({
+            id: 63,
             result: {
               success: false,
               contentItems: [
@@ -1920,6 +2354,19 @@ describe('assistant codex runtime', () => {
             },
           })
 
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-pause-no-reply',
+                  type: 'assistant_message',
+                  message:
+                    'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+                },
+              },
+            }),
+          )
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -1941,6 +2388,8 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         fetchImpl,
         hostedToolContext,
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
         progressDelivery,
         prompt: 'pause for confirmation',
         workingDirectory,
@@ -1948,9 +2397,15 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
-      finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
-      transcriptMessage: null,
+      finalMessage:
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage:
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
     })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+    expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   })
 
   const vaultApprovalUrlScenarios = [
@@ -2127,6 +2582,7 @@ describe('assistant codex runtime', () => {
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
       finalMessage: scenario.expectedFinalMessage,
+      responseDeliveryContextOrdinal: 0,
       transcriptMessage: scenario.expectedTranscriptMessage,
     })
     for (const exactApprovalUrl of exactApprovalUrls) {
@@ -3134,6 +3590,209 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(spawnedChild).filter(
       (message) => message.method === 'turn/start',
     )).toHaveLength(1)
+  })
+
+  it('runs one-shot permission turns beside the occupied warm process and proves exact child exit', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-one-shot-work-')
+    const workspaceRoot = await createTempDir('assistant-codex-one-shot-root-')
+    const codexHome = await createTempDir('assistant-codex-one-shot-home-')
+    const children: MockChildProcess[] = []
+    const completeWarmTurn = createDeferred<void>()
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_000 + children.length
+      children.push(child)
+      const childNumber = children.length
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          const params = asRecord(threadStart.params)
+          const threadId = `thread-process-${childNumber}`
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              ...(params.permissions === 'murph-group-read'
+                ? {
+                    activePermissionProfile: {
+                      id: 'murph-group-read',
+                    },
+                    approvalPolicy: 'never',
+                    cwd: workingDirectory,
+                    instructionSources: [],
+                    runtimeWorkspaceRoots: [workspaceRoot],
+                  }
+                : {}),
+              thread: {
+                id: threadId,
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          const turnId = `turn-process-${childNumber}`
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: turnId,
+              },
+            },
+          }))
+
+          if (childNumber === 1) {
+            await completeWarmTurn.promise
+          }
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const warmTurn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexHome,
+      env: { PATH: '/custom/bin' },
+      prompt: 'foreground group reply',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+    for (let attempt = 0; attempt < 200 && children.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    const warmChild = requireMockChildProcess(children[0] ?? null)
+    await waitForRpcMethod(warmChild, 'turn/start')
+
+    const outputSchema = {
+      properties: {
+        answer: { type: 'string' },
+      },
+      type: 'object',
+    }
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        dynamicTools: [],
+        env: { PATH: '/custom/bin' },
+        ephemeral: true,
+        outputSchema,
+        permissions: 'murph-group-read',
+        processLifetime: 'one-shot',
+        prompt: 'private consultation',
+        runtimeWorkspaceRoots: [workspaceRoot],
+        threadConfig: {
+          project_doc_max_bytes: 0,
+        },
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-process-2',
+      turnId: 'turn-process-2',
+    })
+
+    const oneShotChild = requireMockChildProcess(children[1] ?? null)
+    expect(children).toHaveLength(2)
+    expect(warmChild.exitCode).toBeNull()
+    expect(oneShotChild.signalCode).toBe('SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-27_001, 'SIGTERM')
+    expect(asRecord(
+      (await waitForRpcMethod(oneShotChild, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      dynamicTools: [],
+      ephemeral: true,
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: [workspaceRoot],
+      config: {
+        project_doc_max_bytes: 0,
+      },
+    })
+    expect(asRecord(
+      (await waitForRpcMethod(oneShotChild, 'turn/start')).params,
+    )).toMatchObject({
+      outputSchema,
+    })
+
+    completeWarmTurn.resolve()
+    await expect(warmTurn).resolves.toMatchObject({
+      sessionId: 'thread-process-1',
+      turnId: 'turn-process-1',
+    })
+  })
+
+  it('fails closed before turn start when permission attestation drifts', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-attest-work-')
+    const workspaceRoot = await createTempDir('assistant-codex-attest-root-')
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_500
+      children.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              activePermissionProfile: {
+                id: 'murph-group-read',
+              },
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              instructionSources: [{ source: 'workspace' }],
+              runtimeWorkspaceRoots: [workspaceRoot],
+              thread: {
+                id: 'thread-attestation-drift',
+              },
+            },
+          }))
+        })()
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        dynamicTools: [],
+        ephemeral: true,
+        permissions: 'murph-group-read',
+        processLifetime: 'one-shot',
+        prompt: 'must never reach turn start',
+        runtimeWorkspaceRoots: [workspaceRoot],
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
+      context: {
+        mismatchedFields: ['instructionSources'],
+        retryable: false,
+      },
+    })
+
+    const child = requireMockChildProcess(children[0] ?? null)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'turn/start',
+    )).toBe(false)
+    expect(child.signalCode).toBe('SIGTERM')
   })
 
   it('rejects external warm stops while a local turn is running', async () => {
@@ -10839,7 +11498,7 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
-        mismatchedFields: ['cwd', 'model', 'modelProvider', 'sandbox'],
+        mismatchedFields: ['cwd', 'modelProvider', 'sandbox'],
         resumeContextMismatch: true,
         retryable: true,
         staleResume: true,
@@ -11152,11 +11811,11 @@ describe('assistant codex runtime', () => {
         const turnParams = asRecord(turnRequests[index]?.params)
         expect(turnParams).toMatchObject({
           effort: 'high',
+          model: index === 0 ? 'gpt-5' : 'gpt-5.1',
           threadId: expectedThreadId,
         })
         expect(turnParams.approvalPolicy).toBeUndefined()
         expect(turnParams.cwd).toBeUndefined()
-        expect(turnParams.model).toBeUndefined()
         expect(turnParams.modelProvider).toBeUndefined()
         expect(turnParams.sandbox).toBeUndefined()
       }
@@ -15874,6 +16533,8 @@ describe('steered final segments', () => {
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.transcriptMessage).toBeNull()
   })
 
   it('keeps a pre-steer final when only commentary follows the steer', async () => {
@@ -15958,6 +16619,7 @@ describe('steered final segments', () => {
 
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer two.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([
       {
         deliveryContextOrdinal: 0,
@@ -16002,6 +16664,7 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer three.')
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
     expect(result.precedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,

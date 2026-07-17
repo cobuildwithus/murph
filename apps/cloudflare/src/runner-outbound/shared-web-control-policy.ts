@@ -26,6 +26,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
@@ -33,6 +34,7 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -67,6 +69,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_read"
   | "action_approval_request"
   | "assistant_runtime_issue_export"
+  | "assistant_ask"
   | "assistant_personalization_tool"
   | "assistant_configuration_tool"
   | "browser_vault_replica_publish"
@@ -91,6 +94,7 @@ export type HostedRunnerWebControlOperation =
   | "linq_egress_engagement"
   | "newsletter_tool"
   | "plan_usage_tool"
+  | "subscription_tool"
   | "phone_call_start"
   | "runtime_latency_trace"
   | "runtime_log_write"
@@ -111,6 +115,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH, "action_approval_read"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
+  [HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH, "assistant_ask"],
   [HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH, "assistant_personalization_tool"],
   [HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH, "assistant_configuration_tool"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
@@ -130,6 +135,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
   [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],
   [HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH, "plan_usage_tool"],
+  [HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH, "subscription_tool"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],

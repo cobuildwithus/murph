@@ -1,7 +1,9 @@
 import {
-  assistantPreferenceCausalSeqSchema,
+  assistantPersonalityScoreSchema,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
+  defaultAssistantPersonalityScores,
+  type AssistantPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -15,15 +17,26 @@ import {
 export const HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH =
   "/api/internal/hosted-execution/assistant-personalization/tool";
 
-export const HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION =
-  "resolve_preference_causal_seq";
+export const HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION =
+  "update_personality";
 
-export type HostedRuntimeAssistantPersonalizationToolRequest =
+export type HostedRuntimeAssistantPersonalizationModelToolRequest =
   | { action: "read" }
   | {
       action: "update";
       tone?: AssistantTonePreference;
       voice?: AssistantVoiceOptionId;
+    };
+
+export type HostedRuntimeAssistantPersonalityUpdate = Partial<
+  Record<AssistantPersonalitySettingId, number | null>
+>;
+
+export type HostedRuntimeAssistantPersonalizationToolRequest =
+  | HostedRuntimeAssistantPersonalizationModelToolRequest
+  | {
+      action: typeof HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION;
+      personality: HostedRuntimeAssistantPersonalityUpdate;
     };
 
 const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.object({
@@ -49,6 +62,29 @@ export interface HostedRuntimeAssistantPersonalizationUpdateResult
   status: "saved" | "unchanged";
 }
 
+export const hostedRuntimeAssistantPersonalityUpdateOutcomeValues = [
+  "saved",
+  "unchanged",
+  "superseded",
+] as const;
+
+export type HostedRuntimeAssistantPersonalityUpdateOutcome =
+  (typeof hostedRuntimeAssistantPersonalityUpdateOutcomeValues)[number];
+
+export interface HostedRuntimeAssistantPersonalitySettingSnapshot {
+  source: "custom" | "default";
+  value: number;
+}
+
+export type HostedRuntimeAssistantPersonalitySettings = Record<
+  AssistantPersonalitySettingId,
+  HostedRuntimeAssistantPersonalitySettingSnapshot
+>;
+
+export type HostedRuntimeAssistantPersonalityUpdateOutcomes = Partial<
+  Record<AssistantPersonalitySettingId, HostedRuntimeAssistantPersonalityUpdateOutcome>
+>;
+
 export type HostedRuntimeAssistantPersonalizationToolResponse =
   | {
       action: "read";
@@ -57,41 +93,74 @@ export type HostedRuntimeAssistantPersonalizationToolResponse =
   | {
       action: "update";
       result: HostedRuntimeAssistantPersonalizationUpdateResult;
+    }
+  | {
+      action: typeof HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION;
+      result: {
+        outcomes: HostedRuntimeAssistantPersonalityUpdateOutcomes;
+        settings: HostedRuntimeAssistantPersonalitySettings;
+      };
     };
 
-export type HostedRuntimeAssistantPreferenceCausalSeqRequest = {
-  action: typeof HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION;
-};
+const hostedRuntimeAssistantPersonalizationReadRequestSchema = z
+  .object({ action: z.literal("read") })
+  .strict();
 
-export interface HostedRuntimeAssistantPreferenceCausalSeqResponse {
-  action: typeof HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION;
-  result: {
-    causalSeq: string;
-  };
+const hostedRuntimeAssistantPersonalizationUpdateRequestSchema = z.object({
+  action: z.literal("update"),
+  tone: z.enum(assistantTonePreferenceValues).optional(),
+  voice: z.enum(assistantVoiceOptionIdValues).optional(),
+}).strict();
+
+function requireNonEmptyAssistantPersonalizationUpdate(
+  request: { action: string; tone?: unknown; voice?: unknown },
+  context: z.RefinementCtx,
+): void {
+  if (
+    request.action === "update"
+    && request.tone === undefined
+    && request.voice === undefined
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Assistant personalization update requires a tone or voice.",
+    });
+  }
 }
 
-export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
+export const hostedRuntimeAssistantPersonalizationModelToolRequestSchema = z
   .discriminatedUnion("action", [
-    z.object({ action: z.literal("read") }).strict(),
-    z.object({
-      action: z.literal("update"),
-      tone: z.enum(assistantTonePreferenceValues).optional(),
-      voice: z.enum(assistantVoiceOptionIdValues).optional(),
-    }).strict(),
+    hostedRuntimeAssistantPersonalizationReadRequestSchema,
+    hostedRuntimeAssistantPersonalizationUpdateRequestSchema,
   ])
-  .superRefine((request, context) => {
-    if (
-      request.action === "update"
-      && request.tone === undefined
-      && request.voice === undefined
-    ) {
+  .superRefine(requireNonEmptyAssistantPersonalizationUpdate);
+
+const hostedRuntimeAssistantPersonalityUpdateSchema = z
+  .object({
+    detail: assistantPersonalityScoreSchema.nullable().optional(),
+    humor: assistantPersonalityScoreSchema.nullable().optional(),
+    push: assistantPersonalityScoreSchema.nullable().optional(),
+  })
+  .strict()
+  .superRefine((personality, context) => {
+    if (Object.keys(personality).length === 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Assistant personalization update requires a tone or voice.",
+        message: "Assistant personality update requires at least one setting.",
       });
     }
   });
 
+export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
+  .discriminatedUnion("action", [
+    hostedRuntimeAssistantPersonalizationReadRequestSchema,
+    hostedRuntimeAssistantPersonalizationUpdateRequestSchema,
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION),
+      personality: hostedRuntimeAssistantPersonalityUpdateSchema,
+    }).strict(),
+  ])
+  .superRefine(requireNonEmptyAssistantPersonalizationUpdate);
 
 const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
   model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
@@ -99,6 +168,46 @@ const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
   tone: z.enum(assistantTonePreferenceValues),
   voice: z.enum(assistantVoiceOptionIdValues),
 }).strict();
+
+const hostedRuntimeAssistantPersonalitySettingSnapshotSchema = z.object({
+  source: z.enum(["custom", "default"]),
+  value: assistantPersonalityScoreSchema,
+}).strict();
+
+const hostedRuntimeAssistantPersonalitySettingsSchema = z.object({
+  detail: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
+  humor: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
+  push: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
+}).strict().superRefine((settings, context) => {
+  for (const setting of ["detail", "humor", "push"] as const) {
+    if (
+      settings[setting].source === "default"
+      && settings[setting].value !== defaultAssistantPersonalityScores[setting]
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Assistant personality ${setting} default source has the wrong value.`,
+        path: [setting],
+      });
+    }
+  }
+});
+
+const hostedRuntimeAssistantPersonalityUpdateOutcomesSchema = z
+  .object({
+    detail: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
+    humor: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
+    push: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
+  })
+  .strict()
+  .superRefine((outcomes, context) => {
+    if (Object.keys(outcomes).length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Assistant personality update requires at least one outcome.",
+      });
+    }
+  });
 
 export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
   z.discriminatedUnion("action", [
@@ -114,18 +223,14 @@ export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
         status: z.enum(["saved", "unchanged"]),
       }).strict(),
     }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION),
+      result: z.object({
+        outcomes: hostedRuntimeAssistantPersonalityUpdateOutcomesSchema,
+        settings: hostedRuntimeAssistantPersonalitySettingsSchema,
+      }).strict(),
+    }).strict(),
   ]);
-
-const hostedRuntimeAssistantPreferenceCausalSeqRequestSchema = z.object({
-  action: z.literal(HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION),
-}).strict();
-
-const hostedRuntimeAssistantPreferenceCausalSeqResponseSchema = z.object({
-  action: z.literal(HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION),
-  result: z.object({
-    causalSeq: assistantPreferenceCausalSeqSchema,
-  }).strict(),
-}).strict();
 
 export function parseHostedRuntimeAssistantPersonalizationToolRequest(
   value: unknown,
@@ -149,16 +254,4 @@ export function parseHostedRuntimeAssistantPersonalizationToolResponse(
   value: unknown,
 ): HostedRuntimeAssistantPersonalizationToolResponse {
   return hostedRuntimeAssistantPersonalizationToolResponseSchema.parse(value);
-}
-
-export function parseHostedRuntimeAssistantPreferenceCausalSeqRequest(
-  value: unknown,
-): HostedRuntimeAssistantPreferenceCausalSeqRequest {
-  return hostedRuntimeAssistantPreferenceCausalSeqRequestSchema.parse(value);
-}
-
-export function parseHostedRuntimeAssistantPreferenceCausalSeqResponse(
-  value: unknown,
-): HostedRuntimeAssistantPreferenceCausalSeqResponse {
-  return hostedRuntimeAssistantPreferenceCausalSeqResponseSchema.parse(value);
 }

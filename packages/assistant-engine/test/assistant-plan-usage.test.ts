@@ -47,6 +47,10 @@ describe("assistant plan usage tool", () => {
           label: "Upgrade to Edge",
           url: "https://example.test/settings#subscription",
         },
+        subscriptionActionQuote: {
+          action: "upgrade_edge" as const,
+          label: "Upgrade to Edge ($20/month)",
+        },
         remainingPercent: 20,
         status: "active" as const,
         usedPercent: 80,
@@ -65,6 +69,9 @@ describe("assistant plan usage tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain('"usedPercent":80');
     expect(result.rpcResult.contentItems[0]?.text).toContain("upgrade_edge");
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"label":"Upgrade to Edge ($20/month)"',
+    );
   });
 
   it("rejects extra arguments", () => {

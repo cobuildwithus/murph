@@ -85,7 +85,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       planName: "Pulse Trial",
       recommendedAction: {
         kind: "start_pulse",
-        label: "Start Pulse",
+        label: "Start Pulse now ($8/month)",
         url: "https://example.test/settings#subscription",
       },
       remainingPercent: 50,
@@ -121,6 +121,135 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/UsdMicros|token|dollar/iu);
   });
+
+  it("returns current Edge terms for an explicit request below the recommendation threshold", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_usage_explicit_edge",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      subscriptionActionQuote: {
+        action: "upgrade_edge",
+        label: "Upgrade to Edge ($20/month)",
+      },
+      usedPercent: 10,
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberBillingEligibilityState).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns current Pulse terms for an explicit trial request below the recommendation threshold", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_trial",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_usage_explicit_pulse",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      subscriptionActionQuote: {
+        action: "start_pulse_now",
+        label: "Start Pulse now ($8/month)",
+      },
+      usedPercent: 10,
+    });
+  });
+
+  it("omits the quote field for callers that keep the original empty request shape", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_legacy_shape",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    });
+
+    expect(result).not.toHaveProperty("subscriptionActionQuote");
+    expect(result).toMatchObject({
+      recommendedAction: null,
+      usedPercent: 10,
+    });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "thresholded paid usage",
+      buildDecision({
+        allowanceSource: "direct_paid_member_plan",
+        limitUsdMicros: 10_000_000n,
+        remainingUsdMicros: 1_500_000n,
+        spentUsdMicros: 8_500_000n,
+      }),
+      {
+        recommendedAction: null,
+        status: "active",
+        usedPercent: 85,
+      },
+    ],
+    [
+      "trial conversion",
+      buildDecision({
+        allowed: false,
+        allowanceSource: "direct_trial",
+        reason: "trial_expired_pending_billing",
+        spentUsdMicros: 0n,
+      }),
+      {
+        reason: "trial_conversion_pending",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    ],
+  ] as const)(
+    "avoids action-state fanout for legacy %s without an action URL",
+    async (_caseName, decision, expected) => {
+      mocks.readHostedAiUsageGate.mockResolvedValue(decision);
+
+      const result = await readHostedPersonalAiUsageStatus({
+        memberId: "member_usage_legacy_no_url",
+        now: NOW,
+        prisma: buildPrisma(null) as never,
+        publicBaseUrl: null,
+      });
+
+      expect(result).toMatchObject(expected);
+      expect(result).not.toHaveProperty("subscriptionActionQuote");
+      expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+      expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not recommend an upgrade when the billing action is ineligible", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
@@ -169,12 +298,14 @@ describe("readHostedPersonalAiUsageStatus", () => {
       }));
 
       await expect(readHostedPersonalAiUsageStatus({
+        includeSubscriptionActionQuote: true,
         memberId: "member_usage_incomplete",
         now: NOW,
         prisma: buildPrisma(null) as never,
         publicBaseUrl: "https://example.test",
       })).resolves.toMatchObject({
         recommendedAction: null,
+        subscriptionActionQuote: null,
         usedPercent: 85,
       });
     },
@@ -230,6 +361,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
       memberId: "member_edge",
       now: NOW,
       prisma: prisma as never,
@@ -238,6 +370,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       accessKind: "paid",
       planName: "Edge",
       recommendedAction: null,
+      subscriptionActionQuote: null,
     });
 
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
@@ -248,6 +381,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
       memberId: "member_family",
       now: NOW,
       prisma: prisma as never,
@@ -256,6 +390,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       accessKind: "family_sponsored",
       planName: "Family",
       recommendedAction: null,
+      subscriptionActionQuote: null,
     });
   });
 
@@ -335,6 +470,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
       memberId: "thread_runtime",
       now: NOW,
       prisma: prisma as never,
@@ -342,9 +478,32 @@ describe("readHostedPersonalAiUsageStatus", () => {
       generatedAt: NOW.toISOString(),
       reason: "group_not_supported",
       recommendedAction: null,
+      subscriptionActionQuote: null,
       status: "unavailable",
     });
     expect(prisma.hostedAiUsage.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns no subscription quote for inactive hosted access", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      reason: "hosted_access_inactive",
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_inactive",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+    })).resolves.toEqual({
+      generatedAt: NOW.toISOString(),
+      reason: "hosted_access_inactive",
+      recommendedAction: null,
+      subscriptionActionQuote: null,
+      status: "unavailable",
+    });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
   });
 
   it("returns a conversion path for an ended trial without inventing usage", async () => {
@@ -367,6 +526,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
       memberId: "member_trial_ended",
       now: NOW,
       prisma: buildPrisma(null) as never,
@@ -376,8 +536,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
       reason: "trial_conversion_pending",
       recommendedAction: {
         kind: "start_pulse",
-        label: "Start Pulse",
+        label: "Start Pulse now ($8/month)",
         url: "https://example.test/settings#subscription",
+      },
+      subscriptionActionQuote: {
+        action: "start_pulse_now",
+        label: "Start Pulse now ($8/month)",
       },
       status: "unavailable",
     });
@@ -403,6 +567,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
       memberId: "member_trial_incomplete",
       now: NOW,
       prisma: buildPrisma(null) as never,
@@ -411,6 +576,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       generatedAt: NOW.toISOString(),
       reason: "trial_conversion_pending",
       recommendedAction: null,
+      subscriptionActionQuote: null,
       status: "unavailable",
     });
   });
@@ -474,7 +640,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     })).resolves.toMatchObject({
       recommendedAction: {
         kind: "upgrade_edge",
-        label: "Upgrade to Edge",
+        label: "Upgrade to Edge ($20/month)",
         url: "https://example.test/settings#subscription",
       },
       remainingPercent: 0,

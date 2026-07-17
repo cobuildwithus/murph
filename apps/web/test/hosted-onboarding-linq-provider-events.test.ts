@@ -70,6 +70,80 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(parsed)).not.toContain("+15551234567");
   });
 
+  it.each([
+    {
+      data: {
+        chat: {
+          id: "chat_sent_2026",
+          owner_handle: {
+            handle: "+15550000000",
+            is_me: true,
+            service: "SMS",
+          },
+        },
+        direction: "outbound",
+        id: "msg_sent_2026",
+        parts: [{ type: "text", value: "private sent text" }],
+        sent_at: "2026-03-26T12:00:01.000Z",
+        service: "SMS",
+      },
+      messageId: "msg_sent_2026",
+      providerCreatedAt: "2026-03-26T12:00:01.000Z",
+      version: "2026-02-03",
+    },
+    {
+      data: {
+        chat_id: "chat_sent_2025",
+        from: "+15550000000",
+        from_handle: {
+          handle: "+15550000000",
+          is_me: true,
+          service: "SMS",
+        },
+        is_from_me: true,
+        message: {
+          id: "msg_sent_2025",
+          parts: [{ type: "text", value: "private sent text" }],
+          sent_at: "2026-03-26T12:00:02.000Z",
+        },
+        service: "SMS",
+      },
+      messageId: "msg_sent_2025",
+      providerCreatedAt: "2026-03-26T12:00:02.000Z",
+      version: "2025-01-01",
+    },
+  ])("parses $version message.sent as non-delivery provider evidence", ({
+    data,
+    messageId,
+    providerCreatedAt,
+    version,
+  }) => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        createdAt: "2026-03-26T12:00:03.000Z",
+        data,
+        eventType: "message.sent",
+        webhookVersion: version,
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      deliveryStatus: null,
+      direction: "outbound",
+      eventType: "message.sent",
+      phoneNumberHint: expect.stringContaining("0000"),
+      phoneNumberRole: "line",
+      providerCreatedAt: new Date(providerCreatedAt),
+      service: "SMS",
+      webhookVersion: version,
+    });
+    expect(parsed?.linqChatLookupKey).toEqual(expect.stringMatching(/^hbidx:linq-chat:/u));
+    expect(parsed?.messageLookupKey).toEqual(expect.stringMatching(/^hbidx:linq-message:/u));
+    expect(parsed?.messageIdSuffix).toBe(messageId.slice(-6));
+    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain("private sent text");
+    expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("private sent text");
+  });
+
   it("parses delivered and failed events with shape metadata only", () => {
     const delivered = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
@@ -496,6 +570,7 @@ function buildGenericEvent(input: {
   createdAt?: string;
   data: Record<string, unknown>;
   eventType: string;
+  webhookVersion?: string;
 }): HostedLinqWebhookEvent {
   return {
     api_version: "v3",
@@ -504,6 +579,6 @@ function buildGenericEvent(input: {
     event_id: "evt_123",
     event_type: input.eventType,
     trace_id: "trace_1234567890",
-    webhook_version: "2026-02-03",
+    webhook_version: input.webhookVersion ?? "2026-02-03",
   } as HostedLinqWebhookEvent;
 }

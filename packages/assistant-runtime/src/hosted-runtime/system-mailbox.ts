@@ -2,6 +2,9 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  readHostedRuntimeSafeErrorText,
+} from "@murphai/hosted-execution";
+import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -18,8 +21,8 @@ import {
   executeHostedMailboxEvent,
 } from "./events.ts";
 import {
-  readHostedRuntimeSafeErrorText,
-} from "./diagnostic-redaction.ts";
+  isHostedAssistantAskCompletionPreemptedError,
+} from "./events/assistant-ask-completion.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
@@ -73,6 +76,11 @@ export type HostedSystemMailboxCheckpointPreparation =
   | {
       item: HostedSystemMailboxPendingItem;
       itemId: string;
+      status: "preempted";
+    }
+  | {
+      item: HostedSystemMailboxPendingItem;
+      itemId: string;
       metrics: HostedMailboxExecutionMetrics;
       status: "processed";
     }
@@ -81,6 +89,84 @@ export type HostedSystemMailboxCheckpointPreparation =
       itemId: string;
       status: "recording";
     };
+
+export async function claimHostedSystemMailboxItem(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxPendingItem | null> {
+  if (input.allowedRouteActions.length === 0) {
+    return null;
+  }
+  const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+    const firstAllowed = state.pending.find((item) =>
+      input.allowedRouteActions.includes(item.routeAction)
+    ) ?? null;
+    if (!firstAllowed || firstAllowed.status === "recording") {
+      return { result: null, state };
+    }
+    const pending = firstAllowed.status === "sending"
+      ? firstAllowed
+      : findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: input.allowedRouteActions,
+          now: startedAt,
+          state,
+        });
+    if (!pending) {
+      return { result: null, state };
+    }
+    const claimed: HostedSystemMailboxPendingItem = {
+      ...pending,
+      attemptCount: pending.attemptCount + 1,
+      lastAttemptAt: startedAt,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      nextAttemptAt: null,
+      status: "sending",
+    };
+    return {
+      result: claimed,
+      state: {
+        pending: state.pending.map((item) =>
+          item.itemId === pending.itemId ? claimed : item
+        ),
+      },
+    };
+  });
+}
+
+export async function requeueClaimedHostedSystemMailboxItem(input: {
+  error?: unknown;
+  item: HostedSystemMailboxPendingItem;
+  nextAttemptAt: string | null;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const normalized = input.error === undefined
+    ? null
+    : normalizeHostedSystemMailboxError(input.error);
+  return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+    const current = state.pending.find((item) => item.itemId === input.item.itemId) ?? null;
+    if (!current || !hostedSystemMailboxPendingItemsMatchForClaim(current, input.item)) {
+      return { result: false, state };
+    }
+    const requeued: HostedSystemMailboxPendingItem = {
+      ...input.item,
+      lastErrorCode: normalized?.code ?? null,
+      lastErrorMessage: normalized?.message ?? null,
+      nextAttemptAt: input.nextAttemptAt,
+      status: "pending",
+    };
+    return {
+      result: true,
+      state: {
+        pending: state.pending.map((item) =>
+          item.itemId === input.item.itemId ? requeued : item
+        ),
+      },
+    };
+  });
+}
 
 export type HostedSystemMailboxRuntime = Pick<
   NormalizedHostedAssistantRuntimeConfig,
@@ -157,10 +243,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
+      const selectionState = input.allowedRouteActions == null
+        ? {
+            pending: state.pending.filter((item) =>
+              item.routeAction !== "run-assistant-ask"
+            ),
+          }
+        : state;
       const pending = findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         now: startedAt,
-        state,
+        state: selectionState,
       });
       if (!pending) {
         return {
@@ -241,6 +334,27 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       status: "processed",
     };
   } catch (error) {
+    if (
+      isHostedAssistantAskCompletionPreemptedError(error)
+      && input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      const retainedItem: HostedSystemMailboxPendingItem = {
+        ...prepared,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextAttemptAt: null,
+        status: "pending",
+      };
+      await retainHostedSystemMailboxItemAfterForegroundPreemption({
+        item: retainedItem,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        item: retainedItem,
+        itemId: prepared.itemId,
+        status: "preempted",
+      };
+    }
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
@@ -430,6 +544,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
+          shouldYieldAssistantAskCompletion: input.shouldYieldBackgroundMaintenance,
           shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
           shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
         }
@@ -466,6 +581,8 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
+    || item.route.action === "run-assistant-ask"
+    || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "apply-runtime-control-request"
@@ -474,6 +591,23 @@ function readHostedSystemMailboxRouteAction(
   }
 
   return null;
+}
+
+function hostedSystemMailboxPendingItemsMatchForClaim(
+  left: HostedSystemMailboxPendingItem,
+  right: HostedSystemMailboxPendingItem,
+): boolean {
+  return left.itemId === right.itemId
+    && left.attemptCount === right.attemptCount
+    && left.lastAttemptAt === right.lastAttemptAt
+    && left.mailboxDedupeKey === right.mailboxDedupeKey
+    && left.mailboxLaneSeq === right.mailboxLaneSeq
+    && left.preferenceCausalSeq === right.preferenceCausalSeq
+    && left.nextAttemptAt === right.nextAttemptAt
+    && left.occurredAt === right.occurredAt
+    && left.requestId === right.requestId
+    && left.routeAction === right.routeAction
+    && left.status === right.status;
 }
 
 export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {

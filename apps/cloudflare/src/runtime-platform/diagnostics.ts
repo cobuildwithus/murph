@@ -2,13 +2,11 @@ import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
+  readHostedRuntimeSafeErrorText,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import type { HostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
-import {
-  readHostedRuntimeSafeErrorText,
-} from "../hosted-runtime-redaction.ts";
 import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../workspace-snapshot-local.ts";
 import {
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,

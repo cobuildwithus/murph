@@ -12,6 +12,7 @@ const ROUTE_AUTHORITY = {
   containerMemberId: "member_container",
   threadId: "chat_group_1",
 };
+const PRIVATE_ASSISTANT_INPUT_ID = `ain_${"3".repeat(32)}`;
 
 function buildLinqDeliveryContext(
   overrides: Partial<HostedAssistantLinqDeliveryContext>,
@@ -127,6 +128,21 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    });
 
     await groupTool.request({
       action: "leave_membership",
@@ -307,6 +323,20 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
     expect(request).not.toHaveBeenCalled();
 
+    await expect(groupTool.request({
+      action: "ask",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    })).resolves.toEqual({
+      action: "ask",
+      result: {
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
     await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
       action: "create_join_link",
       result: {
@@ -395,6 +425,146 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         senderHandle: "+15550000001",
         source: "linq",
       },
+    });
+  });
+
+  it("injects the current group chat sender into personal style reads and writes", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        action: "read_own_assistant_style",
+        result: {
+          status: "ok",
+          style: {
+            personality: {
+              detail: { source: "default", value: 5 },
+              humor: { source: "default", value: 3 },
+              push: { source: "default", value: 3 },
+            },
+            tone: "formal",
+            voice: "upbeat",
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        action: "update_own_assistant_style",
+        result: {
+          status: "saved",
+          style: {
+            personality: {
+              detail: { source: "default", value: 5 },
+              humor: { source: "custom", value: 10 },
+              push: { source: "default", value: 3 },
+            },
+            tone: "formal",
+            voice: "upbeat",
+          },
+        },
+      });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request({ action: "read_own_assistant_style" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_own_assistant_style",
+      currentSender: { senderHandle: "+15550000001", source: "linq" },
+    });
+
+    await groupTool.request({
+      action: "update_own_assistant_style",
+      style: { personality: { humor: 10 } },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "update_own_assistant_style",
+      currentSender: { senderHandle: "+15550000001", source: "linq" },
+      style: { personality: { humor: 10 } },
+    });
+  });
+
+  it("rejects personal style reads and writes for group-email ingress", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      emailDeliveryContexts: [buildEmailDeliveryContext({})],
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({ action: "read_own_assistant_style" })).resolves.toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    await expect(groupTool.request({
+      action: "update_own_assistant_style",
+      style: { voice: "warm" },
+    })).resolves.toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("fails personal style access closed when the current group sender is ambiguous", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ directRecipientPhoneNumber: "+15550000001" }),
+        buildLinqDeliveryContext({ directRecipientPhoneNumber: "+15550000002" }),
+      ],
+    });
+
+    await groupTool.request({ action: "read_own_assistant_style" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_own_assistant_style" });
+  });
+
+  it("fails personal style access closed when sender contexts are direct or missing", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({ directRecipientPhoneNumber: "   " }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "update_own_assistant_style",
+      style: { personality: { detail: 8 } },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "update_own_assistant_style",
+      style: { personality: { detail: 8 } },
     });
   });
 

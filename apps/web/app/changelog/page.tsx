@@ -729,6 +729,14 @@ const VISUALS: Record<string, ReactNode> = {
       caption="every new trial, no card required"
     />
   ),
+  "pulse-trial-two-weeks": (
+    <StatBlock
+      label="Pulse Trial length"
+      before="10 days"
+      after="14 days"
+      caption="new trials only"
+    />
+  ),
   "device-sync-reconnect-context": (
     <PhoneMock
       channel="iMessage"

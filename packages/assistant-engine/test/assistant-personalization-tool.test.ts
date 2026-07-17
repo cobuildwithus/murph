@@ -64,7 +64,7 @@ describe('assistant personalization tool', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      currentAssistantPreferenceInputId: () =>
+      currentAssistantInputId: () =>
         'ain_11111111111111111111111111111111',
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
@@ -120,7 +120,7 @@ describe('assistant personalization tool', () => {
       fetchImpl: fetch,
       hostedToolContext: {
         computerToolsAvailable: false,
-        currentAssistantPreferenceInputId: () => null,
+        currentAssistantInputId: () => null,
         currentHostedDeliveryContext: () => null,
         currentHostedMailboxItemIds: () => [],
         personalizationTool,
@@ -157,6 +157,18 @@ describe('assistant personalization tool', () => {
       method: 'item/tool/call',
       params: {
         arguments: { action: 'update', model: 'unknown-model' },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })?.kind).toBe('invalid-personalization-arguments')
+
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update_personality',
+          personality: { humor: 8 },
+        },
         namespace: 'murph',
         tool: 'personalization',
       },

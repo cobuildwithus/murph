@@ -43,9 +43,6 @@ export function createAssistantNewsletterOutboxTool(input: {
   return {
     closeCapability,
     async request(request) {
-      if (request.action === 'read_stats') {
-        return await input.newsletterTool.request(request)
-      }
       if (request.action === 'prepare') {
         if (prepareAttempted || sendAttempted) {
           closeCapability()
@@ -55,8 +52,6 @@ export function createAssistantNewsletterOutboxTool(input: {
         const result = await input.newsletterTool.request({
           action: 'prepare',
           groupId: request.groupId,
-          includeAuthorizationProof: true,
-          includeAuthorizationSnapshot: true,
         })
         if (
           input.authority
@@ -158,6 +153,10 @@ export function createAssistantNewsletterOutboxTool(input: {
         })
       }
 
+      if (parentIntents.some(isRetryExhaustedTerminalIntent)) {
+        return newsletterRetryExhausted(prepared)
+      }
+
       await createAssistantOutboxIntent({
         channel: 'email',
         dedupeToken: [
@@ -220,6 +219,21 @@ function newsletterUnavailable(
   }
 }
 
+function newsletterRetryExhausted(
+  preparation: NewsletterPreparation,
+): HostedRuntimeNewsletterToolResponse {
+  return {
+    action: 'send',
+    result: {
+      failedRecipientCount: preparation.participantMemberIds.length,
+      participantCount: preparation.participantMemberIds.length,
+      sentRecipientCount: 0,
+      skippedNoEmailMemberIds: preparation.skippedNoEmailMemberIds,
+      status: 'partial_failure',
+    },
+  }
+}
+
 function resolveTerminalNewsletterResult(input: {
   preparation: NewsletterPreparation
   recipientIntentGroups: ReadonlyMap<string, readonly AssistantOutboxIntent[]>
@@ -233,6 +247,7 @@ function resolveTerminalNewsletterResult(input: {
     !intents.some((intent) => intent.status === 'sent')
     && intents.some((intent) =>
       intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+      || isRetryExhaustedTerminalIntent(intent)
       || (
         input.treatSafelyReplayableFailuresAsTerminal
         && isSafelyReplayableTerminalIntent(intent)
@@ -361,10 +376,17 @@ function isActiveOutboxIntent(intent: AssistantOutboxIntent): boolean {
 function isSafelyReplayableTerminalIntent(intent: AssistantOutboxIntent): boolean {
   return (intent.status === 'failed' || intent.status === 'abandoned')
     && intent.lastError?.code !== 'ASSISTANT_DELIVERY_AMBIGUOUS'
+    && !isRetryExhaustedTerminalIntent(intent)
 }
 
 function isNonReplayableRecipientIntent(intent: AssistantOutboxIntent): boolean {
   return isActiveOutboxIntent(intent)
     || intent.status === 'sent'
     || intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+    || isRetryExhaustedTerminalIntent(intent)
+}
+
+function isRetryExhaustedTerminalIntent(intent: AssistantOutboxIntent): boolean {
+  return (intent.status === 'failed' || intent.status === 'abandoned')
+    && intent.lastError?.code === 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED'
 }

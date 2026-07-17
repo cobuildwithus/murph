@@ -6,13 +6,16 @@ import {
   EXPERIMENT_PROGRESS_CARD_VERSION,
   experimentProgressCardSchema,
   type ExperimentProgressCardData,
+  type HealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/contracts";
 
+import { resolveBiomarkerChangeSentiment } from "./biomarker-change-sentiment.ts";
 import type {
   ExperimentAdherenceCalendarResult,
   ExperimentAdherenceCellStatus,
 } from "./experiment-adherence.ts";
 import { resolveExperimentAdherenceRollupTarget } from "./experiment-adherence.ts";
+import { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 import {
   collectExperimentAdherenceCalendar,
   summarizeExperimentProgress,
@@ -38,8 +41,14 @@ export interface ExperimentProgressCardConfounderInput {
   label: string;
 }
 
+export interface ExperimentProgressCardBiomarkerDirection {
+  biomarkerKey: string;
+  desiredDirection: HealthCommonsBiomarkerDesiredDirection;
+}
+
 export interface BuildExperimentProgressCardOptions {
   asOf?: string;
+  biomarkerDesiredDirections?: readonly ExperimentProgressCardBiomarkerDirection[];
   confounders?: readonly ExperimentProgressCardConfounderInput[];
   metricPoints?: readonly MetricPoint[];
 }
@@ -82,7 +91,11 @@ export function buildExperimentProgressCard(
     phase: buildCardPhase(runStart, windowEnd, asOf),
     sessions: buildCardSessions(progress.adherence),
     weeks: buildCardWeeks({ asOf, calendar, runStart, warnings, windowEnd, windows }),
-    movers: buildCardMovers(progress.signals, warnings),
+    movers: buildCardMovers(
+      progress.signals,
+      options.biomarkerDesiredDirections ?? [],
+      warnings,
+    ),
     confounders: clampCardConfounders(options.confounders ?? [], warnings),
   });
 
@@ -243,10 +256,20 @@ interface RankedMoverCandidate {
 
 function buildCardMovers(
   signals: readonly ExperimentMetricResult[],
+  biomarkerDesiredDirections: readonly ExperimentProgressCardBiomarkerDirection[],
   warnings: string[],
 ): ExperimentProgressCardData["movers"] {
   const candidates: RankedMoverCandidate[] = [];
+  const seenMetricIdentities = new Set<string>();
+  let duplicateMetricCount = 0;
   for (const signal of signals) {
+    const metricIdentity = resolveExperimentMetricIdentity(signal.biomarkerKey).metricKey;
+    if (seenMetricIdentities.has(metricIdentity)) {
+      duplicateMetricCount += 1;
+      continue;
+    }
+    seenMetricIdentities.add(metricIdentity);
+
     if (
       signal.completeness === "insufficient" ||
       signal.baselineMean === null ||
@@ -270,10 +293,15 @@ function buildCardMovers(
     });
   }
 
-  const skippedCount = signals.length - candidates.length;
+  const skippedCount = signals.length - candidates.length - duplicateMetricCount;
   if (skippedCount > 0) {
     warnings.push(
       `${skippedCount} metric(s) skipped as movers (missing baseline mean or insufficient data)`,
+    );
+  }
+  if (duplicateMetricCount > 0) {
+    warnings.push(
+      `${duplicateMetricCount} alias-equivalent metric(s) skipped as duplicate movers`,
     );
   }
 
@@ -286,11 +314,14 @@ function buildCardMovers(
 
   return ranked
     .slice(0, EXPERIMENT_PROGRESS_CARD_MAX_MOVERS)
-    .map((candidate) => buildCardMover(candidate, warnings));
+    .map((candidate) =>
+      buildCardMover(candidate, biomarkerDesiredDirections, warnings),
+    );
 }
 
 function buildCardMover(
   candidate: RankedMoverCandidate,
+  biomarkerDesiredDirections: readonly ExperimentProgressCardBiomarkerDirection[],
   warnings: string[],
 ): ExperimentProgressCardData["movers"][number] {
   const { signal } = candidate;
@@ -300,20 +331,47 @@ function buildCardMover(
     unit = null;
   }
 
+  const direction = candidate.deltaAbs > 0
+    ? "up"
+    : candidate.deltaAbs < 0
+      ? "down"
+      : "neutral";
+
   return {
     label: clampCardText(signal.label, 40, `mover label "${signal.label}"`, warnings),
     changePct: formatPercentMagnitude(candidate.normalizedMove),
     value: formatCompactNumber(candidate.interventionMean).slice(0, 16),
     unit,
     delta: formatSignedDelta(candidate.deltaAbs, unit),
-    direction: candidate.deltaAbs > 0 ? "up" : candidate.deltaAbs < 0 ? "down" : "neutral",
-    sentiment:
-      signal.movedAsExpected === true
-        ? "positive"
-        : signal.movedAsExpected === false
-          ? "negative"
-          : "neutral",
+    direction,
+    sentiment: resolveBiomarkerChangeSentiment(
+      direction,
+      signal.completeness === "good"
+        ? findBiomarkerDesiredDirection(
+            biomarkerDesiredDirections,
+            signal.biomarkerKey,
+          )
+        : null,
+    ),
   };
+}
+
+function findBiomarkerDesiredDirection(
+  entries: readonly ExperimentProgressCardBiomarkerDirection[],
+  biomarkerKey: string,
+): HealthCommonsBiomarkerDesiredDirection | null {
+  const metricIdentity = resolveExperimentMetricIdentity(biomarkerKey).metricKey;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (
+      entry &&
+      resolveExperimentMetricIdentity(entry.biomarkerKey).metricKey === metricIdentity
+    ) {
+      return entry.desiredDirection;
+    }
+  }
+
+  return null;
 }
 
 function clampCardConfounders(

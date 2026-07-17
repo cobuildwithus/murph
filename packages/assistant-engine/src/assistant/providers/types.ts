@@ -113,6 +113,7 @@ export interface AssistantProviderTurn {
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   onFinishWithoutReplyAccepted?: ((event: {
@@ -218,14 +219,14 @@ export interface AssistantProviderTurnExecutionResult {
   reactions?: readonly AssistantCurrentMessageReactionAction[] | null
   response: string
   /** Capability-free semantic response persisted into model-visible history. */
-  transcriptResponse?: string | null
+  transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in
   // completion order. Delivered ahead of `response` because Codex frontends
   // render every completed agent message.
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns `response` and `responseMedia`. */
-  responseDeliveryContextOrdinal?: number
+  responseDeliveryContextOrdinal: number
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
@@ -233,7 +234,7 @@ export interface AssistantProviderTurnExecutionResult {
 }
 
 export interface AssistantProviderResponseSegment {
-  deliveryContextOrdinal?: number
+  deliveryContextOrdinal: number
   media?: readonly AssistantResponseMedia[] | null
   response: string
 }

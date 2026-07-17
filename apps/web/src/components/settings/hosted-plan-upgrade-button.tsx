@@ -58,7 +58,7 @@ export function UpgradeToEdgeButton(props: {
       });
 
       if (response.status === "pending_payment") {
-        window.location.assign(response.billingPortalUrl);
+        window.location.assign(response.paymentUrl);
         return;
       }
 

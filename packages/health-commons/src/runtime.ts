@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
+  type HealthCommonsBiomarkerDesiredDirection,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
@@ -14,6 +15,10 @@ import {
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
 } from "@murphai/contracts";
+import {
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+} from "@murphai/health-metrics";
 import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
@@ -120,12 +125,6 @@ export interface LoadGeneratedHealthCommonsProtocolFamilyGraphOptions {
 
 export interface LoadGeneratedHealthCommonsWebArtifactOptions {
   generatedWebRoot?: string | URL;
-}
-
-export interface HealthCommonsAssistantProtocolIndexEntry {
-  category: string;
-  routeId: string;
-  title: string;
 }
 
 export interface HealthCommonsCompactProtocol {
@@ -549,17 +548,6 @@ export function getGeneratedHealthCommonsWebExperimentIndex(
   return cachedGeneratedWebExperimentIndex;
 }
 
-export function listGeneratedAssistantProtocolIndexEntries(
-  options: LoadGeneratedHealthCommonsProtocolIndexOptions = {},
-): HealthCommonsAssistantProtocolIndexEntry[] {
-  return getGeneratedHealthCommonsProtocolIndexReader(options).artifact.protocols
-    .map((protocol) => ({
-      category: formatProtocolIndexCategory(protocol),
-      routeId: protocol.routeId,
-      title: protocol.title,
-    }));
-}
-
 export function getGeneratedHealthCommonsWebBiomarkerIndex(
   options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
 ): HealthCommonsWebBiomarkerIndex {
@@ -569,6 +557,30 @@ export function getGeneratedHealthCommonsWebBiomarkerIndex(
 
   cachedGeneratedWebBiomarkerIndex ??= loadGeneratedHealthCommonsWebBiomarkerIndex();
   return cachedGeneratedWebBiomarkerIndex;
+}
+
+export function resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+  biomarkerKey: string,
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsBiomarkerDesiredDirection | null {
+  const canonicalBiomarkerKey = resolveCanonicalBiomarkerKey(biomarkerKey);
+  const entry = getGeneratedHealthCommonsWebBiomarkerIndex(options).biomarkers.find(
+    (biomarker) => biomarker.key === canonicalBiomarkerKey,
+  );
+  return entry?.desiredDirection ?? null;
+}
+
+function resolveCanonicalBiomarkerKey(biomarkerKey: string): string {
+  const normalized = biomarkerKey.trim().toLowerCase();
+  const slug = normalized.split(":").at(-1) ?? normalized;
+  const normalizedBiomarkerKey = normalized.startsWith("biomarker:")
+    ? normalized
+    : `biomarker:${slug}`;
+  return (
+    resolveMetricDefinitionForBiomarker(normalizedBiomarkerKey)?.biomarkerKey ??
+    resolveMetricDefinition(slug)?.biomarkerKey ??
+    normalizedBiomarkerKey
+  );
 }
 
 export function loadGeneratedHealthCommonsWebRouteBundle(input: {
@@ -1667,40 +1679,6 @@ function buildCompactProtocolSearchFields(
       weight: 4,
     },
   ];
-}
-
-function formatProtocolIndexCategory(protocol: HealthCommonsProtocolIndexEntry): string {
-  const categories = protocol.categories;
-
-  if (categories.includes("sleep") || categories.includes("circadian")) {
-    return "Sleep";
-  }
-
-  if (
-    categories.includes("exercise") ||
-    categories.includes("hiit") ||
-    categories.includes("vo2max")
-  ) {
-    return "Exercise";
-  }
-
-  if (
-    categories.includes("recovery") ||
-    categories.includes("dry-sauna") ||
-    categories.includes("passive-heat")
-  ) {
-    return "Recovery";
-  }
-
-  return formatCategory(categories[0] ?? protocol.entityType);
-}
-
-function formatCategory(value: string): string {
-  return value
-    .split(/[._/-]+/u)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function matchesProtocolCategories(

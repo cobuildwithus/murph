@@ -768,6 +768,8 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
+    expect(workflowEnvBindings.get("JUNCTION_TIMESERIES_RESOURCES")).toBeUndefined();
+    expect(workflow).not.toContain("JUNCTION_TIMESERIES_RESOURCES:");
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
       expect(renderWorkerSecretsStep).toContain(`${name}: \${{ secrets.${name} }}`);

@@ -4,6 +4,13 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  assistantPersonalitySettingIds,
+  isAssistantPersonalityScore,
+  isAssistantTonePreference,
+  isAssistantVoiceOptionId,
+  type AssistantPersonalitySettingId,
+} from "@murphai/contracts";
+import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
@@ -18,10 +25,20 @@ import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+} from "../contracts.ts";
+import {
+  parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
+  parseHostedExecutionAssistantAskOriginInputId,
+  parseHostedExecutionAssistantAskResult,
+} from "../assistant-ask-payload.ts";
+import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   HOSTED_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
@@ -69,6 +86,8 @@ import {
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeAssistantMilestone,
+  type HostedRuntimeAssistantAskControlRequest,
+  type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeLatencyTraceAssistantMilestoneEvent,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
@@ -121,8 +140,11 @@ import {
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupMemberSummary,
+  type HostedRuntimeGroupOwnAssistantStyleSnapshot,
+  type HostedRuntimeGroupOwnAssistantStyleUpdate,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -803,11 +825,156 @@ export function parseHostedRuntimeProductFeedbackRecordResponse(
   };
 }
 
+export function parseHostedRuntimeAssistantAskControlRequest(
+  value: unknown,
+): HostedRuntimeAssistantAskControlRequest {
+  const record = requireObject(value, "Hosted runtime assistant ask control request");
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant ask control request action",
+  );
+  const requestId = parseHostedRuntimeGroupAskBoundedText({
+    label: "Hosted runtime assistant ask control request requestId",
+    maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+    value: record.requestId,
+  });
+  if (action === "prepare") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "requestId"]),
+      "Hosted runtime assistant ask prepare control request",
+    );
+    return { action, requestId };
+  }
+  if (action === "complete") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "requestId", "result"]),
+      "Hosted runtime assistant ask complete control request",
+    );
+    return {
+      action,
+      requestId,
+      result: parseHostedExecutionAssistantAskResult(
+        record.result,
+        "Hosted runtime assistant ask result",
+      ),
+    };
+  }
+  throw new TypeError("Hosted runtime assistant ask control request action is invalid.");
+}
+
+export function parseHostedRuntimeAssistantAskControlResponse(
+  value: unknown,
+): HostedRuntimeAssistantAskControlResponse {
+  const record = requireObject(value, "Hosted runtime assistant ask control response");
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant ask control response action",
+  );
+  const status = requireString(
+    record.status,
+    "Hosted runtime assistant ask control response status",
+  );
+  if (action === "prepare" && status === "ready") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "question", "status", "targetLabel"]),
+      "Hosted runtime assistant ask prepare ready control response",
+    );
+    return {
+      action,
+      question: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime assistant ask prepare response question",
+        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        value: record.question,
+      }),
+      status,
+      targetLabel: record.targetLabel === null
+        ? null
+        : parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime assistant ask prepare response targetLabel",
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: record.targetLabel,
+          }),
+    };
+  }
+  if ((action === "prepare" || action === "complete") && status === "terminal") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status", "terminalReason"]),
+      "Hosted runtime assistant ask terminal control response",
+    );
+    const terminalReason = requireString(
+      record.terminalReason,
+      "Hosted runtime assistant ask terminalReason",
+    );
+    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+      throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
+    }
+    return { action, status, terminalReason };
+  }
+  if (
+    action === "complete"
+    && (status === "completed" || status === "already_completed")
+  ) {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status"]),
+      "Hosted runtime assistant ask complete control response",
+    );
+    return { action, status };
+  }
+  throw new TypeError("Hosted runtime assistant ask control response action/status is invalid.");
+}
+
 export function parseHostedRuntimeGroupToolRequest(
   value: unknown,
 ): HostedRuntimeGroupToolRequest {
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
+  if (action === "ask") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "groupLabel",
+        "originAssistantInputId",
+        "originSessionId",
+        "question",
+      ]),
+      "Hosted runtime group tool ask request",
+    );
+    return {
+      action,
+      ...(record.groupLabel === undefined
+        ? {}
+        : {
+            groupLabel: record.groupLabel === null
+              ? null
+              : parseHostedRuntimeGroupAskBoundedText({
+                  label: "Hosted runtime group tool ask request groupLabel",
+                  maxCodePoints:
+                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+                  value: record.groupLabel,
+                }),
+          }),
+      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.originAssistantInputId,
+        "Hosted runtime group tool ask request originAssistantInputId",
+      ),
+      originSessionId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request originSessionId",
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.originSessionId,
+      }),
+      question: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request question",
+        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        value: record.question,
+      }),
+    };
+  }
   if (action === "read_current" || action === "list_memberships") {
     assertAllowedObjectKeys(
       record,
@@ -959,7 +1126,104 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "read_own_assistant_style") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "currentSender"]),
+      "Hosted runtime group tool read_own_assistant_style request",
+    );
+    if (record.currentSender === undefined || record.currentSender === null) {
+      return { action };
+    }
+    return {
+      action,
+      currentSender: parseHostedRuntimeGroupToolCurrentSenderContext(
+        record.currentSender,
+        "Hosted runtime group tool read_own_assistant_style request currentSender",
+      ),
+    };
+  }
+  if (action === "update_own_assistant_style") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "currentSender", "style"]),
+      "Hosted runtime group tool update_own_assistant_style request",
+    );
+    return {
+      action,
+      ...(record.currentSender === undefined || record.currentSender === null
+        ? {}
+        : {
+            currentSender: parseHostedRuntimeGroupToolCurrentSenderContext(
+              record.currentSender,
+              "Hosted runtime group tool update_own_assistant_style request currentSender",
+            ),
+          }),
+      style: parseHostedRuntimeGroupOwnAssistantStyleUpdate(record.style),
+    };
+  }
   throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupOwnAssistantStyleUpdate(
+  value: unknown,
+): HostedRuntimeGroupOwnAssistantStyleUpdate {
+  const record = requireObject(
+    value,
+    "Hosted runtime group tool update_own_assistant_style style",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["personality", "tone", "voice"]),
+    "Hosted runtime group tool update_own_assistant_style style",
+  );
+  const personality = record.personality === undefined
+    ? undefined
+    : parseHostedRuntimeGroupOwnAssistantPersonalityUpdate(record.personality);
+  const tone = record.tone === undefined
+    ? undefined
+    : requireString(record.tone, "Hosted runtime group tool assistant style tone");
+  const voice = record.voice === undefined
+    ? undefined
+    : requireString(record.voice, "Hosted runtime group tool assistant style voice");
+  if (tone !== undefined && !isAssistantTonePreference(tone)) {
+    throw new TypeError("Hosted runtime group tool assistant style tone is not supported.");
+  }
+  if (voice !== undefined && !isAssistantVoiceOptionId(voice)) {
+    throw new TypeError("Hosted runtime group tool assistant style voice is not supported.");
+  }
+  if (personality === undefined && tone === undefined && voice === undefined) {
+    throw new TypeError("Hosted runtime group tool assistant style update must not be empty.");
+  }
+  return {
+    ...(personality === undefined ? {} : { personality }),
+    ...(tone === undefined ? {} : { tone }),
+    ...(voice === undefined ? {} : { voice }),
+  };
+}
+
+function parseHostedRuntimeGroupOwnAssistantPersonalityUpdate(
+  value: unknown,
+): Partial<Record<AssistantPersonalitySettingId, number | null>> {
+  const record = requireObject(value, "Hosted runtime group tool assistant style personality");
+  assertAllowedObjectKeys(
+    record,
+    new Set(assistantPersonalitySettingIds),
+    "Hosted runtime group tool assistant style personality",
+  );
+  const parsed: Partial<Record<AssistantPersonalitySettingId, number | null>> = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const score = record[settingId];
+    if (score === undefined) continue;
+    if (score !== null && !isAssistantPersonalityScore(score)) {
+      throw new TypeError(`Hosted runtime group tool assistant style ${settingId} is invalid.`);
+    }
+    parsed[settingId] = score;
+  }
+  if (Object.keys(parsed).length === 0) {
+    throw new TypeError("Hosted runtime group tool assistant style personality must not be empty.");
+  }
+  return parsed;
 }
 
 function parseHostedRuntimeGroupUpdateDisplayNameRequest(
@@ -1083,10 +1347,10 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
   return template;
 }
 
-function parseHostedRuntimeGroupToolSelfOptOutContext(
+function parseHostedRuntimeGroupToolCurrentSenderContext(
   value: unknown,
   label: string,
-): HostedRuntimeGroupToolSelfOptOutContext {
+): HostedRuntimeGroupToolCurrentSenderContext {
   const record = requireObject(value, label);
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
@@ -1097,6 +1361,13 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
     source,
   };
+}
+
+function parseHostedRuntimeGroupToolSelfOptOutContext(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupToolSelfOptOutContext {
+  return parseHostedRuntimeGroupToolCurrentSenderContext(value, label);
 }
 
 function parseHostedRuntimeGroupCreateJoinLinkRequest(
@@ -1165,6 +1436,97 @@ export function parseHostedRuntimeGroupToolResponse(
   const record = requireObject(value, "Hosted runtime group tool response");
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
+
+  if (action === "ask") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool ask response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool ask response status",
+    );
+    if (status === "accepted") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "targetLabel"]),
+        "Hosted runtime group tool ask accepted response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          targetLabel: result.targetLabel === null
+            ? null
+            : parseHostedRuntimeGroupAskBoundedText({
+                label: "Hosted runtime group tool ask response targetLabel",
+                maxCodePoints:
+                  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+                value: result.targetLabel,
+              }),
+        },
+      };
+    }
+    if (status === "clarification_required") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["groupLabels", "status"]),
+        "Hosted runtime group tool ask clarification response result",
+      );
+      const groupLabels = requireArray(
+        result.groupLabels,
+        "Hosted runtime group tool ask clarification groupLabels",
+      );
+      if (
+        groupLabels.length === 0
+        || groupLabels.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX
+      ) {
+        throw new TypeError(
+          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
+        );
+      }
+      return {
+        action,
+        result: {
+          groupLabels: groupLabels.map((groupLabel) =>
+            parseHostedRuntimeGroupAskBoundedText({
+              label: "Hosted runtime group tool ask clarification groupLabel",
+              maxCodePoints:
+                HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+              value: groupLabel,
+            })
+          ),
+          status,
+        },
+      };
+    }
+    if (status === "no_groups") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool ask no_groups response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool ask unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool ask unavailableReason",
+            maxCodePoints: 500,
+            value: result.unavailableReason,
+          }),
+        },
+      };
+    }
+  }
 
   if (action === "read_current") {
     const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
@@ -1477,7 +1839,136 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
+  if (action === "read_own_assistant_style") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool read_own_assistant_style response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_own_assistant_style response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "style"]),
+        "Hosted runtime group tool read_own_assistant_style ok response result",
+      );
+      return {
+        action,
+        result: { status, style: parseHostedRuntimeGroupOwnAssistantStyleSnapshot(result.style) },
+      };
+    }
+    if (status === "unavailable") {
+      return {
+        action,
+        result: parseHostedRuntimeGroupOwnAssistantStyleUnavailableResult(
+          result,
+          "read_own_assistant_style",
+        ),
+      };
+    }
+  }
+
+  if (action === "update_own_assistant_style") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool update_own_assistant_style response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool update_own_assistant_style response status",
+    );
+    if (status === "saved" || status === "unchanged") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "style"]),
+        "Hosted runtime group tool update_own_assistant_style accepted response result",
+      );
+      return {
+        action,
+        result: { status, style: parseHostedRuntimeGroupOwnAssistantStyleSnapshot(result.style) },
+      };
+    }
+    if (status === "unavailable") {
+      return {
+        action,
+        result: parseHostedRuntimeGroupOwnAssistantStyleUnavailableResult(
+          result,
+          "update_own_assistant_style",
+        ),
+      };
+    }
+  }
+
   throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+function parseHostedRuntimeGroupOwnAssistantStyleUnavailableResult(
+  result: Record<string, unknown>,
+  action: "read_own_assistant_style" | "update_own_assistant_style",
+): { status: "unavailable"; style: null; unavailableReason: string } {
+  assertAllowedObjectKeys(
+    result,
+    new Set(["status", "style", "unavailableReason"]),
+    `Hosted runtime group tool ${action} unavailable response result`,
+  );
+  if (result.style !== null) {
+    throw new TypeError(`Hosted runtime group tool ${action} unavailable style must be null.`);
+  }
+  return {
+    status: "unavailable",
+    style: null,
+    unavailableReason: requireString(
+      result.unavailableReason,
+      `Hosted runtime group tool ${action} unavailableReason`,
+    ),
+  };
+}
+
+function parseHostedRuntimeGroupOwnAssistantStyleSnapshot(
+  value: unknown,
+): HostedRuntimeGroupOwnAssistantStyleSnapshot {
+  const record = requireObject(value, "Hosted runtime group tool assistant style snapshot");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["personality", "tone", "voice"]),
+    "Hosted runtime group tool assistant style snapshot",
+  );
+  const tone = requireString(record.tone, "Hosted runtime group tool assistant style tone");
+  const voice = requireString(record.voice, "Hosted runtime group tool assistant style voice");
+  if (!isAssistantTonePreference(tone) || !isAssistantVoiceOptionId(voice)) {
+    throw new TypeError("Hosted runtime group tool assistant style snapshot is invalid.");
+  }
+  const personalityRecord = requireObject(
+    record.personality,
+    "Hosted runtime group tool assistant style personality snapshot",
+  );
+  assertAllowedObjectKeys(
+    personalityRecord,
+    new Set(assistantPersonalitySettingIds),
+    "Hosted runtime group tool assistant style personality snapshot",
+  );
+  const personality = Object.fromEntries(assistantPersonalitySettingIds.map((settingId) => {
+    const setting = requireObject(
+      personalityRecord[settingId],
+      `Hosted runtime group tool assistant style ${settingId} snapshot`,
+    );
+    assertAllowedObjectKeys(
+      setting,
+      new Set(["source", "value"]),
+      `Hosted runtime group tool assistant style ${settingId} snapshot`,
+    );
+    const source = requireString(setting.source, `Hosted runtime group tool ${settingId} source`);
+    if (source !== "custom" && source !== "default") {
+      throw new TypeError(`Hosted runtime group tool assistant style ${settingId} source is invalid.`);
+    }
+    if (!isAssistantPersonalityScore(setting.value)) {
+      throw new TypeError(`Hosted runtime group tool assistant style ${settingId} value is invalid.`);
+    }
+    return [settingId, { source, value: setting.value }];
+  })) as HostedRuntimeGroupOwnAssistantStyleSnapshot["personality"];
+  return { personality, tone, voice };
 }
 
 export function parseHostedRuntimeNewsletterToolRequest(
@@ -1488,46 +1979,8 @@ export function parseHostedRuntimeNewsletterToolRequest(
   if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
-      new Set([
-        "action",
-        "groupId",
-        "includeAuthorizationProof",
-        "includeAuthorizationSnapshot",
-      ]),
-      "Hosted runtime newsletter tool prepare request",
-    );
-    if (
-      record.includeAuthorizationProof !== undefined
-      && record.includeAuthorizationProof !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationProof must be true when present.",
-      );
-    }
-    if (
-      record.includeAuthorizationSnapshot !== undefined
-      && record.includeAuthorizationSnapshot !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationSnapshot must be true when present.",
-      );
-    }
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-      ...(record.includeAuthorizationProof === true
-        ? { includeAuthorizationProof: true as const }
-        : {}),
-      ...(record.includeAuthorizationSnapshot === true
-        ? { includeAuthorizationSnapshot: true as const }
-        : {}),
-    };
-  }
-  if (action === "read_stats") {
-    assertAllowedObjectKeys(
-      record,
       new Set(["action", "groupId"]),
-      "Hosted runtime newsletter tool read_stats request",
+      "Hosted runtime newsletter tool prepare request",
     );
     return {
       action,
@@ -1619,28 +2072,6 @@ export function parseHostedRuntimeNewsletterToolResponse(
         result,
         new Set(["status", "unavailableReason"]),
         "Hosted runtime newsletter tool prepare unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime newsletter tool unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
-  if (action === "read_stats") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool read_stats unavailable response result",
       );
       return {
         action,
@@ -1910,15 +2341,19 @@ function parseHostedRuntimeGroupMembershipSummaries(
     if (!Number.isInteger(memberCount) || memberCount < 0) {
       throw new TypeError(`${label} entry memberCount must be a non-negative integer.`);
     }
+    const membershipId = requireString(
+      record.membershipId,
+      `${label} entry membershipId`,
+    ).trim();
+    if (!membershipId) {
+      throw new TypeError(`${label} entry membershipId must not be blank.`);
+    }
     return {
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
-      membershipId: parseHostedRuntimeGroupMembershipId(
-        record.membershipId,
-        `${label} entry membershipId`,
-      ),
+      membershipId,
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -1927,21 +2362,6 @@ function parseHostedRuntimeGroupMembershipSummaries(
       role: requireString(record.role, `${label} entry role`),
     };
   });
-}
-
-function parseHostedRuntimeGroupMembershipId(
-  value: unknown,
-  label: string,
-): string | null {
-  const membershipId = readNullableString(value, label);
-  if (membershipId === null) {
-    return null;
-  }
-  const normalized = membershipId.trim();
-  if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
-  }
-  return normalized;
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<
@@ -4534,7 +4954,7 @@ function readNullableNonNegativeBigIntString(value: unknown, label: string): str
   return requireNonNegativeBigIntString(value, label);
 }
 
-function parseHostedRuntimeRedactedJson(
+export function parseHostedRuntimeRedactedJson(
   value: unknown,
   label: string,
   reservedKeys?: ReadonlySet<string>,

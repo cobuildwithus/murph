@@ -27,6 +27,10 @@ describe("hosted plan usage tool port", () => {
       planCode: "launch_monthly",
       planName: "Pulse",
       recommendedAction: null,
+      subscriptionActionQuote: {
+        action: "upgrade_edge",
+        label: "Upgrade to Edge ($20/month)",
+      },
       remainingPercent: 50,
       status: "active",
       usedPercent: 50,
@@ -44,7 +48,7 @@ describe("hosted plan usage tool port", () => {
       usedPercent: 50,
     });
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
-      body: {},
+      body: { includeSubscriptionActionQuote: true },
       boundUserId: "member_bound",
       description: "Hosted plan usage tool",
       fetchImpl,

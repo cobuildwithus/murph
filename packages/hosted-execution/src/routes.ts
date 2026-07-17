@@ -26,11 +26,16 @@ export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
+export const HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH =
+  "/api/internal/hosted-execution/subscription/tool";
 export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
   "/api/internal/hosted-execution/assistant-configuration/tool";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
+export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
+  "/api/internal/hosted-execution/assistant-asks/runtime";
+export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;
 export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
   "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =

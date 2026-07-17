@@ -65,6 +65,7 @@ export {
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
+  type AssistantInputCandidateByIdQuery,
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEvent,

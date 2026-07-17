@@ -55,7 +55,7 @@ If the moment is too lightweight for all six, capture only target behavior, tiny
 
 - Preserve autonomy. Murph supports the user's own reason; it does not pressure, guilt, shame, or manipulate.
 - Treat missed behavior as information about the loop, not as a character flaw.
-- Ask at most one high-leverage setup or repair question unless the user wants to unpack it.
+- Ask at most one high-leverage setup or repair question per reply.
 - Prefer one concrete default the user can edit over a menu of options.
 - Do not increase reminder frequency after non-response.
 - Do not repeat stale reminder copy.
@@ -91,6 +91,12 @@ Read only context that could materially change the loop:
 - current route and privacy context for support delivery
 
 Do not perform broad vault archaeology for a simple setup.
+
+When `murph-onboarding` returns to a parked desired outcome after the health
+foundation, follow that owner's exact bounded behavioral-fit sequence,
+question budget, early-stop rule, and persistence policy. Do not add or repeat
+a second motivation interview here. Use the practical lenses below only to
+interpret the user's answers and shape the collaborative first step.
 
 ### 2. Convert the outcome into a behavior
 
@@ -199,9 +205,11 @@ Automation instructions should include:
 - standard/tiny/fallback versions
 - anchor or likely action window
 - support style and privacy boundary
+- whether this occurrence is a cue-only reminder or an explicitly authorized accountability check-in
 - skip conditions
 - repair-after policy
 - review point
+- for an accountability check-in, the action window, completion evidence to inspect, expected data freshness, and complete/already-reported/unknown behavior
 - whether visual or voice support is welcome, what it should add, and any shared-channel permission
 
 Automation instructions should not include:
@@ -211,18 +219,82 @@ Automation instructions should not include:
 - sensitive details for shared channels
 - instructions to nag harder after non-response
 
-Prefer bounded support. Do not create open-ended nag loops unless the user explicitly asks.
+Prefer bounded support. Never create open-ended nag loops.
+
+## Opt-in accountability check-ins
+
+A reminder is a cue. An accountability check-in is a separate, later action
+whose job is to learn the outcome, not repeat the cue. Default to a simple
+reminder.
+
+Do not offer a check-in for every reminder. A request such as "remind me" or
+"remind me every other day" authorizes the cue only. A direct request to check
+back later authorizes that exact check-in. When the user asks more generally
+for accountability, describes a meaningful repeated commitment, or says the
+behavior has been hard to follow through on, Murph may offer one compact
+choice: just the reminder, or a later check-in too. Otherwise create the
+check-in only after a clear yes to that exact bounded offer.
+
+Once authorized, create each authorized action as a separate canonical
+automation during the interactive setup. Create both only when the user
+requested or accepted both; a check-in-only request does not authorize an
+extra cue. Scheduled turns can skip or send their own occurrence; they do not
+create or mutate future automations. For recurring support, add a review point
+or bounded trial by default, and let the user stop the check-in without losing
+an independently authorized cue.
+
+Every accountability check-in must reconcile current completion evidence
+before sending:
+
+1. Read the latest relevant conversation for a completion report, correction,
+   cancellation, reschedule, or changed plan.
+2. Read only the canonical logs, sessions, and connected data that could prove
+   this occurrence. Match the behavior and action window using event time in
+   the user's timezone; an ingestion or sync timestamp does not prove when the
+   behavior happened.
+3. Check source freshness and expected sync delay. Unavailable, delayed, stale,
+   or missing data is `unknown`, not `missed`.
+
+A plan, reminder, automation record, statement of intent, or unrelated recent
+activity is not completion evidence.
+
+Classify the current occurrence before deciding:
+
+- **Complete:** an explicit user report or matching reliable record proves the
+  action happened. Return `skip`; do not ask the user to confirm it again.
+- **Already reported:** the user said they missed, moved, cancelled, or changed
+  the action. Return `skip`; do not ask whether it happened or piggyback a
+  repair onto this check-in.
+- **Unknown:** no reliable evidence resolves the outcome. Ask one neutral,
+  easy-to-answer question. Never state or imply that the user failed because a
+  log, reply, or wearable event is absent.
+
+One authorization permits one check-in per occurrence. Silence after that
+check-in does not authorize another same-occurrence follow-up. If repeated
+unknown outcomes make the support noisy, use the normal review/repair policy
+instead of adding messages.
+
+Playful wording is allowed only when it fits the chosen support style. Tease
+the situation, never the user's honesty, character, competence, effort, body,
+or symptoms. Do not claim Murph caught the user ignoring or dismissing a
+message.
 
 ## Notification decision policy
 
-When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`. If sending, choose whether the message should be a normal cue or a repair question/proposal.
+When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`. If sending, choose whether the message should be a normal cue, an explicitly authorized accountability check-in, or a repair question/proposal.
 
-Send when:
+Send a normal cue when:
 - the behavior is still relevant
-- the user has not already done it
+- current evidence does not show the behavior is already complete
 - the moment is still actionable
 - the support loop is not already failing
 - the message can be short and grounded
+
+Send an accountability check-in when:
+- the user explicitly authorized it
+- the relevant action window has ended
+- the completion reconciliation above leaves this occurrence `unknown`
+- one short outcome question is still useful and within the support plan
 
 Send a repair question/proposal when:
 - the same support has been ignored twice
@@ -238,6 +310,7 @@ Repair shape:
 
 Skip when:
 - the user already did it
+- the outcome was already reported
 - the plan is inactive or stale
 - the user declined support
 - the support window passed
@@ -376,7 +449,7 @@ Before scheduling recurring experiment support, include in setup answers or auto
 - repair-after policy
 - review point
 
-For first-session prep, teach the user what to do once. For later planned-session support, keep messages short and use this skill's normal-cue/repair-message/skip policy.
+For first-session prep, teach the user what to do once. For later planned-session support, keep messages short and use this skill's normal-cue/accountability-check-in/repair-message/skip policy.
 
 Do not duplicate protocol details in this skill. Do not create a parallel experiment system.
 

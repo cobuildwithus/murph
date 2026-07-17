@@ -24,12 +24,14 @@ import type {
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedSubscriptionTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
+import type { AssistantConversationScope } from './conversation-policy.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -42,6 +44,12 @@ export interface AssistantHostedToolRequestKeyScope {
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
   recipientKey: string | null
+}
+
+export interface AssistantHostedUserActionScope
+  extends AssistantHostedToolRequestKeyScope {
+  conversationScope: AssistantConversationScope
+  originSessionId: string
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -69,20 +77,24 @@ export interface AssistantHostedToolContext {
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
+  beforeToolExecution?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
-  currentAssistantPreferenceInputId?(): string | null
+  currentAssistantInputId?(): string | null
+  claimSubscriptionAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
-  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
+  currentUserActionScope?(): AssistantHostedUserActionScope | null
+  currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -102,10 +114,14 @@ export function createAssistantHostedToolContext(input: {
   newsletterTool?: AssistantHostedNewsletterTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  subscriptionTool?: AssistantHostedSubscriptionTool | null
   computerToolsAvailable?: boolean
-  getAssistantPreferenceInputId?: () => string | null
+  beforeToolExecution?: () => Promise<void>
+  getAssistantInputId?: () => string | null
+  getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
+  getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   newsletterOutbox?: {
     turnId: string
@@ -144,6 +160,16 @@ export function createAssistantHostedToolContext(input: {
       })
     : null
   const newsletterTool = newsletterOutboxTool ?? input.newsletterTool ?? null
+  const readCurrentUserActionAssistantInputId = () => {
+    const currentAssistantInputId = input.getAssistantInputId?.() ?? null
+    const userActionAcceptedInputIds =
+      input.getUserActionAcceptedInputIds?.() ?? []
+    return currentAssistantInputId !== null &&
+      userActionAcceptedInputIds.at(-1) === currentAssistantInputId
+      ? currentAssistantInputId
+      : null
+  }
+  let subscriptionActionClaimed = false
 
   return {
     actionApprovalPort: input.actionApprovalPort ?? null,
@@ -154,10 +180,24 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool,
     personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
+    subscriptionTool: input.subscriptionTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
+    ...(input.beforeToolExecution
+      ? { beforeToolExecution: input.beforeToolExecution }
+      : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantPreferenceInputId: () =>
-      input.getAssistantPreferenceInputId?.() ?? null,
+    currentAssistantInputId: () => input.getAssistantInputId?.() ?? null,
+    claimSubscriptionAssistantInputId: () => {
+      if (subscriptionActionClaimed) {
+        return null
+      }
+      const assistantInputId = readCurrentUserActionAssistantInputId()
+      if (assistantInputId === null) {
+        return null
+      }
+      subscriptionActionClaimed = true
+      return assistantInputId
+    },
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {
@@ -198,12 +238,21 @@ export function createAssistantHostedToolContext(input: {
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
-    currentPhoneCallToolRequestKeyScope: () => {
+    currentUserActionScope: () => {
       const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
-      return acceptedInputIds.length > 0
-        ? buildRequestKeyScope(acceptedInputIds)
-        : null
+      if (acceptedInputIds.length === 0) {
+        return null
+      }
+      const deliveryContext = readDeliveryContext()
+      return {
+        ...buildRequestKeyScope(acceptedInputIds),
+        conversationScope:
+          input.getConversationScope?.() ?? 'unverified-external',
+        originSessionId: deliveryContext.session.sessionId,
+      }
     },
+    currentProductFeedbackAcceptedInputIds: () =>
+      input.getProductFeedbackAcceptedInputIds?.() ?? [],
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

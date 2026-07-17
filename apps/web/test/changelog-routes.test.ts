@@ -35,8 +35,9 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(10);
     expect(items.map((item) => item.publishedOn)).toEqual([
+      "2026-07-15",
       "2026-07-15",
       "2026-07-15",
       "2026-07-15",
@@ -53,6 +54,7 @@ describe("changelog routes", () => {
         "reaction-first-group-permissions",
         "exercise-library-250-more-visual-guides",
         "fresh-messages-stay-foreground",
+        "pulse-trial-two-weeks",
         "billing-settings-handoff",
         "plan-usage-percentage",
         "personal-group-awareness",

@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildHostedExecutionAssistantAskRequestedWake,
+} from "@murphai/hosted-execution";
+import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
@@ -10,8 +13,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
+  claimHostedMailboxConversationSubscriptionAction,
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
@@ -22,10 +27,12 @@ import {
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLiveItemById,
   readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxWakeByItemId,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
@@ -153,6 +160,25 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
 });
 
 describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
+  it("projects the preference sequence from neutral live conversation input authority", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ causalSeq: 7n }]);
+    const prisma = {
+      hostedMailboxItem: { findMany },
+    } as never;
+    const input = {
+      assistantInputId: "ain_valid",
+      memberId: "member_mailbox_1",
+      prisma,
+    };
+
+    await expect(
+      readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input),
+    ).resolves.toEqual({ causalSeq: "7" });
+    await expect(
+      readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input),
+    ).resolves.toBe("7");
+  });
+
   it("returns only a live canonical conversation sequence owned by the member", async () => {
     const now = new Date();
     const rows = [
@@ -318,6 +344,198 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         take: 2,
       }),
     );
+  });
+});
+
+describe("claimHostedMailboxConversationSubscriptionAction", () => {
+  it("atomically claims the live member-bound conversation input", async () => {
+    const findMany = vi.fn().mockResolvedValue([{
+      id: "mailbox_claim_1",
+      subscriptionActionClaim: null,
+    }]);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findFirst = vi.fn();
+    const prisma = {
+      hostedMailboxItem: { findFirst, findMany, updateMany },
+    } as never;
+
+    await expect(claimHostedMailboxConversationSubscriptionAction({
+      action: "start_pulse_now",
+      assistantInputId: "ain_valid",
+      memberId: "member_mailbox_1",
+      prisma,
+    })).resolves.toBe("claimed");
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: {
+        id: true,
+        subscriptionActionClaim: true,
+      },
+      take: 2,
+      where: expectLiveHostedMailboxWhere({
+        assistantInputLookupKey: {
+          in: createHostedAssistantInputLookupKeyReadCandidates("ain_valid"),
+        },
+        causalSeq: { not: null },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      }),
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        subscriptionActionClaim: "start_pulse_now",
+      },
+      where: expectLiveHostedMailboxWhere({
+        assistantInputLookupKey: {
+          in: createHostedAssistantInputLookupKeyReadCandidates("ain_valid"),
+        },
+        causalSeq: { not: null },
+        id: "mailbox_claim_1",
+        kind: "conversation.message",
+        lane: "conversation",
+        subscriptionActionClaim: null,
+        userId: "member_mailbox_1",
+      }),
+    });
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["start_pulse_now", "replayed"],
+    ["upgrade_edge", "conflict"],
+  ] as const)(
+    "classifies an existing %s claim as %s for a start-Pulse replay",
+    async (existingClaim, expectedResult) => {
+      const updateMany = vi.fn();
+      const findFirst = vi.fn();
+      const prisma = {
+        hostedMailboxItem: {
+          findFirst,
+          findMany: vi.fn().mockResolvedValue([{
+            id: "mailbox_claim_1",
+            subscriptionActionClaim: existingClaim,
+          }]),
+          updateMany,
+        },
+      } as never;
+
+      await expect(claimHostedMailboxConversationSubscriptionAction({
+        action: "start_pulse_now",
+        assistantInputId: "ain_valid",
+        memberId: "member_mailbox_1",
+        prisma,
+      })).resolves.toBe(expectedResult);
+
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(findFirst).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["start_pulse_now", "replayed"],
+    ["upgrade_edge", "conflict"],
+    [null, null],
+  ] as const)(
+    "classifies a lost claim race followed by %s as %s",
+    async (racedClaim, expectedResult) => {
+      const findFirst = vi.fn().mockResolvedValue(
+        racedClaim === null
+          ? null
+          : { subscriptionActionClaim: racedClaim },
+      );
+      const prisma = {
+        hostedMailboxItem: {
+          findFirst,
+          findMany: vi.fn().mockResolvedValue([{
+            id: "mailbox_claim_1",
+            subscriptionActionClaim: null,
+          }]),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      } as never;
+
+      await expect(claimHostedMailboxConversationSubscriptionAction({
+        action: "start_pulse_now",
+        assistantInputId: "ain_valid",
+        memberId: "member_mailbox_1",
+        prisma,
+      })).resolves.toBe(expectedResult);
+
+      expect(findFirst).toHaveBeenCalledWith({
+        select: {
+          subscriptionActionClaim: true,
+        },
+        where: expectLiveHostedMailboxWhere({
+          assistantInputLookupKey: {
+            in: createHostedAssistantInputLookupKeyReadCandidates("ain_valid"),
+          },
+          causalSeq: { not: null },
+          id: "mailbox_claim_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          userId: "member_mailbox_1",
+        }),
+      });
+    },
+  );
+
+  it("allows only one of two concurrent different actions to claim an input", async () => {
+    type TestSubscriptionAction = "start_pulse_now" | "upgrade_edge";
+    type ClaimUpdateArgs = {
+      data: { subscriptionActionClaim: TestSubscriptionAction };
+    };
+
+    let currentClaim: TestSubscriptionAction | null = null;
+    let readCount = 0;
+    let releaseReads!: () => void;
+    const bothReadsStarted = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    const findMany = vi.fn(async () => {
+      const observedClaim = currentClaim;
+      readCount += 1;
+      if (readCount === 2) {
+        releaseReads();
+      }
+      await bothReadsStarted;
+      return [{
+        id: "mailbox_claim_1",
+        subscriptionActionClaim: observedClaim,
+      }];
+    });
+    const updateMany = vi.fn(async (args: ClaimUpdateArgs) => {
+      if (currentClaim !== null) {
+        return { count: 0 };
+      }
+      currentClaim = args.data.subscriptionActionClaim;
+      return { count: 1 };
+    });
+    const findFirst = vi.fn(async () => ({
+      subscriptionActionClaim: currentClaim,
+    }));
+    const prisma = {
+      hostedMailboxItem: { findFirst, findMany, updateMany },
+    } as never;
+
+    const results = await Promise.all([
+      claimHostedMailboxConversationSubscriptionAction({
+        action: "start_pulse_now",
+        assistantInputId: "ain_valid",
+        memberId: "member_mailbox_1",
+        prisma,
+      }),
+      claimHostedMailboxConversationSubscriptionAction({
+        action: "upgrade_edge",
+        assistantInputId: "ain_valid",
+        memberId: "member_mailbox_1",
+        prisma,
+      }),
+    ]);
+
+    expect(new Set(results)).toEqual(new Set(["claimed", "conflict"]));
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -766,6 +984,73 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("uses an explicit request identity and expiry without changing ordinary appends", async () => {
+    let insertedRow: HostedMailboxItemRow | null = null;
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        insertedRow = buildHostedMailboxItemRow(args.data);
+        return insertedRow;
+      }),
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => insertedRow),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    const itemId = `aask_req_${"a".repeat(64)}`;
+    const expiresAt = new Date(FIXED_NOW.getTime() + 10 * 60 * 1_000).toISOString();
+    const envelope = buildHostedExecutionAssistantAskRequestedWake({
+      ask: {
+        expiresAt,
+        originAssistantInputId: `ain_${"b".repeat(32)}`,
+        originSessionId: "session_private",
+        question: "What is today's workout?",
+        target: {
+          kind: "joined_group",
+          membershipId: "membership-one",
+          requestedLabel: null,
+        },
+      },
+      eventId: itemId,
+      memberId: "member-group-runtime",
+      occurredAt: FIXED_NOW.toISOString(),
+    });
+
+    await expect(appendHostedMailboxEnvelopeWithIdentityTx({
+      envelope,
+      expiresAt,
+      itemId,
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        expiresAt,
+        id: itemId,
+      },
+    });
+
+    expect(hostedMailboxItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        expiresAt: new Date(expiresAt),
+        id: itemId,
+      }),
+    });
+    await expect(readHostedMailboxWakeByItemId({
+      availableAt: FIXED_NOW,
+      mailboxItemId: itemId,
+      prisma: tx,
+    })).resolves.toEqual(envelope);
+    await expect(appendHostedMailboxEnvelopeWithIdentityTx({
+      envelope,
+      expiresAt,
+      itemId: `${itemId}_different`,
+      tx,
+    })).rejects.toThrow(
+      "Hosted mailbox item identity must equal the envelope event id.",
+    );
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
   it("serializes post-append reconciliation before reading the mailbox claim", async () => {
     const findUnique = vi.fn<HostedMailboxFindUnique>(async () => null);
     const tx = createHostedMailboxTx({

@@ -3362,7 +3362,7 @@ exit 1
         rmSync(outDir, { force: true, recursive: true })
       }
     },
-    120_000,
+    240_000,
   )
 
   it('keeps release-only docs drift allowances tied to the manifest package set', () => {

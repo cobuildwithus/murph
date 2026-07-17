@@ -241,6 +241,9 @@ type RuntimeUsageRecordPort = NonNullable<
 type RuntimeAssistantConfigurationToolPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantConfigurationToolPort"]
 >;
+type RuntimeSubscriptionToolPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["subscriptionToolPort"]
+>;
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
@@ -748,23 +751,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("exposes hosted personalization through the native dynamic-tool context", async () => {
+  it("exposes current-input authority with hosted personalization", async () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
-      resolvePreferenceCausalSeq: vi.fn(),
     };
-    const currentAssistantPreferenceInputId = () =>
+    const currentAssistantInputId = () =>
       "ain_33333333333333333333333333333333";
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      currentAssistantPreferenceInputId,
+      currentAssistantInputId,
       runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
     }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
-          currentAssistantPreferenceInputId,
+          currentAssistantInputId,
           personalizationTool: assistantPersonalizationToolPort,
         }),
       },
@@ -774,7 +776,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
-            currentAssistantPreferenceInputId,
+            currentAssistantInputId,
             personalizationTool: assistantPersonalizationToolPort,
           }),
         }),
@@ -858,6 +860,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         hosted: expect.objectContaining({
           assistantConfigurationTool: assistantConfigurationToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("passes the hosted subscription port into assistant execution", async () => {
+    const subscriptionToolPort: RuntimeSubscriptionToolPort = {
+      request: vi.fn(),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeSubscriptionToolPort: subscriptionToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          subscriptionTool: subscriptionToolPort,
         }),
       },
       expect.any(Object),
@@ -12692,8 +12713,8 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
-  currentAssistantPreferenceInputId?:
-    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPreferenceInputId"];
+  currentAssistantInputId?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
@@ -12729,6 +12750,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantPersonalizationToolPort"]
   >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
+  runtimeSubscriptionToolPort?: RuntimeSubscriptionToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   vaultRoot?: string;
@@ -12740,8 +12762,7 @@ function createPhaseInput(input: {
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
-    currentAssistantPreferenceInputId:
-      input.currentAssistantPreferenceInputId,
+    currentAssistantInputId: input.currentAssistantInputId,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
@@ -12866,6 +12887,9 @@ function createPhaseInput(input: {
               assistantConfigurationToolPort:
                 input.runtimeAssistantConfigurationToolPort,
             }
+          : {}),
+        ...(input.runtimeSubscriptionToolPort
+          ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
         ...(input.runtimeLatencyTraceRequests

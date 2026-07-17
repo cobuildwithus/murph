@@ -480,8 +480,11 @@ model HostedMember {
   assistantVoice                 String?                         @map("assistant_voice")
   assistantVoiceCausalSeq        BigInt?                         @map("assistant_voice_causal_seq")
   assistantHumor                 Int?                            @map("assistant_humor")
+  assistantHumorCausalSeq        BigInt?                         @map("assistant_humor_causal_seq")
   assistantPush                  Int?                            @map("assistant_push")
+  assistantPushCausalSeq         BigInt?                         @map("assistant_push_causal_seq")
   assistantDetail                Int?                            @map("assistant_detail")
+  assistantDetailCausalSeq       BigInt?                         @map("assistant_detail_causal_seq")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
@@ -848,6 +851,7 @@ model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
   assistantInputLookupKey String?               @map("assistant_input_lookup_key")
+  subscriptionActionClaim String?               @map("subscription_action_claim")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
   laneSeq                 BigInt                @map("lane_seq")
@@ -1597,7 +1601,6 @@ model HostedAiUsagePeriod {
   limitUsdMicros    BigInt       @map("limit_usd_micros")
   spentUsdMicros    BigInt       @default(0) @map("spent_usd_micros")
   blockedAt         DateTime?    @map("blocked_at")
-  limitNoticeSentAt DateTime?    @map("limit_notice_sent_at")
   lastUsageAt       DateTime?    @map("last_usage_at")
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
@@ -1606,7 +1609,6 @@ model HostedAiUsagePeriod {
   @@id([memberId, periodStart])
   @@index([memberId, periodEnd])
   @@index([blockedAt])
-  @@index([limitNoticeSentAt])
   @@index([periodEnd])
   @@map("hosted_ai_usage_period")
 }

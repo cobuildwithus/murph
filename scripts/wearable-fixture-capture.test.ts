@@ -178,13 +178,12 @@ describe("checkCaptureRequestHost", () => {
 });
 
 describe("buildCaptureDeviceSyncEnv", () => {
-  it("pins the local capture run to all wearable targets and allowed Junction resources", () => {
+  it("pins the local capture run to wearable targets and reports allowed Junction resources", () => {
     const result = buildCaptureDeviceSyncEnv({
       env: {
         DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "http://existing.local",
         JUNCTION_PROVIDER_FILTER: "oura",
         JUNCTION_SUMMARY_RESOURCES: "sleep",
-        JUNCTION_TIMESERIES_RESOURCES: "hrv",
       },
       origin: "http://127.0.0.1:8799",
     });
@@ -203,7 +202,6 @@ describe("buildCaptureDeviceSyncEnv", () => {
       ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     ]);
     expect(result.env.JUNCTION_SUMMARY_RESOURCES).toBe(result.captureConfig.summaryResources.join(","));
-    expect(result.env.JUNCTION_TIMESERIES_RESOURCES).toBe(result.captureConfig.timeseriesResources.join(","));
   });
 });
 

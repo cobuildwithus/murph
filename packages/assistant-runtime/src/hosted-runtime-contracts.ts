@@ -42,6 +42,7 @@ export type {
   HostedRuntimePlatform,
   HostedRuntimePhoneCallPort,
   HostedRuntimePlanUsageToolPort,
+  HostedRuntimeSubscriptionToolPort,
   HostedRuntimeProviderFileResponse,
   HostedRuntimeProviderTargetKind,
   HostedRuntimeTelegramChatActionRequest,

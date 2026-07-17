@@ -56,8 +56,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
     'assistantDetail Int? @map("assistant_detail")',
+    'assistantDetailCausalSeq BigInt? @map("assistant_detail_causal_seq")',
     'assistantHumor Int? @map("assistant_humor")',
+    'assistantHumorCausalSeq BigInt? @map("assistant_humor_causal_seq")',
     'assistantPush Int? @map("assistant_push")',
+    'assistantPushCausalSeq BigInt? @map("assistant_push_causal_seq")',
     'assistantTone String? @map("assistant_tone")',
     'assistantToneCausalSeq BigInt? @map("assistant_tone_causal_seq")',
     'assistantVoice String? @map("assistant_voice")',
@@ -607,6 +610,27 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAssistantPersonalityProjectionWatermarkMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715190000_hosted_assistant_personality_projection_watermarks/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMailboxSubscriptionActionClaimMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715230000_hosted_mailbox_subscription_action_claim/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLinqHomeParticipantIdentityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260711180000_hosted_linq_home_participant_identity/migration.sql",
@@ -812,8 +836,16 @@ describe("hosted Prisma baseline migration", () => {
       "20260714130000_hosted_mailbox_assistant_input_lookup",
       "20260715120000_delete_orphaned_linq_invite_deliveries",
       "20260715150000_hosted_family_pending_member_plan",
+      "20260715190000_hosted_assistant_personality_projection_watermarks",
+      "20260715230000_hosted_mailbox_subscription_action_claim",
       "migration_lock.toml",
     ]);
+    expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
+      'ALTER TABLE "hosted_mailbox_item"',
+    );
+    expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
+      'ADD COLUMN "subscription_action_claim" TEXT',
+    );
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
       'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
     );
@@ -909,7 +941,26 @@ describe("hosted Prisma baseline migration", () => {
       expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
         `"assistant_${setting}" NOT BETWEEN 0 AND 10`,
       );
+      expect(hostedAssistantPersonalityProjectionWatermarkMigrationSql).toContain(
+        `ADD COLUMN "assistant_${setting}_causal_seq" BIGINT`,
+      );
+      expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+        `"assistant_${setting}_causal_seq" = GREATEST(`,
+      );
+      expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+        `COALESCE(member."assistant_${setting}_causal_seq", 0)`,
+      );
     }
+    expect(hostedAssistantPersonalityProjectionWatermarkMigrationSql).not.toContain("UPDATE");
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      'FROM "hosted_mailbox_lane_counter" AS causal_counter',
+    );
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      'COALESCE(causal_counter."next_seq" - 1, 0)',
+    );
+    expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
+      "causal_counter.\"lane\" = 'causal'",
+    );
     expect(hostedMemberAssistantPersonalityContractMigrationSql).toContain(
       "IF EXISTS",
     );

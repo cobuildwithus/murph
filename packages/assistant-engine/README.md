@@ -54,6 +54,37 @@ abort cleanup, malformed output, off-turn output, process failure, or idle
 explicit shutdown stops or poisons the warm process before a later turn can
 reuse it.
 
+## Read-only Assistant Ask
+
+`executeReadOnlyAssistantAsk`, exported from
+`@murphai/assistant-engine/assistant-ask`, is the one deliberate exception to
+the warm single-process path. It starts a separate one-shot Codex App Server
+child for a target-owned Assistant Ask, so its provider latency, failure, and
+interruption domain cannot block or poison the resident foreground process. The
+trusted caller supplies the authorized target workspace root plus one untrusted
+question; the executor owns no membership, routing, mailbox, retry, or delivery
+state and returns only one schema-checked bounded answer.
+
+The child reuses the trusted hosted Codex home for minimum provider auth and
+configuration, but starts from a fresh empty working directory and removes that
+directory after the exact child exits. It uses process lifetime `one-shot`; its
+`thread/start` request sets `permissions = "murph-group-read"`, exact
+`runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
+legacy `sandbox`. The pinned App Server must attest the effective profile,
+roots, working directory, empty instruction sources, and approval policy before
+the turn starts. The profile permits read-only access to the exact target roots
+while denying `.runtime/**`, `.codex/**`, environment files, writes, other
+workspaces, and tool network. Model-run shell commands inherit no provider
+credential or hosted secret. The child receives no dynamic tools, CLI bridge,
+delivery route, MCP, web search, memory, plugin, app, or multi-agent authority.
+
+The runtime may keep one such child beside foreground work. It owns the exact
+process handle and must interrupt, await with bounded grace, terminate only
+that proven-owned child if needed, and prove exit before its workspace can be
+checkpointed, replaced, or released. Further asks remain pending in the
+existing hosted mailbox; assistant-engine does not add a process pool or
+scheduler.
+
 ## Dynamic tool contracts
 
 Route planning is the single owner of the dynamic tool contract. It resolves the
@@ -76,4 +107,23 @@ Do not add per-tool availability booleans to provider or app-server inputs.
 hosted plan-usage service exists, accepts no arguments, and returns only the
 web-authorized read projection. Assistant policy limits it to explicit member
 questions or one trusted manual private check; it is not an onboarding or
-recurring usage watcher.
+recurring usage watcher. A thresholded `recommendedAction` is a suggestion;
+the separate `subscriptionActionQuote` is current terms for an explicit request
+and is neither a recommendation nor consent. Start-now and Edge actions require
+a matching current quote before exact confirmation. Usage-saving model options
+use plain language rather than internal model codenames, “should we part ways?”
+is only an optional trial off-ramp, and an active trial already set to continue
+needs no unsolicited explanation.
+
+`murph.subscription` is also private and default-off. It is advertised only
+when a hosted subscription service exists and the current private turn has
+eligible accepted member input. Assistant policy requires one explicit,
+unambiguous current-turn choice before calling it. The model supplies only the
+bounded action; assistant-engine injects the current accepted input id before
+the host call and consumes the ephemeral subscription capability on its first
+use. Web separately claims the first action on the existing accepted-input
+mailbox row, so restart or replay cannot use that input for a different action.
+An exact action retry may continue; a conflicting action requires new eligible
+member input. That binding proves current authority, not the meaning of the
+message. The result exposes a Stripe-hosted URL only when payment is required,
+and the tool never exposes a general billing or Stripe client.

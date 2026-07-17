@@ -1,12 +1,14 @@
-# Hosted Plan Usage Visibility
+# Hosted Plan Usage And Subscription Actions
 
 Last verified: 2026-07-15
 
 ## Goal
 
-Give a member one honest view of their current included AI usage without
-creating another billing system. Settings and Murph's read-only plan-usage tool
-must consume the same web-owned projection.
+Give a member one honest view of their current included AI usage, then let a
+private Murph conversation carry out the smallest billing action the member
+clearly chooses. Settings and Murph's read-only plan-usage tool consume the same
+web-owned projection. Stripe and the existing web billing services remain the
+only billing system.
 
 ## Ownership
 
@@ -19,13 +21,30 @@ usage period, or change billing state.
 Cloudflare carries that contract over the existing signed `web-control.worker`
 boundary through `planUsageToolPort`. Assistant runtime passes the semantic
 port into assistant-engine, which advertises `murph.plan_usage` only when the
-port exists. Billing truth and mutation authority stay in `apps/web`.
+port exists. The original empty request remains valid and keeps the original
+response shape. The current runtime opts into a nullable
+`subscriptionActionQuote`; Web omits that field for callers that do not request
+it. Billing truth and mutation authority stay in `apps/web`.
+
+`@murphai/hosted-execution/subscription` owns the separate strict action
+contract. Cloudflare carries it through `subscriptionToolPort` over the same
+signed callback boundary. Assistant policy requires an explicit, unambiguous
+current-turn choice before invocation. The runtime attaches the current
+eligible accepted private input id, and the model selects only a bounded
+action. Web binds that action to the callback member and live input before it
+atomically claims the first subscription action on the existing mailbox row
+and revalidates the current plan and action eligibility. The exact same action
+may replay, but a different action for that input fails closed. This binding
+proves current authority and provenance; it does not semantically interpret
+the member's text. The runtime never receives Stripe credentials or derives
+billing state. The nullable claim is operational metadata with the mailbox
+row's existing retention, not a new billing owner or action table.
 
 ## Status Semantics
 
 The available projection keeps these access states distinct:
 
-| Access | Display plan | Period | Possible action |
+| Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
 | Direct trial | Pulse Trial | Trial | Start Pulse |
 | Direct paid Pulse | Pulse | Monthly | Upgrade to Edge |
@@ -59,14 +78,26 @@ the projection omits it.
 
 ## Actions
 
-`apps/web` may return an action only when the period is exhausted, the forecast
-projects exhaustion, or at least 80% is used. Trial access may return **Start
-Pulse**. Paid Pulse may return **Upgrade to Edge**. Edge and Family do not get
-an action from this surface.
+`apps/web` may return `recommendedAction` only when the period is exhausted,
+the forecast projects exhaustion, or at least 80% is used. Trial access may
+recommend **Start Pulse now** with the current monthly price. Paid Pulse may
+recommend **Upgrade to Edge** with the current monthly price. Both labels are
+derived from the web billing-plan catalog. Edge and Family do not get a
+recommendation from this surface.
 
-Clients render only the returned action descriptor and still use the existing
-server-authorized billing route. The tool cannot start checkout, upgrade a
-plan, or claim that a billing change happened.
+An opted-in `subscriptionActionQuote` answers a different question: what are
+the current terms for the exact start-now or upgrade choice the member asked
+about? Web resolves that quote even below the usage threshold and without a
+Settings URL. The quote contains the bounded action and current catalog label,
+not a URL. It may be null when the action is ineligible. It is neither a
+recommendation nor consent, and it does not weaken the explicit-confirmation
+rule.
+
+Settings and Home render only `recommendedAction` and still use the existing
+server-authorized billing route. Assistant policy uses a matching
+`subscriptionActionQuote` only to disclose current terms before seeking an
+explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
+upgrade a plan, or claim that a billing change happened.
 
 An explicit request in a private conversation to manage billing, or to perform
 a Family account change outside `murph.family_plan`'s status, checkout, and
@@ -76,6 +107,67 @@ after `murph.plan_usage` returns `active`, `exhausted`, or
 billing action or recommendation. The assistant must say that no billing or
 Family change happened. It must not provide the private management handoff for
 `group_not_supported` or `hosted_access_inactive`, or offer it proactively.
+
+### Private Conversation Actions
+
+`murph.subscription` is a narrow mutation surface for three choices:
+
+- keep an active Pulse trial scheduled to continue at its natural end;
+- end the trial and start Pulse now; or
+- upgrade an active paid Pulse plan to Edge.
+
+These are member-directed actions, not extensions of the read projection's
+`recommendedAction`. A recommendation is never consent. Before an immediate
+start or upgrade, the assistant needs a `subscriptionActionQuote` whose action
+matches the proposed choice, states the returned label, and then gets explicit
+confirmation. When that quote is absent, the assistant does not guess and uses
+the neutral Settings handoff. Continuing a currently active trial does not
+charge now and does not require a start-now quote or recommendation.
+
+The tool is available only in a private personal conversation with current
+eligible accepted member input. Assistant policy permits a call only after the
+member makes one exact choice in that turn. The runtime attaches the input id
+itself; the model cannot provide one, and the first call consumes that turn's
+ephemeral subscription capability. Web also claims the requested action on the
+existing live conversation mailbox row with one atomic compare-and-set before
+billing. An exact same-action retry is allowed; a conflicting action requires
+new eligible member input. The durable claim survives process restart and is
+removed with the mailbox row under existing retention. The backend does not
+claim to prove the meaning of the message. Family and group contexts are
+outside this surface.
+
+Continuing an active trial with a configured default payment method is already
+represented by the existing Stripe subscription. Nothing is needed right now:
+the choice requires no charge, subscription update, payment link, or
+unsolicited explanation. A configured method does not guarantee that a future
+renewal will succeed. If the payment method is missing, web may return a Stripe
+Customer Portal payment-method-update URL. A paused-trial state race remains
+recoverable through the existing Pulse activation service rather than gaining a
+second resume path. Assistant policy treats an already ended or
+conversion-pending trial as a start-now choice, discloses the current terms,
+and asks for explicit confirmation instead of presenting it as non-charging
+continuation.
+
+Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
+Edge uses the existing plan-change service. Pulse activation keeps its existing
+Stripe-hosted invoice or Customer Portal handoff when payment is required. A
+pending Edge change returns the existing Customer Portal handoff and does not
+retrieve or validate a separate invoice URL. The assistant sends a returned
+Stripe URL only after the member's explicit choice and only when the
+authoritative result says payment is required. Completed, pending, and
+no-action results do not carry a URL.
+
+The assistant may discuss plan and usage options before a choice, but the first
+assistant-initiated commercial mention is one short, reply-oriented question
+with no link. A trial off-ramp may naturally ask “should we part ways?”; this is
+optional language, not a fixed script or pressure tactic. If a trusted manual
+check finds no action is needed and the member did not ask about billing, the
+assistant says nothing. Existing automated recovery notices may keep their
+current account links; they are not authority to invoke `murph.subscription`.
+
+When discussing a usage-saving model, call it “a less capable model that uses
+less of your included usage.” Do not assume the member knows Luna, Terra, or
+Sol; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 
@@ -98,12 +190,14 @@ safe route and forbids lookup, claim, and send; an object permits only that
 exact target. Later counted usage may retry an uncompleted period claim, while
 the delivery owner permits at most one completed notice.
 
-Every billing action in Settings, Home, or `murph.plan_usage` comes only from
-the projection's `recommendedAction`. A notice code, plan label, incomplete
-billing row, or legacy state must not independently imply **Start Pulse** or
-**Upgrade to Edge**. When the projection returns no action, the surface remains
-informational. The explicit Settings handoff above remains navigation rather
-than an action and must not be presented as a plan recommendation.
+Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
+only from the projection's thresholded `recommendedAction`. A notice code, plan
+label, incomplete billing row, or legacy state must not independently imply
+**Start Pulse** or **Upgrade to Edge**. A requested
+`subscriptionActionQuote` may disclose current terms below that threshold, but
+it must not be presented as a recommendation. The explicit Settings handoff
+above remains navigation rather than an action and must not be presented as a
+plan recommendation.
 
 ## Assistant Policy
 
@@ -111,7 +205,8 @@ than an action and must not be presented as a plan recommendation.
 runtime callback, not from the model. Murph may call it only when a member asks
 about their current plan or included usage, explicitly asks to manage billing
 or an unsupported Family account change, or when a trusted runtime instruction
-requests one manual private check.
+requests one manual private check. A trusted check authorizes the read only; it
+does not authorize a billing action or a proactive payment link.
 
 Do not turn this read into onboarding automation, a recurring threshold
 watcher, or a group-chat money prompt. Do not name a group payer, invent a
@@ -129,17 +224,24 @@ fallback is valid for an accepted group conversation.
 
 ## Non-Goals
 
-This feature adds no schema, second usage ledger, Stripe read, persisted
-forecast, queue, cron, automatic nudge, group balance, top-up flow, or billing
-mutation tool.
+This feature adds one nullable action claim to the existing mailbox row. It
+adds no new table, second usage ledger, persisted forecast, queue, cron,
+trial-ending webhook, automatic nudge, group balance, top-up flow, automatic
+model switch, custom checkout page, App Clip, or mini app. It does not add a
+general Stripe API tool: the action contract exposes only the three current
+web-owned billing operations above, and every payment handoff is Stripe-hosted.
 
 ## Deployment
 
-Deploy web before Cloudflare/runtime. Old runtimes simply omit the tool while
-Settings can use the new web projection. A new runtime deployed against old
-web would advertise a callback that the old web does not serve. This order also
-preserves the newer originating-notice-target compatibility contract described
-in `hosted-plan-downgrades.md`.
+Apply the additive mailbox-claim migration, then deploy Web, then deploy the
+Cloudflare runtime. An old runtime continues to send the empty plan-usage
+request, and new Web omits `subscriptionActionQuote`, preserving the old strict
+response shape. The new runtime opts into the quote field only after Web can
+parse that request and serve the durable action claim. A new runtime against
+old Web is unsupported because old Web rejects the opt-in request and does not
+provide the durable claim. Roll back Cloudflare before Web; the nullable column
+may remain. This order also preserves the originating-notice-target
+compatibility contract described in `hosted-plan-downgrades.md`.
 
 Existing billing mechanics remain in:
 

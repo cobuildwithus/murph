@@ -273,7 +273,6 @@ type UsagePeriodRecord = {
   billingPlanCode: "launch_monthly" | "launch_edge_monthly";
   blockedAt: Date | null;
   lastUsageAt: Date | null;
-  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   memberId: string;
   periodEnd: Date;
@@ -306,7 +305,6 @@ type UsageResetPrismaFixture = {
     findUnique: MockedFunction;
     findUniqueOrThrow: MockedFunction;
     update: MockedFunction;
-    updateMany: MockedFunction;
   };
   hostedAccountGroupMembership: {
     count: MockedFunction;
@@ -502,7 +500,6 @@ describe("hosted Linq usage reset e2e", () => {
       timeoutMs: 1_500,
     });
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: null,
       spentUsdMicros: monthlyLimit,
     });
 
@@ -583,78 +580,6 @@ describe("hosted Linq usage reset e2e", () => {
       timeoutMs: 1_500,
     });
   });
-
-  it("preserves exhausted-period messages when the usage-limit notice was already claimed", async () => {
-    const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
-    const staleClaimedAt = new Date("2026-04-29T16:30:00.000Z");
-    const usage = createUsageResetPrismaFixture({
-      initialPeriod: {
-        limitNoticeSentAt: staleClaimedAt,
-        limitUsdMicros: monthlyLimit,
-        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-        periodStart: new Date("2026-04-01T00:00:00.000Z"),
-        spentUsdMicros: monthlyLimit,
-      },
-    });
-
-    const response = await handleHostedOnboardingLinqWebhook({
-      prisma: usage.prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        createdAt: "2026-04-30T12:00:00.000Z",
-        data: {
-          id: "msg_after_notice_claimed",
-          parts: [
-            {
-              type: "text",
-              value: "Are you there?",
-            },
-          ],
-          sent_at: "2026-04-30T12:00:00.000Z",
-        },
-        eventId: "evt_after_notice_claimed",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(usage.prisma.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
-    expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: staleClaimedAt,
-      spentUsdMicros: monthlyLimit,
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        eventId: "evt_after_notice_claimed",
-        kind: "conversation.message",
-        message: expect.objectContaining({
-          channel: "linq",
-          linqMessage: expect.objectContaining({
-            chatId: CHAT_ID,
-            messageId: "msg_after_notice_claimed",
-            threadIsDirect: true,
-          }),
-        }),
-        userId: MEMBER_ID,
-      }),
-      tx: usage.prisma,
-    });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: MEMBER_ID,
-      mailboxItemId: "mailbox_evt_after_notice_claimed",
-    });
-    expectHostedLinqReadReceiptSent();
-    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: CHAT_ID,
-      timeoutMs: 1_500,
-    });
-  });
 });
 
 async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebhookTestInput) {
@@ -663,7 +588,6 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 
 function createUsageResetPrismaFixture(input: {
   initialPeriod: {
-    limitNoticeSentAt?: Date | null;
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
@@ -794,48 +718,6 @@ function createUsageResetPrismaFixture(input: {
         periods.set(key, updated);
         return selectUsagePeriod(updated, periodInput.select);
       }),
-      updateMany: vi.fn(async (periodInput: {
-        data: {
-          limitNoticeSentAt?: Date | null;
-        };
-        where: {
-          blockedAt?: {
-            not: null;
-          };
-          limitNoticeSentAt?: Date | null;
-          memberId: string;
-          periodStart: Date;
-        };
-      }) => {
-        const period = periods.get(periodKey(periodInput.where.periodStart));
-        if (
-          !period ||
-          period.memberId !== periodInput.where.memberId
-        ) {
-          return { count: 0 };
-        }
-        if (periodInput.where.blockedAt?.not === null && period.blockedAt === null) {
-          return { count: 0 };
-        }
-        if ("limitNoticeSentAt" in periodInput.where) {
-          const expected = periodInput.where.limitNoticeSentAt;
-          if (expected === null && period.limitNoticeSentAt !== null) {
-            return { count: 0 };
-          }
-          if (
-            expected instanceof Date
-            && period.limitNoticeSentAt?.getTime() !== expected.getTime()
-          ) {
-            return { count: 0 };
-          }
-        }
-
-        if ("limitNoticeSentAt" in periodInput.data) {
-          period.limitNoticeSentAt = periodInput.data.limitNoticeSentAt ?? null;
-        }
-        periods.set(periodKey(period.periodStart), period);
-        return { count: 1 };
-      }),
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
@@ -930,7 +812,6 @@ type UsagePeriodWhere = {
 
 function buildUsagePeriodRecord(input: {
   billingPlanCode?: "launch_monthly" | "launch_edge_monthly";
-  limitNoticeSentAt?: Date | null;
   limitUsdMicros: bigint;
   memberId?: string;
   periodEnd: Date;
@@ -945,7 +826,6 @@ function buildUsagePeriodRecord(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(input.periodStart.getTime() + 60_000)
       : null,
-    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros,
     memberId: input.memberId ?? MEMBER_ID,
     periodEnd: input.periodEnd,
@@ -969,9 +849,6 @@ function selectUsagePeriod(
   }
   if (select.blockedAt) {
     selected.blockedAt = period.blockedAt;
-  }
-  if (select.limitNoticeSentAt) {
-    selected.limitNoticeSentAt = period.limitNoticeSentAt;
   }
   if (select.lastUsageAt) {
     selected.lastUsageAt = period.lastUsageAt;

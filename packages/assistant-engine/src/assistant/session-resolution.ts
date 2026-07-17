@@ -26,8 +26,12 @@ import type {
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import {
+  readAssistantCodexResume,
   serializeAssistantConversationForPersistence,
 } from './conversation-persistence.js'
+import {
+  bindAssistantResumeStateToThreadCompatibility,
+} from './codex-resume-binding.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildResolveAssistantSessionInput(
@@ -302,14 +306,27 @@ export function applyEffectiveTargetToResolvedSession(
     return resolved
   }
 
-  const projectedSession = normalizeAssistantConversationSnapshot({
+  const currentRoute = resolveAssistantExecutionPlan({
+    defaults: null,
+    sessionTarget: resolved.session.target,
+  }).codexRoute
+  const currentResumeState = bindAssistantResumeStateToThreadCompatibility({
+    resumeState: readAssistantCodexResume(resolved.session),
+    route: currentRoute,
+  })
+  const currentSession = normalizeAssistantConversationSnapshot({
     ...resolved.session,
+    codexResume: currentResumeState,
+    resumeState: currentResumeState,
+  })
+  const projectedSession = normalizeAssistantConversationSnapshot({
+    ...currentSession,
     codexTarget: target,
     target,
   })
   const continuityChanged =
     projectedSession.providerOptions.continuityFingerprint !==
-    resolved.session.providerOptions.continuityFingerprint
+    currentSession.providerOptions.continuityFingerprint
 
   if (!continuityChanged) {
     return {

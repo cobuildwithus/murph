@@ -119,6 +119,24 @@ describe("hosted plan usage tool route", () => {
     ).toEqual(expect.any(Function));
   });
 
+  it("opts the hosted assistant into current subscription action terms", async () => {
+    const { POST } = await import(
+      "../app/api/internal/hosted-execution/plan-usage/tool/route"
+    );
+    const body = JSON.stringify({ includeSubscriptionActionQuote: true });
+    const response = await POST(await createSignedRequest({
+      body,
+      memberId: "member_bound",
+      nonce: "fedcba9876543210fedcba9876543210",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_bound",
+    });
+  });
+
   it("rejects model-supplied fields instead of accepting a member id", async () => {
     const { POST } = await import(
       "../app/api/internal/hosted-execution/plan-usage/tool/route"

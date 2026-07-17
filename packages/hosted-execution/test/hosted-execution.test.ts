@@ -467,6 +467,8 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "member.preferences.updated",
       "assistant.notification.requested",
+      "assistant.ask.requested",
+      "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
       "group-newsletter.email-needed",
@@ -506,6 +508,7 @@ describe("hosted execution coverage gaps", () => {
       "./assistant-capabilities",
       "./assistant-identifiers",
       "./assistant-model",
+      "./assistant-permissions",
       "./assistant-personalization",
       "./assistant-usage",
       "./auth",
@@ -530,6 +533,7 @@ describe("hosted execution coverage gaps", () => {
       "./routes",
       "./runtime-control",
       "./side-effects",
+      "./subscription",
       "./temporal-env",
       "./vault-share",
       "./vault-share-store-node",
@@ -557,6 +561,8 @@ describe("hosted execution coverage gaps", () => {
     const legacyDashboardReplicaCompatibilityModule =
       await import("@murphai/hosted-execution/dashboard-replica");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
+    const subscriptionModule =
+      await import("@murphai/hosted-execution/subscription") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
       string,
       unknown
@@ -609,6 +615,8 @@ describe("hosted execution coverage gaps", () => {
     expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
     expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(false);
+    expect(subscriptionModule.parseHostedSubscriptionControlRequest).toBeTypeOf("function");
+    expect(subscriptionModule.parseHostedRuntimeSubscriptionToolResponse).toBeTypeOf("function");
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
@@ -627,6 +635,8 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
+      "HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES",
+      "HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH",
       "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
@@ -647,6 +657,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
+      "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
@@ -664,6 +675,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/subscription/tool",
     );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
       "/api/internal/hosted-runtime/vault-share/active-kinds",

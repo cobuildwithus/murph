@@ -28,6 +28,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeAssistantAskControlRequest,
+  HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -76,6 +78,10 @@ import type {
 import type {
   HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
+import type {
+  HostedRuntimeSubscriptionControlRequest,
+  HostedRuntimeSubscriptionToolResponse,
+} from "@murphai/hosted-execution/subscription";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
@@ -140,6 +146,13 @@ export interface HostedRuntimeAssistantConfigurationToolPort {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
   ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
+}
+
+export interface HostedRuntimeAssistantAskPort {
+  request(
+    request: HostedRuntimeAssistantAskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeAssistantAskControlResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -248,7 +261,7 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -410,10 +423,13 @@ export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
 }
 
+export interface HostedRuntimeSubscriptionToolPort {
+  request(
+    request: HostedRuntimeSubscriptionControlRequest,
+  ): Promise<HostedRuntimeSubscriptionToolResponse>;
+}
+
 export interface HostedRuntimeAssistantPersonalizationToolPort {
-  resolvePreferenceCausalSeq(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>;
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -566,6 +582,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantAskPort?: HostedRuntimeAssistantAskPort | null;
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
@@ -586,6 +603,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;

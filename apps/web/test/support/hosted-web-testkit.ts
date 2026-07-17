@@ -184,7 +184,6 @@ interface HostedUsageLimitForTestPrismaClient {
 
 export interface HostedAiUsagePeriodForTest {
   blockedAt: Date | null;
-  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   memberId: string;
   periodEnd: Date;
@@ -888,7 +887,6 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
         billingPlanCode: "launch_monthly",
         blockedAt: input.periodStart,
         lastUsageAt: input.periodStart,
-        limitNoticeSentAt: null,
         limitUsdMicros,
         memberId: input.memberId,
         periodEnd: input.periodEnd,
@@ -899,7 +897,6 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
         billingPlanCode: "launch_monthly",
         blockedAt: input.periodStart,
         lastUsageAt: input.periodStart,
-        limitNoticeSentAt: null,
         limitUsdMicros,
         periodEnd: input.periodEnd,
         spentUsdMicros: limitUsdMicros,

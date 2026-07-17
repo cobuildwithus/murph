@@ -29,6 +29,8 @@ import {
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
+  readHostedRuntimeSafeErrorText,
+  redactHostedRuntimeDiagnosticText,
 } from "@murphai/hosted-execution";
 import {
   type HostedExecutionSnapshotRef,
@@ -59,10 +61,6 @@ import {
 import type {
   HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
 } from "./platform.ts";
-import {
-  readHostedRuntimeSafeErrorText,
-  redactHostedRuntimeDiagnosticText,
-} from "./diagnostic-redaction.ts";
 import {
   classifyHostedWorkspaceSnapshotFailure,
   readHostedBundleArchiveValidationErrorDetails,
