@@ -537,11 +537,14 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // static-closure ratchet for the July 16-17 mainline (Epic clinical
     // records beta, onboarding clarifiers), which again landed without moving
     // this lock; the lock is reconciled to that already-shipped ratchet here.
+    // The source ratchet subsequently advanced 12,638B to 7,139,911B for the
+    // V1 posture comment, delegation hints, subagent usage evidence, and hosted
+    // onboarding concurrency. Reconcile this lock to that shipped baseline.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_127_273 + 96_000 + 250_000,
+      staticClosureBytes: 7_139_911 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });
