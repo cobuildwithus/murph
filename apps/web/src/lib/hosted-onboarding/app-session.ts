@@ -12,7 +12,7 @@ import {
 } from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
-  readHostedMemberCoreState,
+  hostedMemberCoreStateSelect,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
@@ -206,8 +206,16 @@ async function resolveHostedAppSessionFromToken(value: string | null | undefined
   const hmacKey = readHostedAppSessionHmacKey();
   const prisma = getPrisma();
   const now = new Date();
+  // One round trip for session plus member: this resolver runs on every
+  // authenticated request, so the member core state rides the session read
+  // instead of costing a second sequential query.
   const record = await prisma.hostedWebSession.findUnique({
     where: { id: token.sessionId },
+    include: {
+      member: {
+        select: hostedMemberCoreStateSelect,
+      },
+    },
   });
 
   if (
@@ -219,18 +227,9 @@ async function resolveHostedAppSessionFromToken(value: string | null | undefined
     return null;
   }
 
-  const member = await readHostedMemberCoreState({
-    memberId: record.memberId,
-    prisma,
-  });
-
-  if (!member) {
-    return null;
-  }
-
   return {
     expiresAt: record.expiresAt,
-    member,
+    member: record.member,
     privyUserId: record.privyUserId,
     sessionId: record.id,
   };

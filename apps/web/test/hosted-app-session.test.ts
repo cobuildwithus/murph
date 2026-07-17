@@ -4,17 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
-  readHostedMemberCoreState: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 interface StoredHostedWebSession {
@@ -62,6 +57,11 @@ interface HostedWebSessionFindManyInput {
 }
 
 interface HostedWebSessionFindUniqueInput {
+  include?: {
+    member?: {
+      select: Record<string, true>;
+    };
+  };
   where: {
     id: string;
   };
@@ -89,7 +89,6 @@ describe("hosted app session", () => {
     vi.clearAllMocks();
     harness = createPrismaHarness();
     mocks.getPrisma.mockReturnValue(harness.prismaClient);
-    mocks.readHostedMemberCoreState.mockResolvedValue(createHostedMember());
     process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_APP_SESSION_HMAC_KEY;
   });
 
@@ -204,16 +203,49 @@ describe("hosted app session", () => {
 
     const session = await getHostedAppSessionFromRequest(requestWithCookie(result.cookie));
 
-    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: harness.prismaClient,
-    });
     expect(session).toEqual({
       expiresAt: new Date("2099-01-31T00:00:00.000Z"),
       member: createHostedMember(),
       privyUserId: "did:privy:user_123",
       sessionId: result.sessionId,
     });
+    expect(harness.rootHostedWebSession.findUnique).toHaveBeenCalledTimes(1);
+    expect(harness.rootHostedWebSession.findUnique).toHaveBeenCalledWith({
+      where: { id: result.sessionId },
+      include: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+  });
+
+  it("returns the member bound to the session row rather than a fixed member", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const result = await issueHostedAppSession({
+      memberId: "member_456",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_456",
+    });
+
+    const session = await getHostedAppSessionFromRequest(requestWithCookie(result.cookie));
+
+    expect(session).toEqual({
+      expiresAt: new Date("2099-01-31T00:00:00.000Z"),
+      member: createHostedMember("member_456"),
+      privyUserId: "did:privy:user_456",
+      sessionId: result.sessionId,
+    });
+    expect(session?.member.id).toBe(findStoredSession(result.sessionId).memberId);
   });
 
   it("rejects a caller-computable forged database row before member access", async () => {
@@ -234,7 +266,6 @@ describe("hosted app session", () => {
     await expect(
       getHostedAppSessionFromRequest(requestWithToken(token)),
     ).resolves.toBeNull();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects mutation of every claim bound by the session authenticator", async () => {
@@ -267,7 +298,6 @@ describe("hosted app session", () => {
       ).resolves.toBeNull();
     }
 
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects a valid tag copied to a different session id with the same bearer", async () => {
@@ -297,7 +327,6 @@ describe("hosted app session", () => {
     await expect(
       getHostedAppSessionFromRequest(requestWithToken(copiedToken)),
     ).resolves.toBeNull();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects a substituted bearer for an otherwise valid session id", async () => {
@@ -317,7 +346,6 @@ describe("hosted app session", () => {
     await expect(
       getHostedAppSessionFromRequest(requestWithToken(substitutedToken)),
     ).resolves.toBeNull();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects legacy, malformed, and non-canonical session cookies before database access", async () => {
@@ -344,7 +372,6 @@ describe("hosted app session", () => {
     }
 
     expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized bearer before database access", async () => {
@@ -359,7 +386,6 @@ describe("hosted app session", () => {
     ).resolves.toBeNull();
 
     expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects authentically issued expired or revoked sessions without reading member state", async () => {
@@ -374,7 +400,6 @@ describe("hosted app session", () => {
     });
 
     await expect(getHostedAppSessionFromRequest(requestWithCookie(expired.cookie))).resolves.toBeNull();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
 
     const revoked = await issueHostedAppSession({
       memberId: "member_123",
@@ -385,7 +410,6 @@ describe("hosted app session", () => {
     revokedRecord.revokedAt = new Date("2099-02-02T00:00:00.000Z");
 
     await expect(getHostedAppSessionFromRequest(requestWithCookie(revoked.cookie))).resolves.toBeNull();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("revokes only the authenticated session id and tag pair and returns a clearing cookie", async () => {
@@ -511,7 +535,6 @@ describe("hosted app session", () => {
 
     expect(harness.rootHostedWebSession.findUnique).not.toHaveBeenCalled();
     expect(harness.rootHostedWebSession.updateMany).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 });
 
@@ -567,9 +590,15 @@ function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
     }
     return { count };
   });
-  const findUnique = vi.fn(async (input: HostedWebSessionFindUniqueInput): Promise<StoredHostedWebSession | null> =>
-    records.find((record) => record.id === input.where.id) ?? null,
-  );
+  const findUnique = vi.fn(async (input: HostedWebSessionFindUniqueInput) => {
+    const record = records.find((candidate) => candidate.id === input.where.id) ?? null;
+    if (!record) {
+      return null;
+    }
+    return input.include?.member
+      ? { ...record, member: createHostedMember(record.memberId) }
+      : record;
+  });
   const updateMany = vi.fn(async (input: HostedWebSessionUpdateManyInput): Promise<{ count: number }> => {
     let count = 0;
     for (const record of records) {
@@ -712,11 +741,11 @@ function readSetCookieToken(cookie: string): string {
   return decodeURIComponent(firstPart.slice(separatorIndex + 1));
 }
 
-function createHostedMember() {
+function createHostedMember(id = "member_123") {
   return {
     billingStatus: "active",
     createdAt: new Date("2026-05-02T00:00:00.000Z"),
-    id: "member_123",
+    id,
     suspendedAt: null,
     updatedAt: new Date("2026-05-02T00:00:00.000Z"),
   };
