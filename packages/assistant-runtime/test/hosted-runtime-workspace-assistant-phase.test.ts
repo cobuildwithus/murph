@@ -237,6 +237,9 @@ import type {
 type RuntimeDeviceSyncPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
 >;
+type RuntimeClinicalRecordsPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["clinicalRecordsPort"]
+>;
 type RuntimeUsageRecordPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
@@ -761,7 +764,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
       codexCommand: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "openai",
       oss: false,
       profile: null,
@@ -1116,7 +1119,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: "https://linq.example.test",
     };
@@ -3914,7 +3917,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       await upsertAutomation({
         assistantTargetOverride: {
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           reasoningEffort: "medium",
         },
         continuityPolicy: "preserve",
@@ -3993,7 +3996,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
         assistantTargetOverride: {
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           reasoningEffort: "medium",
         },
         route: expect.objectContaining({
@@ -5720,6 +5723,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
     expect(JSON.stringify(await deviceTool.request({ action: "list_accounts" })))
       .not.toContain("not-for-assistant");
+  });
+
+  it("exposes the existing Clinical Records link method to the hosted assistant context", async () => {
+    const createConnectLink = vi.fn<
+      NonNullable<RuntimeClinicalRecordsPort["createConnectLink"]>
+    >(async () => ({
+      connectUrl:
+        `https://app.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
+      expiresAt: "2026-07-16T12:15:00.000Z",
+      ok: true,
+    }));
+    const clinicalRecordsPort: RuntimeClinicalRecordsPort = {
+      createConnectLink,
+      async fetchPage() {
+        throw new Error("Clinical Records link test should not fetch a page.");
+      },
+      async readRun() {
+        throw new Error("Clinical Records link test should not read a run.");
+      },
+      async recordOutcome() {
+        throw new Error("Clinical Records link test should not record an outcome.");
+      },
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeClinicalRecordsPort: clinicalRecordsPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    const controller = new AbortController();
+    await expect(
+      hydratedContext?.hosted?.clinicalRecordsConnectLinkTool?.createConnectLink({
+        signal: controller.signal,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(createConnectLink).toHaveBeenCalledWith({ signal: controller.signal });
   });
 
   it("injects active hosted device connection status as dynamic context for due cron lanes", async () => {
@@ -13613,6 +13652,7 @@ function createPhaseInput(input: {
   prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
+  runtimeClinicalRecordsPort?: RuntimeClinicalRecordsPort;
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeGroupToolPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
@@ -13754,6 +13794,9 @@ function createPhaseInput(input: {
             }
           : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
+        ...(input.runtimeClinicalRecordsPort
+          ? { clinicalRecordsPort: input.runtimeClinicalRecordsPort }
+          : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),
@@ -13847,10 +13890,10 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.5",
+    requestedModel: "gpt-5.6-terra",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.5",
+    servedModel: "gpt-5.6-terra",
     sessionId: "asst_direct_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -13932,7 +13975,7 @@ async function seedDirectLinqAssistantInputRoute(input: {
       approvalPolicy: "never",
       codexCommand: null,
       codexHome: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       oss: false,
       profile: null,

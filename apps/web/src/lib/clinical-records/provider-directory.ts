@@ -1,8 +1,8 @@
-import { CLINICAL_FHIR_RESOURCE_TYPES } from "@murphai/clinical-records";
 import type {
   ClinicalProviderFacilityContract,
   ClinicalProviderSearchResultContract,
 } from "./client-contracts";
+import { EPIC_BETA_RESOURCE_TYPES } from "./epic-beta-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA =
   "murph.clinical-provider-directory.v1" as const;
@@ -14,7 +14,9 @@ const MAX_PROVIDER_RESULTS = 20;
 const MAX_SEARCH_TEXT_LENGTH = 120;
 
 export type ClinicalProviderSourceSystem = "epic-fhir";
-export type ClinicalProviderClientIdEnvironmentKey = "EPIC_SMART_CLIENT_ID";
+export type ClinicalProviderClientIdEnvironmentKey =
+  | "EPIC_SMART_CLIENT_ID"
+  | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
 
 export type ClinicalProviderFacility = ClinicalProviderFacilityContract;
 
@@ -146,7 +148,10 @@ function parseDirectoryEntry(value: unknown, index: number): ClinicalProviderDir
   if (record.sourceSystem !== "epic-fhir") {
     throw new TypeError(`Clinical provider directory entry ${index} source system is unsupported.`);
   }
-  if (record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID") {
+  if (
+    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
+    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
+  ) {
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
 
@@ -207,12 +212,13 @@ function parseResourceTypes(value: unknown, index: number): readonly string[] {
     32,
     80,
   );
-  const allowed = new Set<string>(CLINICAL_FHIR_RESOURCE_TYPES);
   if (
-    resources.length === 0
-    || resources.some((resource) => !allowed.has(resource))
+    resources.length !== EPIC_BETA_RESOURCE_TYPES.length
+    || resources.some((resource, resourceIndex) =>
+      resource !== EPIC_BETA_RESOURCE_TYPES[resourceIndex]
+    )
   ) {
-    throw new TypeError(`Clinical provider directory entry ${index} has invalid FHIR resource types.`);
+    throw new TypeError(`Clinical provider directory entry ${index} does not match the Epic beta FHIR policy.`);
   }
   return resources;
 }

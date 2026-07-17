@@ -28,7 +28,7 @@ import {
 
 const HOSTED_ASSISTANT_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -69,22 +69,22 @@ test("hosted assistant injected env overrides a stale saved platform profile", a
       allowMissing: false,
       env: {
         ...HOSTED_ASSISTANT_ENV,
-        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.6-terra",
       },
     });
 
     const staleSavedTarget = await readHostedAssistantExecutionDefaultTarget();
-    assert.equal(staleSavedTarget?.model, "openai/gpt-5.5");
+    assert.equal(staleSavedTarget?.model, "openai/gpt-5.6-terra");
 
     const envTarget = await readHostedAssistantExecutionDefaultTarget({
       runtimeEnv: HOSTED_ASSISTANT_RUNTIME_ENV,
     });
 
-    assert.equal(envTarget?.model, "gpt-5.5");
+    assert.equal(envTarget?.model, "gpt-5.6-terra");
     assert.equal(envTarget?.modelProvider, "hosted-openai");
 
     const restoredTarget = await readHostedAssistantExecutionDefaultTarget();
-    assert.equal(restoredTarget?.model, "gpt-5.5");
+    assert.equal(restoredTarget?.model, "gpt-5.6-terra");
     assert.equal(restoredTarget?.modelProvider, "openai");
   });
 });
@@ -110,7 +110,7 @@ test("hosted assistant hydration applies runtime env over stale saved platform p
       allowMissing: false,
       env: {
         ...HOSTED_ASSISTANT_ENV,
-        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.6-terra",
       },
     });
 
@@ -126,7 +126,7 @@ test("hosted assistant hydration applies runtime env over stale saved platform p
       },
     );
 
-    assert.equal(hydrated.hosted?.defaultTarget?.model, "gpt-5.5");
+    assert.equal(hydrated.hosted?.defaultTarget?.model, "gpt-5.6-terra");
     assert.equal(hydrated.hosted?.defaultTarget?.modelProvider, "hosted-openai");
   });
 });

@@ -141,13 +141,13 @@ test('redactAssistantDisplayPath leaves sibling prefixes alone and falls back to
 
 test('normalizeProviderOptions and createAssistantSessionId keep assistant identifiers normalized', () => {
   const normalized = normalizeProviderOptions({
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     reasoningEffort: 'medium',
   })
   assert.equal(normalized.approvalPolicy, null)
   assert.match(normalized.continuityFingerprint ?? '', /^sha256:[a-f0-9]{64}$/u)
   assert.equal(normalized.executionDriver, 'codex-app-server')
-  assert.equal(normalized.model, 'gpt-5.5')
+  assert.equal(normalized.model, 'gpt-5.6-terra')
   assert.equal(normalized.oss, false)
   assert.equal(normalized.profile, null)
   assert.equal(normalized.reasoningEffort, 'medium')

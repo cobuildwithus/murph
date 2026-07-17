@@ -33,7 +33,6 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
   }`;
 
 const hostedRunnerFlexModelSlugs = [
-  "gpt-5.5",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -556,7 +555,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -675,6 +674,7 @@ describe("hosted runner container image contract", () => {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
     }
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
+    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["priority"]);
     expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
       description: "Flagship agentic coding model for complex professional work.",
       display_name: "GPT-5.6-Sol",
@@ -698,7 +698,7 @@ describe("hosted runner container image contract", () => {
     const repatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, patchedCatalog),
     );
-    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.5");
+    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.6-terra");
     const twicePatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, repatchedCatalog),
     );
@@ -843,7 +843,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
     expect(hostedRunnerSmokeChild).toContain("cwd: input.vaultRoot");
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
-    expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.5"');
+    expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.6-terra"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 164000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");

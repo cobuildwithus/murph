@@ -4789,6 +4789,12 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.clinicalRecordsPort
       ? {
           clinicalRecordsPort: {
+            ...(platform.clinicalRecordsPort.createConnectLink
+              ? {
+                  createConnectLink: (options) =>
+                    guard(() => platform.clinicalRecordsPort!.createConnectLink!(options)),
+                }
+              : {}),
             fetchPage: (fetchInput, options) =>
               guard(() => platform.clinicalRecordsPort!.fetchPage(fetchInput, options)),
             readRun: (readInput, options) =>

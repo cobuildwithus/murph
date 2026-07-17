@@ -39,6 +39,7 @@ The export includes:
 - Browser-safe private vault entities from the browser-vault policy families: allergy, assessment, condition, event, experiment, family, genetics, goal, journal, protocol, regimen, provider, sample, and workout format.
 - Entity attributes, lookup ids, titles, tags, status, dates, links, and bounded body previews.
 - Metric rows, metric selection rows, metric goal progress rows, source-health rows, weekly sample summaries, assistant summary highlights, timeline rows, and search rows.
+- All-history lab-result rows for each measured analyte, including dated numeric or qualitative results, original and normalized units, comparator, flag, reference-range context, and safe lab and source labels.
 - Browser-vault policy metadata, generated timestamp, data version, and source bundle hash already used by the browser-vault freshness contract.
 
 The Settings vault export does not include:

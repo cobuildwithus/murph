@@ -845,7 +845,7 @@ testHostedCodexAuthE2e(
       const result = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -986,7 +986,7 @@ testHostedCodexAutocompactionE2e(
       const prepared = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -1479,7 +1479,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 
 test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
   const config = buildHostedCodexConfigToml({
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -1753,7 +1753,7 @@ async function startResponsesStubServer(input: {
       response.end(JSON.stringify({
         created_at: Math.floor(Date.now() / 1000),
         id: `resp_hosted_codex_config_${requestIndex}`,
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         output: [
           {
             content: [
@@ -1805,7 +1805,7 @@ async function prepareLegacyBuiltInOpenAiCodexHome(input: {
   await writeFile(
     path.join(codexHome, "config.toml"),
     [
-      'model = "gpt-5.5"',
+      'model = "gpt-5.6-terra"',
       'model_provider = "openai"',
       `openai_base_url = ${JSON.stringify(input.baseUrl)}`,
       'model_reasoning_effort = "medium"',
@@ -1862,7 +1862,7 @@ function writeResponsesStubStream(input: {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
     output: [outputItem],
     status: "completed",
     usage: input.usage,

@@ -220,7 +220,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.5",
+    requestedModel: "gpt-5.6-terra",
     routeId: "route_usage",
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,

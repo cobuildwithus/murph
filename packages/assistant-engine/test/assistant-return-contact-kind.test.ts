@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type {
   AssistantSession,
@@ -96,6 +96,33 @@ describe('assistant return contact kind', () => {
     expect(nextHostedToolContext.claimSubscriptionAssistantInputId?.())
       .toBeNull()
   })
+
+  it('reuses one Clinical Records connect intent within a hosted tool context', async () => {
+    const createConnectLink = vi.fn(async () => ({
+      connectUrl:
+        `https://app.example.test/records/connect#clinicalRecordsIntent=cr_${'a'.repeat(32)}`,
+      expiresAt: '2026-07-16T12:15:00.000Z',
+      ok: true as const,
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      clinicalRecordsConnectLinkTool: { createConnectLink },
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: null,
+      }),
+      session: createAssistantSession(),
+    })
+    const tool = hostedToolContext.clinicalRecordsConnectLinkTool
+    if (!tool) {
+      throw new Error('Expected a hosted Clinical Records connect-link tool.')
+    }
+
+    const first = tool.createConnectLink()
+    const second = tool.createConnectLink()
+
+    await expect(first).resolves.toEqual(await second)
+    expect(createConnectLink).toHaveBeenCalledOnce()
+  })
 })
 
 function createMessageInput(input: {
@@ -114,7 +141,7 @@ function createAssistantSession(): AssistantSession {
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     codexHome: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: null,
     oss: false,
     profile: 'default',

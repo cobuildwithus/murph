@@ -46,6 +46,7 @@ import {
   toBrowserVaultMetricRows,
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
+import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -77,6 +78,10 @@ export async function createBrowserVaultReplica(
       isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
   );
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
+  const labResultRows = toBrowserVaultLabResultRows({
+    entities: defaultProjectedVault.entities,
+    points: allMetricPoints,
+  });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
@@ -91,6 +96,7 @@ export async function createBrowserVaultReplica(
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
     generatedAt,
+    labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,

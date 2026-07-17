@@ -25,7 +25,7 @@ import {
 const userId = `member_local_linq_onboarding_followup_${Date.now()}`;
 const linqWebhookSecret = "linq-local-onboarding-followup-secret";
 const onboardingCompleteReplyText = "Setup is marked complete.";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;

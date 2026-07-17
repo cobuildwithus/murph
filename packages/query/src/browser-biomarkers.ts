@@ -2,11 +2,21 @@ export {
   BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
   selectBrowserVaultBiomarkerPanel,
 } from "./browser-replica/biomarker-panel.ts";
+export {
+  selectBrowserVaultLabBiomarkerDetail,
+  selectBrowserVaultMeasuredBiomarkers,
+} from "./browser-replica/lab-results.ts";
 export type {
+  BrowserVaultLabResultRow,
   BrowserVaultMetricRow,
   BrowserVaultMetricSelectionRow,
   BrowserVaultQueryClient,
 } from "./browser-replica/shared.ts";
+export type {
+  BrowserVaultLabBiomarkerDetail,
+  BrowserVaultLabBiomarkerSeriesPoint,
+  BrowserVaultMeasuredBiomarker,
+} from "./browser-replica/lab-results.ts";
 export type {
   BrowserVaultBiomarkerMetricBinding,
   BrowserVaultBiomarkerMetricPanel,

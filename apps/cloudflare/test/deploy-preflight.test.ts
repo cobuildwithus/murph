@@ -12,7 +12,7 @@ import {
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
-  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
+  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
 const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
   "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key and selector-scope runner bundle.";
 
@@ -36,7 +36,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
-    HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+    HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_ASSISTANT_REASONING_EFFORT: "low",
     HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -383,7 +383,7 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "openai/gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "openai/gpt-5.6-terra",
         }),
         { deployWorker: true },
       ),

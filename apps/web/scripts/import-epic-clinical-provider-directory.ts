@@ -1,8 +1,7 @@
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { CLINICAL_FHIR_RESOURCE_TYPES } from "@murphai/clinical-records";
-
+import { EPIC_BETA_RESOURCE_TYPES } from "../src/lib/clinical-records/epic-beta-policy";
 import {
   CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
   buildEpicProviderDirectoryEntryId,
@@ -18,6 +17,17 @@ const REQUESTED_BASE_SCOPES = [
   "fhirUser",
   "launch/patient",
 ] as const;
+const EPIC_SANDBOX_ENTRY = {
+  aliases: ["Epic on FHIR Sandbox"],
+  brandName: "Epic Sandbox (test data only)",
+  clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" as const,
+  fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+  id: "epic-sandbox",
+  locations: [],
+  requestedBaseScopes: [...REQUESTED_BASE_SCOPES],
+  resourceTypes: [...EPIC_BETA_RESOURCE_TYPES],
+  sourceSystem: "epic-fhir" as const,
+};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -93,34 +103,37 @@ async function main(): Promise<void> {
     primary.facilities.push(...readAddresses(organization.resource.address, facilityName));
   }
 
-  const entries = [...primaryBrands.values()]
-    .map((brand) => ({
-      aliases: [...new Set(brand.aliases)].sort((left, right) => left.localeCompare(right)),
-      brandName: brand.brandName,
-      clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as const,
-      locations: deduplicateFacilities(brand.facilities).map((facility) => [
-        facility.name,
-        facility.city,
-        facility.state,
-        facility.postalCode,
-      ]),
-      fhirBaseUrl: brand.endpoint,
-      id: buildEpicProviderDirectoryEntryId(brand.brandIdentifier),
-      requestedBaseScopes: [...REQUESTED_BASE_SCOPES],
-      resourceTypes: [...CLINICAL_FHIR_RESOURCE_TYPES],
-      sourceSystem: "epic-fhir" as const,
-    }))
+  const entries = [
+    EPIC_SANDBOX_ENTRY,
+    ...[...primaryBrands.values()]
+      .map((brand) => ({
+        aliases: [...new Set(brand.aliases)].sort((left, right) => left.localeCompare(right)),
+        brandName: brand.brandName,
+        clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as const,
+        locations: deduplicateFacilities(brand.facilities).map((facility) => [
+          facility.name,
+          facility.city,
+          facility.state,
+          facility.postalCode,
+        ]),
+        fhirBaseUrl: brand.endpoint,
+        id: buildEpicProviderDirectoryEntryId(brand.brandIdentifier),
+        requestedBaseScopes: [...REQUESTED_BASE_SCOPES],
+        resourceTypes: [...EPIC_BETA_RESOURCE_TYPES],
+        sourceSystem: "epic-fhir" as const,
+      })),
+  ]
     .sort((left, right) => left.brandName.localeCompare(right.brandName) || left.id.localeCompare(right.id));
 
   const artifact = {
     entries,
     generatedAt,
     schema: CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
-    version: `${generatedAt.slice(0, 10)}.epic-brands-r4`,
+    version: `${generatedAt.slice(0, 10)}.epic-brands-r4-beta-v1`,
   } as const;
   parseClinicalProviderDirectory(artifact);
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
-  process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records provider brands to ${path.relative(process.cwd(), outputPath)}.\n`);
+  process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
 }
 
 function parseArguments(args: string[]): { inputPath: string; outputPath: string } {

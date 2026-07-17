@@ -395,7 +395,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "--delivery-target",
       "telegram_thread_real",
       "--assistant-target-override-model",
-      "gpt-5.5",
+      "gpt-5.6-terra",
       "--assistant-target-override-model-provider",
       "vercel-ai-gateway",
       "--assistant-target-override-reasoning-effort",
@@ -424,7 +424,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       reasoningEffort: "high",
     });
@@ -464,7 +464,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.exitCode, null);
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       reasoningEffort: "medium",
     });

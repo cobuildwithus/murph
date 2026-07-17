@@ -1769,7 +1769,7 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.5-mini',
+    model: 'gpt-5.6-terra-mini',
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
@@ -7035,7 +7035,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       codexHome: '/tmp/codex-home',
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'prod',
@@ -7049,7 +7049,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       approvalPolicy: 'never',
       codexCommand: '/opt/murph/bin/custom-codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'prod',
@@ -7096,7 +7096,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
   const result = await updateAssistantSessionOptionsLocal({
     providerOptions: {
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
     },
     sessionId: 'session-codex-updated',
     vault: '/vaults/test',
@@ -7111,7 +7111,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
     mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.codexHome,
     '/tmp/codex-home',
   )
-  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.model, 'gpt-5.5')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.model, 'gpt-5.6-terra')
 })
 
 test('openAssistantConversationLocal forwards defaults into session resolution', async () => {
@@ -7982,7 +7982,7 @@ function createAssistantSession(input?: {
       codexHome: null,
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
@@ -8010,7 +8010,7 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,

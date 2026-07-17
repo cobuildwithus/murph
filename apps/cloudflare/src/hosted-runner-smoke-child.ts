@@ -700,7 +700,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
-    'model = "gpt-5.5"',
+    'model = "gpt-5.6-terra"',
     ...(modelCatalogJson
       ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
       : []),
