@@ -138,6 +138,7 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
         },
       ],
       title: "Get your full sync",
+      voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
     },
     title: "WHOOP is connected",
   });
@@ -147,6 +148,7 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.innerHTML).toContain("Get full sync");
   expect(render.container.innerHTML).not.toContain("Download Murph and sign in");
   expect(render.container.innerHTML).not.toContain("apps.apple.com");
+  expect(render.container.querySelector("audio")).toBeNull();
 
   const guideButton = render.container.querySelector(
     'button[aria-label="See how to sync all of your WHOOP data"]',
@@ -163,6 +165,12 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
   expect(render.container.innerHTML).toContain("Continue exploring");
+  expect(
+    render.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
+  ).not.toBeNull();
+  expect(
+    render.container.querySelector("button[aria-label='Play voice memo']"),
+  ).not.toBeNull();
 
   await render.cleanup();
 });
