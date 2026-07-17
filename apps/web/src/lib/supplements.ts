@@ -4,9 +4,13 @@ import type {
   ProductLabelDetail,
   ProductLabelsQueryClient,
   ProductLabelSearchItem,
+  PublicProductLabelRecord,
+  PublicProductLabelSearchItem,
+  PublicProductTestEvidence,
 } from "./product-labels";
 import {
   createProductLabelsQueries,
+  createPublicProductLabelsQueries,
   getDefaultSupplementProductLabelsPool,
   normalizeProductLabelsConnectionString,
 } from "./product-labels";
@@ -28,6 +32,9 @@ export type SupplementDetail = ProductLabelDetail;
 
 let defaultSupplementsQueriesInstance: ReturnType<
   typeof createSupplementsQueries
+> | null = null;
+let defaultPublicSupplementsQueriesInstance: ReturnType<
+  typeof createPublicSupplementsQueries
 > | null = null;
 
 export function createSupplementsQueries(client: ProductLabelsQueryClient): {
@@ -58,6 +65,32 @@ export function createSupplementsQueries(client: ProductLabelsQueryClient): {
   };
 }
 
+export function createPublicSupplementsQueries(
+  client: ProductLabelsQueryClient,
+): {
+  searchPublicSupplements: (input: {
+    limit: number;
+    q: string;
+  }) => Promise<PublicProductLabelSearchItem[]>;
+  getPublicSupplementRecordById: (input: {
+    id: string;
+  }) => Promise<PublicProductLabelRecord | null>;
+  getPublicSupplementEvidence: (input: {
+    id: string;
+  }) => Promise<PublicProductTestEvidence>;
+} {
+  const queries = createPublicProductLabelsQueries(client, "supplements", {
+    stemmedSearch: true,
+    weakQueryTokens: SUPPLEMENT_SEARCH_WEAK_QUERY_TOKENS,
+  });
+
+  return {
+    searchPublicSupplements: queries.searchCompact,
+    getPublicSupplementRecordById: queries.getRecordById,
+    getPublicSupplementEvidence: queries.getEvidence,
+  };
+}
+
 export async function searchSupplements(input: {
   q: string;
   limit: number;
@@ -80,12 +113,45 @@ export async function getSupplementByUpc(input: {
   return await defaultSupplementsQueries().getSupplementByUpc(input);
 }
 
+export async function searchPublicSupplements(input: {
+  q: string;
+  limit: number;
+}): Promise<PublicProductLabelSearchItem[]> {
+  return await defaultPublicSupplementsQueries().searchPublicSupplements(input);
+}
+
+export async function getPublicSupplementRecordById(input: {
+  id: string;
+}): Promise<PublicProductLabelRecord | null> {
+  return await defaultPublicSupplementsQueries().getPublicSupplementRecordById(
+    input,
+  );
+}
+
+export async function getPublicSupplementEvidence(input: {
+  id: string;
+}): Promise<PublicProductTestEvidence> {
+  return await defaultPublicSupplementsQueries().getPublicSupplementEvidence(
+    input,
+  );
+}
+
 function defaultSupplementsQueries(): ReturnType<typeof createSupplementsQueries> {
   defaultSupplementsQueriesInstance ??= createSupplementsQueries(
     getDefaultSupplementProductLabelsPool(),
   );
 
   return defaultSupplementsQueriesInstance;
+}
+
+function defaultPublicSupplementsQueries(): ReturnType<
+  typeof createPublicSupplementsQueries
+> {
+  defaultPublicSupplementsQueriesInstance ??= createPublicSupplementsQueries(
+    getDefaultSupplementProductLabelsPool(),
+  );
+
+  return defaultPublicSupplementsQueriesInstance;
 }
 
 export const normalizeSupplementConnectionString =
