@@ -1269,6 +1269,220 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('starts cold and warm App Server turns before any lazy shared-data read', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-group-shared-work-')
+    const codexHome = await createTempDir('assistant-codex-group-shared-home-')
+    const threadId = 'thread-group-shared-lazy-read'
+    const boundaryObservations: Array<{
+      providerStarts: number
+      readerCalls: number
+      rpcMethod: 'thread/start' | 'thread/resume' | 'turn/start'
+    }> = []
+    const executionOrder: string[] = []
+    let providerStartOrdinal = 0
+    let readerOrdinal = 0
+    let turnStartOrdinal = 0
+    const onProviderRequestStarted = vi.fn(() => {
+      providerStartOrdinal += 1
+      executionOrder.push(`provider-started:${providerStartOrdinal}`)
+    })
+    const groupSharedRead = vi.fn(async () => {
+      readerOrdinal += 1
+      executionOrder.push(`shared-reader:${readerOrdinal}`)
+      return {
+        members: [] as const,
+        requestedProjectionScopeKeys: ['steps-days.v0'],
+        status: 'none' as const,
+      }
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ computerToolsAvailable: false }),
+      groupSharedReader: { request: groupSharedRead },
+    }
+    const dynamicTools = resolveMurphDynamicTools({
+      groupSharedReadAvailable: true,
+      progressUpdatesAvailable: false,
+    })
+
+    const observeBoundary = (
+      rpcMethod: 'thread/start' | 'thread/resume' | 'turn/start',
+    ) => {
+      boundaryObservations.push({
+        providerStarts: onProviderRequestStarted.mock.calls.length,
+        readerCalls: groupSharedRead.mock.calls.length,
+        rpcMethod,
+      })
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.stdin.onWrite = (write) => {
+        for (const line of write.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) {
+            continue
+          }
+          const message = asRecord(JSON.parse(trimmed))
+          if (message.method === 'turn/start') {
+            turnStartOrdinal += 1
+            executionOrder.push(`turn-start:${turnStartOrdinal}`)
+            observeBoundary('turn/start')
+          }
+        }
+      }
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const runTurn = async (input: {
+            threadMethod: 'thread/start' | 'thread/resume'
+            turnOrdinal: number
+          }) => {
+            const threadRequest = await waitForRpcMethod(
+              child,
+              input.threadMethod,
+            )
+            observeBoundary(input.threadMethod)
+            const threadParams = asRecord(threadRequest.params)
+            child.stdout.write(jsonLine({
+              id: threadRequest.id,
+              result: {
+                ...(input.threadMethod === 'thread/resume'
+                  ? {
+                      approvalPolicy: threadParams.approvalPolicy,
+                      cwd: threadParams.cwd,
+                    }
+                  : {}),
+                thread: { id: threadId },
+              },
+            }))
+
+            const turnStart = await waitForRpcMethodCount(
+              child,
+              'turn/start',
+              input.turnOrdinal,
+            )
+            await waitForMockCall(
+              onProviderRequestStarted,
+              input.turnOrdinal,
+            )
+
+            const turnId = `turn-group-shared-${input.turnOrdinal}`
+            child.stdout.write(jsonLine({
+              id: turnStart.id,
+              result: { turn: { id: turnId } },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: { turn: { id: turnId } },
+            }))
+
+            const toolCallId = 70 + input.turnOrdinal
+            child.stdout.write(jsonLine({
+              id: toolCallId,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'group',
+                arguments: {
+                  action: 'read_shared',
+                  projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+                },
+                turnId,
+              },
+            }))
+            await expect(waitForRpcResponse(child, toolCallId)).resolves.toEqual({
+              id: toolCallId,
+              result: {
+                success: true,
+                contentItems: [{
+                  type: 'inputText',
+                  text: JSON.stringify({
+                    action: 'read_shared',
+                    result: {
+                      members: [],
+                      requestedProjectionScopeKeys: ['steps-days.v0'],
+                      status: 'none',
+                    },
+                  }),
+                }],
+              },
+            })
+
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: { id: turnId, status: 'completed' },
+              },
+            }))
+          }
+
+          await runTurn({ threadMethod: 'thread/start', turnOrdinal: 1 })
+          await runTurn({ threadMethod: 'thread/resume', turnOrdinal: 2 })
+        })()
+      })
+
+      return child
+    })
+
+    const env = {
+      CODEX_HOME: codexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools,
+      env,
+      hostedToolContext,
+      onProviderRequestStarted,
+      prompt: 'Check shared steps.',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: threadId,
+      turnId: 'turn-group-shared-1',
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools,
+      env,
+      hostedToolContext,
+      onProviderRequestStarted,
+      prompt: 'Check shared steps again.',
+      resumeSessionId: threadId,
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: threadId,
+      turnId: 'turn-group-shared-2',
+    })
+
+    expect(boundaryObservations).toEqual([
+      { providerStarts: 0, readerCalls: 0, rpcMethod: 'thread/start' },
+      { providerStarts: 0, readerCalls: 0, rpcMethod: 'turn/start' },
+      { providerStarts: 1, readerCalls: 1, rpcMethod: 'thread/resume' },
+      { providerStarts: 1, readerCalls: 1, rpcMethod: 'turn/start' },
+    ])
+    expect(executionOrder).toEqual([
+      'turn-start:1',
+      'provider-started:1',
+      'shared-reader:1',
+      'turn-start:2',
+      'provider-started:2',
+      'shared-reader:2',
+    ])
+    expect(groupSharedRead).toHaveBeenCalledTimes(2)
+    expect(groupSharedRead).toHaveBeenNthCalledWith(1, {
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    })
+    expect(groupSharedRead).toHaveBeenNthCalledWith(2, {
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the latest valid attach_response_media batch for final response media', async () => {
     const firstMedia = [
       {

@@ -18,12 +18,11 @@ import type {
   HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
-import {
-  createHostedPostCommitDeadline,
-  waitForHostedPostCommitOperation,
-} from "../hosted-onboarding/bounded-post-commit";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
@@ -61,10 +60,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
-import {
-  signalHostedMailboxAppendRuntime,
-  signalHostedRuntimeMaintenanceRuntime,
-} from "../hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
@@ -76,10 +72,11 @@ import {
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
+  prepareHostedGroupJoinOfferPostTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
-  readHostedGroupShareAuthorityByRuntimeMemberId,
+  readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
@@ -88,9 +85,38 @@ import {
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
+import { sha256Hex } from "../primitives";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
+
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v2:";
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
+
+export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
+  groupId: string;
+  joinCode: string;
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+}): string {
+  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+    input.projectionScopes,
+  );
+  const projectionScopeKeys = projectionScopes.map(
+    buildHostedVaultShareProjectionScopeKey,
+  );
+  if (projectionScopeKeys.length !== input.projectionScopes.length) {
+    throw new TypeError("Hosted group join-offer idempotency input is invalid.");
+  }
+  const digest = sha256Hex(JSON.stringify({
+    groupId: input.groupId,
+    joinCode: input.joinCode,
+    projectionScopeKeys,
+  }));
+  return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
+    0,
+    HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH,
+  )}`;
+}
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
@@ -106,7 +132,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
-  read_share_authority: "participant_aware",
+  read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
@@ -208,13 +234,24 @@ export async function handleHostedRuntimeGroupTool(input: {
     });
   }
 
-  if (input.request.action === "read_share_authority") {
-    return {
-      action: "read_share_authority",
-      result: await readHostedGroupShareAuthorityByRuntimeMemberId({
-        runtimeMemberId: input.memberId,
-      }),
-    };
+  if (input.request.action === "read_shared") {
+    try {
+      return {
+        action: "read_shared",
+        result: await readHostedGroupSharedDataByRuntimeMemberId({
+          projectionScopes: input.request.projectionScopes,
+          runtimeMemberId: input.memberId,
+        }),
+      };
+    } catch {
+      return {
+        action: "read_shared",
+        result: {
+          status: "unavailable",
+          unavailableReason: "shared_data_unavailable",
+        },
+      };
+    }
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
@@ -271,7 +308,6 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
     };
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
   return {
     action: "leave_membership",
     result: { status: "left" },
@@ -459,8 +495,6 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
     return unavailable(revoked.kind);
   }
 
-  await signalVaultShareCleanupRuntimesBestEffort(revoked.vaultShareCleanupSignals);
-
   return {
     action: "revoke_own_email_share",
     result: revoked.revokedCount > 0
@@ -481,26 +515,6 @@ async function lookupSelfOptOutParticipantMember(input: {
     handle: input.context.senderHandle,
     prisma: input.prisma,
   });
-}
-
-async function signalVaultShareCleanupRuntimesBestEffort(
-  signals: readonly { mailboxItemId: string; memberId: string }[],
-): Promise<void> {
-  const deadlineMs = createHostedPostCommitDeadline(undefined);
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await waitForHostedPostCommitOperation({
-        deadlineMs,
-        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
-          abortSignal,
-          expectedUserId: signal.memberId,
-          mailboxItemId: signal.mailboxItemId,
-        }),
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will observe it later.
-    }
-  }));
 }
 
 async function handleHostedRuntimeGroupCreateJoinLink(input: {
@@ -622,7 +636,25 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
+    const offerPost = hasEveryHostedGroupMemberGrantedProjectionScopes(
+      result.group,
+      projectionScopes,
+    )
+      ? { kind: "not_needed" as const }
+      : await prepareHostedGroupJoinOfferPostTx({
+          groupId: result.group.id,
+          projectionScopes,
+          tx,
+        });
+    if (offerPost.kind === "unavailable") {
+      return { kind: "active_offer_state_unavailable" as const };
+    }
+    return {
+      kind: "ok" as const,
+      offerPost,
+      ownerMemberId: ownerAccess.ownerMemberId,
+      ...result,
+    };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (created.kind !== "ok") {
     return unavailable(created.kind);
@@ -635,6 +667,15 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
+  if (
+    created.offerPost.kind === "active_offer"
+    || created.offerPost.kind === "not_needed"
+  ) {
+    return {
+      action: "post_join_offer",
+      result: { group: created.group, joinUrl, status: "sent" },
+    };
+  }
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
@@ -644,7 +685,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   try {
     sent = await sendHostedLinqChatMessage({
       chatId: authorized.chatId,
-      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
+      idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
+        groupId: created.group.id,
+        joinCode: created.offerPost.joinCode,
+        projectionScopes,
+      }),
       message,
     });
   } catch {
@@ -684,6 +729,31 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     action: "post_join_offer",
     result: { group: created.group, joinUrl, status: "sent" },
   };
+}
+
+function hasEveryHostedGroupMemberGrantedProjectionScopes(
+  group: {
+    memberCount: number;
+    members: readonly {
+      grantedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
+    }[];
+  },
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): boolean {
+  if (group.members.length !== group.memberCount) {
+    return false;
+  }
+  const requestedScopeKeys = projectionScopes.map(
+    buildHostedVaultShareProjectionScopeKey,
+  );
+  return group.members.every((member) => {
+    const grantedScopeKeys = new Set(
+      member.grantedVaultShareProjectionScopes.map(
+        buildHostedVaultShareProjectionScopeKey,
+      ),
+    );
+    return requestedScopeKeys.every((scopeKey) => grantedScopeKeys.has(scopeKey));
+  });
 }
 
 async function handleHostedRuntimeGroupSetChatAvatar(input: {

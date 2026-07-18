@@ -101,6 +101,76 @@ describe("legacy workspace v2 snapshot materialization", () => {
     expect(remainingManifest).toEqual(expect.arrayContaining([...plan.skippedInlineFiles]));
     expect(await readdir(roots.scratchRoot)).toEqual([]);
   });
+
+  it("does not fetch or materialize retired shared projections while restoring unrelated files", async () => {
+    const roots = await createWorkspaceRoots();
+    const derivedShare = createSkippedInlineFile(
+      "derived/vault-share/projections.json",
+      "legacy derived share\n",
+    );
+    const directChildShare = createSkippedInlineFile(
+      "vault-share/projections.json",
+      "abandoned direct-child share\n",
+    );
+    const unrelated = createSkippedInlineFile(
+      "raw/legacy/keep.txt",
+      "unrelated legacy bytes\n",
+    );
+    const similarlyNamedSibling = createSkippedInlineFile(
+      "derived/vault-share-notes/keep.txt",
+      "similarly named sibling\n",
+    );
+    const plan = createPlan([
+      derivedShare.file,
+      directChildShare.file,
+      unrelated.file,
+      similarlyNamedSibling.file,
+    ]);
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: plan.skippedInlineFiles,
+      vaultRoot: roots.vaultRoot,
+    });
+    const excludedHashes = new Set([
+      derivedShare.file.sha256,
+      directChildShare.file.sha256,
+    ]);
+    const bytesByHash = new Map([
+      [unrelated.file.sha256, unrelated.bytes],
+      [similarlyNamedSibling.file.sha256, similarlyNamedSibling.bytes],
+    ]);
+    const requestedHashes: string[] = [];
+
+    await materializeLegacyWorkspaceRefsForV2Snapshot({
+      artifactStore: {
+        get: async (sha256: string) => {
+          requestedHashes.push(sha256);
+          if (excludedHashes.has(sha256)) {
+            throw new Error("Retired shared projections must not be fetched.");
+          }
+          return bytesByHash.get(sha256) ?? null;
+        },
+      },
+      operatorHomeRoot: roots.operatorHomeRoot,
+      plan,
+      scratchRoot: roots.scratchRoot,
+      vaultRoot: roots.vaultRoot,
+    });
+
+    await expectMissing(path.join(roots.vaultRoot, derivedShare.file.path));
+    await expectMissing(path.join(roots.vaultRoot, directChildShare.file.path));
+    await expect(readFile(path.join(roots.vaultRoot, unrelated.file.path), "utf8"))
+      .resolves.toBe("unrelated legacy bytes\n");
+    await expect(readFile(
+      path.join(roots.vaultRoot, similarlyNamedSibling.file.path),
+      "utf8",
+    )).resolves.toBe("similarly named sibling\n");
+    expect(requestedHashes).toHaveLength(2);
+    expect(new Set(requestedHashes)).toEqual(new Set(bytesByHash.keys()));
+    await expect(readHostedWorkspaceSkippedInlineFiles({
+      vaultRoot: roots.vaultRoot,
+    })).resolves.toEqual([]);
+    expect(await readdir(roots.scratchRoot)).toEqual([]);
+  });
 });
 
 function createPlan(

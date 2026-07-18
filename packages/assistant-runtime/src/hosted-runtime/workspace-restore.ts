@@ -84,6 +84,10 @@ import {
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+const HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS = [
+  "derived/vault-share",
+  "vault-share",
+] as const;
 const HOSTED_CODEX_THREAD_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u;
 
@@ -1507,6 +1511,10 @@ function shouldRestoreHostedRuntimeEagerArtifact(input: {
     return false;
   }
 
+  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
+    return false;
+  }
+
   return !isHostedRuntimeLazyVaultContentPath(input.path);
 }
 
@@ -1518,7 +1526,19 @@ function shouldRestoreHostedRuntimeInlineFile(input: {
     return true;
   }
 
+  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
+    return false;
+  }
+
   return !isHostedRuntimeLazyVaultContentPath(input.path);
+}
+
+function isHostedLegacySharedProjectionVaultPath(relativePath: string): boolean {
+  return HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS.some(
+    (excludedPath) =>
+      relativePath === excludedPath
+      || relativePath.startsWith(`${excludedPath}/`),
+  );
 }
 
 function isHostedRuntimeLazyVaultContentPath(relativePath: string): boolean {

@@ -96,9 +96,10 @@ check the join-page selectable Vault Share projection scopes and choose the
 narrowest matching scope; if none exists, say it is unsupported instead of
 inventing a share kind.
 
-For weekly or two-week challenges, read fresh rolling shared records during
-the daily loop and append standings snapshots to the challenge page. The share
-itself is a short current window; the challenge page is the durable scoreboard.
+For weekly or two-week challenges, call `murph.group action="read_shared"`
+for fresh rolling shared records during the daily loop and append standings
+snapshots to the challenge page. The share itself is a short current window;
+the challenge page is the durable scoreboard.
 
 ## The challenge page (your durable state)
 
@@ -114,9 +115,10 @@ The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
   settled any dispute about it.
-- **Roster & intros** — each member's name, member id, participation state
-  (`in`, `pending`, `declined`, or `withdrawn`), their intro or fun fact
-  (verbatim), and the capture refs for their photos.
+- **Roster & intros** — each member's name, group-scoped `participantId` (or
+  an explicit `unresolved` identity marker), participation state (`in`,
+  `pending`, `declined`, or `withdrawn`), their intro or fun fact (verbatim),
+  and the capture refs for their photos.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
@@ -126,12 +128,6 @@ The page carries these sections, kept current:
   lyrics of any voice memo or song.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
   short sliding window, so yesterday's standings are only in this page).
-- **Gap disclosure log** — at most one row per participant `memberId`, with the
-  `firstPublicGapDate` and one category from `metric-grant`, `diagnostic-grant`,
-  `needs-reconnect`, `disconnected`, `setting-up`, `needs-attention`,
-  `connected-metric-missing`, `no-visible-source`, or `unverified`. This is the
-  durable gate that prevents public troubleshooting from repeating after a
-  context reset.
 - **Confounders & protected notes** — declared confounders and who is having
   a rough stretch and is off-limits for jokes right now.
 
@@ -189,6 +185,16 @@ loses a reminder; it must never lose the challenge.
    withdraws, record that state in the same turn. Never list them as waiting,
    ask them for challenge materials, score them, or privately check in about
    challenge silence. Re-entry requires a new explicit affirmative response.
+   After the model turn has begun and before writing a new challenge roster,
+   call `murph.group action="read_shared"` once with the exact scoring scope
+   and `device-sync-status.v0`. Record the returned group-scoped
+   `participantId` for each roster entry whose association is unambiguous.
+   This is the kickoff identity read; it must never become prompt preload or
+   other pre-model work. Do not attach an id from a matching display name,
+   array position, projection values, grant state, or remembered context.
+   When current attributable sender or reaction evidence does not establish
+   one exact association, record that roster identity as `unresolved` and do
+   not baseline, score, or diagnose that person until it is resolved.
 4. **Collect sharing permissions.** Read the current group first. When
    `read_current` returns `status="none"`, the group-chat skill's Creating a
    hosted group core set takes precedence. For an existing group, use
@@ -255,49 +261,72 @@ automation action rules with a `dailyLocal` schedule and
 1. Read the challenge page.
 2. Build the daily roster from only the challenge-page participants whose
    participation state is `in`. Do not use group membership, current grants,
-   or landed shared records to add someone to the challenge. Score only the
+   or returned shared records to add someone to the challenge. Score only the
    people recorded as in; shared data does not add a pending or silent person
-   to the challenge. Read the current
-   authoritative group roster and grants with `murph.group`
-   `action="read_current"`. On a scheduled run, use the trusted current
-   roster/grant context supplied by the runtime when the route-bound group tool
-   is unavailable. Interactive turns use the exact
-   `grantedVaultShareProjectionScopes` entries returned by `read_current`;
-   scheduled turns use the exact canonical scope keys in the trusted context.
-   A projection kind alone is never grant authority for every selector. If
-   neither source provides a current authoritative roster/grant snapshot, stop
-   before reading or using shared records. Say that current permissions could
-   not be verified for this run, do not infer grants from the challenge page or
-   landed projections, and do not publish possibly unauthorized standings.
-   Otherwise, read the challenge metric and
-   `device-sync-status.v0` with `vault-cli group shared`. Fixed projections use
-   `vault-cli group shared --kind steps-days.v0`; selector activity projections
-   use exact scopes such as
-   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`,
-   `vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>`,
-   or `vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>`.
-   Read diagnostics with
-   `vault-cli group shared --kind device-sync-status.v0`.
-   Never pass selector scopes through `--kind`.
+   to the challenge.
 
-   Left join both shared-data results to that challenge roster by exact
-   `memberId`. `vault-cli group shared` reports landed projections; it is not
-   an authoritative roster. Never let a filtered or empty result hide an
-   opted-in participant. Never reuse remembered numbers — wrong scores turn
-   jokes into noise. A recorded zero is a real score; missing data is never a
-   zero.
-3. Classify each missing participant with this evidence order. Stop at the
-   first match:
+   After the model turn has begun, call `murph.group action="read_shared"`
+   once with the exact scoring scope and `device-sync-status.v0`. Pass the
+   full selector object for selector scopes; a projection kind alone is never
+   authority for every selector. Do not request `profile-name.v0`; the direct
+   Web snapshot returns a name only when that member's current exact name-sharing
+   authority permits it. The runtime does not preload a roster, grant snapshot, or shared
+   records into the prompt. Do not use `vault-cli group shared`, `vault-cli
+   group weekly`, raw `vault-share/**` or legacy `derived/vault-share/**`
+   files, or remembered prompt
+   context as another hosted data path.
 
-   - Current challenge-metric data through the reporting cutoff under a current
-     exact grant: rank the participant. Do not override current metric evidence
-     with a device status.
-   - No current grant for the exact metric scope: say that the participant has
-     not shared that metric with this group.
-   - The exact metric scope is granted but `device-sync-status.v0` is not:
-     say that Murph cannot verify the source problem because connection status
-     was not shared.
-   - A recent `device-sync-status.v0` projection: use its literal source label,
+   `status="ok"` returns every current group member and, for each requested
+   scope, an explicit `grantStatus`, `dataStatus`, and only the bounded records
+   allowed by current exact authority. Each returned `participantId` identifies
+   only that membership in this group; it carries no account, device, provider,
+   or route identity. Left join those members to the challenge roster by exact
+   `participantId`, never by display name. Duplicate or changed names do not
+   change that join. Never let an empty record set hide an opted-in
+   participant. A challenge participant absent from the current member result
+   is no longer a current member; do not score or diagnose them from retained
+   challenge history. `status="none"` means there is no current hosted group.
+   `status="unavailable"` returns no roster or projection payload because
+   Web could not resolve current authority and the direct bounded snapshot. In
+   either case, do not publish standings or try another data path. Say only
+   that current group data could not be verified for this run, then continue
+   any unrelated conversational help.
+
+   For an active challenge page created before `participantId` was recorded,
+   use this same `read_shared` result for a one-time identity backfill; do not
+   add another read. Bind a legacy roster entry only when current attributable
+   sender or reaction evidence establishes exactly which returned membership
+   is that person. A unique or equal display name is not identity proof, and
+   array order, projection values, grant state, and remembered context are not
+   identity evidence. If the association is not exact, write
+   `participantId: unresolved` on that roster entry in the same turn and do
+   not score or diagnose it. Do not retry on every scheduled run; reconsider
+   only after new attributable evidence makes that one association exact.
+
+   Classify every `in` participant in a successful result before composing:
+   `grantStatus="not_granted"` means the group share is not granted;
+   `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
+   no usable record was returned; and `dataStatus="available"` means use only the
+   returned records. `available` does not make an old record current for this
+   reporting cutoff. Never infer a grant from a record or a record from a grant.
+   Never reuse remembered numbers — wrong scores turn jokes into noise. A
+   recorded zero is a real score; missing data is never a zero.
+3. Apply this evidence order to each participant and stop at the first match:
+
+   - The scoring projection is `granted` and `available`, with current
+     challenge-metric data through the reporting cutoff: rank the participant.
+     Do not override current metric evidence with a device status.
+   - The scoring projection is `not_granted`: say that the participant has not
+     shared that challenge metric with this group and give the permission-card
+     next step below.
+   - The scoring projection is `granted` but has no current metric through the
+     reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
+     the metric share exists, but Murph cannot verify the source problem because
+     connection status was not shared. Give the diagnostic permission-card next
+     step below.
+   - The scoring projection is `granted` but has no current metric through the
+     reporting cutoff, while a recent
+     `device-sync-status.v0` record is `available`: use its literal source label,
      coarse status, and, only when useful, the accurately named connection-wide
      sync-job completion time described below. Treat a projection whose `observedAt` is more
      than two local calendar days old as stale and unverified. Only
@@ -314,9 +343,11 @@ automation action rules with a `dailyLocal` schedule and
      list, say that no connected health source is visible in the shared
      snapshot. That is not proof that no compatible source exists; suggest a
      private source check or connection step.
-   - No recent diagnostic evidence: say that the reason is unverified. Do not
-     guess about permissions, a disconnected device, source freshness, or
-     whether the participant opened the app.
+   - The scoring projection is `granted` but has no current metric through the
+     reporting cutoff, and diagnostic data is also `granted` but `missing` or
+     stale: say that the reason is unverified. Do not guess about permissions,
+     a disconnected device, source freshness, or whether the participant opened
+     the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
    participant denied, forgot, or has not approved Apple Health Steps. The
@@ -328,28 +359,41 @@ automation action rules with a `dailyLocal` schedule and
 4. Lead with completeness: say whether the standings are complete or partial
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
-   message. Name every `in` participant who is missing current data. Before
-   composing, read the challenge page's Gap disclosure log. When a missing
-   participant has no row, first append that participant's `memberId`, today's
-   local date as `firstPublicGapDate`, and the matching closed category to the
-   log. Include the evidence-backed reason and smallest useful action only
-   after the write returns a successful save receipt. If the write fails or is
-   ambiguous, send only the neutral waiting entry for that participant so a
-   later run cannot repeat a disclosure that was never durably recorded. When
-   a row already exists, list that participant
-   neutrally as waiting on data without repeating their individual reason or
-   troubleshooting step in the room. Keep at most one row per participant for
-   the challenge. Never present a partial table as the full standings.
+   message. Name every `in` participant who is missing current data, state the
+   current evidence-backed reason, and give the smallest useful action. Never
+   present a partial table as the full standings.
 
-   An interactive group turn may post one additive `post_join_offer` when the
-   room asks for a missing metric or diagnostic scope. A scheduled turn has no
-   route authority to post that offer. On the first group digest that exposes
-   the gap, it should report the missing grant and invite the room to ask Murph
-   interactively for a permission card; later digests keep only the neutral
-   waiting entry; never tell someone to like an ordinary standings message. Do
-   not repost or nag after an offer. Repeated reminders and troubleshooting
-   belong in the affected participant's private thread, with no performance
-   teasing.
+   After `read_shared`, collect the exact scopes whose current evidence is
+   `not_granted`: use the exact scoring scope when that scope is not granted;
+   use `device-sync-status.v0` only when the scoring scope is granted but has
+   no current metric and the diagnostic scope is not granted. Deduplicate that
+   list. Never infer or request a scope from granted-but-missing or stale data.
+
+   On a scheduled group turn, when that list is nonempty, call the narrow
+   `murph.group action="post_join_offer"` exactly once with only those exact
+   `projectionScopes`. The call stays inside this already-started model turn,
+   after `read_shared`. It synchronously reuses the Linq egress-route assertion
+   that scheduled delivery already completed; this feature adds no new
+   pre-model work. Web reauthorization, active-offer lookup, and provider work
+   begin only after the tool call. Do not call it when the list is empty. Web
+   suppresses the call when every current member already grants the scopes or
+   when a matching active offer exists, so never make a second call, repost,
+   or nag.
+
+   A `sent` result can mean either that Web delivered a new card or that a
+   matching active card was already available. If you mention success, keep it
+   delivery-neutral, such as "A separate permission card is available in the
+   chat." Never say that you posted or sent a new card.
+
+   The permission card is a separate server-owned message. It is the only
+   message members should Like or heart to grant the disclosed Murph group
+   scopes. Never imply that reacting to the standings message grants anything.
+   The card cannot connect a source, grant Apple Health or operating-system
+   Steps access, or fix granted-but-missing or stale data. If the narrow tool
+   is absent or returns `unavailable`, keep the diagnostic neutral, do not
+   claim that a card was posted, and do not send the room on a
+   manual debugging hunt. An interactive group turn may still post one
+   additive offer when the room asks for an exact missing scope.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does

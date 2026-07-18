@@ -1,7 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
-import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
@@ -17,16 +16,9 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
-import {
-  formatHostedDeviceSyncProviderLabel,
-  resolveHostedDeviceSyncBrowserProviderLabel,
-} from "../device-sync/provider-label";
+import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import {
-  readHostedMemberSnapshot,
-  type HostedMemberSnapshot,
-} from "../hosted-onboarding/hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
@@ -46,16 +38,9 @@ import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
 import {
-  signalHostedMailboxAppendRuntime,
-} from "../hosted-orchestration/signal-runtime";
-import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
   deleteHostedPhoneCallsForAccountDeletion,
 } from "../phone-calls/account-deletion";
-import {
-  revokeOutgoingHostedVaultSharesForMemberDeletionTx,
-  type HostedVaultShareCleanupSignal,
-} from "../hosted-vault-share/share-grant-store";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -289,7 +274,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_vault_share",
     label: "Hosted vault share grants",
     deletion: "live-delete",
-    note: "Outgoing active grants are revoked with destination cleanup wakes before account rows are removed; share rows are then deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed.",
+    note: "Share rows are deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed.",
   },
   {
     slug: "prisma.hosted_thread_container",
@@ -535,7 +520,6 @@ type DeviceConnectionIdentity = {
 type HostedAccountDeletionDatabaseResult = {
   deletedCounts: HostedAccountDataCounts;
   deletedRuntimeMemberIds: readonly string[];
-  vaultShareCleanupSignals: readonly HostedVaultShareCleanupSignal[];
 };
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
@@ -710,11 +694,6 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       prisma: tx,
     });
-    const vaultShareCleanup = await revokeOutgoingHostedVaultSharesForMemberDeletionTx({
-      grantorMemberIds: transactionDeletionMemberIds,
-      now: deletionStartedAt,
-      tx,
-    });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
@@ -724,16 +703,12 @@ export async function deleteHostedAccountData(input: {
     return {
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
-      vaultShareCleanupSignals: vaultShareCleanup.cleanupSignals,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const deletedCounts = databaseDeletion.deletedCounts;
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
     : deletionMemberIds;
-  await signalHostedVaultShareCleanupRuntimesBestEffort(
-    databaseDeletion.vaultShareCleanupSignals,
-  );
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -1337,22 +1312,6 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member", await input.prisma.hostedMember.deleteMany({ where: { id: memberIdFilter } }));
 
   return counts;
-}
-
-async function signalHostedVaultShareCleanupRuntimesBestEffort(
-  signals: readonly HostedVaultShareCleanupSignal[],
-): Promise<void> {
-  await Promise.all(signals.map(async (signal) => {
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
-      });
-    } catch {
-      // The revoke mailbox item is durable; the destination runtime will observe it on
-      // its next mailbox poll if this best-effort wake signal fails.
-    }
-  }));
 }
 
 async function deleteHostedUserCryptoEnvelopeRows(

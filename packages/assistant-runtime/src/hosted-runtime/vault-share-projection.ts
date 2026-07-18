@@ -6,15 +6,10 @@ import {
   activityTextMatchesKind,
   hasMemoryDisplayNameEvidence,
   isStrictIsoDate,
-  isStrictIsoDateTime,
   memoryDisplayNameSchema,
   parseFrontmatterDocument,
   resolveMemoryDisplayName,
 } from "@murphai/contracts";
-import {
-  resolveDeviceConnectSourceById,
-  resolveJunctionConnectSourceLabel,
-} from "@murphai/device-syncd/connect-config";
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareActivityDistanceProjectionSpec,
@@ -22,10 +17,7 @@ import {
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
-  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY,
-  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   type HostedVaultShareActivityDistanceProjectionSpec,
@@ -33,9 +25,6 @@ import {
   type HostedVaultShareActivitySessionCountProjectionSpec,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionSpec,
-  type HostedVaultShareDeviceSyncSource,
-  type HostedVaultShareDeviceSyncSourceStatus,
-  type HostedVaultShareDeviceSyncStatusData,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
@@ -52,10 +41,7 @@ import {
   type MetricSeriesPoint,
 } from "@murphai/query";
 
-import type {
-  HostedRuntimeDeviceSyncPort,
-  HostedRuntimeVaultSharePort,
-} from "./platform.ts";
+import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MAX_MINUTES = 24 * 60;
@@ -138,12 +124,11 @@ export interface HostedVaultShareProjectionOfferResult {
  * member's own vault. The web control plane is the sole authority on whether shares exist;
  * this step holds no share state.
  *
- * Never throws — a projection failure must never affect the runtime's primary work — and
- * sends nothing for a kind the vault cannot project, so members without that data make
- * no delivery call for it at all.
+ * Never throws — a projection failure must never affect the runtime's primary work. For
+ * a projectable scope, an empty read still replaces the Web-owned snapshot so records
+ * that disappeared from the member vault cannot remain visible as current data.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
-  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
 }): Promise<HostedVaultShareProjectionOfferResult> {
@@ -167,16 +152,18 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
   }
 
   const outcomes: HostedVaultShareOfferOutcome[] = [];
-  const context: HostedVaultShareProjectionReadContext = {
-    deviceSyncPort: input.deviceSyncPort ?? null,
-  };
+  const context: HostedVaultShareProjectionReadContext = {};
 
   for (const projectionScope of projectionScopes) {
+    const readRecords = resolveProjectableRecordReader(projectionScope);
+    if (!readRecords) {
+      continue;
+    }
     outcomes.push(await offerHostedVaultShareScopeBestEffort({
       context,
       port,
       projectionScope,
-      readRecords: resolveProjectableRecordReader(projectionScope),
+      readRecords,
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -188,7 +175,6 @@ type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outco
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
-  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
 }
 
 type ProjectableRecordReader = (input: {
@@ -209,10 +195,6 @@ async function offerHostedVaultShareScopeBestEffort(input: {
       vaultRoot: input.vaultRoot,
     });
 
-    if (records.length === 0) {
-      return "no-projectable-records";
-    }
-
     const response = await input.port.deliver({
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
@@ -227,13 +209,13 @@ async function offerHostedVaultShareScopeBestEffort(input: {
 
 function resolveProjectableRecordReader(
   projectionScope: HostedVaultShareProjectionScope,
-): ProjectableRecordReader {
+): ProjectableRecordReader | null {
   const projectionKind = projectionScope.projectionKind;
   switch (projectionKind) {
     case HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND:
-      return ({ context }) => readProjectableDeviceSyncStatus(context.deviceSyncPort);
+      return null;
     case "group-email.v0":
-      return async () => [];
+      return null;
     case "heart-rate-zones-days.v0":
       return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot);
     case "profile-name.v0":
@@ -265,7 +247,7 @@ function resolveProjectableRecordReader(
       if (spec) {
         return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec);
       }
-      return async () => [];
+      return null;
     }
   }
 }
@@ -307,236 +289,6 @@ function combineHostedVaultShareOfferOutcomes(
     }
   }
   return "no-projectable-records";
-}
-
-type HostedDeviceSyncSnapshot = Awaited<
-  ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>
->;
-type HostedDeviceSyncConnectionSnapshot = HostedDeviceSyncSnapshot["connections"][number];
-type HostedDeviceSyncConnectionSourceSnapshot = NonNullable<
-  HostedDeviceSyncConnectionSnapshot["sources"]
->[number];
-
-/**
- * Projects only the small public connection-health surface a member explicitly chose to
- * share. The snapshot read is credential-free and every private account, source, and error
- * identifier is discarded before the content-derived revision is built.
- */
-export async function readProjectableDeviceSyncStatus(
-  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
-): Promise<HostedVaultShareDeliveryRecord[]> {
-  if (!deviceSyncPort) {
-    return [];
-  }
-
-  const snapshot = await deviceSyncPort.fetchSnapshot({
-    includeCredentialMaterial: false,
-    limit: 100,
-  });
-  const observedAt = toUtcDayBucket(snapshot.generatedAt);
-  if (!observedAt) {
-    throw new TypeError("Hosted device-sync snapshot generatedAt must be a valid timestamp.");
-  }
-
-  const data: HostedVaultShareDeviceSyncStatusData = {
-    observedAt,
-    sources: selectProjectableDeviceSyncSources(snapshot),
-  };
-
-  return [{
-    data,
-    occurredAt: observedAt,
-    recordKey: HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY,
-  }];
-}
-
-function selectProjectableDeviceSyncSources(
-  snapshot: HostedDeviceSyncSnapshot,
-): HostedVaultShareDeviceSyncSource[] {
-  const byLabel = new Map<string, HostedVaultShareDeviceSyncSource>();
-
-  for (const entry of snapshot.connections) {
-    const sources = entry.sources ?? [];
-    if (sources.length === 0) {
-      if (normalizeDeviceSyncProviderKey(entry.connection.provider) === "junction") {
-        continue;
-      }
-      const candidate = toProjectableDeviceSyncSource({
-        entry,
-        provider: entry.connection.provider,
-        source: null,
-      });
-      if (candidate) {
-        mergeProjectableDeviceSyncSource(byLabel, candidate);
-      }
-      continue;
-    }
-
-    for (const source of sources) {
-      const candidate = toProjectableDeviceSyncSource({
-        entry,
-        provider: source.sourceProviderSlug,
-        source,
-      });
-      if (candidate) {
-        mergeProjectableDeviceSyncSource(byLabel, candidate);
-      }
-    }
-  }
-
-  return [...byLabel.values()]
-    .sort((left, right) => left.label.localeCompare(right.label, "en-US"))
-    .slice(0, HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES);
-}
-
-function toProjectableDeviceSyncSource(input: {
-  entry: HostedDeviceSyncConnectionSnapshot;
-  provider: string;
-  source: HostedDeviceSyncConnectionSourceSnapshot | null;
-}): HostedVaultShareDeviceSyncSource | null {
-  const label = resolveProjectableDeviceSyncSourceLabel(input.provider);
-  if (
-    !label
-    || label.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH
-    || /[\u0000-\u001f\u007f]/u.test(label)
-  ) {
-    return null;
-  }
-
-  const connectionStatus = resolveProjectableDeviceSyncConnectionStatus(input.entry);
-  const status = connectionStatus ?? resolveProjectableDeviceSyncSourceStatus(input.source);
-  const rawStatusObservedAt = connectionStatus
-    ? input.entry.connection.updatedAt ?? input.entry.connection.connectedAt
-    : input.source?.lastSeenAt ?? input.entry.connection.updatedAt
-      ?? input.entry.connection.connectedAt;
-  const statusObservedAt = toCanonicalIsoTimestamp(rawStatusObservedAt);
-  if (!statusObservedAt) {
-    return null;
-  }
-
-  return {
-    connectionSyncJobCompletedAt: toCanonicalIsoTimestamp(
-      input.entry.localState.lastSyncCompletedAt,
-    ),
-    label,
-    status,
-    statusObservedAt,
-  };
-}
-
-function resolveProjectableDeviceSyncSourceLabel(provider: string): string | null {
-  return resolveDeviceConnectSourceById(provider)?.label
-    ?? resolveJunctionConnectSourceLabel(provider);
-}
-
-function resolveProjectableDeviceSyncConnectionStatus(
-  entry: HostedDeviceSyncConnectionSnapshot,
-): HostedVaultShareDeviceSyncSourceStatus | null {
-  if (entry.connection.status === "reauthorization_required") {
-    return "needs-reconnect";
-  }
-  if (entry.connection.status === "disconnected") {
-    return "disconnected";
-  }
-  if (entry.connection.setupPhase === "failed") {
-    return "needs-attention";
-  }
-  if (
-    entry.connection.setupPhase === "pending_link"
-    || entry.connection.setupPhase === "link_returned"
-  ) {
-    return "setting-up";
-  }
-  return null;
-}
-
-function resolveProjectableDeviceSyncSourceStatus(
-  source: HostedDeviceSyncConnectionSourceSnapshot | null,
-): HostedVaultShareDeviceSyncSourceStatus {
-  switch (source?.status) {
-    case "disconnected":
-      return "disconnected";
-    case "error":
-    case "unavailable":
-      return "needs-attention";
-    case "connected":
-    case undefined:
-      return "connected";
-  }
-}
-
-function mergeProjectableDeviceSyncSource(
-  byLabel: Map<string, HostedVaultShareDeviceSyncSource>,
-  candidate: HostedVaultShareDeviceSyncSource,
-): void {
-  const key = candidate.label.toLocaleLowerCase("en-US");
-  const existing = byLabel.get(key);
-  if (!existing) {
-    byLabel.set(key, candidate);
-    return;
-  }
-
-  const candidatePriority = projectableDeviceSyncStatusPriority(candidate.status);
-  const existingPriority = projectableDeviceSyncStatusPriority(existing.status);
-  const useCandidate = candidatePriority > existingPriority
-    || (
-      candidatePriority === existingPriority
-      && Date.parse(candidate.statusObservedAt) > Date.parse(existing.statusObservedAt)
-    );
-  const selected = useCandidate ? candidate : existing;
-  byLabel.set(key, {
-    ...selected,
-    connectionSyncJobCompletedAt: latestCanonicalIsoTimestamp(
-      existing.connectionSyncJobCompletedAt,
-      candidate.connectionSyncJobCompletedAt,
-    ),
-  });
-}
-
-function projectableDeviceSyncStatusPriority(
-  status: HostedVaultShareDeviceSyncSourceStatus,
-): number {
-  switch (status) {
-    case "connected":
-      return 6;
-    case "needs-reconnect":
-      return 5;
-    case "needs-attention":
-      return 4;
-    case "setting-up":
-      return 3;
-    case "disconnected":
-      return 2;
-  }
-}
-
-function latestCanonicalIsoTimestamp(
-  left: string | null,
-  right: string | null,
-): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-  return Date.parse(left) >= Date.parse(right) ? left : right;
-}
-
-function normalizeDeviceSyncProviderKey(value: string): string {
-  return value.trim().toLocaleLowerCase("en-US");
-}
-
-function toCanonicalIsoTimestamp(value: string | null | undefined): string | null {
-  if (!value || !isStrictIsoDateTime(value)) {
-    return null;
-  }
-  return new Date(Date.parse(value)).toISOString();
-}
-
-function toUtcDayBucket(value: string): string | null {
-  const timestamp = toCanonicalIsoTimestamp(value);
-  return timestamp ? `${timestamp.slice(0, 10)}T00:00:00.000Z` : null;
 }
 
 /**

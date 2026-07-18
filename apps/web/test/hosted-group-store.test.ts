@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
   isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
-  revokeHostedVaultSharesWithCleanupTx: vi.fn(),
+  revokeHostedVaultSharesTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
@@ -43,7 +43,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   grantHostedVaultShareTx: mocks.grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionScopes: mocks.readActiveHostedVaultShareProjectionScopes,
-  revokeHostedVaultSharesWithCleanupTx: mocks.revokeHostedVaultSharesWithCleanupTx,
+  revokeHostedVaultSharesTx: mocks.revokeHostedVaultSharesTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -55,12 +55,13 @@ import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   leaveHostedGroupMemberTx,
+  prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
   readHostedGroupMembershipsForMember,
-  readHostedGroupShareAuthorityByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -301,10 +302,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(true);
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [],
-      revokedCount: 0,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
   it("rejects membership when the group runtime is inactive even with no selected permissions", async () => {
@@ -589,7 +587,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
       expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
       expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
-      expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+      expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     },
   );
 
@@ -796,19 +794,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("returns cleanup signals when a member unselects a previously granted group share", async () => {
+  it("records revoked scopes when a member unselects a previously granted group share", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       existingMembershipId: "membership_existing",
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [{
-        mailboxItemId: "mailbox_item_revoke_1",
-        memberId: "member_group_runtime",
-      }],
-      revokedCount: 1,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(1);
 
     await expect(acceptHostedGroupJoinCodeTx({
       expectedMembershipId: "membership_existing",
@@ -822,13 +814,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantedVaultShareProjectionKinds: ["profile-name.v0"],
       membershipId: "membership_existing",
       revokedVaultShareProjectionKinds: ["sleep-times.v0"],
-      vaultShareCleanupSignals: [{
-        mailboxItemId: "mailbox_item_revoke_1",
-        memberId: "member_group_runtime",
-      }],
     });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
@@ -865,6 +853,169 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         projectionKindsJson: [SLEEP_SCOPE],
       },
     });
+  });
+
+  it("finds an active offer whose canonical scope snapshot covers the request", async () => {
+    const findMany = vi.fn(async () => [{
+      projectionKindsJson: [SLEEP_SCOPE, ACTIVITY_SCOPE],
+    }]);
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+        })),
+      },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "active_offer" });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { groupId: "group_1", revokedAt: null },
+      select: { projectionKindsJson: true },
+      take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
+    });
+  });
+
+  it("fails closed when a stored active offer scope is not canonicalizable", async () => {
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+        })),
+      },
+      hostedGroupJoinOffer: {
+        findMany: vi.fn(async () => [{
+          projectionKindsJson: [{ projectionKind: "raw-health-records.v0" }],
+        }]),
+      },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+  });
+
+  it("fails closed before inspecting a truncated active-offer set", async () => {
+    const findMany = vi.fn(async () => Array.from(
+      { length: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1 },
+      () => ({ projectionKindsJson: [SLEEP_SCOPE] }),
+    ));
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "join_generation_1" })),
+      },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { groupId: "group_1", revokedAt: null },
+      take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
+    }));
+  });
+
+  it("rejects duplicate requested scopes before reading active offers", async () => {
+    const findMany = vi.fn();
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: { findUnique: vi.fn() },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE, SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("idempotently reuses the same active provider-message binding", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const input = {
+      groupId: "group_1",
+      messageId: "msg_offer_same",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    };
+
+    const first = await recordHostedGroupJoinOfferTx(input);
+    const retry = await recordHostedGroupJoinOfferTx(input);
+
+    expect(retry).toEqual(first);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: "different group",
+      existingGroupId: "group_1",
+      inputGroupId: "group_2",
+      existingProjectionKinds: ["sleep-times.v0"],
+      revokedAt: null,
+    },
+    {
+      label: "different scopes",
+      existingGroupId: "group_1",
+      inputGroupId: "group_1",
+      existingProjectionKinds: ["activity-days.v0"],
+      revokedAt: null,
+    },
+    {
+      label: "revoked binding",
+      existingGroupId: "group_1",
+      inputGroupId: "group_1",
+      existingProjectionKinds: ["sleep-times.v0"],
+      revokedAt: new Date("2026-07-02T00:00:00.000Z"),
+    },
+  ])("fails closed when a retry resolves to a $label", async ({
+    existingGroupId,
+    existingProjectionKinds,
+    inputGroupId,
+    revokedAt,
+  }) => {
+    const messageId = "msg_offer_conflict";
+    const messageLookupKey = createHostedLinqMessageLookupKey(messageId);
+    if (!messageLookupKey) {
+      throw new Error("Expected a message lookup key.");
+    }
+    const tx = buildTx({
+      offerMessageLookupKey: messageLookupKey,
+      offerProjectionKinds: existingProjectionKinds,
+      revokedOfferAt: revokedAt,
+    });
+    tx.hostedGroupJoinOffer.findUnique.mockResolvedValueOnce({
+      groupId: existingGroupId,
+      projectionKindsJson: existingProjectionKinds,
+      revokedAt,
+    });
+
+    await expect(recordHostedGroupJoinOfferTx({
+      groupId: inputGroupId,
+      messageId,
+      postedAt: new Date("2026-07-03T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_CONFLICT",
+      httpStatus: 409,
+    });
+    expect(tx.hostedGroupJoinOffer.create).not.toHaveBeenCalled();
   });
 
   it("accepts a live join offer additively without revoking unselected group shares", async () => {
@@ -906,7 +1057,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
       projectionScope: SLEEP_SCOPE,
     }));
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
   });
 
   it("appends a reaction-specific private confirmation for a first offer join", async () => {
@@ -1797,22 +1948,12 @@ function buildLeaveTx(input?: {
 describe("leaveHostedGroupMemberTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [],
-      revokedCount: 0,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
   it("hard-deletes the selected self-membership and revokes every share atomically", async () => {
     const leave = buildLeaveTx({ currentMembershipId: "membership_1" });
-    const cleanupSignals = [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }];
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
-      cleanupSignals,
-      revokedCount: 3,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(3);
     const now = new Date("2026-07-15T12:00:00.000Z");
 
     await expect(leaveHostedGroupMemberTx({
@@ -1820,12 +1961,9 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_1",
       now,
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "left",
-      vaultShareCleanupSignals: cleanupSignals,
-    });
+    })).resolves.toEqual({ kind: "left" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_self",
       now,
@@ -1844,12 +1982,9 @@ describe("leaveHostedGroupMemberTx", () => {
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "owner_cannot_leave",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "owner_cannot_leave" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
@@ -1861,12 +1996,9 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_old",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
@@ -1878,36 +2010,23 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_other",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
     expect(leave.hostedGroupFindUnique).not.toHaveBeenCalled();
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
   it("repairs orphaned shares for an authenticated join-page member", async () => {
     const leave = buildLeaveTx({ currentMembershipId: null });
-    const cleanupSignals = [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }];
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
-      cleanupSignals,
-      revokedCount: 1,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(leaveHostedGroupMemberTx({
       joinCode: "join_1",
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "left",
-      vaultShareCleanupSignals: cleanupSignals,
-    });
+    })).resolves.toEqual({ kind: "left" });
 
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
@@ -1920,10 +2039,7 @@ describe("leaveHostedGroupMemberTx", () => {
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
@@ -1965,138 +2081,6 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
   process.env[key] = value;
 }
-
-describe("readHostedGroupShareAuthorityByRuntimeMemberId", () => {
-  it("derives current members and exact granted row generations in one snapshot", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    const hostedGroupFindUnique = vi.fn(async () => ({
-      members: [
-        { memberId: "member_current_a" },
-        { memberId: "member_current_b" },
-      ],
-    }));
-    const hostedVaultShareFindMany = vi.fn(async () => [{
-      grantorMemberId: "member_current_a",
-      id: "share_generation_current",
-      projectionScopeKey: "steps-days.v0",
-    }]);
-    const tx = createPrismaStub({
-      hostedGroup: { findUnique: hostedGroupFindUnique },
-      hostedVaultShare: { findMany: hostedVaultShareFindMany },
-    });
-    const transaction = vi.fn(async (
-      run: (client: typeof tx) => Promise<unknown>,
-    ) => await run(tx));
-    const prisma = createPrismaStub({ $transaction: transaction });
-
-    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
-      prisma,
-      runtimeMemberId: "member_group_runtime",
-    })).resolves.toEqual({
-      memberIds: ["member_current_a", "member_current_b"],
-      shares: [{
-        memberId: "member_current_a",
-        projectionScopeKey: "steps-days.v0",
-        shareId: "share_generation_current",
-      }],
-      status: "ok",
-    });
-
-    expect(transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      expect.objectContaining({
-        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      }),
-    );
-    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 4_097,
-      where: {
-        destinationMemberId: "member_group_runtime",
-        grantorMemberId: {
-          in: ["member_current_a", "member_current_b"],
-        },
-        status: "granted",
-      },
-    }));
-  });
-
-  it("returns none without reading grants when the runtime has no current group", async () => {
-    const hostedVaultShareFindMany = vi.fn();
-    const tx = createPrismaStub({
-      hostedGroup: { findUnique: vi.fn(async () => null) },
-      hostedVaultShare: { findMany: hostedVaultShareFindMany },
-    });
-    const prisma = createPrismaStub({
-      $transaction: vi.fn(async (
-        run: (client: typeof tx) => Promise<unknown>,
-      ) => await run(tx)),
-    });
-
-    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
-      prisma,
-      runtimeMemberId: "member_without_group",
-    })).resolves.toEqual({ memberIds: [], shares: [], status: "none" });
-    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
-  });
-
-  it("fails closed without reading grants when the group runtime is inactive", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
-    const hostedVaultShareFindMany = vi.fn();
-    const tx = createPrismaStub({
-      hostedGroup: {
-        findUnique: vi.fn(async () => ({
-          members: [{ memberId: "member_current" }],
-        })),
-      },
-      hostedVaultShare: { findMany: hostedVaultShareFindMany },
-    });
-    const prisma = createPrismaStub({
-      $transaction: vi.fn(async (
-        run: (client: typeof tx) => Promise<unknown>,
-      ) => await run(tx)),
-    });
-
-    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
-      prisma,
-      runtimeMemberId: "member_group_runtime",
-    })).resolves.toEqual({
-      status: "unavailable",
-      unavailableReason: "runtime_inactive",
-    });
-    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
-  });
-
-  it("fails closed instead of truncating an oversized authority snapshot", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    const tx = createPrismaStub({
-      hostedGroup: {
-        findUnique: vi.fn(async () => ({
-          members: [{ memberId: "member_current" }],
-        })),
-      },
-      hostedVaultShare: {
-        findMany: vi.fn(async () => Array.from({ length: 4_097 }, (_, index) => ({
-          grantorMemberId: "member_current",
-          id: `share_${index}`,
-          projectionScopeKey: `scope_${index}`,
-        }))),
-      },
-    });
-    const prisma = createPrismaStub({
-      $transaction: vi.fn(async (
-        run: (client: typeof tx) => Promise<unknown>,
-      ) => await run(tx)),
-    });
-
-    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
-      prisma,
-      runtimeMemberId: "member_group_runtime",
-    })).resolves.toEqual({
-      status: "unavailable",
-      unavailableReason: "authorization_snapshot_too_large",
-    });
-  });
-});
 
 describe("readHostedGroupMembershipsForMember", () => {
   beforeEach(() => {

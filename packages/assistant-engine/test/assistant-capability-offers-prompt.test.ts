@@ -136,6 +136,12 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
     expect(section).toContain('`action="post_join_offer"` to add a sharing permission')
+    expect(section).toContain('`action="read_shared"` as the only hosted path')
+    expect(section).toContain('resolves live authority lazily after the tool call')
+    expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
+    expect(section).toContain('Use `read_current` for membership and permission configuration only')
+    expect(section).toContain('not Apple Health access')
+    expect(section).toContain('Apple does not expose HealthKit read authorization')
     expect(section).toContain('permission opt-in, not joining or rejoining')
     expect(section).toContain(
       "After read_current, use the group-chat skill's core permissions only for `status=none`",

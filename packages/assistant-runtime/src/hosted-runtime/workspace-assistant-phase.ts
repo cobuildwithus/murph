@@ -10,6 +10,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -19,6 +20,9 @@ import {
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
@@ -35,6 +39,8 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
+  type AssistantHostedGroupPermissionOfferTool,
+  type AssistantHostedGroupSharedReader,
   type AssistantInputEventRecord,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
@@ -109,12 +115,9 @@ import {
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
-  buildHostedBackgroundGroupRosterPrompt,
-} from "./group-roster-prompt.ts";
-import {
-  prepareSharedVaultShareModelView,
-  type HostedVaultShareModelViewOutcome,
-} from "./vault-share-import.ts";
+  createHostedGroupSharedReader,
+  normalizeHostedGroupSharedProjectionScopes,
+} from "./group-shared-reader.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
@@ -241,12 +244,6 @@ const HOSTED_MANAGED_AUTOMATION_SETUP_TRANSIENT_ERROR_CODES = new Set([
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
-const HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_PROMPT = [
-  "Shared group data is temporarily unavailable this turn because current",
-  "sharing authority could not be verified. Do not report challenge standings,",
-  "rankings, or any member's shared data, and do not treat this as members",
-  "having shared nothing; say the shared view is temporarily unavailable.",
-].join(" ");
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
@@ -293,7 +290,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         emailIngressPresent
         && request.action !== "read_current"
-        && request.action !== "read_share_authority"
+        && request.action !== "read_shared"
         && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
@@ -332,7 +329,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
-    { action: "read_current" | "read_share_authority" | "revoke_own_email_share" }
+    { action: "read_current" | "read_shared" | "revoke_own_email_share" }
   >,
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
@@ -481,6 +478,7 @@ function createHostedAssistantAutomationOperationScope(
       const groupScopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
         emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
+        groupSharedReadAvailable: route?.threadIsDirect === false,
         groupEmailIngress:
           normalizeAssistantRouteString(route?.channel)?.toLowerCase() === "email"
           && route?.threadIsDirect === false,
@@ -587,22 +585,173 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
 function scopeHostedGroupToolToAssistantOperation(input: {
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   executionContext: AssistantExecutionContext;
+  groupSharedReadAvailable: boolean;
   groupEmailIngress: boolean;
-  groupToolPort: HostedRuntimePlatform["groupToolPort"] | null;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): AssistantExecutionContext {
-  if (!input.executionContext.hosted || !input.groupToolPort) {
-    return input.executionContext;
+  const sharedScopedExecutionContext = scopeHostedGroupSharedReaderToAssistantOperation({
+    executionContext: input.executionContext,
+    groupSharedReadAvailable: input.groupSharedReadAvailable,
+    groupToolPort: input.groupToolPort,
+  });
+  if (!sharedScopedExecutionContext.hosted || !input.groupToolPort) {
+    return sharedScopedExecutionContext;
   }
   return {
     hosted: {
-      ...input.executionContext.hosted,
+      ...sharedScopedExecutionContext.hosted,
       groupTool: createHostedGroupToolWithLinqThreadContext({
         emailDeliveryContexts: input.emailDeliveryContexts,
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,
         linqDeliveryContexts: input.linqDeliveryContexts,
       }),
+    },
+  };
+}
+
+function scopeHostedGroupSharedReaderToAssistantOperation(input: {
+  executionContext: AssistantExecutionContext;
+  groupSharedReadAvailable: boolean;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+}): AssistantExecutionContext {
+  if (!input.executionContext.hosted) {
+    return input.executionContext;
+  }
+  const {
+    groupSharedReader: _unscopedGroupSharedReader,
+    ...hostedWithoutGroupSharedReader
+  } = input.executionContext.hosted;
+  void _unscopedGroupSharedReader;
+  return {
+    hosted: {
+      ...hostedWithoutGroupSharedReader,
+      ...(input.groupSharedReadAvailable
+        ? {
+            groupSharedReader: createHostedGroupSharedReader({
+              groupToolPort: input.groupToolPort,
+            }),
+          }
+        : {}),
+    },
+  };
+}
+
+const HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE =
+  "scheduled_group_permission_offer_unavailable";
+
+function createHostedScheduledGroupTools(input: {
+  channel: string;
+  containerMemberId: string;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  target: string;
+  threadIsDirect: boolean;
+}): {
+  groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool;
+  groupSharedReader: AssistantHostedGroupSharedReader;
+} | null {
+  const channel = input.channel.trim().toLowerCase();
+  const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
+  const target = normalizeAssistantRouteString(input.target);
+  if (
+    channel !== "linq"
+    || input.threadIsDirect !== false
+    || !containerMemberId
+    || !target
+  ) {
+    return null;
+  }
+
+  // The factory creates one scheduled model-operation scope. Its only state is
+  // evidence learned after a model-triggered read and the one-offer budget.
+  const observedNotGrantedScopeKeys = new Set<string>();
+  let permissionOfferAttempted = false;
+  const unobservedGroupSharedReader = createHostedGroupSharedReader({
+    groupToolPort: input.groupToolPort,
+  });
+  const groupSharedReader: AssistantHostedGroupSharedReader = {
+    async request(request) {
+      const result = await unobservedGroupSharedReader.request(request);
+      if (result.status !== "ok") {
+        observedNotGrantedScopeKeys.clear();
+        return result;
+      }
+      for (const projectionScopeKey of result.requestedProjectionScopeKeys) {
+        observedNotGrantedScopeKeys.delete(projectionScopeKey);
+      }
+      for (const member of result.members) {
+        for (const projection of member.projections) {
+          if (projection.grantStatus === "not_granted") {
+            observedNotGrantedScopeKeys.add(projection.projectionScopeKey);
+          }
+        }
+      }
+      return result;
+    },
+  };
+
+  const groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool = {
+    async request(request) {
+      if (permissionOfferAttempted) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+      permissionOfferAttempted = true;
+
+      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(
+        request.projectionScopes,
+      );
+      if (
+        !input.groupToolPort
+        || !projectionScopes
+        || projectionScopes.some((projectionScope) =>
+          !observedNotGrantedScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(projectionScope),
+          )
+        )
+      ) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+
+      try {
+        const response = await input.groupToolPort.request({
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+            projectionScopes,
+          },
+          linqThread: {
+            authority: {
+              channel: "linq",
+              containerMemberId,
+              threadId: target,
+            },
+            chatId: target,
+          },
+        });
+        return response.action === "post_join_offer"
+          ? response
+          : buildHostedScheduledGroupPermissionOfferUnavailable();
+      } catch {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+    },
+  };
+
+  return { groupPermissionOfferTool, groupSharedReader };
+}
+
+function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "post_join_offer" }
+> {
+  return {
+    action: "post_join_offer",
+    result: {
+      group: null,
+      status: "unavailable",
+      unavailableReason: HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE,
     },
   };
 }
@@ -959,6 +1108,14 @@ export async function runHostedWorkspaceAssistantPhase(
           ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
           : {}),
         memberId: input.request.userId,
+        createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
+          createHostedScheduledGroupTools({
+            channel,
+            containerMemberId: input.request.userId,
+            groupToolPort: input.runtime.platform.groupToolPort ?? null,
+            target,
+            threadIsDirect,
+          }),
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
         resolveScheduledLinqRoute: async ({
@@ -1118,7 +1275,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const shouldReadDynamicContextForBackgroundWork = async (options: {
+    const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }): Promise<boolean> => {
@@ -1135,7 +1292,14 @@ export async function runHostedWorkspaceAssistantPhase(
 
       return await hasDueHostedAssistantCronJob(input);
     };
-    const readBackgroundDeviceSyncStatusPrompt = async (): Promise<string | null> => {
+    const buildBackgroundDeviceSyncStatusPrompt = (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }) => async (): Promise<string | null> => {
+      if (!await shouldReadDeviceSyncStatusPromptForBackgroundWork(options)) {
+        return null;
+      }
+
       const cancellation = createHostedBackgroundMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
@@ -1160,73 +1324,11 @@ export async function runHostedWorkspaceAssistantPhase(
         cancellation.dispose();
       }
     };
-    // One pass-local share-authority snapshot serves both landed-store
-    // reconciliation and scheduled roster context, so a single Web read owns
-    // one consistent membership/grant view and one failure disposition.
-    let shareAuthorityResponsePromise: ReturnType<
-      NonNullable<typeof input.runtime.platform.groupToolPort>["request"]
-    > | null = null;
-    const readShareAuthorityResponseOnce = () => {
-      const groupToolPort = input.runtime.platform.groupToolPort;
-      if (!groupToolPort) {
-        return null;
-      }
-      shareAuthorityResponsePromise ??= groupToolPort.request({
-        action: "read_share_authority",
-      });
-      return shareAuthorityResponsePromise;
-    };
-    let vaultShareModelViewOutcome: HostedVaultShareModelViewOutcome | null = null;
-    const readBackgroundGroupRosterPrompt = async (): Promise<string | null> => {
-      const response = await Promise.resolve(readShareAuthorityResponseOnce())
-        .catch(() => null);
-      return buildHostedBackgroundGroupRosterPrompt({ authority: response });
-    };
-    const createBackgroundDynamicContextPromptBuilder = (options: {
-      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
-      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
-    }) => async (): Promise<string | null> => {
-      if (!await shouldReadDynamicContextForBackgroundWork(options)) {
-        return null;
-      }
-
-      const [deviceSyncStatusPrompt, groupRosterPrompt] = await Promise.all([
-        readBackgroundDeviceSyncStatusPrompt(),
-        readBackgroundGroupRosterPrompt(),
-      ]);
-      if (input.shouldYieldBackgroundMaintenance?.() === true) {
-        return null;
-      }
-
-      const prompts = [
-        deviceSyncStatusPrompt,
-        groupRosterPrompt,
-        vaultShareModelViewOutcome?.status === "unavailable"
-          ? HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE_PROMPT
-          : null,
-      ].filter((prompt): prompt is string => Boolean(prompt));
-      return prompts.length > 0 ? prompts.join("\n\n") : null;
-    };
     const runAutomationLane = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
-      vaultShareModelViewOutcome = await prepareSharedVaultShareModelView({
-        readAuthority: async () => {
-          const response = await readShareAuthorityResponseOnce();
-          if (!response || response.action !== "read_share_authority") {
-            throw new Error("group_share_authority_invalid");
-          }
-          if (response.result.status === "unavailable") {
-            throw new Error("group_share_authority_unavailable");
-          }
-          return response.result.status === "none"
-            ? []
-            : response.result.shares;
-        },
-        vaultRoot: input.restored.vaultRoot,
-      });
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
@@ -1244,7 +1346,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const automationBootstrapMs = elapsedSince(automationBootstrapStartedAt);
       const buildBackgroundDynamicContextPrompt =
         assistantRuntimeState?.assistantConfigured === true
-          ? createBackgroundDynamicContextPromptBuilder({
+          ? buildBackgroundDeviceSyncStatusPrompt({
             managedAutomationsResult: options.managedAutomationsResult,
             systemMailboxMaintenance: options.systemMailboxMaintenance,
           })

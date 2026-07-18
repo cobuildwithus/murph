@@ -3392,6 +3392,9 @@ describe("assistant execution context normalization", () => {
 
   it("normalizes hosted context and preserves callable helpers only", () => {
     const deviceTool = { request: vi.fn() };
+    const groupPermissionOfferTool = { request: vi.fn() };
+    const groupSharedReader = { request: vi.fn() };
+    const createScheduledGroupTools = vi.fn();
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra",
@@ -3402,6 +3405,7 @@ describe("assistant execution context normalization", () => {
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
+          createScheduledGroupTools,
           defaultTarget,
           deviceConnectProviders: [
             { label: " Oura ", provider: " OURA " },
@@ -3409,6 +3413,8 @@ describe("assistant execution context normalization", () => {
             { label: "bad", provider: "not allowed!" },
           ],
           deviceTool,
+          groupPermissionOfferTool,
+          groupSharedReader,
           memberId: " member-1 ",
           resolveScheduledLinqRoute,
           userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
@@ -3416,6 +3422,7 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
+        createScheduledGroupTools,
         defaultTarget,
         deviceConnectProviders: [
           { label: "Oura", provider: "oura" },
@@ -3423,11 +3430,18 @@ describe("assistant execution context normalization", () => {
         deviceTool: {
           request: expect.any(Function),
         },
+        groupPermissionOfferTool: {
+          request: expect.any(Function),
+        },
+        groupSharedReader: {
+          request: expect.any(Function),
+        },
         memberId: "member-1",
         resolveScheduledLinqRoute,
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });
+    expect(createScheduledGroupTools).not.toHaveBeenCalled();
   });
 
   it("keeps a valid hosted member id even when no hosted helper functions are injected", () => {

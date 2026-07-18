@@ -29,7 +29,6 @@ const lazyRootCommands = [
   'food',
   'goal',
   'habitat',
-  'group',
   'immunization',
   'init',
   'journal',

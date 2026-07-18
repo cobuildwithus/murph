@@ -4,9 +4,11 @@ import type {
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type {
-  HostedRuntimeLatencyTraceRequest,
-  HostedRuntimeLogRequest,
+import {
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeLatencyTraceRequest,
+  type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import type {
@@ -684,51 +686,6 @@ async function writeHostedPhaseExperimentSource(vaultRoot: string): Promise<void
   );
 }
 
-async function writeHostedPhaseSharedProjection(input: {
-  memberId?: string;
-  shareId?: string;
-  vaultRoot: string;
-}): Promise<void> {
-  const memberId = input.memberId ?? "member_shared_current";
-  const shareId = input.shareId ?? "share_profile_current";
-  const directory = path.join(input.vaultRoot, "derived", "vault-share");
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    path.join(directory, "projections.json"),
-    JSON.stringify({
-      projections: {
-        "profile-name.v0": {
-          grantors: {
-            [memberId]: {
-              grantorMemberId: memberId,
-              projectionKind: "profile-name.v0",
-              projectionScope: { projectionKind: "profile-name.v0" },
-              projectionScopeKey: "profile-name.v0",
-              records: [{
-                receivedEventId: "vault-share:profile-current",
-                record: {
-                  data: { displayName: "Shared member" },
-                  occurredAt: "2026-07-16T12:00:00.000Z",
-                  recordKey: "profile-name",
-                },
-                schema: "murph.vault-share.delivery.v1",
-                shareId,
-              }],
-              shareId,
-              updatedAt: "2026-07-16T12:00:00.000Z",
-            },
-          },
-          projectionScope: { projectionKind: "profile-name.v0" },
-          projectionScopeKey: "profile-name.v0",
-        },
-      },
-      schema: "murph.shared-vault-projections.v1",
-      updatedAt: "2026-07-16T12:00:00.000Z",
-    }),
-    "utf8",
-  );
-}
-
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("keeps foreground reply orchestration separate from background maintenance", async () => {
     const source = await readFile(
@@ -804,30 +761,65 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("verifies landed share authority before entering the assistant lane", async () => {
+  it("starts the assistant lane before a scheduled group operation lazily reads the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
-    await writeHostedPhaseSharedProjection({ vaultRoot });
     const sequence: string[] = [];
     const request: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = vi.fn(async (request) => {
-      sequence.push("authority");
-      expect(request).toEqual({ action: "read_share_authority" });
+      sequence.push("read_shared");
+      expect(request).toEqual({
+        action: "read_shared",
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
       return {
-        action: "read_share_authority" as const,
+        action: "read_shared" as const,
         result: {
-          memberIds: ["member_shared_current"],
-          shares: [{
+          members: [{
+            displayName: "Ada",
             memberId: "member_shared_current",
-            projectionScopeKey: "profile-name.v0",
-            shareId: "share_profile_current",
+            participantId: "participant_shared_current",
+            projections: [{
+              dataStatus: "missing" as const,
+              grantStatus: "not_granted" as const,
+              projectionScope: { projectionKind: "steps-days.v0" as const },
+              projectionScopeKey: "steps-days.v0",
+              records: [],
+            }],
           }],
+          requestedProjectionScopeKeys: ["steps-days.v0"],
           status: "ok" as const,
         },
       };
     });
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
       sequence.push("assistant_lane");
+      expect(request).not.toHaveBeenCalled();
+      expect(laneInput.executionContext.hosted?.groupSharedReader).toBeUndefined();
+      const createScheduledGroupTools =
+        laneInput.executionContext.hosted?.createScheduledGroupTools;
+      expect(createScheduledGroupTools).toEqual(expect.any(Function));
+      if (!createScheduledGroupTools) {
+        throw new Error("Expected the scheduled group capability factory.");
+      }
+      expect(createScheduledGroupTools({
+        channel: "linq",
+        target: "chat_direct",
+        threadIsDirect: true,
+      })).toBeNull();
+      const scheduledGroupTools = createScheduledGroupTools({
+        channel: "linq",
+        target: "chat_current_group",
+        threadIsDirect: false,
+      });
+      expect(scheduledGroupTools).not.toBeNull();
+      if (!scheduledGroupTools) {
+        throw new Error("Expected scheduled group capabilities.");
+      }
+      expect(request).not.toHaveBeenCalled();
+      await expect(scheduledGroupTools.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      })).resolves.toMatchObject({ status: "ok" });
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -841,110 +833,191 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      expect(sequence).toEqual(["authority", "assistant_lane"]);
+      expect(sequence).toEqual(["assistant_lane", "read_shared"]);
       expect(request).toHaveBeenCalledTimes(1);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
-  it("marks shared data unavailable and still runs the assistant lane during an authority outage", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
-    await writeHostedPhaseSharedProjection({ vaultRoot });
-    const storeFilePath = path.join(vaultRoot, "derived", "vault-share", "projections.json");
-    const before = await readFile(storeFilePath, "utf8");
+  it("gates a scheduled permission offer on exact read evidence and one attempt", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-scheduled-group-tools-"));
+    const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
     const request: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-    >["request"] = vi.fn(async () => ({
-      action: "read_share_authority" as const,
-      result: {
-        status: "unavailable" as const,
-        unavailableReason: "control_plane_unavailable",
-      },
-    }));
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => ({
-      assistantAutomationProgressed: false,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    }));
+    >["request"] = vi.fn(async (groupToolRequest) => {
+      groupToolRequests.push(groupToolRequest);
+      if (groupToolRequest.action === "read_shared") {
+        return {
+          action: "read_shared" as const,
+          result: {
+            members: [{
+              displayName: "Ada",
+              memberId: "member_shared_current",
+              participantId: "participant_shared_current",
+              projections: [{
+                dataStatus: "missing" as const,
+                grantStatus: "not_granted" as const,
+                projectionScope: { projectionKind: "steps-days.v0" as const },
+                projectionScopeKey: "steps-days.v0",
+                records: [],
+              }],
+            }],
+            requestedProjectionScopeKeys: ["steps-days.v0"],
+            status: "ok" as const,
+          },
+        };
+      }
+      if (groupToolRequest.action === "post_join_offer") {
+        return {
+          action: "post_join_offer" as const,
+          result: {
+            group: null,
+            status: "unavailable" as const,
+            unavailableReason: "synthetic_web_unavailable",
+          },
+        };
+      }
+      throw new Error(`Unexpected group action: ${groupToolRequest.action}`);
+    });
+
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      const createScheduledGroupTools =
+        laneInput.executionContext.hosted?.createScheduledGroupTools;
+      if (!createScheduledGroupTools) {
+        throw new Error("Expected the scheduled group capability factory.");
+      }
+      expect(createScheduledGroupTools({
+        channel: "email",
+        target: "chat_current_group",
+        threadIsDirect: false,
+      })).toBeNull();
+      expect(createScheduledGroupTools({
+        channel: "linq",
+        target: "chat_current_direct",
+        threadIsDirect: true,
+      })).toBeNull();
+
+      const createTools = () => {
+        const scheduledGroupTools = createScheduledGroupTools({
+          channel: "linq",
+          target: "chat_current_group",
+          threadIsDirect: false,
+        });
+        if (!scheduledGroupTools) {
+          throw new Error("Expected scheduled group capabilities.");
+        }
+        return scheduledGroupTools;
+      };
+      const offerRequest = {
+        projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
+      };
+      const readSteps = async (
+        scheduledGroupTools: ReturnType<typeof createTools>,
+      ) => {
+        await expect(scheduledGroupTools.groupSharedReader.request({
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        })).resolves.toMatchObject({ status: "ok" });
+      };
+
+      const beforeRead = createTools();
+      await expect(
+        beforeRead.groupPermissionOfferTool.request(offerRequest),
+      ).resolves.toMatchObject({
+        action: "post_join_offer",
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      const invalid = createTools();
+      await readSteps(invalid);
+      await expect(
+        invalid.groupPermissionOfferTool.request({ projectionScopes: [] }),
+      ).resolves.toMatchObject({
+        action: "post_join_offer",
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+      await expect(
+        invalid.groupPermissionOfferTool.request(offerRequest),
+      ).resolves.toMatchObject({
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      const duplicate = createTools();
+      await readSteps(duplicate);
+      await expect(duplicate.groupPermissionOfferTool.request({
+        projectionScopes: [
+          { projectionKind: "steps-days.v0" },
+          { projectionKind: "steps-days.v0" },
+        ],
+      })).resolves.toMatchObject({
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      const unobserved = createTools();
+      await readSteps(unobserved);
+      await expect(unobserved.groupPermissionOfferTool.request({
+        projectionScopes: [{ projectionKind: "device-sync-status.v0" }],
+      })).resolves.toMatchObject({
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      const allowed = createTools();
+      await readSteps(allowed);
+      await expect(
+        allowed.groupPermissionOfferTool.request(offerRequest),
+      ).resolves.toMatchObject({
+        result: { unavailableReason: "synthetic_web_unavailable" },
+      });
+      await expect(
+        allowed.groupPermissionOfferTool.request(offerRequest),
+      ).resolves.toMatchObject({
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
 
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
-      expect(request).toHaveBeenCalledTimes(1);
-      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-      // Last-known-good authorized state: the landed records stay byte-for-byte
-      // while the marker makes every shared-data reader report unavailable.
-      expect(await readFile(storeFilePath, "utf8")).toBe(before);
-      const marker = JSON.parse(await readFile(
-        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
-        "utf8",
-      ));
-      expect(marker.schema).toBe("murph.shared-vault-authority-unavailable.v1");
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("clears the unavailable marker only after share authority recovers", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
-    await writeHostedPhaseSharedProjection({ vaultRoot });
-    const responses = [
-      {
-        action: "read_share_authority" as const,
-        result: {
-          status: "unavailable" as const,
-          unavailableReason: "control_plane_unavailable",
-        },
-      },
-      {
-        action: "read_share_authority" as const,
-        result: {
-          memberIds: ["member_shared_current"],
-          shares: [{
-            memberId: "member_shared_current",
-            projectionScopeKey: "profile-name.v0",
-            shareId: "share_profile_current",
-          }],
-          status: "ok" as const,
-        },
-      },
-    ];
-    const request: NonNullable<
-      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-    >["request"] = vi.fn(async () => responses.shift() ?? responses[0]!);
-    mocks.runHostedAssistantAutomationLane.mockImplementation(async () => ({
-      assistantAutomationProgressed: false,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    }));
-
-    try {
-      await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        runtimeGroupToolPort: { request },
-        vaultRoot,
-      }));
-      await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        runtimeGroupToolPort: { request },
-        vaultRoot,
-      }));
-      await expect(readFile(
-        path.join(vaultRoot, "derived", "vault-share", "authority-unavailable.json"),
-        "utf8",
-      )).rejects.toMatchObject({ code: "ENOENT" });
-      // The retained records are re-verified against fresh authority without
-      // any redelivery.
-      const restored = JSON.parse(await readFile(
-        path.join(vaultRoot, "derived", "vault-share", "projections.json"),
-        "utf8",
-      ));
-      expect(Object.keys(restored.projections["profile-name.v0"].grantors))
-        .toEqual(["member_shared_current"]);
+      expect(groupToolRequests.filter((request) => request.action === "read_shared"))
+        .toHaveLength(4);
+      expect(groupToolRequests.filter((request) => request.action === "post_join_offer"))
+        .toEqual([{
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+            projectionScopes: [{ projectionKind: "steps-days.v0" }],
+          },
+          linqThread: {
+            authority: {
+              channel: "linq",
+              containerMemberId: "member_synthetic_phase",
+              threadId: "chat_current_group",
+            },
+            chatId: "chat_current_group",
+          },
+        }]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -3618,6 +3691,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       ],
       operation: async (executionContext) => {
         expect(executionContext.hosted?.automationTool).toBeUndefined();
+        expect(executionContext.hosted?.groupSharedReader).toBeUndefined();
       },
       turnEnvironment: null,
     });
@@ -3756,6 +3830,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         operation: async (executionContext, turnEnvironment) => {
           expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
           expect(executionContext.hosted?.automationTool).toBeUndefined();
+          expect(executionContext.hosted?.groupSharedReader).toEqual(
+            expect.objectContaining({ request: expect.any(Function) }),
+          );
           return await executionContext.hosted?.groupTool?.request({
             action: "update_display_name",
             updateDisplayName: { displayName: "Email cannot rename" },
@@ -3778,6 +3855,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         inputIds: [linqInputId],
         operation: async (executionContext, turnEnvironment) => {
           expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
+          expect(executionContext.hosted?.groupSharedReader).toEqual(
+            expect.objectContaining({ request: expect.any(Function) }),
+          );
           const saved = await executionContext.hosted?.automationTool?.request({
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
@@ -3970,6 +4050,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           executionContext: laneInput.executionContext,
           inputIds: [inputId],
           operation: async (executionContext) => {
+            expect(executionContext.hosted?.groupSharedReader).toBeUndefined();
             const automationTool = executionContext.hosted?.automationTool;
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
@@ -5834,48 +5915,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
     } satisfies RuntimeDeviceSyncPort;
-    const groupToolRequests: Array<
-      Parameters<
-        NonNullable<
-          HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-        >["request"]
-      >[0]
-    > = [];
-    const groupToolPort: NonNullable<
-      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-    > = {
-      async request(request) {
-        groupToolRequests.push(request);
-        if (request.action !== "read_share_authority") {
-          throw new Error("Scheduled context may only read current share authority.");
-        }
-        return {
-          action: "read_share_authority",
-          result: {
-            memberIds: ["member_alpha", "member_beta"],
-            shares: [
-              {
-                memberId: "member_alpha",
-                projectionScopeKey: "profile-name.v0",
-                shareId: "share_alpha_profile",
-              },
-              {
-                memberId: "member_alpha",
-                projectionScopeKey: "steps-days.v0",
-                shareId: "share_alpha_steps",
-              },
-              {
-                memberId: "member_beta",
-                projectionScopeKey: "profile-name.v0",
-                shareId: "share_beta_profile",
-              },
-            ],
-            status: "ok",
-          },
-        };
-      },
-    };
-
     mocks.getAssistantCronStatus.mockResolvedValueOnce({
       dueJobs: 1,
       enabledJobs: 1,
@@ -5896,7 +5935,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     expect(fetchSnapshotRequests).toEqual([]);
-    expect(groupToolRequests).toEqual([]);
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       resolvedDeviceSync: {
         providerConfigs: {
@@ -5910,12 +5948,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         secret: "synthetic-device-sync-secret",
       },
       runtimeDeviceSyncPort: deviceSyncPort,
-      runtimeGroupToolPort: groupToolPort,
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     expect(assistantLaneCall?.executionContext.hosted?.automationTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupTool).toBeUndefined();
+    expect(assistantLaneCall?.executionContext.hosted?.groupSharedReader).toBeUndefined();
+    expect(assistantLaneCall?.executionContext.hosted?.createScheduledGroupTools)
+      .toEqual(expect.any(Function));
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
@@ -5936,7 +5976,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       ]),
     );
-    expect(groupToolRequests).toEqual([{ action: "read_share_authority" }]);
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -5945,12 +5984,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(dynamicContextPrompt).toContain(
       "Do not offer initial wearable connection",
     );
-    expect(dynamicContextPrompt).toContain(
-      "authoritative current group membership and grant snapshot",
-    );
-    expect(dynamicContextPrompt).toContain('"memberId": "member_alpha"');
-    expect(dynamicContextPrompt).toContain('"memberId": "member_beta"');
-    expect(dynamicContextPrompt).toContain("only participants recorded as `in`");
+    expect(dynamicContextPrompt).not.toContain("member_alpha");
+    expect(dynamicContextPrompt).not.toContain("member_beta");
     expect(dynamicContextPrompt).not.toContain("needs reconnect");
     expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
     expect(dynamicContextPrompt).not.toContain("refresh failed");

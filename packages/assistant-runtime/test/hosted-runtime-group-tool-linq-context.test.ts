@@ -302,8 +302,14 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
 
-    await groupTool.request({ action: "read_share_authority" });
-    expect(request).toHaveBeenLastCalledWith({ action: "read_share_authority" });
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
   });
 
   it("rejects personal membership reads and durable group mutations whenever email ingress is present", async () => {

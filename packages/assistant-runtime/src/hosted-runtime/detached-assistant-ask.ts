@@ -4,6 +4,9 @@ import {
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import type {
+  AssistantHostedGroupSharedReader,
+} from "@murphai/assistant-engine";
+import type {
   HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -35,8 +38,8 @@ export interface HostedDetachedAssistantAskController {
 
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
-  beforeExecuteAsk(): Promise<void>;
   codexHome: string | null;
+  createGroupSharedReader?(): AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk?: (
     input: ReadOnlyAssistantAskInput,
@@ -74,8 +77,10 @@ export function createHostedDetachedAssistantAskController(
     const completion = runOneHostedDetachedAssistantAsk({
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
-      beforeExecuteAsk: input.beforeExecuteAsk,
       codexHome: input.codexHome,
+      ...(input.createGroupSharedReader
+        ? { createGroupSharedReader: input.createGroupSharedReader }
+        : {}),
       env: input.env,
       executeAsk,
       now,
@@ -160,8 +165,8 @@ export function createHostedDetachedAssistantAskController(
 async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
-  beforeExecuteAsk(): Promise<void>;
   codexHome: string | null;
+  createGroupSharedReader?: () => AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk: (
     input: ReadOnlyAssistantAskInput,
@@ -213,7 +218,6 @@ async function runOneHostedDetachedAssistantAsk(input: {
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
-    await input.beforeExecuteAsk();
     if (input.abortSignal.aborted) {
       await requeueHostedDetachedAssistantAsk({
         claimed,
@@ -226,6 +230,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
       env: { ...input.env },
+      ...(input.createGroupSharedReader
+        ? { groupSharedReader: input.createGroupSharedReader() }
+        : {}),
       now: new Date(input.now()),
       question: prepared.question,
       workspaceRoot: input.vaultRoot,

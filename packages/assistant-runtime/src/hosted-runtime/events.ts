@@ -350,16 +350,16 @@ async function executeHostedSystemWake(input: {
         "Hosted assistant ask request wakes must run through the detached read-only controller.",
       );
     case "vault-share.delivery":
-      // Vault-share deliveries are landed deterministically at mailbox import
-      // (vault-share-import.ts) and never enter the system wake execution path.
+      // The retired mailbox route skips legacy vault-share deliveries before
+      // payload resolution; they must never enter system wake execution.
       throw new TypeError(
-        'Hosted vault-share delivery wakes are landed at mailbox import and must never reach system wake execution.',
+        "Retired hosted vault-share delivery wakes must never reach system wake execution.",
       );
     case "vault-share.revoke":
-      // Vault-share revokes are applied deterministically at mailbox import
-      // (vault-share-import.ts) and never enter the system wake execution path.
+      // The retired mailbox route skips legacy vault-share revokes before
+      // payload resolution; they must never enter system wake execution.
       throw new TypeError(
-        'Hosted vault-share revoke wakes are applied at mailbox import and must never reach system wake execution.',
+        "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
     case "group-newsletter.email-needed":
       // Group newsletter email-needed wakes stage a private system note at

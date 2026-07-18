@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-16
+Last verified: 2026-07-18
 
 Status: Implemented
 
@@ -28,10 +28,9 @@ Every scheduled challenge update does all of the following:
   reporting cutoff. A real zero is a score; absent data is not zero.
 - Names every `in` participant who is waiting on data in a separate status
   section.
-- Gives one evidence-backed reason and the smallest useful action, or says the
-  reason is unverified, the first time that gap appears in a group digest.
-- Keeps every missing participant named neutrally in later daily digests, but
-  moves repeated reasons, actions, and troubleshooting to the affected
+- Gives every missing participant one current evidence-backed reason and the
+  smallest useful action, or says the reason is unverified.
+- Keeps individual troubleshooting and private account details in the affected
   participant's private thread.
 
 Murph never presents a partial leaderboard as complete, hides an opted-in
@@ -43,75 +42,94 @@ performance joke.
 Four facts remain separate:
 
 1. The challenge knowledge page owns durable challenge participation,
-   including `in`, `pending`, `declined`, and `withdrawn`. It also owns a
-   bounded Gap disclosure log with at most one row per participant: `memberId`,
-   `firstPublicGapDate`, and a closed evidence category. That log, rather than
-   transient model context, gates whether the room receives a reason/action or
-   only the neutral waiting entry.
-2. `apps/web` owns current group membership and current Vault Share grants.
-   Interactive turns read them with `murph.group action="read_current"`;
-   scheduled turns receive a narrower trusted runtime snapshot containing only
-   current member ids and exact `(projectionScopeKey, shareId)` authority.
-3. `vault-cli group shared` reads projections that reached the group vault.
-   It is not an authoritative roster, and a grant proves permission rather
-   than projection delivery.
-4. The member's device-sync owner supplies connection facts. The group sees
-   only the separately consented `device-sync-status.v0` projection.
+   including `in`, `pending`, `declined`, and `withdrawn`.
+2. `apps/web` owns current group membership, current Vault Share grants, and
+   the one nullable encrypted projection snapshot on each existing
+   `HostedVaultShare` row. An active grant authorizes only its exact canonical
+   scope; it does not prove that data is available.
+3. `murph.group action="read_shared"` is the only hosted assistant read for
+   shared group facts. Web captures the current roster and exact active grants,
+   decrypts the bounded snapshots owned by those rows, and returns the complete
+   consent/data matrix. No shared copy is landed in a member or group workspace.
+4. Web's device-sync owner supplies live connection facts only after an active
+   `device-sync-status.v0` grant is captured. Device status is not written into
+   the share snapshot column.
 
-Before every hosted assistant pass or detached read-only Assistant Ask that has
-landed group projections, the runtime asks Web for the current active share
-authority and reconciles the derived projection store by exact `(memberId,
-projectionScopeKey, shareId)`. It removes revoked scopes, former members,
-superseded re-grants, and records whose share id does not match the active grant
-before the model can run. If the authority read or atomic reconciliation fails,
-a detached ask fails closed and requeues without model execution, while an
-accepted foreground turn still runs against the last successfully verified
-store content: a fixed unavailable marker makes `vault-cli group shared`,
-`group weekly`, and newsletter readers report "unavailable" and scheduled
-turns withhold standings until a later successful read clears the marker.
-Landed records are never discarded on a transient failure, and vault-share
-deliveries and revokes keep importing through their one ordered system lane
-during the outage — Web's atomic grant check at append time is their
-authorization, and blocking either item class would strand the other behind
-it. A full-access foreground shell can therefore still read the retained
-store during the outage; every retained record was Web-authorized as of its
-append, and the exposure ends when the pending revoke imports or authority
-recovers. Foreground mailbox imports pause and requeue detached asks until
-the mutation and any subsequent assistant pass finish; a resumed ask then
-revalidates the new store. The normal mailbox revoke remains cleanup
-delivery; it is not the read-time authorization boundary.
+The runtime constructs the `read_shared` adapter synchronously and performs no
+group, grant, snapshot, device, filesystem, projection, sandbox, or configuration
+work before the model turn starts. Foreground, scheduled, notification, and
+detached read-only turns all contact Web only if the model invokes
+`read_shared`. Scheduled turns do not receive a preloaded roster or grant
+snapshot.
 
-The reader starts with challenge participants recorded as `in`, reconciles
-them with current Web-owned membership and grants, and left joins metric and
-diagnostic projections by exact `memberId`. It never starts from the members
-returned by a filtered `vault-cli group shared` result. Only canonical scope
-keys are grant authority; a selector projection kind is not a broad selector
-grant. If the current roster/grant snapshot is unavailable, Murph does not use
-landed records or publish standings for that run because it cannot revalidate
-their current authorization.
+Web answers one model-triggered read with every current member and every
+requested scope. Each cell distinguishes `not_granted`, `granted` plus
+`missing`, and `available`; a real zero remains available data. Profile labels
+come only from the separately granted profile snapshot. Authority, decryption,
+parsing, or bound failures return one typed `unavailable` result without shared
+records rather than falling back to cached data.
+
+Each returned member has a `participantId` derived from that group's
+`HostedGroupMember` row. It is stable only for the lifetime of that exact group
+membership and is scoped to the group; it carries no account, device, provider,
+or route identity. Duplicate display names and later name changes therefore do
+not make challenge joins ambiguous. The trusted Web-to-runtime response retains
+the global member id only for existing newsletter authorization composition;
+the assistant-engine model boundary removes it and exposes only
+`participantId`, the consented display name, and requested projections.
+
+Health projection delivery replaces the complete bounded encrypted snapshot on
+the exact active share row. An encrypted empty record set means the projection
+was observed but has no data; `null` means no snapshot has been supplied yet.
+Revoke and regrant clear the ciphertext in the same authority transaction, and
+regrant rotates the share id, so a stale producer cannot write into a later
+grant generation.
+
+The retired `vault-share.delivery` and `vault-share.revoke` mailbox rows are
+terminally skipped from their plaintext metadata before payload fetch or
+decryption. They do not mutate a workspace or schedule cleanup. Both v2 archive
+restore and legacy snapshot materialization exclude `derived/vault-share/**`
+and `vault-share/**`; the assistant, CLI, newsletter, and challenge paths never
+read those legacy local copies.
+
+The challenge reader starts with knowledge-page participants recorded as `in`,
+then joins the current `read_shared` result by exact group-scoped
+`participantId`, never by display name or global member id. It never starts
+from members that happen to have data. Only an exact canonical scope key is
+grant authority; a selector projection kind is not a broad selector grant.
+
+New challenge kickoff performs one post-model-start `read_shared` call with the
+exact scoring scope and `device-sync-status.v0` before writing the roster, and
+records the returned group-scoped `participantId` wherever current attributable
+sender or reaction evidence makes the association exact. This is not prompt
+preload and adds no pre-model work. Display-name equality or uniqueness, array
+position, projection values, grant state, and remembered context are not
+identity evidence.
+
+For an active legacy challenge page without those keys, the normal daily
+`read_shared` call also provides one backfill attempt; there is no extra read or
+new state owner. An exact current attributed association may fill the key.
+Otherwise the page records that identity as unresolved and excludes that entry
+from scoring and diagnostics. Scheduled runs do not repeat the guess; only new
+attributable evidence can reopen that one mapping. Participation state remains
+unchanged throughout this identity migration.
 
 ## Diagnostic decision order
 
-Current grant authority gates use of a landed projection. Within authorized
-evidence, Murph applies this order to each `in` participant and stops at the
-first match:
+The current `read_shared` result gates every diagnosis. Murph applies this order
+to each `in` participant and stops at the first match:
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
 | Current challenge-metric data through the reporting cutoff | Include the participant in the ranked standings. | None. Device status cannot override current metric evidence. |
-| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | In an interactive group turn, offer the missing scope once. In a scheduled update, invite the room to ask Murph for a permission card. |
-| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Offer the diagnostic scope once in an interactive group turn, or request that interactive card from a scheduled update. |
-| Recent diagnostic projection with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
-| Recent diagnostic projection with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
-| Recent diagnostic projection with `needs-attention` | The visible source needs attention; the projection does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
-| Recent diagnostic projection with `connected`, but no metric data | The source is connected, but the challenge metric has not reached Murph. | Give a source-appropriate recovery step without claiming a cause. |
-| Recent diagnostic projection with no visible sources | No connected health source is visible in the shared snapshot. | Ask the participant to check or connect a source privately. |
-| Missing or stale diagnostic projection | Murph cannot verify the reason. | Do not guess. Offer a private check or an interactive diagnostic permission card when applicable. |
-
-A diagnostic projection is recent only when its top-level `observedAt` is no
-more than two calendar dates behind the challenge's local date. For example,
-an observation bucket dated the 14th is usable on the 16th; one dated the 13th
-is stale. This is a calendar-date rule, not a rolling 48-hour calculation.
+| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Offer the exact missing scope once after the current read. |
+| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Offer the diagnostic scope once after the current read. |
+| Live diagnostic result with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
+| Live diagnostic result with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
+| Live diagnostic result with `needs-attention` | The visible source needs attention; the result does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
+| Live diagnostic result with `connected`, but no metric data | The source is connected, but the challenge metric has not reached Murph. | Give a source-appropriate recovery step without claiming a cause. |
+| Live diagnostic result with no visible sources | No connected health source is visible in the consented result. | Ask the participant to check or connect a source privately. |
+| Diagnostic read unavailable | Murph cannot verify the reason. | Do not guess. Offer a private check and retry only through a later model-triggered read. |
 
 ## Apple Health boundary
 
@@ -120,13 +138,13 @@ connection status nor an empty Steps projection proves that a participant
 denied, forgot, or has not approved Steps access. Current backend state also
 cannot prove that the participant has not opened the app.
 
-When Apple Health has the literal `connected` status in a recent diagnostic
-projection and current Steps are absent from the authorized group projection,
+When Apple Health has the literal `connected` status in a live diagnostic
+result and current Steps are absent from the authorized group snapshot,
 Murph may say that this group does not currently have recent Steps for the
 participant and that Apple Health is visible as connected. Other Apple Health
 statuses follow their status-specific rules. A `connected` status does not
 prove private ingestion failed;
-Vault Share delivery may be the missing step. The safe first action is to open
+projection production may be the missing step. The safe first action is to open
 Murph. If Steps still do not arrive, Murph may ask the participant to check
 Apple Health Steps access. It must not present either action as the established
 cause.
@@ -137,8 +155,13 @@ group-sharing scopes. It cannot grant or change HealthKit authorization.
 ## `device-sync-status.v0` privacy contract
 
 The selectable fixed scope is `device-sync-status.v0`, presented to members as
-"Health source connection status." It uses the replacement record key
-`device-sync-status` and carries this closed data shape:
+"Health source connection status." It is an explicit group-sharing grant, not
+an inference from some other health permission. When a model-triggered
+`read_shared` captures that current grant, Web derives one bounded live result
+from its existing device state. It does not ask the grantor runtime to project
+device data and does not persist device data in the share snapshot column.
+
+The result uses record key `device-sync-status` and this closed data shape:
 
 ```json
 {
@@ -154,11 +177,10 @@ The selectable fixed scope is `device-sync-status.v0`, presented to members as
 }
 ```
 
-The projection rules are:
+The derivation rules are:
 
-- `observedAt` is a UTC-day bucket and equals the delivery record's
-  `occurredAt`. It bounds unchanged projection revisions; it is not a
-  health-data receipt time.
+- `observedAt` is the current UTC-day bucket and equals the result record's
+  `occurredAt`. It is not a health-data receipt time.
 - `sources` contains at most eight unique public source labels, such as Apple
   Health or WHOOP, each at most 80 characters. It does not expose an internal
   provider key.
@@ -173,9 +195,10 @@ The projection rules are:
   credentials, tokens, scopes, provider errors, resource payloads, raw health
   data, health values, and private diagnostics.
 
-The group may use the projection only while the member has the explicit scope.
-An old record is treated as unverified rather than as forever-current device
-truth.
+Web returns this result only while the member has the explicit scope. The
+timestamps are reported with their literal meanings; an old sync-job timestamp
+may support saying when that job last completed, but never implies fresh health
+data or proves the cause of a missing metric.
 
 ## Permission behavior
 
@@ -189,11 +212,14 @@ first-party customize link. Liking or hearting adds only that disclosed
 snapshot; the first-party page remains the customize path.
 
 An interactive group turn may post one new additive offer when the room asks
-for a missing scope. Do not repost it, retry it from a scheduled occurrence, or
-nag someone who ignores or declines it. Scheduled challenge turns lack the
-current chat-route authority required to post a like-to-consent offer. They
-report the missing grant and ask the room to request an interactive permission
-card instead of telling someone to like the ordinary standings message.
+for a missing scope. A scheduled challenge turn may also post one offer, but
+only after its model-triggered `read_shared` result and only for the exact scopes
+that result observed as `not_granted`. The operation-local adapter rejects calls
+before that read, scopes not supported by that evidence, and every second
+attempt without calling Web. Web's current active-offer and all-granted checks
+remain the final durable authority and suppress duplicate permission cards.
+Do not repost or nag someone who ignores or declines an offer, and never tell
+someone to react to the ordinary standings message.
 
 ## Message shape
 
@@ -203,47 +229,36 @@ For example, the semantic shape is "partial standings: 2 of 5 current," a
 ranked section, then a waiting section with one reason/action per person.
 
 Names in the waiting section are operational status, not performance shaming.
-The group receives the first factual explanation because it changes how the
-standings should be read. Later daily updates still name the participant as
-waiting so the leaderboard stays complete, but they do not repeat the reason or
-action in the room. Repeated reminders and individual troubleshooting belong in
-the participant's private thread. The challenge page records that first public
-gap before the message includes its reason/action, using one bounded row per
-participant. A failed or ambiguous save makes that digest neutral for the
-participant. This fail-closed receipt gate prevents a context reset from
-turning a later digest back into a repeated first disclosure.
+Each update may include the participant's current evidence-backed reason and
+smallest action because those facts explain how to read the standings. It does
+not repeat speculative causes or expose private troubleshooting in the room.
 
 ## Deployment compatibility
 
-This is a Web-first cross-plane change. The new runtime both consumes the
-projection and can request its scope through the group tool, so Web must know
-the scope before any new prompt can send it:
+This is a consumer-first hard cut:
 
-1. Deploy Web/Vercel first so its strict group-tool parser, join policy, grant
-   owner, delivery route, canonical reaction-consent copy, and internal current
-   share-authority read recognize `device-sync-status.v0`. Old runners neither
-   call that internal read nor advertise or request the new scope, so Web does
-   not receive or offer the new scope in this compatibility window.
-2. Deploy the hosted-execution parser, projection reader/projector, CLI view,
-   pre-model exact-share reconciliation, scheduled roster/grant context, and
-   assistant guidance in the Cloudflare runner bundle. Use immediate container
-   rollout and runner-fingerprint proof so a warm old consumer is not left
-   beside a new projection producer.
-3. Verify that the new runner can request, parse, project, treat stale records
-   as unverified, and explain `device-sync-status.v0` through the already-ready
-   Web control plane.
+1. Deploy Cloudflare and the runner bundle with immediate container rollout.
+   Prove the new bundle constructs the shared reader with zero I/O before
+   `turn/start`, supports `read_shared`, skips legacy delivery/revoke rows before
+   payload fetch, excludes both legacy share subtrees during restore, and never
+   reads or writes a local shared-data store.
+2. After fleet convergence, apply the nullable
+   `HostedVaultShare.projectionSnapshotCiphertext` migration and deploy Web's
+   encrypted snapshot replacement, direct `read_shared`, and consent-gated live
+   device derivation. Before this step, a new runtime calling an old Web fails
+   closed with typed shared-data unavailability. The runtime continues sending
+   the ignored legacy permission-offer template field only so old Web accepts
+   scheduled offer requests during this consumer-first window; delete that
+   field after new Web is deployed and the Cloudflare rollback floor is set.
+3. Verify complete member/scope matrices, empty-snapshot behavior, stale-writer
+   rejection, revoke/regrant clearing, device privacy, and the challenge output
+   against the deployed route.
 
-No coordinated downtime is required with that order. Once the new Cloudflare
-runner can request the scope and members can produce its records, Web's strict
-scope support and the consumer-capable runner are both rollback floors. To
-roll back after that point, first ship a forward-compatible mitigation that
-keeps the new scope parser and landed-record consumer but stops new diagnostic
-offers and projection production. Revoke every `device-sync-status.v0` grant,
-clean the corresponding landed records, and verify both are absent. Only after
-that proof may Cloudflare roll back below consumer support; Web rolls back
-last. Never put an old Cloudflare consumer beside an existing new-kind record.
-Staleness makes an old diagnostic fact unusable for challenge decisions; it
-does not delete the landed record.
+Once Web can write the encrypted snapshot column or serve `read_shared`, the
+new Cloudflare consumer is the hard rollback floor. Do not roll Cloudflare back
+to a bundle that restores or consumes legacy local projections; disable the Web
+producer/read path and forward-fix instead. There is no cleanup wake, local
+drain, or foreground reconciliation step in either deployment or rollback.
 
 ## Acceptance cases
 
@@ -254,10 +269,12 @@ does not delete the landed record.
   not a device diagnosis.
 - A participant missing only diagnostic consent gets an unverified explanation,
   not a guessed Apple Health state.
-- A recent Apple Health `connected` projection plus absent Steps recommends
+- An Apple Health `connected` result plus absent Steps recommends
   opening Murph and checking Steps access only as recovery steps.
-- A device projection more than two local calendar days old is ignored for
-  diagnosis.
-- A scheduled occurrence does not call or claim a successful permission offer.
+- A three-day-old connection sync-job timestamp may be named literally but is
+  not presented as health-data receipt or a proven cause.
+- A scheduled occurrence may attempt one evidence-bound permission offer after
+  `read_shared`; it never claims a new card was sent when Web reports only that
+  a matching card is already active.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

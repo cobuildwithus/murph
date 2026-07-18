@@ -17,20 +17,6 @@ export function filterHostedRuntimeGroupToolResponseProjectionScopes(
   response: HostedRuntimeGroupToolResponse,
   supportedProjectionScopeKeys: ReadonlySet<string>,
 ): HostedRuntimeGroupToolResponse {
-  if (
-    response.action === "read_share_authority"
-    && response.result.status === "ok"
-  ) {
-    return {
-      ...response,
-      result: {
-        ...response.result,
-        shares: response.result.shares.filter((share) =>
-          supportedProjectionScopeKeys.has(share.projectionScopeKey)
-        ),
-      },
-    };
-  }
   if (response.action === "list_memberships" && response.result.status === "ok") {
     return {
       ...response,

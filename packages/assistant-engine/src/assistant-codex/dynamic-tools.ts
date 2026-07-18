@@ -52,15 +52,9 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
-  flattenSharedVaultShareProjectionStore,
   parseHostedVaultShareProjectionScope,
-  type SharedVaultShareProjectionsFile,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
-import {
-  hasSharedVaultShareAuthorityUnavailableMarker,
-  readSharedVaultShareProjectionStore,
-} from '@murphai/hosted-execution/vault-share-store-node'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -87,11 +81,17 @@ import {
   type SharedGroupWeeklyMember,
 } from '@murphai/query'
 
-import type {
-  AssistantGeneratedImageContentType,
-  AssistantHostedGeneratedImageUploader,
-  AssistantWorkspaceArtifactMaterializer,
+import {
+  type AssistantHostedGroupSharedReadResponse,
+  type AssistantHostedGroupSharedReader,
+  type AssistantGeneratedImageContentType,
+  type AssistantHostedGeneratedImageUploader,
+  type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
+import {
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+} from '../assistant/group-shared-read-limits.js'
 import type {
   AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
@@ -635,12 +635,72 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
   ],
 } as const
 
+/**
+ * Detached group consultation gets only the lazy shared-data read surface. It
+ * intentionally reuses murph.group so the normal parser/executor stays the
+ * single implementation while the model never sees mutation or routing actions.
+ */
+export const MURPH_GROUP_SHARED_READ_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Read current consent-aware shared group facts after the turn has started. Request one to three unique exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Its participantId is scoped to the group membership and carries no account, device, provider, or route identity. The trusted host resolves current authority; never supply member, share, group, runtime, mailbox, session, or route identifiers.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_shared'],
+      },
+      projectionScopes: {
+        type: 'array',
+        minItems: 1,
+        maxItems: ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+        uniqueItems: true,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
+      },
+    },
+    required: ['action', 'projectionScopes'],
+  },
+} as const
+
+/**
+ * Scheduled group turns can read shared facts and post a server-authored
+ * additive permission card, but cannot access the broader group mutation API.
+ */
+export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. The read result participantId is scoped to the group membership and carries no account, device, provider, or route identity. Use action="post_join_offer" only for scopes members still need to grant; existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_shared', 'post_join_offer'],
+      },
+      projectionScopes: {
+        type: 'array',
+        minItems: 1,
+        maxItems: ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+        uniqueItems: true,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
+      },
+    },
+    required: ['action', 'projectionScopes'],
+  },
+} as const
+
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
     'Use action="ask" only from a personal direct conversation when the member wants an answer from one of their joined group Murphs. Supply the bounded natural-language question and, only when useful for choosing among multiple groups, the visible groupLabel the member would recognize. For this action, the runtime resolves membership and every internal target automatically; never supply or ask the member for membership, group, runtime, mailbox, session, callback, or route identifiers. The result is asynchronous, so an accepted request will return to the personal conversation later. ' +
-    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s exact granted projection scopes) with action="read_current"; use the exact `grantedVaultShareProjectionScopes` entries as grant authority and never treat a selector projection kind as a broad grant. Request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, pass the exact projectionScopes and, only when chosen by the group, displayName. Web owns the full canonical consent copy: the exact scope disclosure, accepted Like-or-heart gestures, and first-party customize link. Never supply offer text. Liking or hearting grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Use action="read_shared" only when current group standings or diagnostics need exact consent-aware shared facts. Request one to three exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Each participantId is scoped to this group membership and carries no account, device, provider, or route identity. It resolves current authority only after this tool call; never supply member, share, runtime, group, or route identifiers. ' +
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data is available in the current Web-owned snapshot. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Use action="read_current" only for membership, group creation, join, and permission-offer operations; its roster or grant fields are not authority to read or score shared records. Request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, pass the exact projectionScopes and, only when chosen by the group, displayName. Web owns the full canonical consent copy: the exact scope disclosure, accepted Like-or-heart gestures, and first-party customize link. Never supply offer text. Liking or hearting grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -649,6 +709,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [
           'ask',
+          'read_shared',
           'read_current',
           'list_memberships',
           'leave_membership',
@@ -760,7 +821,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections that liking or hearting the server-owned offer message will add as a fixed permission snapshot. Existing membership and other grants remain unchanged. Web writes the complete causal consent sentence, exact scope disclosure including preferred display name, accepted gestures, and first-party customize link.',
+          'For read_shared, one to three exact consent-aware group projections to read. For post_join_offer, optional bounded health projections that liking or hearting the server-owned offer message will add as a fixed permission snapshot. Existing membership and other grants remain unchanged. Web writes the complete causal consent sentence, exact scope disclosure including preferred display name, accepted gestures, and first-party customize link.',
       },
     },
     required: ['action'],
@@ -1072,7 +1133,10 @@ export const MURPH_DYNAMIC_TOOLS = [
   ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
 ] as const
 
-export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
+export type MurphDynamicTool =
+  | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_SHARED_READ_TOOL
+  | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
 
 export interface MurphDynamicToolAvailability {
   assistantStyleSettingsAvailable?: boolean | null
@@ -1090,6 +1154,8 @@ export interface MurphDynamicToolAvailability {
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
+  groupPermissionOfferAvailable?: boolean | null
+  groupSharedReadAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
@@ -1152,9 +1218,20 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
 export function resolveMurphDynamicTools(
   availability: MurphDynamicToolAvailability,
 ): readonly MurphDynamicTool[] {
-  return MURPH_DYNAMIC_TOOLS.filter((tool) =>
+  const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (
+    availability.groupAvailable !== true &&
+    availability.groupSharedReadAvailable === true
+  ) {
+    tools.push(
+      availability.groupPermissionOfferAvailable === true
+        ? MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
+        : MURPH_GROUP_SHARED_READ_TOOL,
+    )
+  }
+  return tools
 }
 
 export function listMurphDynamicToolNames(): string[] {
@@ -1257,6 +1334,22 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('read_shared'),
+      projectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .min(1)
+        .max(ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES)
+        .refine(
+          (projectionScopes) =>
+            new Set(
+              projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+            ).size === projectionScopes.length,
+          { message: 'projectionScopes must contain unique exact scopes' },
+        ),
     })
     .strict(),
   z
@@ -1652,6 +1745,10 @@ interface ParsedDynamicToolCallRequest {
 
 type MurphGroupToolRequest =
   | Exclude<HostedRuntimeGroupToolRequest, { action: 'ask' }>
+  | {
+      action: 'read_shared'
+      projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+    }
   | {
       action: 'ask'
       groupLabel?: string
@@ -3081,6 +3178,68 @@ function groupAvatarUnavailableToolResult(
   }))
 }
 
+function groupSharedUnavailableToolResult(
+  unavailableReason: string,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, JSON.stringify({
+    action: 'read_shared',
+    result: {
+      status: 'unavailable',
+      unavailableReason,
+    },
+  }))
+}
+
+function groupSharedModelResult(
+  result: AssistantHostedGroupSharedReadResponse,
+) {
+  if (result.status !== 'ok') {
+    return result
+  }
+  return {
+    ...result,
+    members: result.members.map((member) => ({
+      displayName: member.displayName,
+      participantId: member.participantId,
+      projections: member.projections,
+    })),
+  }
+}
+
+async function executeGroupSharedRead(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
+}): Promise<MurphDynamicToolExecutionResult> {
+  const groupSharedReader = input.hostedToolContext?.groupSharedReader ?? null
+  if (!groupSharedReader) {
+    return groupSharedUnavailableToolResult('group_shared_reader_unavailable')
+  }
+
+  try {
+    const result = await groupSharedReader.request({
+      projectionScopes: input.request.projectionScopes,
+    })
+    const text = JSON.stringify({
+      action: 'read_shared',
+      result: groupSharedModelResult(result),
+    })
+    if (text.length > ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS) {
+      return groupSharedUnavailableToolResult('group_shared_result_too_large')
+    }
+    return toolTextResult(true, text)
+  } catch {
+    return groupSharedUnavailableToolResult('group_shared_read_failed')
+  }
+}
+
+function hasExactStringEntries(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return actual.length === expected.length
+    && actual.every((value, index) => value === expected[index])
+}
+
 async function executeGroupTool(input: {
   abortSignal: AbortSignal | null
   env: NodeJS.ProcessEnv
@@ -3093,7 +3252,19 @@ async function executeGroupTool(input: {
   toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  if (input.request.action === 'read_shared') {
+    return executeGroupSharedRead({
+      hostedToolContext: input.hostedToolContext,
+      request: input.request,
+    })
+  }
   const groupTool = input.hostedToolContext?.groupTool ?? null
+  if (input.request.action === 'post_join_offer' && !groupTool) {
+    return executeGroupPermissionOffer({
+      hostedToolContext: input.hostedToolContext,
+      request: input.request,
+    })
+  }
   if (!groupTool) {
     return toolTextResult(false, 'group tools are unavailable for this turn')
   }
@@ -3195,6 +3366,51 @@ async function executeGroupTool(input: {
       ...toolTextResult(false, 'group tool request failed'),
       ...(usageDraft ? { usageDraft } : {}),
     }
+  }
+}
+
+async function executeGroupPermissionOffer(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: Extract<MurphGroupToolRequest, { action: 'post_join_offer' }>
+}): Promise<MurphDynamicToolExecutionResult> {
+  const permissionOfferTool =
+    input.hostedToolContext?.groupPermissionOfferTool ?? null
+  const projectionScopes = input.request.joinOffer?.projectionScopes ?? null
+  if (
+    !permissionOfferTool
+    || input.request.joinOffer?.displayName !== undefined
+    || !projectionScopes
+    || projectionScopes.length === 0
+    || projectionScopes.length
+      > ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
+    || new Set(
+      projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+    ).size !== projectionScopes.length
+  ) {
+    return toolTextResult(false, 'group tools are unavailable for this turn')
+  }
+
+  try {
+    const result = await permissionOfferTool.request({ projectionScopes })
+    const sanitized = z.object({
+      action: z.literal('post_join_offer'),
+      result: z.discriminatedUnion('status', [
+        z.object({ status: z.literal('sent') }),
+        z.object({
+          status: z.literal('unavailable'),
+          unavailableReason: z.string()
+            .trim()
+            .min(1)
+            .transform((reason) => reason.slice(0, 256)),
+        }),
+      ]),
+    }).safeParse(result)
+    if (!sanitized.success) {
+      return toolTextResult(false, 'group tool request failed')
+    }
+    return toolTextResult(true, safeToolPayloadText(sanitized.data))
+  } catch {
+    return toolTextResult(false, 'group tool request failed')
   }
 }
 
@@ -3395,35 +3611,9 @@ async function executeNewsletterTool(input: {
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
-    if (
-      input.request.action === 'send'
-      && input.vaultRoot
-      && !await isGroupSharedProjectionAvailable(input.vaultRoot)
-    ) {
-      recordNewsletterUnavailable(
-        input.hostedToolContext,
-        'newsletter_preparation_unavailable',
-      )
-      return groupSharedProjectionUnavailableResult(input.request.action)
-    }
-
     const scheduledAutomationAuthority =
       input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
       null
-    let newsletterWeeklySource: NewsletterWeeklySource | null = null
-    if (input.request.action === 'prepare') {
-      newsletterWeeklySource = await readNewsletterWeeklySource({
-        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
-        vaultRoot: input.vaultRoot,
-      })
-      if (newsletterWeeklySource === null) {
-        recordNewsletterUnavailable(
-          input.hostedToolContext,
-          'newsletter_preparation_unavailable',
-        )
-        return groupSharedProjectionUnavailableResult(input.request.action)
-      }
-    }
     const request: HostedRuntimeNewsletterToolRequest = {
       ...input.request,
       scheduledAutomationAuthority,
@@ -3456,18 +3646,19 @@ async function executeNewsletterTool(input: {
       })
     }
     const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
-    if (newsletterWeeklySource === null) {
+    const members = await readNewsletterWeeklyMembers({
+      groupSharedReader: input.hostedToolContext?.groupSharedReader ?? null,
+      participants: result.result.participants,
+      referenceAt,
+      vaultRoot: input.vaultRoot,
+    })
+    if (members === null) {
       recordNewsletterUnavailable(
         input.hostedToolContext,
         'newsletter_preparation_unavailable',
       )
       return groupSharedProjectionUnavailableResult(input.request.action)
     }
-    const members = buildEligibleNewsletterWeeklyMembers({
-      participants: result.result.participants,
-      referenceAt,
-      source: newsletterWeeklySource,
-    })
 
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
@@ -3516,112 +3707,183 @@ function isNewsletterAllRecipientSendFailure(
   )
 }
 
-async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<boolean> {
-  if (await hasSharedVaultShareAuthorityUnavailableMarker(vaultRoot)) {
-    return false
-  }
-  const read = await readSharedVaultShareProjectionStore(vaultRoot)
-  return read.status === 'loaded' || read.status === 'empty'
-}
-
-type NewsletterWeeklySource =
-  | { status: 'empty' }
-  | {
-      status: 'loaded'
-      store: SharedVaultShareProjectionsFile
-      timeZone: string
-    }
-
-async function readNewsletterWeeklySource(input: {
-  referenceAt: string | null
-  vaultRoot: string | null
-}): Promise<NewsletterWeeklySource | null> {
-  if (!input.referenceAt || !input.vaultRoot) {
-    return { status: 'empty' }
-  }
-
-  if (await hasSharedVaultShareAuthorityUnavailableMarker(input.vaultRoot)) {
-    return null
-  }
-  const read = await readSharedVaultShareProjectionStore(input.vaultRoot)
-  if (read.status === 'corrupt' || read.status === 'read_failed') {
-    return null
-  }
-  if (read.status === 'empty') {
-    return { status: 'empty' }
-  }
-
-  let timeZone: string
-  try {
-    const { loadVault } = await import('@murphai/core')
-    timeZone = (await loadVault({ vaultRoot: input.vaultRoot })).metadata.timezone
-  } catch {
-    return null
-  }
-
-  return { status: 'loaded', store: read.store, timeZone }
-}
-
-function buildEligibleNewsletterWeeklyMembers(input: {
+async function readNewsletterWeeklyMembers(input: {
+  groupSharedReader: AssistantHostedGroupSharedReader | null
   participants: readonly HostedRuntimeNewsletterParticipantSummary[]
   referenceAt: string | null
-  source: NewsletterWeeklySource
-}): SharedGroupWeeklyMember[] {
-  if (!input.referenceAt || input.source.status === 'empty') {
+  vaultRoot: string | null
+}): Promise<SharedGroupWeeklyMember[] | null> {
+  if (!input.referenceAt || !input.vaultRoot) {
     return []
   }
 
-  const authorizedStore = filterNewsletterAuthorizedProjectionStore({
-    participants: input.participants,
-    store: input.source.store,
-  })
-  return buildSharedGroupWeeklyMembers({
-    members: flattenSharedVaultShareProjectionStore(authorizedStore),
-    referenceAt: input.referenceAt,
-    timeZone: input.source.timeZone,
-  })
+  const projectionScopes = readNewsletterAuthorizedProjectionScopes(
+    input.participants,
+  )
+  if (projectionScopes.length === 0) {
+    return []
+  }
+  const groupSharedReader = input.groupSharedReader
+  if (!groupSharedReader) {
+    return null
+  }
+
+  try {
+    const [timeZone, responses] = await Promise.all([
+      readNewsletterTimeZone(input.vaultRoot),
+      Promise.all(
+        chunkNewsletterProjectionScopes(projectionScopes).map((batch) =>
+          groupSharedReader.request({ projectionScopes: batch })
+        ),
+      ),
+    ])
+    if (
+      timeZone === null
+      || responses.some((response) => response.status === 'unavailable')
+    ) {
+      return null
+    }
+
+    const availableResponses = responses.filter(
+      (response): response is Extract<
+        AssistantHostedGroupSharedReadResponse,
+        { status: 'ok' }
+      > => response.status === 'ok',
+    )
+    if (availableResponses.length === 0) {
+      return []
+    }
+    if (availableResponses.length !== responses.length) {
+      // A group or membership changed between bounded reads. Do not combine
+      // different live snapshots.
+      return null
+    }
+
+    const expectedMemberKeys = availableResponses[0]!.members.map(
+      (member) => JSON.stringify([member.memberId, member.participantId]),
+    )
+    if (
+      availableResponses.some((response) =>
+        !hasExactStringEntries(
+          response.members.map((member) =>
+            JSON.stringify([member.memberId, member.participantId])
+          ),
+          expectedMemberKeys,
+        )
+      )
+    ) {
+      return null
+    }
+
+    const authorizedScopeKeysByMember = new Map(
+      input.participants
+        .filter((participant) => participant.hasEmail)
+        .map((participant) => [
+          participant.memberId,
+          new Set(
+            participant.authorizedShares.map(
+              (share) => share.projectionScopeKey,
+            ),
+          ),
+        ]),
+    )
+    const members = new Map<string, {
+      displayName: string | null
+      memberId: string
+      shares: Array<{
+        projectionScopeKey: string
+        records: Array<{ data: object }>
+      }>
+    }>()
+
+    for (const response of availableResponses) {
+      for (const member of response.members) {
+        const authorizedScopeKeys = authorizedScopeKeysByMember.get(member.memberId)
+        if (!authorizedScopeKeys) {
+          continue
+        }
+        const existing = members.get(member.memberId)
+        if (existing && existing.displayName !== member.displayName) {
+          return null
+        }
+        const accumulator = existing ?? {
+          displayName: member.displayName,
+          memberId: member.memberId,
+          shares: [],
+        }
+        for (const projection of member.projections) {
+          if (
+            projection.grantStatus !== 'granted'
+            || !authorizedScopeKeys.has(projection.projectionScopeKey)
+            || projection.records.length === 0
+          ) {
+            continue
+          }
+          accumulator.shares.push({
+            projectionScopeKey: projection.projectionScopeKey,
+            records: projection.records.map((record) => ({
+              data: record.data,
+            })),
+          })
+        }
+        members.set(member.memberId, accumulator)
+      }
+    }
+
+    return buildSharedGroupWeeklyMembers({
+      members: [...members.values()].filter((member) => member.shares.length > 0),
+      referenceAt: input.referenceAt,
+      timeZone,
+    })
+  } catch {
+    return null
+  }
 }
 
-function filterNewsletterAuthorizedProjectionStore(input: {
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
-  store: SharedVaultShareProjectionsFile
-}): SharedVaultShareProjectionsFile {
-  const authorizedShares = new Set<string>()
-  for (const participant of input.participants) {
-    if (!participant.hasEmail) {
-      continue
-    }
-    for (const share of participant.authorizedShares) {
-      authorizedShares.add(JSON.stringify([
-        participant.memberId,
-        share.projectionScopeKey,
-        share.shareId,
-      ]))
-    }
-  }
+function readNewsletterAuthorizedProjectionScopes(
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
+): HostedVaultShareSelectableProjectionScope[] {
+  const authorizedScopeKeys = new Set(
+    participants
+      .filter((participant) => participant.hasEmail)
+      .flatMap((participant) =>
+        participant.authorizedShares.map(
+          (share) => share.projectionScopeKey,
+        )
+      ),
+  )
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(
+    (projectionScope) =>
+      authorizedScopeKeys.has(
+        buildHostedVaultShareProjectionScopeKey(projectionScope),
+      ),
+  )
+}
 
-  const projections: SharedVaultShareProjectionsFile['projections'] = {}
-  for (const [projectionScopeKey, projection] of Object.entries(input.store.projections)) {
-    const grantors: typeof projection.grantors = {}
-    for (const [memberId, grantor] of Object.entries(projection.grantors)) {
-      if (!authorizedShares.has(JSON.stringify([
-        memberId,
-        projectionScopeKey,
-        grantor.shareId,
-      ]))) {
-        continue
-      }
-      const records = grantor.records.filter((record) => record.shareId === grantor.shareId)
-      if (records.length > 0) {
-        grantors[memberId] = { ...grantor, records }
-      }
-    }
-    if (Object.keys(grantors).length > 0) {
-      projections[projectionScopeKey] = { ...projection, grantors }
-    }
+function chunkNewsletterProjectionScopes(
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
+): HostedVaultShareSelectableProjectionScope[][] {
+  const batches: HostedVaultShareSelectableProjectionScope[][] = []
+  for (
+    let offset = 0;
+    offset < projectionScopes.length;
+    offset += ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
+  ) {
+    batches.push(projectionScopes.slice(
+      offset,
+      offset + ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+    ))
   }
+  return batches
+}
 
-  return { ...input.store, projections }
+async function readNewsletterTimeZone(vaultRoot: string): Promise<string | null> {
+  try {
+    const { loadVault } = await import('@murphai/core')
+    return (await loadVault({ vaultRoot })).metadata.timezone
+  } catch {
+    return null
+  }
 }
 
 function stripNewsletterAuthorizationSnapshot(
@@ -4440,6 +4702,15 @@ function parseGroupArguments(
           ? { groupLabel: parsed.data.groupLabel }
           : {}),
         question: parsed.data.question,
+      },
+    }
+  }
+  if (parsed.data.action === 'read_shared') {
+    return {
+      ok: true,
+      request: {
+        action: 'read_shared',
+        projectionScopes: parsed.data.projectionScopes,
       },
     }
   }

@@ -109,7 +109,6 @@ describe("hosted detached assistant ask controller", () => {
       ]);
       const controller = createHostedDetachedAssistantAskController({
         assistantAskPort,
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         executeAsk,
@@ -170,7 +169,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk() {
@@ -210,11 +208,19 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("requeues the exact ask without starting Codex when its pre-execution gate fails", async () => {
+  test("starts the detached model with a fresh lazy reader and no eager shared-data read", async () => {
     const vaultRoot = await createVaultRoot();
-    const executeAsk = vi.fn();
-    const beforeExecuteAsk = vi.fn(async () => {
-      throw new Error("share authority unavailable");
+    const sharedRead = vi.fn(async () => ({
+      members: [] as const,
+      requestedProjectionScopeKeys: ["steps-days.v0"],
+      status: "none" as const,
+    }));
+    const groupSharedReader = { request: sharedRead };
+    const createGroupSharedReader = vi.fn(() => groupSharedReader);
+    const executeAsk = vi.fn(async (input) => {
+      assert.equal(input.groupSharedReader, groupSharedReader);
+      assert.equal(sharedRead.mock.calls.length, 0);
+      return { answer: "answer", outcome: "answered" as const };
     });
 
     try {
@@ -224,17 +230,19 @@ describe("hosted detached assistant ask controller", () => {
       const controller = createHostedDetachedAssistantAskController({
         assistantAskPort: {
           async request(request) {
-            assert.equal(request.action, "prepare");
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
             return {
               action: "prepare",
-              question: "question blocked by authority",
+              question: "question with optional shared context",
               status: "ready",
               targetLabel: "100 Club",
             };
           },
         },
-        beforeExecuteAsk,
         codexHome: null,
+        createGroupSharedReader,
         env: {},
         executeAsk,
         now: () => TEST_NOW,
@@ -242,16 +250,17 @@ describe("hosted detached assistant ask controller", () => {
         vaultRoot,
       });
 
+      assert.equal(createGroupSharedReader.mock.calls.length, 0);
+      assert.equal(sharedRead.mock.calls.length, 0);
       controller.kick();
       await waitUntil(async () => {
         const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-        assert.equal(pending[0]?.itemId, "item_authority");
-        assert.equal(pending[0]?.status, "pending");
-        assert.equal(pending[0]?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+        assert.equal(pending.length, 0);
       });
       await controller.closeAndRequeue();
-      assert.equal(beforeExecuteAsk.mock.calls.length, 1);
-      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(createGroupSharedReader.mock.calls.length, 1);
+      assert.equal(executeAsk.mock.calls.length, 1);
+      assert.equal(sharedRead.mock.calls.length, 0);
     } finally {
       await removeVaultRoot(vaultRoot);
     }
@@ -281,7 +290,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk(input) {
@@ -369,7 +377,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         async executeAsk(input) {
@@ -428,7 +435,6 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
-        beforeExecuteAsk: async () => undefined,
         codexHome: null,
         env: {},
         executeAsk,

@@ -695,8 +695,10 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Only when it returns `status="none"`')
     expect(raw).toMatch(/one reusable core\s+set/u)
     expect(raw).toMatch(
-      /`group-email\.v0`[\s\S]*`steps-days\.v0`[\s\S]*`activity-days\.v0`[\s\S]*`workout-days\.v0`[\s\S]*`sleep-duration-days\.v0`[\s\S]*`sleep-times\.v0`[\s\S]*`resting-heart-rate-days\.v0`[\s\S]*`hrv-days\.v0`/u,
+      /`group-email\.v0`[\s\S]*`device-sync-status\.v0`[\s\S]*`steps-days\.v0`[\s\S]*`activity-days\.v0`[\s\S]*`workout-days\.v0`[\s\S]*`sleep-duration-days\.v0`[\s\S]*`sleep-times\.v0`[\s\S]*`resting-heart-rate-days\.v0`[\s\S]*`hrv-days\.v0`/u,
     )
+    expect(raw).toContain('`device-sync-status.v0` belongs in this new-group core set')
+    expect(raw).toContain('It does not\ngrant Apple Health access')
     expect(raw).toContain('`requestedVaultShareProjectionScopes` on `create_join_link`')
     expect(raw).toContain('`projectionScopes` when creation uses `post_join_offer`')
     expect(raw).toContain('This is a permission\nrequest, not automatic sharing')
@@ -868,17 +870,66 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('"activityKind": "<alias>"')
     expect(raw).toContain('narrowest matching scope')
     expect(raw).toContain('unsupported instead of')
-    expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
+    expect(raw).toContain('murph.group action="read_shared"')
+    expect(raw).toContain('After the model turn has begun')
+    expect(raw).toContain('the exact scoring scope and `device-sync-status.v0`')
+    expect(raw).toContain('an explicit `grantStatus`, `dataStatus`')
+    expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
+    expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
+    expect(raw).toMatch(
+      /before writing a new challenge roster,\s+call `murph\.group action="read_shared"` once/u,
+    )
+    expect(raw).toMatch(
+      /same `read_shared` result for a one-time identity backfill; do not\s+add another read/u,
+    )
+    expect(raw).toContain('A unique or equal display name is not identity proof')
+    expect(raw).toContain('`participantId: unresolved`')
+    expect(raw).toContain('`grantStatus="not_granted"`')
+    expect(raw).toContain('`dataStatus="missing"`')
+    expect(raw).toContain('`dataStatus="available"`')
+    expect(raw).not.toContain('Gap disclosure log')
+    expect(raw).not.toContain('`gapState`')
+    expect(raw).not.toContain('`episodePublicGapDate`')
     expect(raw).toContain(
-      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
+      'After `read_shared`, collect the exact scopes whose current evidence is',
     )
     expect(raw).toContain(
-      'vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>',
+      '`murph.group action="post_join_offer"` exactly once with only those exact',
     )
     expect(raw).toContain(
-      'vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>',
+      'Never infer or request a scope from granted-but-missing or stale data.',
     )
-    expect(raw).toContain('Never pass selector scopes through `--kind`')
+    expect(raw).toContain('Do not call it when the list is empty.')
+    expect(raw).toMatch(/matching active\s+offer exists/u)
+    expect(raw).toContain(
+      'The permission card is a separate server-owned message.',
+    )
+    expect(raw).toContain(
+      'Never imply that reacting to the standings message grants anything.',
+    )
+    expect(raw).toContain(
+      'grant Apple Health or operating-system\n   Steps access',
+    )
+    expect(raw).toContain(
+      'If the narrow tool\n   is absent or returns `unavailable`',
+    )
+    expect(raw).toContain('manual debugging hunt')
+    expect(raw).toContain(
+      'synchronously reuses the Linq egress-route assertion\n   that scheduled delivery already completed',
+    )
+    expect(raw).toContain(
+      'this feature adds no new\n   pre-model work.',
+    )
+    expect(raw).toContain(
+      'Web reauthorization, active-offer lookup, and provider work\n   begin only after the tool call.',
+    )
+    expect(raw).not.toContain('belong in the affected participant\'s private thread')
+    expect(raw).toContain(
+      'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',
+    )
+    expect(raw).not.toContain('vault-cli group shared --kind')
+    expect(raw).not.toContain('vault-cli group shared --scope')
+    expect(raw).not.toContain('vault-cli group weekly --')
     expect(raw).toContain('`murph.group action="post_join_offer"` with only the challenge\'s share')
     expect(raw).toContain('the group-chat skill\'s Creating a\n   hosted group core set takes precedence')
     expect(raw).toContain('For an existing group, use')

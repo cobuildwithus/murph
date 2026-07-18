@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -47,7 +46,6 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
@@ -80,15 +78,10 @@ beforeEach(async () => {
     groupId: "group_1",
     membershipId: "membership_existing",
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
-    vaultShareCleanupSignals: [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }],
   });
   mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
     undefined,
   );
-  mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
@@ -96,7 +89,7 @@ beforeEach(async () => {
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
 });
 
-test("signals destination cleanup wakes after a group permission revoke without exposing mailbox ids", async () => {
+test("returns a group permission revocation without exposing internal metadata", async () => {
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
       expectedMembershipId: "membership_existing",
@@ -134,10 +127,6 @@ test("signals destination cleanup wakes after a group permission revoke without 
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
     .not.toHaveBeenCalled();
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-    expectedUserId: "member_group_runtime",
-    mailboxItemId: "mailbox_item_revoke_1",
-  });
 });
 
 test("signals a first-join confirmation without exposing mailbox metadata", async () => {
@@ -151,7 +140,6 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
     },
     membershipId: "membership_created",
     revokedVaultShareProjectionKinds: [],
-    vaultShareCleanupSignals: [],
   });
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
@@ -194,64 +182,6 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
   });
 });
 
-test("best-effort signals combined confirmation and cleanup wakes without exposing them", async () => {
-  mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
-    alreadyMember: false,
-    grantedVaultShareProjectionKinds: ["profile-name.v0"],
-    groupId: "group_1",
-    joinConfirmationSignal: {
-      mailboxItemId: "mailbox_item_join_confirmation_1",
-      memberId: "member_grantor",
-    },
-    membershipId: "membership_created",
-    revokedVaultShareProjectionKinds: ["sleep-times.v0"],
-    vaultShareCleanupSignals: [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }],
-  });
-  mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(
-    new Error("runtime unavailable"),
-  );
-  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
-    body: JSON.stringify({
-      expectedMembershipId: null,
-      selectedVaultShareProjectionKinds: [],
-    }),
-    headers: {
-      "content-type": "application/json",
-      origin: "https://join.example.test",
-    },
-    method: "POST",
-  });
-
-  const response = await route.POST(request, {
-    params: Promise.resolve({ joinCode: "JOIN123" }),
-  });
-
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    alreadyMember: false,
-    grantedVaultShareProjectionKinds: ["profile-name.v0"],
-    groupId: "group_1",
-    membershipId: "membership_created",
-    ok: true,
-    revokedVaultShareProjectionKinds: ["sleep-times.v0"],
-  });
-  expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
-    mailboxItemId: "mailbox_item_join_confirmation_1",
-    memberId: "member_grantor",
-    prisma: expect.any(Object),
-    signal: request.signal,
-    timeoutMs: expect.any(Number),
-  });
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-  expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-    expectedUserId: "member_group_runtime",
-    mailboxItemId: "mailbox_item_revoke_1",
-  });
-});
-
 test("bounds a stalled maintenance wake after confirmation recovery", async () => {
   vi.useFakeTimers();
   try {
@@ -261,7 +191,6 @@ test("bounds a stalled maintenance wake after confirmation recovery", async () =
       groupId: "group_1",
       membershipId: "membership_created",
       revokedVaultShareProjectionKinds: [],
-      vaultShareCleanupSignals: [],
     });
     mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
     const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
@@ -299,7 +228,6 @@ test("enqueues a private missing-email nudge after accepting an email-sharing gr
     groupId: "group_1",
     membershipId: "membership_created",
     revokedVaultShareProjectionKinds: [],
-    vaultShareCleanupSignals: [],
   });
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({

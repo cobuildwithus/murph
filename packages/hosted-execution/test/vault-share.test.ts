@@ -6,9 +6,7 @@ import {
   buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
   buildHostedVaultShareActivitySessionCountProjectionScope,
-  buildHostedVaultShareDeliveryDedupeKey,
   buildHostedVaultShareProjectionScopeKey,
-  buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
@@ -20,6 +18,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
+  parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareProjectionScopeKey,
@@ -213,25 +212,6 @@ describe("vault-share contracts", () => {
     expect(getHostedVaultShareDailyMetricProjectionSpec("group-email.v0")).toBeNull();
   });
 
-  it("derives the delivery dedupe key from share id, record key, and revision", () => {
-    expect(
-      buildHostedVaultShareDeliveryDedupeKey({
-        recordKey: "2026-06-09",
-        recordRevision: "revision_1",
-        shareId: "share_1",
-      }),
-    ).toBe("vault-share:share_1:2026-06-09:revision_1");
-  });
-
-  it("derives the revoke dedupe key from share id and revocation timestamp", () => {
-    expect(
-      buildHostedVaultShareRevokeDedupeKey({
-        revokedAt: "2026-07-01T00:00:00.000Z",
-        shareId: "share_1",
-      }),
-    ).toBe("vault-share-revoke:share_1:2026-07-01T00:00:00.000Z");
-  });
-
   it("parses a valid deliver request", () => {
     const parsed = parseHostedVaultShareDeliverRequest({
       projectionKind: "sleep-times.v0",
@@ -267,10 +247,14 @@ describe("vault-share contracts", () => {
     ).toThrow(/sourceRevision/u);
   });
 
-  it("rejects an empty records array", () => {
-    expect(() =>
+  it("accepts an empty records array as a complete missing-data replacement", () => {
+    expect(
       parseHostedVaultShareDeliverRequest({ projectionKind: "sleep-times.v0", records: [] }),
-    ).toThrow(/must not be empty/u);
+    ).toEqual({
+      projectionKind: "sleep-times.v0",
+      projectionScope: { projectionKind: "sleep-times.v0" },
+      records: [],
+    });
   });
 
   it("rejects more records than the cap", () => {
@@ -962,6 +946,7 @@ describe("heart-rate-zones-days.v0 delivery records", () => {
 });
 
 describe("device-sync-status.v0 delivery records", () => {
+  const projectionScope = { projectionKind: "device-sync-status.v0" } as const;
   const validRecord = {
     data: {
       observedAt: "2026-07-01T00:00:00.000Z",
@@ -984,27 +969,21 @@ describe("device-sync-status.v0 delivery records", () => {
     recordKey: "device-sync-status",
   } as const;
 
-  it("parses public, bounded source status and an empty authoritative snapshot", () => {
-    expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
+  it("keeps live read records valid but rejects device status at the delivery boundary", () => {
+    expect(parseHostedVaultShareDeliveryRecord(validRecord, projectionScope)).toEqual(validRecord);
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: projectionScope.projectionKind,
       records: [validRecord],
-    })).toEqual({
-      projectionKind: "device-sync-status.v0",
-      projectionScope: { projectionKind: "device-sync-status.v0" },
-      records: [validRecord],
-    });
+    })).toThrow(/does not accept device-sync-status\.v0/u);
 
-    expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
-      records: [{
-        data: {
-          observedAt: "2026-07-01T00:00:00.000Z",
-          sources: [],
-        },
-        occurredAt: "2026-07-01T00:00:00.000Z",
-        recordKey: "device-sync-status",
-      }],
-    }).records[0]?.data).toEqual({
+    expect(parseHostedVaultShareDeliveryRecord({
+      data: {
+        observedAt: "2026-07-01T00:00:00.000Z",
+        sources: [],
+      },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "device-sync-status",
+    }, projectionScope).data).toEqual({
       observedAt: "2026-07-01T00:00:00.000Z",
       sources: [],
     });
@@ -1015,41 +994,32 @@ describe("device-sync-status.v0 delivery records", () => {
       ...validRecord.data.sources[0],
       label: `Source ${index}`,
     }));
-    expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
-      records: [{
-        ...validRecord,
-        data: { ...validRecord.data, sources: boundedSources },
-      }],
-    }).records[0]?.data).toMatchObject({ sources: boundedSources });
+    expect(parseHostedVaultShareDeliveryRecord({
+      ...validRecord,
+      data: { ...validRecord.data, sources: boundedSources },
+    }, projectionScope).data).toMatchObject({ sources: boundedSources });
 
-    expect(() => parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
-      records: [{
-        ...validRecord,
-        data: {
-          ...validRecord.data,
-          sources: [
-            ...boundedSources,
-            { ...validRecord.data.sources[0], label: "Source 8" },
-          ],
-        },
-      }],
-    })).toThrow(/at most 8 entries/u);
+    expect(() => parseHostedVaultShareDeliveryRecord({
+      ...validRecord,
+      data: {
+        ...validRecord.data,
+        sources: [
+          ...boundedSources,
+          { ...validRecord.data.sources[0], label: "Source 8" },
+        ],
+      },
+    }, projectionScope)).toThrow(/at most 8 entries/u);
 
-    expect(() => parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
-      records: [{
-        ...validRecord,
-        data: {
-          ...validRecord.data,
-          sources: [{
-            ...validRecord.data.sources[0],
-            label: "s".repeat(81),
-          }],
-        },
-      }],
-    })).toThrow(/1-80 characters/u);
+    expect(() => parseHostedVaultShareDeliveryRecord({
+      ...validRecord,
+      data: {
+        ...validRecord.data,
+        sources: [{
+          ...validRecord.data.sources[0],
+          label: "s".repeat(81),
+        }],
+      },
+    }, projectionScope)).toThrow(/1-80 characters/u);
   });
 
   it("rejects drifting keys, day buckets, extra fields, and duplicate labels", () => {
@@ -1087,10 +1057,7 @@ describe("device-sync-status.v0 delivery records", () => {
     ];
 
     for (const record of invalidRecords) {
-      expect(() => parseHostedVaultShareDeliverRequest({
-        projectionKind: "device-sync-status.v0",
-        records: [record],
-      })).toThrow();
+      expect(() => parseHostedVaultShareDeliveryRecord(record, projectionScope)).toThrow();
     }
   });
 
@@ -1107,23 +1074,17 @@ describe("device-sync-status.v0 delivery records", () => {
     ];
 
     for (const source of invalidSources) {
-      expect(() => parseHostedVaultShareDeliverRequest({
-        projectionKind: "device-sync-status.v0",
-        records: [{
-          ...validRecord,
-          data: { ...validRecord.data, sources: [source] },
-        }],
-      })).toThrow();
+      expect(() => parseHostedVaultShareDeliveryRecord({
+        ...validRecord,
+        data: { ...validRecord.data, sources: [source] },
+      }, projectionScope)).toThrow();
     }
 
-    expect(() => parseHostedVaultShareDeliverRequest({
-      projectionKind: "device-sync-status.v0",
-      records: [{
-        ...validRecord,
-        data: { ...validRecord.data, observedAt: "2999-01-01T00:00:00.000Z" },
-        occurredAt: "2999-01-01T00:00:00.000Z",
-      }],
-    })).toThrow(/future/u);
+    expect(() => parseHostedVaultShareDeliveryRecord({
+      ...validRecord,
+      data: { ...validRecord.data, observedAt: "2999-01-01T00:00:00.000Z" },
+      occurredAt: "2999-01-01T00:00:00.000Z",
+    }, projectionScope)).toThrow(/future/u);
   });
 });
 

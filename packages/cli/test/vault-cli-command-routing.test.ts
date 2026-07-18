@@ -25,7 +25,6 @@ const mockedModules = [
   '../src/commands/health-allergy-save.js',
   '../src/commands/health-condition-save.js',
   '../src/commands/health-goal-save.js',
-  '../src/commands/group.js',
   '../src/commands/meal.js',
   '../src/commands/medication.js',
   '../src/commands/measurement.js',
@@ -247,11 +246,6 @@ for (const input of [
     moduleId: '../src/commands/batch.js',
     registerName: 'registerBatchCommands',
     root: 'batch',
-  },
-  {
-    moduleId: '../src/commands/group.js',
-    registerName: 'registerGroupCommands',
-    root: 'group',
   },
   {
     moduleId: '../src/commands/clinical-imports.js',

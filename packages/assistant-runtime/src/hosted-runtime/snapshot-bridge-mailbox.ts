@@ -1,8 +1,4 @@
 import {
-  applyHostedVaultShareRevokeWake,
-  importHostedVaultShareDeliveryWake,
-} from "./vault-share-import.ts";
-import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
@@ -167,6 +163,16 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
+  if (isRetiredVaultShareMailboxItem(input.item)) {
+    // Direct Web-owned encrypted snapshots replaced destination workspace
+    // landing. Consume old producer rows without decrypting or recreating the
+    // retired local store during the consumer-first rollout window.
+    return {
+      reasonCode: "vault_share.retired_direct_snapshot",
+      status: "skipped",
+    };
+  }
+
   const decoded = await input.decodeMailboxPayload.decode({
     itemRef: {
       dedupeKey: input.item.item.dedupeKey,
@@ -199,16 +205,6 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
 
   if (
     input.item.route.action === "import-vault-share-delivery"
-    && wake.kind === "vault-share.delivery"
-  ) {
-    return await importHostedVaultShareDeliveryWake({
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-  }
-
-  if (
-    input.item.route.action === "import-vault-share-delivery"
     || wake.kind === "vault-share.delivery"
   ) {
     return {
@@ -216,16 +212,6 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
       retryable: false,
       status: "blocked",
     };
-  }
-
-  if (
-    input.item.route.action === "import-vault-share-revoke"
-    && wake.kind === "vault-share.revoke"
-  ) {
-    return await applyHostedVaultShareRevokeWake({
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
   }
 
   if (
@@ -289,6 +275,18 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake,
   });
+}
+
+function isRetiredVaultShareMailboxItem(
+  item: HostedWorkspaceRuntimeBridgeImportItemInput,
+): boolean {
+  return (
+    item.route.action === "import-vault-share-delivery"
+    && item.item.kind === "vault-share.delivery"
+  ) || (
+    item.route.action === "import-vault-share-revoke"
+    && item.item.kind === "vault-share.revoke"
+  );
 }
 
 function resolveHostedDeviceSyncMessagingReturnTarget(

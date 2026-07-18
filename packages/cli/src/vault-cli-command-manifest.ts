@@ -92,11 +92,6 @@ import {
   registerGoalCommands,
 } from './commands/health-goal-save.js'
 import {
-  groupSharedResultSchema,
-  groupWeeklyResultSchema,
-  registerGroupCommands,
-} from './commands/group.js'
-import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
@@ -542,55 +537,6 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['automation'],
     register({ cli }) {
       registerAutomationCommands(cli)
-    },
-  },
-  {
-    id: 'group',
-    bindingMode: 'none',
-    rootCommandNames: ['group'],
-    leafCommands: [
-      {
-        path: ['group', 'shared'],
-        description:
-          "Show the consented data members share with this group, grouped by member and joined to each member's shared display name.",
-        examples: [
-          {
-            description: 'Read everything members have shared with this group before running a challenge.',
-            options: {
-              vault: './vault',
-            },
-          },
-          {
-            description: 'Build a steps leaderboard from the shared daily step totals.',
-            options: {
-              kind: ['steps-days.v0'],
-              vault: './vault',
-            },
-          },
-        ],
-        hint:
-          'Empty until members have connected the relevant data and their runtime has next woken. When empty, say so plainly and never invent figures.',
-        output: groupSharedResultSchema,
-      },
-      {
-        path: ['group', 'weekly'],
-        description:
-          "Summarize each member's consented shared data for the current and previous calendar week in the group vault timezone.",
-        examples: [
-          {
-            description: 'Read reusable weekly group health summaries for a group update or challenge.',
-            options: {
-              vault: './vault',
-            },
-          },
-        ],
-        hint:
-          'Member ids join this result to authorized group operations. Empty weeklyStats means that member shared no numeric data for either reporting week; never invent figures.',
-        output: groupWeeklyResultSchema,
-      },
-    ],
-    register({ cli }) {
-      registerGroupCommands(cli)
     },
   },
   {

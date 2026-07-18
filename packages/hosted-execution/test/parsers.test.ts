@@ -1481,6 +1481,345 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
+  it("parses bounded read_shared requests in requested order", () => {
+    const projectionScopes = [
+      { projectionKind: "device-sync-status.v0" },
+      {
+        projectionKind: "activity-minutes-days.v1",
+        selector: { activityKind: "running" },
+      },
+      { projectionKind: "steps-days.v0" },
+    ];
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes,
+    })).toEqual({ action: "read_shared", projectionScopes });
+
+    for (const invalidProjectionScopes of [
+      [],
+      [
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "hrv-days.v0" },
+        { projectionKind: "device-sync-status.v0" },
+      ],
+      [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "steps-days.v0" },
+      ],
+      [{ projectionKind: "profile-name.v0" }],
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "read_shared",
+        projectionScopes: invalidProjectionScopes,
+      })).toThrow(/projectionScopes|projection scopes/u);
+    }
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      shareId: "share_private",
+    })).toThrow(/not allowed/u);
+  });
+
+  it("parses a closed, canonical read_shared roster and status matrix", () => {
+    const stepsRecord = {
+      data: {
+        date: "2026-07-01",
+        metricKey: "steps",
+        unit: "count",
+        value: 12_345,
+      },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "2026-07-01",
+    };
+    const deviceRecord = {
+      data: {
+        observedAt: "2026-07-01T00:00:00.000Z",
+        sources: [{
+          connectionSyncJobCompletedAt: "2026-06-30T23:58:00.000Z",
+          label: "Apple Health",
+          status: "connected",
+          statusObservedAt: "2026-06-30T23:59:00.000Z",
+        }],
+      },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "device-sync-status",
+    };
+    const response = {
+      action: "read_shared",
+      result: {
+        members: [
+          {
+            displayName: "Member One",
+            memberId: "member_1",
+            participantId: "participant_1",
+            projections: [
+              {
+                dataStatus: "available",
+                grantStatus: "granted",
+                projectionScope: { projectionKind: "device-sync-status.v0" },
+                projectionScopeKey: "device-sync-status.v0",
+                records: [deviceRecord],
+              },
+              {
+                dataStatus: "available",
+                grantStatus: "granted",
+                projectionScope: { projectionKind: "steps-days.v0" },
+                projectionScopeKey: "steps-days.v0",
+                records: [stepsRecord],
+              },
+            ],
+          },
+          {
+            displayName: null,
+            memberId: "member_2",
+            participantId: "participant_2",
+            projections: [
+              {
+                dataStatus: "missing",
+                grantStatus: "not_granted",
+                projectionScope: { projectionKind: "steps-days.v0" },
+                projectionScopeKey: "steps-days.v0",
+                records: [],
+              },
+              {
+                dataStatus: "missing",
+                grantStatus: "granted",
+                projectionScope: { projectionKind: "device-sync-status.v0" },
+                projectionScopeKey: "device-sync-status.v0",
+                records: [],
+              },
+            ],
+          },
+        ],
+        requestedProjectionScopeKeys: [
+          "steps-days.v0",
+          "device-sync-status.v0",
+        ],
+        status: "ok",
+      },
+    };
+
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual({
+      ...response,
+      result: {
+        ...response.result,
+        members: [
+          {
+            ...response.result.members[0],
+            projections: [
+              response.result.members[0]?.projections[1],
+              response.result.members[0]?.projections[0],
+            ],
+          },
+          response.result.members[1],
+        ],
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        members: [],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "none",
+      },
+    })).toEqual({
+      action: "read_shared",
+      result: {
+        members: [],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "none",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        status: "unavailable",
+        unavailableReason: "shared_data_unavailable",
+      },
+    })).toEqual({
+      action: "read_shared",
+      result: {
+        status: "unavailable",
+        unavailableReason: "shared_data_unavailable",
+      },
+    });
+  });
+
+  it("rejects read_shared identity leaks, inconsistent statuses, and corrupt records", () => {
+    const projection = {
+      dataStatus: "available",
+      grantStatus: "granted",
+      projectionScope: { projectionKind: "steps-days.v0" },
+      projectionScopeKey: "steps-days.v0",
+      records: [{
+        data: {
+          date: "2026-07-01",
+          metricKey: "steps",
+          unit: "count",
+          value: 1_234,
+        },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "2026-07-01",
+      }],
+    };
+    const result = {
+      members: [{
+        displayName: null,
+        memberId: "member_1",
+        participantId: "participant_1",
+        projections: [projection],
+      }],
+      requestedProjectionScopeKeys: ["steps-days.v0"],
+      status: "ok",
+    };
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{ ...result.members[0], handle: "+15550000000" }],
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{ ...projection, shareId: "share_private" }],
+        }],
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            dataStatus: "available",
+            grantStatus: "not_granted",
+          }],
+        }],
+      },
+    })).toThrow(/not_granted/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{ ...projection, dataStatus: "missing" }],
+        }],
+      },
+    })).toThrow(/must not contain records/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{ ...projection, records: [] }],
+        }],
+      },
+    })).toThrow(/at least one record/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            records: Array.from({ length: 8 }, (_, index) => ({
+              ...projection.records[0],
+              recordKey: `2026-07-0${index + 1}`,
+            })),
+          }],
+        }],
+      },
+    })).toThrow(/at most 7/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            records: [{ ...projection.records[0], sourceRevision: "opaque" }],
+          }],
+        }],
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            records: [{
+              ...projection.records[0],
+              data: { ...projection.records[0]?.data, metricKey: "distance" },
+            }],
+          }],
+        }],
+      },
+    })).toThrow(/metricKey/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        requestedProjectionScopeKeys: [
+          "steps-days.v0",
+          "steps-days.v0",
+        ],
+      },
+    })).toThrow(/duplicates/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        requestedProjectionScopeKeys: [
+          "steps-days.v0",
+          "device-sync-status.v0",
+        ],
+      },
+    })).toThrow(/exactly the requested projection scopes/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [result.members[0], result.members[0]],
+      },
+    })).toThrow(/memberIds must be unique/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [
+          result.members[0],
+          { ...result.members[0], memberId: "member_2" },
+        ],
+      },
+    })).toThrow(/participantIds must be unique/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: Array.from({ length: 201 }, (_, index) => ({
+          ...result.members[0],
+          memberId: `member_${index}`,
+          participantId: `participant_${index}`,
+        })),
+      },
+    })).toThrow(/at most 200/u);
+  });
+
   const LINQ_THREAD = {
     authority: {
       channel: "linq",
