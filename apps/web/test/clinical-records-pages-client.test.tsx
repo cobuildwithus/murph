@@ -188,7 +188,11 @@ describe("Clinical Records connect page", () => {
       "Murph copies records once. It does not keep checking your chart.",
     );
     expect(rendered.container.textContent).toContain("Where do you get care?");
+    expect(rendered.container.textContent).toContain(
+      "Murph supports selected portals right now.",
+    );
     expect(rendered.container.textContent).not.toContain("Epic organization");
+    expect(connectionProgress.textContent).toContain("Patient portal");
     expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
       "Where you get care",
     );
@@ -227,7 +231,7 @@ describe("Clinical Records connect page", () => {
     expect(String(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.url)).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Opening portal");
     expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
-      "Patient portal",
+      "Where you get care",
     );
 
     await restoreFromBackForwardCache(rendered);
@@ -297,6 +301,10 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
     });
     expect(rendered.container.textContent).toContain("No matches");
+    expect(rendered.container.textContent).toContain("This portal may not be supported");
+    expect(rendered.container.textContent).toContain(
+      "Murph does not support every patient portal yet.",
+    );
     await vi.waitFor(() => {
       expect(input.hasAttribute("readOnly")).toBe(false);
     });
@@ -622,6 +630,11 @@ describe("Clinical Records status page", () => {
     });
     cleanup = rendered.cleanup;
 
+    expect(rendered.container.textContent).toContain("Connect a supported patient portal.");
+    expect(rendered.container.textContent).toContain(
+      "Murph copies available lab results and report summaries once",
+    );
+
     await clickButton(rendered, "Connect records");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -688,7 +701,10 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain("Records connected");
-    expect(rendered.container.textContent).toContain("Some records added");
+    expect(rendered.container.textContent).toContain("Some results added");
+    expect(rendered.container.textContent).toContain(
+      "Some lab results and report summaries were added.",
+    );
     const addedLabel = Array.from(rendered.container.querySelectorAll("p"))
       .find((paragraph) => paragraph.textContent === "Added");
     assert.ok(addedLabel);
@@ -698,7 +714,7 @@ describe("Clinical Records status page", () => {
     assert.ok(reviewLabel);
     expect(reviewLabel.nextElementSibling?.textContent).toBe("1");
     const partialBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Some records added");
+      .find((span) => span.textContent === "Some results added");
     assert.ok(partialBadge);
     expect(partialBadge.className).not.toContain("bg-primary");
     expect(String(rendered.replaceState.mock.lastCall?.[2])).toBe(
@@ -747,7 +763,7 @@ describe("Clinical Records status page", () => {
       expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
       expect(rendered.container.textContent).toContain("No patient portals connected");
       expect(rendered.container.textContent).not.toContain("Records connected");
-      expect(rendered.container.textContent).not.toContain("Some records added");
+      expect(rendered.container.textContent).not.toContain("Some results added");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
       .find((alert) => alert.textContent?.includes("Patient portal disconnected"));
@@ -791,9 +807,12 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Records added");
+      .find((span) => span.textContent === "Results added");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "Available lab results and report summaries were added to your private vault.",
+    );
 
     await rendered.rerender(renderWithConnection({
       ...connection,

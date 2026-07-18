@@ -45,7 +45,6 @@ const PROVIDER_SEARCH_PATH = "/api/clinical-records/providers/search";
 export function RecordsConnectClient({ authenticated }: { authenticated: boolean }) {
   const [intentClaim, setIntentClaim] = useState<string | null | undefined>(undefined);
   const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
-  const [authorizationPending, setAuthorizationPending] = useState(false);
   const authOpenedRef = useRef(false);
   const capturedIntentRef = useRef<string | null | undefined>(undefined);
   const { openAuthDialog } = useAuth();
@@ -93,7 +92,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
     return <AuthRequiredState onSignIn={openAuthDialog} />;
   }
 
-  const currentStep = authorizationPending ? 2 : consentRequired === false ? 1 : 0;
+  const currentStep = consentRequired === false ? 1 : 0;
 
   return (
     <div className="max-w-5xl space-y-9">
@@ -126,7 +125,6 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
         ) : (
           <ProviderSearch
             intentClaim={intentClaim}
-            onAuthorizationPendingChange={setAuthorizationPending}
             onConsentRequired={() => setConsentRequired(true)}
           />
         )}
@@ -219,11 +217,9 @@ function ImportBoundaryAside() {
 
 function ProviderSearch({
   intentClaim,
-  onAuthorizationPendingChange,
   onConsentRequired,
 }: {
   intentClaim: string;
-  onAuthorizationPendingChange: (pending: boolean) => void;
   onConsentRequired: () => void;
 }) {
   const [providers, setProviders] = useState<readonly ClinicalProviderSearchResultContract[]>([]);
@@ -257,12 +253,11 @@ function ProviderSearch({
       startInFlightRef.current = false;
       setSearchPending(false);
       setStartingProviderId(null);
-      onAuthorizationPendingChange(false);
     }
 
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
     return () => window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
-  }, [onAuthorizationPendingChange]);
+  }, []);
 
   async function searchProviders() {
     const normalizedQuery = searchInputRef.current?.value.trim() ?? "";
@@ -310,7 +305,6 @@ function ProviderSearch({
     startInFlightRef.current = true;
     setStartingProviderId(provider.id);
     setStartError(null);
-    onAuthorizationPendingChange(true);
 
     try {
       const response = await requestHostedOnboardingJson<unknown>({
@@ -330,21 +324,18 @@ function ProviderSearch({
     } catch (error) {
       if (isConsentRequiredError(error)) {
         startInFlightRef.current = false;
-        onAuthorizationPendingChange(false);
         setStartingProviderId(null);
         onConsentRequired();
         return;
       }
       if (isUnavailableIntentError(error)) {
         startInFlightRef.current = false;
-        onAuthorizationPendingChange(false);
         setIntentUnavailable(true);
         setStartingProviderId(null);
         return;
       }
 
       startInFlightRef.current = false;
-      onAuthorizationPendingChange(false);
       setStartError(
         `Could not continue with ${provider.brandName}. Choose it again or try another result.`,
       );
@@ -366,7 +357,7 @@ function ProviderSearch({
           Where do you get care?
         </h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Search for your hospital or clinic by name or location. Choose the place whose patient portal you use.
+          Search for the hospital or clinic whose patient portal you use. Murph supports selected portals right now.
         </p>
       </div>
 
@@ -463,9 +454,9 @@ function ProviderSearch({
             <div className="flex gap-4 border-y border-border py-6">
               <SearchIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
-                <p className="text-sm font-medium text-foreground">Try a broader search</p>
+                <p className="text-sm font-medium text-foreground">This portal may not be supported</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Search for the hospital or clinic, not a specific doctor. Adding a city can help.
+                  Murph does not support every patient portal yet. Check the hospital or clinic name and city, or try another place where you get care.
                 </p>
               </div>
             </div>

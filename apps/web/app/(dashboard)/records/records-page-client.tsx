@@ -574,7 +574,7 @@ function EmptyRecordsState() {
           Your records can meet you here
         </h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Connect the hospital or clinic whose patient portal you use. Murph copies available records once, and anything already saved stays in your vault after you disconnect.
+          Connect a supported patient portal. Murph copies available lab results and report summaries once, and anything already saved stays in your vault after you disconnect.
         </p>
       </div>
     </section>
@@ -617,9 +617,9 @@ function describeRun(status: ClinicalRecordRunStatus | null): {
     case "importing":
       return { badgeVariant: "secondary", detail: "Murph is saving the records into your private vault.", label: "Saving records" };
     case "complete":
-      return { badgeVariant: "default", detail: "Available records were added to your private vault.", label: "Records added" };
+      return { badgeVariant: "default", detail: "Available lab results and report summaries were added to your private vault.", label: "Results added" };
     case "partial":
-      return { badgeVariant: "outline", detail: "Some records were added. Others could not be added or need review.", label: "Some records added" };
+      return { badgeVariant: "outline", detail: "Some lab results and report summaries were added. Others could not be added or need review.", label: "Some results added" };
     case "needs_reauth":
       return { badgeVariant: "outline", detail: "Access from your patient portal ended before Murph finished copying records. Connecting it again is not available in this beta.", label: "Portal access ended" };
     case "failed":

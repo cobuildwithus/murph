@@ -10,7 +10,7 @@ import { RecordsConnectClient } from "./records-connect-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect medical records | Murph",
-  description: "Connect a patient portal and copy your available medical records into Murph.",
+  description: "Connect a supported patient portal to copy available lab results and report summaries into Murph.",
 });
 
 export default async function RecordsConnectPage() {
@@ -29,7 +29,7 @@ export default async function RecordsConnectPage() {
         <PageHeader
           eyebrow="Medical records"
           title="Connect medical records"
-          description="Find the hospital or clinic where you get care. You will sign in to its patient portal, then Murph will copy the available records once."
+          description="Find a hospital or clinic Murph supports. You will sign in to its patient portal, then Murph will copy available lab results and report summaries once."
         />
       </div>
       <RecordsConnectClient authenticated={Boolean(auth.authenticatedMember)} />
