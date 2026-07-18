@@ -373,6 +373,11 @@ async function planAssistantGeneratedDeliveryPrune(input: {
         'Assistant generated-delivery staging contains an unsafe filename.',
       )
     }
+    if (stats.nlink !== 1 && activeMediaByRef.has(ref)) {
+      throw new Error(
+        'An active assistant generated delivery must have exactly one hard link.',
+      )
+    }
     const file = {
       absolutePath,
       ref,
@@ -578,6 +583,7 @@ function assistantFileStatsMatch(left: Stats, right: Stats): boolean {
   return (
     left.dev === right.dev &&
     left.ino === right.ino &&
+    left.nlink === right.nlink &&
     left.size === right.size &&
     left.mtimeMs === right.mtimeMs &&
     left.ctimeMs === right.ctimeMs

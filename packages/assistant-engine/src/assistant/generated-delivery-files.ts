@@ -37,14 +37,14 @@ export function resolveSupportedAssistantVaultFileContentType(
 }
 
 // The model chooses a friendly staging name; the runtime owns the persisted
-// identity. A stable per-send basename lets an interrupted retry recover the
-// same owned bytes, while distinct tool calls remain collision-free even when
-// they reuse the same friendly name.
+// identity. A stable per-tool-call basename lets an exact call re-delivery
+// recover the same owned bytes, while distinct calls remain collision-free
+// even when they reuse the same friendly name.
 export function buildAssistantGeneratedDeliveryOwnedRef(input: {
   displayFilename: string
   ref: string
   sessionId: string
-  toolCallId: string | null
+  toolCallId: string
   turnId: string
 }): string {
   const extension = path.posix.extname(input.displayFilename).toLowerCase()

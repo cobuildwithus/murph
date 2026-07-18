@@ -1,4 +1,14 @@
-import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -200,6 +210,7 @@ describe('assistant vault-file send', () => {
       sessionId: 'session-runtime-delivery',
       threadId: 'thread-runtime-delivery',
       threadIsDirect: true,
+      toolCallId: 'call-runtime-delivery',
       turnId: 'turn-runtime-delivery',
       vault: vaultRoot,
     })
@@ -254,6 +265,82 @@ describe('assistant vault-file send', () => {
         code: 'ASSISTANT_VAULT_FILE_REF_INVALID',
       })
     }
+  })
+
+  it('rejects generated delivery staging without a provider call identity before adoption', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-runtime-identity-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const stagingPath = path.join(vaultRoot, ...ref.split('/'))
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+    await writeFile(stagingPath, 'generated report', { mode: 0o666 })
+    await chmod(stagingPath, 0o666)
+    const approvalRequest = vi.fn()
+
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: { request: approvalRequest },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-runtime-identity',
+      },
+      channel: 'linq',
+      identityId: 'identity-runtime-identity',
+      ref,
+      sessionId: 'session-runtime-identity',
+      threadId: 'thread-runtime-identity',
+      threadIsDirect: true,
+      turnId: 'turn-runtime-identity',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+    })
+
+    expect(approvalRequest).not.toHaveBeenCalled()
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    expect(await stat(stagingPath)).toMatchObject({ size: 16 })
+    expect((await stat(stagingPath)).mode & 0o777).toBe(0o666)
+  })
+
+  it('rejects a hardlinked generated delivery before approval or outbox persistence', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-runtime-hardlink-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const stagingPath = path.join(vaultRoot, ...ref.split('/'))
+    const ordinaryPath = path.join(vaultRoot, 'documents', 'report.pdf')
+    const contents = 'ordinary vault report'
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+    await mkdir(path.dirname(ordinaryPath), { recursive: true })
+    await writeFile(ordinaryPath, contents, { mode: 0o666 })
+    await chmod(ordinaryPath, 0o666)
+    await link(ordinaryPath, stagingPath)
+    const approvalRequest = vi.fn()
+
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: { request: approvalRequest },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-runtime-hardlink',
+      },
+      channel: 'linq',
+      identityId: 'identity-runtime-hardlink',
+      ref,
+      sessionId: 'session-runtime-hardlink',
+      threadId: 'thread-runtime-hardlink',
+      threadIsDirect: true,
+      toolCallId: 'call-runtime-hardlink',
+      turnId: 'turn-runtime-hardlink',
+      vault: vaultRoot,
+    })).rejects.toThrow(/exactly 1 hard link/u)
+
+    expect(approvalRequest).not.toHaveBeenCalled()
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    expect(await readFile(ordinaryPath, 'utf8')).toBe(contents)
+    expect((await lstat(ordinaryPath)).mode & 0o777).toBe(0o666)
+    expect((await lstat(stagingPath)).nlink).toBe(2)
   })
 
   it('keeps distinct sends separate when they reuse the same staging name', async () => {

@@ -1,5 +1,15 @@
 import { existsSync } from 'node:fs'
-import { access, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  access,
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -191,6 +201,46 @@ describe('assistant runtime residue pruning', () => {
     for (const filePath of filePaths) {
       await expectPathExists(filePath)
     }
+  })
+
+  it('fails closed when an active generated delivery gains another hard link', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-active-hardlink-',
+    )
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active linked delivery',
+      refSuffix: 'active-linked.pdf',
+      vaultRoot,
+    })
+    await chmod(active.filePath, 0o600)
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'r',
+      status: 'pending',
+      vaultRoot,
+    })
+    const linkedPath = path.join(vaultRoot, 'documents', 'linked-report.pdf')
+    await mkdir(path.dirname(linkedPath), { recursive: true })
+    await link(active.filePath, linkedPath)
+    const orphan = await writeGeneratedDeliveryFile({
+      contents: 'must remain',
+      refSuffix: 'hardlink-orphan.pdf',
+      vaultRoot,
+    })
+
+    await expect(pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })).rejects.toThrow(
+      'An active assistant generated delivery must have exactly one hard link.',
+    )
+
+    await expectPathExists(active.filePath)
+    await expectPathExists(linkedPath)
+    await expectPathExists(orphan.filePath)
+    expect((await lstat(active.filePath)).nlink).toBe(2)
   })
 
   it('reclaims an active ref whose bytes no longer match its persisted delivery snapshot', async () => {
@@ -385,6 +435,38 @@ describe('assistant runtime residue pruning', () => {
 
     expect(result.generatedDeliveryFilesPruned).toBe(0)
     await expectPathExists(file.filePath)
+  })
+
+  it('prunes an orphan staging hardlink without changing its ordinary vault file', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-hardlink-',
+    )
+    const ordinaryPath = path.join(vaultRoot, 'documents', 'report.pdf')
+    const stagingPath = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+      'report.pdf',
+    )
+    const contents = 'ordinary vault report'
+    await mkdir(path.dirname(ordinaryPath), { recursive: true })
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+    await writeFile(ordinaryPath, contents, { mode: 0o666 })
+    await chmod(ordinaryPath, 0o666)
+    await link(ordinaryPath, stagingPath)
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(1)
+    expect(result.generatedDeliveryBytesPruned).toBe(Buffer.byteLength(contents))
+    await expectPathMissing(stagingPath)
+    expect(await readFile(ordinaryPath, 'utf8')).toBe(contents)
+    expect((await lstat(ordinaryPath)).nlink).toBe(1)
+    expect((await lstat(ordinaryPath)).mode & 0o777).toBe(0o666)
   })
 
   it('rejects generated-delivery symlinks before deleting regular files', async () => {

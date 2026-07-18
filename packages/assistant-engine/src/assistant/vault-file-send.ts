@@ -35,10 +35,7 @@ import {
   buildAssistantOutboxRawTargetIdentity,
   hashAssistantOutboxTargetFingerprint,
 } from './outbox/intents.js'
-import {
-  isMissingFileError,
-  normalizeNullableString,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
@@ -195,8 +192,8 @@ export async function resolveAssistantVaultFileResponseMedia(input: {
   return (await readAssistantVaultFileSnapshot(input)).file
 }
 
-// Consuming the model-selected staging file into a deterministic per-send name
-// happens before hashing or approval. The owned ref is keyed on the tool-call
+// Consuming the model-selected staging file into a deterministic per-tool-call
+// name happens before hashing or approval. The owned ref is keyed on the call
 // identity, so distinct sends reusing one friendly name never collide and an
 // exact re-delivery of the same call idempotently re-adopts its own bytes.
 // Accepted limitation (see agent-docs/references/hosted-runtime-protocol.md):
@@ -214,6 +211,13 @@ async function consumeAssistantGeneratedDeliveryStagingRef(input: {
 }): Promise<{ displayFilename: string; ownedRef: string }> {
   const displayFilename = path.posix.basename(input.ref)
   resolveAssistantVaultFileContentType(displayFilename)
+  if (input.toolCallId === null) {
+    throw new VaultCliError(
+      'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+      'Generated delivery files require a provider tool-call identity before '
+        + 'they can be sent.',
+    )
+  }
   const ownedRef = buildAssistantGeneratedDeliveryOwnedRef({
     displayFilename,
     ref: input.ref,
@@ -242,30 +246,10 @@ async function adoptAssistantGeneratedDeliveryIntoStableName(input: {
   sourcePath: string
   targetPath: string
 }): Promise<void> {
-  try {
-    await adoptAssistantStateFile(input.targetPath)
-    return
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-  }
-
-  try {
-    await adoptAssistantStateFileIntoExclusiveName(
-      input.sourcePath,
-      input.targetPath,
-    )
-  } catch (sourceError) {
-    try {
-      await adoptAssistantStateFile(input.targetPath)
-    } catch (targetError) {
-      if (isMissingFileError(targetError)) {
-        throw sourceError
-      }
-      throw targetError
-    }
-  }
+  await adoptAssistantStateFileIntoExclusiveName(
+    input.sourcePath,
+    input.targetPath,
+  )
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {
@@ -656,7 +640,7 @@ async function readAdoptedAssistantGeneratedDeliveryFile(input: {
   try {
     const openedMetadata = await fileHandle.stat()
     assertAssistantVaultFileMetadataSupported(openedMetadata)
-    assertAdoptedAssistantGeneratedDeliveryMode(openedMetadata)
+    assertAdoptedAssistantGeneratedDeliveryMetadata(openedMetadata)
     await assertAssistantGeneratedDeliveryPathMatchesHandle({
       ...input,
       handleMetadata: openedMetadata,
@@ -667,7 +651,7 @@ async function readAdoptedAssistantGeneratedDeliveryFile(input: {
     if (!assistantVaultFileStatsMatch(openedMetadata, readMetadata)) {
       throw assistantVaultFileChangedDuringReadError()
     }
-    assertAdoptedAssistantGeneratedDeliveryMode(readMetadata)
+    assertAdoptedAssistantGeneratedDeliveryMetadata(readMetadata)
     await assertAssistantGeneratedDeliveryPathMatchesHandle({
       ...input,
       handleMetadata: readMetadata,
@@ -703,7 +687,7 @@ async function assertAssistantGeneratedDeliveryPathMatchesHandle(input: {
   ) {
     throw assistantVaultFileChangedDuringReadError()
   }
-  assertAdoptedAssistantGeneratedDeliveryMode(pathMetadata)
+  assertAdoptedAssistantGeneratedDeliveryMetadata(pathMetadata)
 }
 
 function assertAssistantVaultFileMetadataSupported(metadata: Stats): void {
@@ -721,11 +705,11 @@ function assertAssistantVaultFileMetadataSupported(metadata: Stats): void {
   }
 }
 
-function assertAdoptedAssistantGeneratedDeliveryMode(metadata: Stats): void {
-  if ((metadata.mode & 0o777) !== 0o600) {
+function assertAdoptedAssistantGeneratedDeliveryMetadata(metadata: Stats): void {
+  if ((metadata.mode & 0o777) !== 0o600 || metadata.nlink !== 1) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
-      'The generated delivery file permissions changed before it could be read.',
+      'The generated delivery file ownership or permissions changed before it could be read.',
     )
   }
 }
@@ -739,6 +723,7 @@ function assistantVaultFileStatsMatch(left: Stats, right: Stats): boolean {
     assistantVaultFileIdentityMatches(left, right)
     && left.mode === right.mode
     && left.size === right.size
+    && left.nlink === right.nlink
     && left.mtimeMs === right.mtimeMs
     && left.ctimeMs === right.ctimeMs
   )
