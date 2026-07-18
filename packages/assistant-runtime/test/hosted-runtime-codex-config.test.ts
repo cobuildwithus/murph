@@ -63,6 +63,7 @@ const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
 const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
+const HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT = 4_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
@@ -198,6 +199,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       "mu",
     ),
   );
+  assertHostedCodexToolOutputTokenLimit(config);
   assert.match(config, /^log_dir = "\/tmp\/murph-codex-log"$/mu);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
@@ -1375,6 +1377,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
       `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
+      `tool_output_token_limit = ${HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT}`,
       'log_dir = "/tmp/murph-codex-log"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
@@ -1980,6 +1983,22 @@ function assertHostedCodexAutoCompactTokenLimit(config: string): void {
     limit < HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING,
     true,
     "Hosted Codex config auto-compaction token limit must stay below 250k tokens.",
+  );
+}
+
+function assertHostedCodexToolOutputTokenLimit(config: string): void {
+  const matches = [...config.matchAll(/^tool_output_token_limit\s*=\s*(\d+)$/gmu)];
+  assert.equal(
+    matches.length,
+    1,
+    "Hosted Codex config must inject exactly one tool_output_token_limit setting.",
+  );
+
+  const limit = Number(matches[0]?.[1]);
+  assert.equal(
+    limit,
+    HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT,
+    "Hosted Codex tool output token limit must preserve the measured hosted recovery budget.",
   );
 }
 

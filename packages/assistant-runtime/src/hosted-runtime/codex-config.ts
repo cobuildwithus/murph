@@ -81,6 +81,11 @@ const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
 // separate idle-shutdown compaction threshold intentionally stays lower so
 // off-hot-path checkpointing can clean up large threads before the next wake.
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
+// Keep full command help, exact-record reads, and normal write confirmations
+// visible while preventing unbounded list/search output from being replayed on
+// every later provider request. A 2026-07 full-vault CLI audit found that 2k
+// clipped a valid write response, while 4k preserved the tested recovery paths.
+const DEFAULT_HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT = 4_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // Hosted runs get one WebSocket attempt, then Codex replays the request over
@@ -555,6 +560,7 @@ export function buildHostedCodexConfigToml(input: {
     `model_provider = ${tomlString(modelProviderId)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
+    `tool_output_token_limit = ${DEFAULT_HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
