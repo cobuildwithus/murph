@@ -466,9 +466,10 @@ The hard-cut architecture is accepted when:
 - Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
   starts a short-lived reconciler workflow whose web command appends bounded
   `device-sync.wake` handoffs and re-signals bounded, already-durable preference
-  and queued Clinical Records mailbox items that remain ahead of their lane
-  watermarks. Clinical recovery does not create a second run, wake, receipt, or
-  generation. There is no Vercel device-sync dirty-sweeper cron cadence and no
+  and queued Clinical Records mailbox candidates through one shared sweep. It
+  selects at most one exact pending item per user ahead of its lane watermark.
+  Clinical recovery does not create a second run, wake, receipt, or generation.
+  There is no Vercel device-sync dirty-sweeper cron cadence and no
   Temporal dirty-row sweep replacement.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.

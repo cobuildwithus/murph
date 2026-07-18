@@ -47,8 +47,9 @@ does not expose a compatible patient-facing SMART endpoint.
    retrieval generation and durable system-mailbox wake. A second authorization
    for that member/provider pair fails closed before provider discovery when
    possible and again at the unique persistence boundary. The existing Temporal
-   recovery schedule re-signals a bounded set of exact queued-generation wakes
-   that remain ahead of their mailbox lane watermark; it creates no second run,
+   recovery schedule's shared mailbox handoff sweep re-signals at most one
+   exact pending item per member, including a current queued-generation wake
+   that remains ahead of its mailbox lane watermark. It creates no second run,
    wake, receipt, or retrieval generation.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through

@@ -11,7 +11,9 @@ Schedule helper. That reconciler calls one signed web command and stores only
 count/status metadata in Temporal history. Web remains the owner of canonical
 dirty state, due-reconcile facts, mailbox rows, and lane completion. The command
 appends bounded device-sync wakes and re-handoffs a bounded set of pending
-preference mailbox pointers whose original post-commit signal was missed.
+preference or exact queued Clinical Records mailbox pointers whose original
+post-commit signal was missed. One shared Web sweep selects at most one pending
+pointer per user.
 
 ## Workflow Replay Discipline
 
@@ -146,11 +148,10 @@ empty JSON request to the hosted web command at
 for compatibility. Web reads due-reconcile facts, records due-reconcile wake
 markers, appends bounded `device-sync.wake` mailbox handoffs, reissues bounded
 pointer-only signals for pending preference rows and exact queued Clinical
-Records wakes that remain ahead of their mailbox lane watermark, and returns
-count-only summaries. These handoff recoveries create no receipt, second work
-record, or second Clinical Records generation. The activity accepts a missing
-Clinical Records summary from an older Web deployment as zero counts during a
-rolling deploy.
+Records wakes that remain ahead of their mailbox lane watermark through the
+same one-candidate-per-user sweep, and returns count-only summaries. These
+handoff recoveries create no receipt, second work record, or second Clinical
+Records generation.
 
 Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
 append one bounded mailbox handoff, and runtime maintenance drains pending dirty

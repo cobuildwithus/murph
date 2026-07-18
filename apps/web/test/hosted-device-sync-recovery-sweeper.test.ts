@@ -7,9 +7,6 @@ import {
 describe("hosted device-sync scheduled wake sweeper", () => {
   it("runs due-reconcile wake handoff as one retryable command", async () => {
     const dueReconcileSweeper = vi.fn(async () => buildDueReconcileSweepResult());
-    const clinicalRetrievalHandoffSweeper = vi.fn(async () =>
-      buildClinicalRetrievalHandoffSweepResult()
-    );
     const preferenceHandoffSweeper = vi.fn(async () => ({
       candidateUsers: 1,
       handoffAccepted: 1,
@@ -21,11 +18,9 @@ describe("hosted device-sync scheduled wake sweeper", () => {
     }));
 
     await expect(runHostedDeviceSyncRecoverySweep({
-      runClinicalRetrievalHandoffSweeper: clinicalRetrievalHandoffSweeper,
       runDueReconcileSweeper: dueReconcileSweeper,
       runPreferenceHandoffSweeper: preferenceHandoffSweeper,
     })).resolves.toEqual({
-      clinicalRetrievalHandoffSweeper: buildClinicalRetrievalHandoffSweepResult(),
       dueReconcileSweeper: buildDueReconcileSweepResult(),
       preferenceHandoffSweeper: {
         candidateUsers: 1,
@@ -39,7 +34,6 @@ describe("hosted device-sync scheduled wake sweeper", () => {
     });
 
     expect(dueReconcileSweeper).toHaveBeenCalledTimes(1);
-    expect(clinicalRetrievalHandoffSweeper).toHaveBeenCalledTimes(1);
     expect(preferenceHandoffSweeper).toHaveBeenCalledTimes(1);
   });
 
@@ -53,9 +47,6 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
     await expect(runHostedDeviceSyncRecoverySweep({
       logger,
-      runClinicalRetrievalHandoffSweeper: vi.fn(async () =>
-        buildClinicalRetrievalHandoffSweepResult()
-      ),
       runPreferenceHandoffSweeper: preferenceHandoffSweeper,
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult({
         wakeFailed: 1,
@@ -78,9 +69,6 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
     await expect(runHostedDeviceSyncRecoverySweep({
       logger: { warn: vi.fn() },
-      runClinicalRetrievalHandoffSweeper: vi.fn(async () =>
-        buildClinicalRetrievalHandoffSweepResult()
-      ),
       runDueReconcileSweeper: vi.fn(async () => {
         throw new Error("device-sync unavailable");
       }),
@@ -93,50 +81,13 @@ describe("hosted device-sync scheduled wake sweeper", () => {
   it("fails the retryable command when a preference handoff is missed", async () => {
     await expect(runHostedDeviceSyncRecoverySweep({
       logger: { warn: vi.fn() },
-      runClinicalRetrievalHandoffSweeper: vi.fn(async () =>
-        buildClinicalRetrievalHandoffSweepResult()
-      ),
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult()),
       runPreferenceHandoffSweeper: vi.fn(async () =>
         buildPreferenceHandoffSweepResult({ handoffFailed: 1 })
       ),
     })).rejects.toThrow("Hosted preference mailbox handoff recovery failed.");
   });
-
-  it("fails the retryable command when a Clinical Records wake is still missed", async () => {
-    await expect(runHostedDeviceSyncRecoverySweep({
-      logger: { warn: vi.fn() },
-      runClinicalRetrievalHandoffSweeper: vi.fn(async () =>
-        buildClinicalRetrievalHandoffSweepResult({ handoffFailed: 1 })
-      ),
-      runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult()),
-      runPreferenceHandoffSweeper: vi.fn(async () =>
-        buildPreferenceHandoffSweepResult()
-      ),
-    })).rejects.toThrow("Hosted Clinical Records mailbox handoff recovery failed.");
-  });
 });
-
-function buildClinicalRetrievalHandoffSweepResult(overrides: Partial<{
-  candidateRuns: number;
-  handoffAccepted: number;
-  handoffAttempted: number;
-  handoffFailed: number;
-  handoffLimit: number;
-  handoffSkippedInactive: number;
-  skippedCandidateRuns: number;
-}> = {}) {
-  return {
-    candidateRuns: 1,
-    handoffAccepted: 1,
-    handoffAttempted: 1,
-    handoffFailed: 0,
-    handoffLimit: 25,
-    handoffSkippedInactive: 0,
-    skippedCandidateRuns: 0,
-    ...overrides,
-  };
-}
 
 function buildDueReconcileSweepResult(overrides: Partial<{
   dueConnections: number;

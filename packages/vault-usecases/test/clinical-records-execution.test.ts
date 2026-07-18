@@ -543,7 +543,7 @@ describe("importClinicalFhirSnapshot", () => {
 
     await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
       cause: expect.objectContaining({
-        message: expect.stringContaining("unresolved pagination"),
+        message: expect.stringContaining("does not match its manifest hash"),
       }),
       code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
     });
