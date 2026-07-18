@@ -74,7 +74,9 @@ describe("product-test reviewed remap safety contract", () => {
     expect(script).not.toContain("apps/web/sql/supplements/schema.sql");
     expect(script).not.toContain("$script_dir/schema.sql");
     expect(sql).toContain("compare-and-set conflict with unexpected current link state");
-    expect(sql).toContain("'matchMethod', 'source_only'");
+    expect(sql).toContain("'version', 'product-test-remap-preimage-fingerprint-v2'");
+    expect(sql).toContain("'observationRevisions'");
+    expect(sql).not.toContain("'foodId', NULL::text");
     expect(sql).toContain("product test remap source fingerprint is stale");
     expect(sql).toContain("product test remap target fingerprint is stale");
     expect(sql).toContain("'testedPackageSize', MIN(tests.tested_package_size)");
@@ -435,23 +437,57 @@ describe.runIf(Boolean(testDatabaseUrl))(
       });
     });
 
-    it("also accepts the canonical source-only baseline for a fresh import", async () => {
-      const reviewedOldState = await remapRow({
+    it("rejects ABA replay after a reviewed link is disproven", async () => {
+      const firstCorrection = await remapRow({
         sourceId: "conflict",
         targetFoodId: "food-a",
         matchMethod: "manual_confirmed",
-        reviewNote: "The old linked state was captured for a reviewed correction.",
+        reviewNote: "The original target was disproven and target A was reviewed.",
       });
-      const freshImport = await remapRow({
-        sourceId: "manual",
+      expect((await runRemap([firstCorrection], ["--apply"])).stdout)
+        .toContain("mutations=1");
+
+      const disproven = await remapRow({
+        sourceId: "conflict",
+        matchMethod: "source_only",
+        reviewNote: "Target A was disproven and no exact replacement exists.",
+      });
+      expect((await runRemap([disproven], ["--apply"])).stdout)
+        .toContain("mutations=1");
+
+      await expect(runRemap([firstCorrection], ["--apply"]))
+        .rejects.toMatchObject({
+          stderr: expect.stringContaining("compare-and-set conflict"),
+        });
+      expect((await runRemap([disproven], ["--apply"])).stdout)
+        .toContain("mutations=0 noops=1");
+    });
+
+    it("rejects a mutating artifact after observation revisions change", async () => {
+      const staleArtifact = await remapRow({
+        sourceId: "stale",
         targetFoodId: "food-a",
         matchMethod: "manual_confirmed",
-        reviewNote: "The same correction must apply after a fresh source import.",
+        reviewNote: "The current observation revision was reviewed.",
       });
-      freshImport.expected_current_state_fingerprint =
-        reviewedOldState.expected_current_state_fingerprint;
+      await client.query(`
+        UPDATE ${schemaName}.product_tests
+        SET imported_at = imported_at + interval '1 second'
+        WHERE tested_source_product_id = 'stale'
+      `);
 
-      expect((await runRemap([freshImport])).stdout).toContain("mutations=1");
+      await expect(runRemap([staleArtifact], ["--apply"]))
+        .rejects.toMatchObject({
+          stderr: expect.stringContaining("compare-and-set conflict"),
+        });
+
+      const freshArtifact = await remapRow({
+        sourceId: "stale",
+        targetFoodId: "food-a",
+        matchMethod: "manual_confirmed",
+        reviewNote: "The refreshed observation revision was reviewed.",
+      });
+      expect((await runRemap([freshArtifact])).stdout).toContain("mutations=1");
     });
 
     it("requires a review note for manual and explicit source-only decisions", async () => {
@@ -631,6 +667,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
       await runCandidateExport(secondCandidatesPath);
       const secondRows = parseTsv(await readFile(secondCandidatesPath, "utf8"));
       expect(secondRows[0]?.source_fingerprint).toBe(firstRows[0]?.source_fingerprint);
+      expect(secondRows[0]?.current_state_fingerprint).not.toBe(
+        firstRows[0]?.current_state_fingerprint,
+      );
       expect(secondRows[0]?.source_snapshot_fingerprint).not.toBe(
         firstRows[0]?.source_snapshot_fingerprint,
       );
@@ -754,7 +793,18 @@ describe.runIf(Boolean(testDatabaseUrl))(
             MIN(tested_package_size) AS tested_package_size,
             MIN(food_id) AS food_id,
             MIN(supplement_id) AS supplement_id,
-            MIN(match_method) AS match_method
+            MIN(match_method) AS match_method,
+            jsonb_agg(
+              jsonb_build_array(
+                source_result_id,
+                contaminant_key,
+                to_char(
+                  imported_at AT TIME ZONE 'UTC',
+                  'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                )
+              )
+              ORDER BY source_result_id, contaminant_key
+            ) AS observation_revisions
           FROM ${schemaName}.product_tests
           WHERE source_key = 'catalog' AND tested_source_product_id = $1
           GROUP BY source_key, tested_source_product_id
@@ -796,11 +846,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
             'testedPackageSize', tested_package_size
           )::text) AS source_fingerprint,
           md5(jsonb_build_object(
-            'version', 'product-test-link-state-fingerprint-v1',
+            'version', 'product-test-remap-preimage-fingerprint-v2',
             'foodId', food_id,
             'supplementId', supplement_id,
             'matchMethod', match_method,
-            'targetFingerprint', current_target_fingerprint
+            'targetFingerprint', current_target_fingerprint,
+            'observationRevisions', observation_revisions
           )::text) AS current_state_fingerprint
         FROM source_with_target
       `, [input.sourceId]);

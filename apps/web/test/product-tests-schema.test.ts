@@ -781,15 +781,13 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("Bulk open-source contaminant CSV snapshots are intentionally not committed");
     expect(readme).toContain(".product-tests-work/seed-data/open-product-sources/");
     expect(readme).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
-    expect(readme).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
-    expect(readme).toContain("With `--replace-source`, the importer requires");
-    expect(readme).toContain("deletes rows absent from the complete");
-    expect(readme).toContain("snapshot for the source keys present in the snapshot");
+    expect(readme).toContain("Re-imports are always additive upserts");
+    expect(readme).toContain("multi-source refresh is not deletion authority");
     expect(readme).toContain("import-open-product-sources.sh");
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
     expect(readme).toContain("Recall feeds such as openFDA and FSIS");
-    expect(readme).toContain("Re-imports are additive upserts");
+    expect(readme).toContain("Re-imports are always additive upserts");
     expect(readme).toContain("Bulk legal-threshold snapshots are intentionally not committed as runtime data");
     expect(readme).toContain("Transform source material into a small screening-threshold CSV");
     expect(readme).toContain(".product-tests-work/seed-data/thresholds/");
@@ -1071,11 +1069,10 @@ describe("product test contaminant schema", () => {
     expect(importSourceOnlyProductTestsBodySql).toContain("pg_advisory_xact_lock");
     expect(importSourceOnlyProductTestsBodySql).toContain("murph:product_tests:mutation");
     expect(importOpenProductSourcesSql).not.toContain("murph:open_product_sources:import");
-    expect(importOpenProductSourcesScript).toContain("--replace-source");
-    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
-    expect(importOpenProductSourcesScript).toContain("Open product sources --replace-source expected");
-    expect(importOpenProductSourcesScript).toContain("-v replace_source=\"$replace_source\"");
-    expect(importOpenProductSourcesScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
+    expect(importOpenProductSourcesScript).not.toContain("--replace-source");
+    expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
+    expect(importOpenProductSourcesScript).toContain("-v replace_source=false");
+    expect(importOpenProductSourcesScript).toContain("-v replace_source_expected_product_test_rows=\"\"");
     expect(importOpenProductSourcesScript).not.toContain("replace-source.lock");
     expect(importOpenProductSourcesScript).not.toContain(
       "Another open product sources --replace-source import is already running",
@@ -1191,14 +1188,8 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).not.toContain("./open-data/");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
-    const enabledAdapterKeysBlock = productTestSourceRegistry.slice(
-      productTestSourceRegistry.indexOf(
-        "export const EXTERNALLY_MANAGED_PRODUCT_TEST_ADAPTER_KEYS",
-      ),
-      productTestSourceRegistry.indexOf("export function productTestCatalog"),
-    );
     const openContaminantSourceKeys = new Set(
-      [...enabledAdapterKeysBlock.matchAll(/"([a-z0-9_]+)"/gu)]
+      [...productTestSourceRegistry.matchAll(/sourceKey: "([a-z0-9_]+)"/gu)]
         .map((match) => match[1] ?? ""),
     );
     expect(openContaminantSourceKeys).toEqual(new Set([
@@ -2591,7 +2582,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("guards open product source replace-source repair with an expected complete row count", async () => {
+  it("keeps open product source imports additive and rejects replacement mode", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-sources-replace-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -2617,15 +2608,6 @@ describe("product test contaminant schema", () => {
           "",
         ].join("\n"),
       );
-      await writeFile(
-        path.join(tempOpenDataDir, "open_product_sources_source_counts.tsv"),
-        [
-          "source_key\trow_count",
-          "nyc_dohmh_consumer_products\t1",
-          "",
-        ].join("\n"),
-      );
-
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
       await writeFile(
@@ -2638,55 +2620,25 @@ describe("product test contaminant schema", () => {
       );
       await chmod(fakePsqlPath, 0o755);
 
-      const runReplaceImport = async (
-        expectedRows: string | undefined,
-      ): Promise<string> => {
-        const env: NodeJS.ProcessEnv = {
+      const env: NodeJS.ProcessEnv = {
           ...process.env,
           OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:
             ".product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv",
           MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
           PSQL_BIN: fakePsqlPath,
           PSQL_FAKE_LOG: fakePsqlLogPath,
-        };
-        if (expectedRows !== undefined) {
-          env.OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS = expectedRows;
-        }
-
-        try {
-          await execFileAsync(tempScriptPath, ["--replace-source"], {
-            env,
-          });
-          return "";
-        } catch (error) {
-          return error instanceof Error && "stderr" in error
-            ? String(error.stderr)
-            : String(error);
-        }
       };
 
-      const missingExpectedRowsStderr = await runReplaceImport(undefined);
-      expect(missingExpectedRowsStderr).toContain(
-        "OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS is required with --replace-source",
-      );
-      expect(missingExpectedRowsStderr).not.toContain("postgres://");
+      await expect(execFileAsync(tempScriptPath, ["--replace-source"], { env }))
+        .rejects.toMatchObject({ code: 64 });
       await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
         code: "ENOENT",
       });
 
-      const mismatchedExpectedRowsStderr = await runReplaceImport("2");
-      expect(mismatchedExpectedRowsStderr).toContain(
-        "Open product sources --replace-source expected 2 product test rows but found 1; refusing destructive import.",
-      );
-      expect(mismatchedExpectedRowsStderr).not.toContain("postgres://");
-      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-
-      await expect(runReplaceImport("1")).resolves.toBe("");
+      await expect(execFileAsync(tempScriptPath, { env })).resolves.toBeDefined();
       const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
-      expect(fakePsqlLog).toContain("-v replace_source=true");
-      expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows=1");
+      expect(fakePsqlLog).toContain("-v replace_source=false");
+      expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows= ");
       expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });

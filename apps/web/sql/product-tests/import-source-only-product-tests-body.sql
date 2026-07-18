@@ -56,55 +56,6 @@ END $$;
 
 DO $$
 BEGIN
-  IF (SELECT replace_source FROM source_only_product_tests_import_options)
-    AND to_regclass(
-      'pg_temp.source_only_product_tests_import_require_source_counts'
-    ) IS NOT NULL
-  THEN
-    IF to_regclass('pg_temp.source_only_product_tests_import_source_counts') IS NULL THEN
-      RAISE EXCEPTION
-        'source-only product test replace-source import requires a per-source count manifest';
-    END IF;
-
-    IF NOT EXISTS (
-      SELECT 1
-      FROM source_only_product_tests_import_source_counts
-    ) OR EXISTS (
-      SELECT source_key
-      FROM source_only_product_tests_import_source_counts
-      GROUP BY source_key
-      HAVING COUNT(*) > 1
-    ) OR EXISTS (
-      SELECT 1
-      FROM source_only_product_tests_import_source_counts
-      WHERE
-        source_key !~ '^[a-z][a-z0-9_]*$'
-        OR row_count <= 0
-    ) THEN
-      RAISE EXCEPTION
-        'source-only product test replace-source manifest is empty or invalid';
-    END IF;
-
-    IF EXISTS (
-      WITH actual_counts AS (
-        SELECT source_key, COUNT(*)::integer AS row_count
-        FROM source_only_product_tests_import
-        GROUP BY source_key
-      )
-      SELECT 1
-      FROM actual_counts
-      FULL JOIN source_only_product_tests_import_source_counts expected_counts
-        USING (source_key)
-      WHERE actual_counts.row_count IS DISTINCT FROM expected_counts.row_count
-    ) THEN
-      RAISE EXCEPTION
-        'source-only product test replace-source per-source row count mismatch';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
   IF NOT EXISTS (SELECT 1 FROM source_only_product_tests_import) THEN
     RAISE EXCEPTION 'source-only product test import prepared zero product test rows';
   END IF;

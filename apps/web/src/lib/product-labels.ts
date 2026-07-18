@@ -31,6 +31,12 @@ const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   medium: 3,
   high: 4,
 };
+const PRODUCT_TEST_SOURCE_DATA_ORIGINS = [
+  "plasticlist_bay_area_2024",
+  "nyc_dohmh_consumer_products",
+  "king_county_consumer_products",
+  "pure_earth_rms_2024",
+] as const;
 const PRODUCT_CONTAMINANT_GRADING_POLICY = {
   id: "adult_one_serving_per_day_v1",
   bodyWeightKg: 70,
@@ -1759,7 +1765,9 @@ function isMissingProductContaminantSchemaError(error: unknown): boolean {
 }
 
 function productLabelSourceFilterSql(columnSql: string): string {
-  return `NOT murph_product_test_legacy_source_backed_origin(${columnSql})`;
+  return `${columnSql} NOT IN (${PRODUCT_TEST_SOURCE_DATA_ORIGINS
+    .map(sqlStringLiteral)
+    .join(", ")})`;
 }
 
 function sqlStringLiteral(value: string): string {

@@ -173,6 +173,17 @@ SELECT
     tests.supplement_id,
     tests.match_method
   )) AS current_target_variants,
+  jsonb_agg(
+    jsonb_build_array(
+      tests.source_result_id,
+      tests.contaminant_key,
+      to_char(
+        tests.imported_at AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+      )
+    )
+    ORDER BY tests.source_result_id, tests.contaminant_key
+  ) AS observation_revisions,
   md5(jsonb_build_object(
     'version', 'product-test-source-fingerprint-v2',
     'sourceKey', tests.source_key,
@@ -310,6 +321,14 @@ SELECT
     'supplementId', current_state_targets.supplement_id,
     'matchMethod', current_state_targets.match_method,
     'targetFingerprint', current_state_targets.current_target_fingerprint
+  )::text) AS current_link_state_fingerprint,
+  md5(jsonb_build_object(
+    'version', 'product-test-remap-preimage-fingerprint-v2',
+    'foodId', current_state_targets.food_id,
+    'supplementId', current_state_targets.supplement_id,
+    'matchMethod', current_state_targets.match_method,
+    'targetFingerprint', current_state_targets.current_target_fingerprint,
+    'observationRevisions', current_state_targets.observation_revisions
   )::text) AS current_state_fingerprint
 FROM current_state_targets;
 
@@ -467,21 +486,14 @@ BEGIN
     JOIN product_test_remap_current_states source_products
       ON source_products.source_key = remaps.source_key
       AND source_products.tested_source_product_id = remaps.tested_source_product_id
-    WHERE source_products.current_state_fingerprint NOT IN (
-      remaps.expected_current_state_fingerprint,
-      md5(jsonb_build_object(
+    WHERE NOT (
+      source_products.current_state_fingerprint = remaps.expected_current_state_fingerprint
+      OR source_products.current_link_state_fingerprint = md5(jsonb_build_object(
         'version', 'product-test-link-state-fingerprint-v1',
         'foodId', NULLIF(remaps.food_id, ''),
         'supplementId', NULLIF(remaps.supplement_id, ''),
         'matchMethod', remaps.match_method,
         'targetFingerprint', remaps.target_fingerprint
-      )::text),
-      md5(jsonb_build_object(
-        'version', 'product-test-link-state-fingerprint-v1',
-        'foodId', NULL::text,
-        'supplementId', NULL::text,
-        'matchMethod', 'source_only',
-        'targetFingerprint', NULL::text
       )::text)
     )
   ) THEN
@@ -492,7 +504,7 @@ END $$;
 CREATE TEMP TABLE product_test_remap_plan ON COMMIT DROP AS
 SELECT
   decisions.*,
-  decisions.current_state_fingerprint = decisions.desired_state_fingerprint AS is_noop
+  decisions.current_link_state_fingerprint = decisions.desired_state_fingerprint AS is_noop
 FROM (
   SELECT
     remaps.source_key,
@@ -500,6 +512,7 @@ FROM (
     remaps.source_fingerprint,
     remaps.expected_current_state_fingerprint,
     source_products.current_state_fingerprint,
+    source_products.current_link_state_fingerprint,
     source_products.product_test_rows,
     source_products.food_id AS before_food_id,
     source_products.supplement_id AS before_supplement_id,

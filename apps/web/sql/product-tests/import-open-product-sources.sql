@@ -53,22 +53,6 @@ CREATE TEMP TABLE source_only_product_tests_import (
 
 \copy source_only_product_tests_import FROM __PRODUCT_TESTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
 
-\if :replace_source
-CREATE TEMP TABLE source_only_product_tests_import_require_source_counts (
-  required BOOLEAN NOT NULL
-) ON COMMIT DROP;
-
-INSERT INTO source_only_product_tests_import_require_source_counts (required)
-VALUES (true);
-
-CREATE TEMP TABLE source_only_product_tests_import_source_counts (
-  source_key TEXT NOT NULL,
-  row_count INTEGER NOT NULL
-) ON COMMIT DROP;
-
-\copy source_only_product_tests_import_source_counts FROM __SOURCE_COUNTS_TSV__ WITH (FORMAT csv, HEADER true, DELIMITER E'\t')
-\endif
-
 \i apps/web/sql/product-tests/import-source-only-product-tests-body.sql
 
 COMMIT;

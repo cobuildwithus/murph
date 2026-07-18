@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: apps/web/sql/product-tests/import-open-product-sources.sh [--schema-only] [--replace-source]
+Usage: apps/web/sql/product-tests/import-open-product-sources.sh [--schema-only]
 
 Imports open-source product_tests rows from a local CSV.
 
@@ -15,28 +15,16 @@ Required env:
                                   .product-tests-work/.
 
 Optional env:
-  OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS
-                                  Required with --replace-source. Must equal
-                                  the CSV data row count before the import can
-                                  unlink rows absent from the complete input.
-                                  A sync-generated
-                                  open_product_sources_source_counts.tsv must
-                                  sit beside the CSV and exactly match every
-                                  staged source key and per-source row count.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
   --schema-only                  Apply schemas without importing rows.
-  --replace-source               Treat the CSV as a complete source snapshot.
-                                  Rows absent for imported source keys are
-                                  repaired back to source_only.
 
 The runner never prints the database URL or passes it to psql argv.
 USAGE
 }
 
 schema_only=false
-replace_source=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,9 +35,6 @@ while [ "$#" -gt 0 ]; do
     --schema-only)
       schema_only=true
       ;;
-    --replace-source)
-      replace_source=true
-      ;;
     *)
       usage
       exit 64
@@ -57,11 +42,6 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-
-if [ "$replace_source" = true ] && [ "$schema_only" = true ]; then
-  echo "--replace-source cannot be used with --schema-only" >&2
-  exit 64
-fi
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
@@ -89,8 +69,6 @@ if [ "$schema_only" = true ]; then
 fi
 
 product_tests_csv_path="${OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:-}"
-replace_source_expected_rows="${OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS:-}"
-source_counts_tsv_path="$(dirname "$product_tests_csv_path")/open_product_sources_source_counts.tsv"
 
 if [ -z "$product_tests_csv_path" ]; then
   echo "OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required" >&2
@@ -119,38 +97,12 @@ mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 rendered_import_sql="$run_work_dir/import-open-product-sources.sql"
 
-if [ "$replace_source" = true ]; then
-  if ! [[ "$replace_source_expected_rows" =~ ^[0-9]+$ ]]; then
-    echo "OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS is required with --replace-source" >&2
-    exit 64
-  fi
-
-  product_test_rows=$(awk 'NR > 1 && /[^[:space:]]/ { count += 1 } END { print count + 0 }' "$product_tests_csv_path")
-  if [ "$product_test_rows" -ne "$replace_source_expected_rows" ]; then
-    echo "Open product sources --replace-source expected $replace_source_expected_rows product test rows but found $product_test_rows; refusing destructive import." >&2
-    exit 65
-  fi
-
-  if [ ! -f "$source_counts_tsv_path" ]; then
-    echo "Open product sources --replace-source requires open_product_sources_source_counts.tsv beside the CSV" >&2
-    exit 66
-  fi
-
-  IFS= read -r source_counts_header < "$source_counts_tsv_path" || true
-  if [ "$source_counts_header" != $'source_key\trow_count' ]; then
-    echo "Open product sources source-count manifest has an invalid header" >&2
-    exit 65
-  fi
-fi
-
 apply_product_test_schemas
 
 awk \
   -v product_tests_csv="$(labels_db_psql_copy_literal "$product_tests_csv_path")" \
-  -v source_counts_tsv="$(labels_db_psql_copy_literal "$source_counts_tsv_path")" \
   '{
     gsub(/__PRODUCT_TESTS_CSV__/, product_tests_csv)
-    gsub(/__SOURCE_COUNTS_TSV__/, source_counts_tsv)
     print
   }' \
   "$script_dir/import-open-product-sources.sql" > "$rendered_import_sql"
@@ -158,8 +110,8 @@ awk \
 echo "Importing open product source CSVs..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
-  -v replace_source="$replace_source" \
-  -v replace_source_expected_product_test_rows="$replace_source_expected_rows" \
+  -v replace_source=false \
+  -v replace_source_expected_product_test_rows="" \
   -f "$rendered_import_sql"
 
 echo "Imported open product source rows."

@@ -7,13 +7,12 @@ by exact UPC, exact source id, or manual confirmation, or it remains
 summaries only for linked rows and never infer contaminants from names, brands,
 tags, categories, or fuzzy matches.
 
-The catalog registry in `product-test-source-registry.ts` is the source of
-truth for researched test catalogs and their rights, freshness, and
-matchability posture. A catalog can be enabled for quantitative or qualitative
-observations, retained as generic/event-only context, held behind permission,
-or explicitly excluded. Public visibility alone is not permission for bulk
-reuse, and a recall, certification, allegation, or anonymous survey is not
-silently converted into a product measurement.
+The catalog registry in `product-test-source-registry.ts` contains only sources
+with executable import adapters and the attribution fields those adapters use.
+Deferred source research and rights decisions stay in planning or documentation
+until an adapter has a current product need. Public visibility alone is not
+permission for bulk reuse, and a recall, certification, allegation, or anonymous
+survey is not silently converted into a product measurement.
 
 ## PlasticList
 
@@ -361,10 +360,9 @@ Source posture:
   the public enforcement record; the third-party report and scans are not
   mirrored.
 
-The registry also records high-value catalogs that are not imported because
-their product identities are anonymous, they contain events rather than test
-results, or their reuse terms require permission. Add an adapter only after the
-registry disposition and rights scope support it.
+The executable registry contains only imported sources and the attribution
+fields consumed by their adapters. Keep deferred source research in planning or
+documentation until an adapter has a current product need and usable rights.
 
 Refresh the local CSV with:
 
@@ -376,7 +374,7 @@ The refresh requires `unzip` for the Pure Earth workbook and `pdftotext` for
 the NYAG report. Every sync-managed adapter must produce rows before the CSV is
 written, and source-specific parsers fail closed when a primary page or report
 changes shape. The command prints per-source counts and skipped-row diagnostics;
-review both before replacement import.
+review both before import.
 
 Import a local CSV with:
 
@@ -385,18 +383,6 @@ OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-p
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh
 ```
-
-For a generated complete source snapshot, use guarded replacement mode:
-
-```sh
-OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
-OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=8957 \
-MURPH_LABELS_DB_URL=postgres://... \
-apps/web/sql/product-tests/import-open-product-sources.sh --replace-source
-```
-
-The example count is the July 16, 2026 snapshot; always replace it with the
-exact total printed by the refresh being imported.
 
 Apply schemas only with:
 
@@ -408,11 +394,11 @@ apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
 Every imported row has `match_method = source_only` and no product link. These
 source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
-product. Re-imports are additive upserts by default: rows absent from an
-operator-local CSV are not pruned. With `--replace-source`, the importer requires
-the expected complete CSV row count and deletes rows absent from the complete
-snapshot for the source keys present in the snapshot. Existing reviewed links
-are preserved only when the refreshed source row still names the same source
+product. Re-imports are always additive upserts: rows absent from an
+operator-local or upstream snapshot are never pruned. A source withdrawal or
+correction needs an exact reviewed deletion with preimage proof; a generated
+multi-source refresh is not deletion authority. Existing reviewed links are
+preserved only when the refreshed source row still names the same source
 product id, tested product name, tested brand, canonical UPC, raw reported UPC,
 and published package size; source identity drift repairs the row back to
 `source_only` for review.

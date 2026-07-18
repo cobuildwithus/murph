@@ -471,7 +471,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       }]);
     });
 
-    it("rejects per-source truncation hidden by the same aggregate row count", async () => {
+    it("preserves rows omitted from a later additive snapshot", async () => {
       const rows = [
         {
           id: "source-a:a1:lead",
@@ -491,69 +491,23 @@ describe.runIf(Boolean(testDatabaseUrl))(
           lotCode: "LOT-A2",
           resultValue: "0.2",
         },
-        {
-          id: "source-b:b1:lead",
-          sourceKey: "source_b",
-          sourceResultId: "b1",
-          contaminantKey: "lead",
-          contaminantName: "Lead",
-          lotCode: "LOT-B1",
-          resultValue: "1.1",
-        },
-        {
-          id: "source-b:b2:cadmium",
-          sourceKey: "source_b",
-          sourceResultId: "b2",
-          contaminantKey: "cadmium",
-          contaminantName: "Cadmium",
-          lotCode: "LOT-B2",
-          resultValue: "0.3",
-        },
       ];
 
-      await expect(runImport(rows, {
-        replaceSource: true,
-        sourceCounts: [
-          { sourceKey: "source_a", rowCount: 1 },
-          { sourceKey: "source_b", rowCount: 3 },
-        ],
-      })).rejects.toThrow("per-source row count mismatch");
-    });
+      await runImport(rows);
+      await runImport([rows[0]]);
 
-    it("rejects missing, extra, or absent replace-source manifest keys", async () => {
-      const rows = [
-        {
-          id: "source-a:a1:lead",
-          sourceKey: "source_a",
-          sourceResultId: "a1",
-          contaminantKey: "lead",
-          contaminantName: "Lead",
-          lotCode: "LOT-A",
-          resultValue: "1",
-        },
-        {
-          id: "source-b:b1:lead",
-          sourceKey: "source_b",
-          sourceResultId: "b1",
-          contaminantKey: "lead",
-          contaminantName: "Lead",
-          lotCode: "LOT-B",
-          resultValue: "1.1",
-        },
-      ];
-
-      await expect(runImport(rows, {
-        replaceSource: true,
-        sourceCounts: [
-          { sourceKey: "source_a", rowCount: 1 },
-          { sourceKey: "source_c", rowCount: 1 },
-        ],
-      })).rejects.toThrow("per-source row count mismatch");
-
-      await expect(runImport(rows, {
-        replaceSource: true,
-        sourceCounts: null,
-      })).rejects.toThrow("requires a per-source count manifest");
+      const imported = await client.query<{
+        source_result_id: string;
+      }>(`
+        SELECT source_result_id
+        FROM product_tests
+        WHERE source_key = 'source_a'
+        ORDER BY source_result_id
+      `);
+      expect(imported.rows).toEqual([
+        { source_result_id: "a1" },
+        { source_result_id: "a2" },
+      ]);
     });
 
     it("keeps single-source replacement compatible without an open-source manifest", async () => {
@@ -567,7 +521,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
         resultValue: "1",
       }], {
         replaceSource: true,
-        requireSourceCounts: false,
       });
 
       const imported = await client.query<{ count: string }>(`
@@ -1079,18 +1032,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       testedPackageSize?: string;
       testedProductName?: string;
       testedProductUpcRaw?: string;
-    }>, options: {
-      requireSourceCounts?: boolean;
-      replaceSource?: boolean;
-      sourceCounts?: Array<{ rowCount: number; sourceKey: string }> | null;
-    } = {}): Promise<void> {
+    }>, options: { replaceSource?: boolean } = {}): Promise<void> {
       await client.query("DROP TABLE IF EXISTS source_only_product_tests_import");
-      await client.query(
-        "DROP TABLE IF EXISTS source_only_product_tests_import_source_counts",
-      );
-      await client.query(
-        "DROP TABLE IF EXISTS source_only_product_tests_import_require_source_counts",
-      );
       await client.query(`
         CREATE TEMP TABLE source_only_product_tests_import (
           id TEXT NOT NULL,
@@ -1174,43 +1117,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
         ]);
       }
 
-      if (
-        options.replaceSource === true
-        && options.requireSourceCounts !== false
-      ) {
-        await client.query(`
-          CREATE TEMP TABLE source_only_product_tests_import_require_source_counts (
-            required BOOLEAN NOT NULL
-          );
-          INSERT INTO source_only_product_tests_import_require_source_counts
-          VALUES (true);
-        `);
-
-        if (options.sourceCounts !== null) {
-          await client.query(`
-            CREATE TEMP TABLE source_only_product_tests_import_source_counts (
-              source_key TEXT NOT NULL,
-              row_count INTEGER NOT NULL
-            )
-          `);
-          const sourceCounts = options.sourceCounts ?? Object.entries(
-            rows.reduce<Record<string, number>>((counts, row) => {
-              const sourceKey = row.sourceKey ?? "catalog";
-              counts[sourceKey] = (counts[sourceKey] ?? 0) + 1;
-              return counts;
-            }, {}),
-          ).map(([sourceKey, rowCount]) => ({ sourceKey, rowCount }));
-          for (const sourceCount of sourceCounts) {
-            await client.query(`
-              INSERT INTO source_only_product_tests_import_source_counts (
-                source_key,
-                row_count
-              ) VALUES ($1, $2)
-            `, [sourceCount.sourceKey, sourceCount.rowCount]);
-          }
-        }
-      }
-
       const renderedImportBody = importBody
         .replace(
           ":'replace_source'::boolean",
@@ -1224,12 +1130,6 @@ describe.runIf(Boolean(testDatabaseUrl))(
         );
       await client.query(renderedImportBody);
       await client.query("DROP TABLE source_only_product_tests_import");
-      await client.query(
-        "DROP TABLE IF EXISTS source_only_product_tests_import_source_counts",
-      );
-      await client.query(
-        "DROP TABLE IF EXISTS source_only_product_tests_import_require_source_counts",
-      );
     }
   },
 );

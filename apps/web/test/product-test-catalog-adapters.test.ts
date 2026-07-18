@@ -18,7 +18,6 @@ import {
   PRODUCT_TEST_HEADERS,
   type JsonRecord,
 } from "../sql/product-tests/product-test-catalog-types";
-import { buildProductTestSourceCountManifest } from "../sql/product-tests/product-test-source-count-manifest";
 
 const FIXTURE_ROOT = new URL("../sql/product-tests/fixtures/", import.meta.url);
 
@@ -68,20 +67,6 @@ describe("product-test catalog adapters", () => {
     const rows = outputs.flatMap((output) => output.rows);
 
     expect(() => assertSyncManagedSourcesPresent(rows)).not.toThrow();
-    const manifest = buildProductTestSourceCountManifest(rows);
-    const manifestLines = manifest.trimEnd().split("\n");
-    expect(manifestLines[0]).toBe("source_key\trow_count");
-    expect(manifestLines.slice(1)).toEqual([...manifestLines.slice(1)].sort());
-    expect(manifestLines).toContain("fda_cinnamon_alert_2024_07_25\t1");
-    expect(manifestLines).toContain("fda_health_fraud_products\t4");
-    expect(() =>
-      buildProductTestSourceCountManifest([
-        ...rows,
-        { ...rows[0], source_key: "plasticlist_bay_area_2024" },
-      ])
-    ).toThrow(
-      "Product-test source-count manifest received unmanaged source: plasticlist_bay_area_2024",
-    );
     expect(() =>
       assertSyncManagedSourcesPresent(
         rows.filter((row) => row.source_key !== "fda_health_fraud_products"),

@@ -21,14 +21,8 @@ import {
   type JsonRecord,
 } from "./product-test-catalog-types";
 import {
-  buildProductTestSourceCountManifest,
-  PRODUCT_TEST_SOURCE_COUNT_MANIFEST_FILENAME,
-} from "./product-test-source-count-manifest";
-import {
-  EXTERNALLY_MANAGED_PRODUCT_TEST_ADAPTER_KEYS,
   productTestCatalog,
   SYNC_MANAGED_PRODUCT_TEST_ADAPTER_KEYS,
-  type ExternallyManagedProductTestAdapterKey,
   type SyncManagedProductTestAdapterKey,
 } from "./product-test-source-registry";
 
@@ -37,10 +31,6 @@ const OUTPUT_DIR = new URL(
   import.meta.url,
 );
 const PRODUCT_TESTS_CSV = new URL("open_product_sources_product_tests.csv", OUTPUT_DIR);
-const SOURCE_COUNTS_TSV = new URL(
-  PRODUCT_TEST_SOURCE_COUNT_MANIFEST_FILENAME,
-  OUTPUT_DIR,
-);
 
 const NYC_API_URL =
   "https://data.cityofnewyork.us/resource/da9u-wz3r.json?$limit=50000";
@@ -48,11 +38,6 @@ const KING_COUNTY_API_URL =
   "https://data.kingcounty.gov/resource/i6sy-ckp7.json?$select=:id,year_tested,program,data_source,product_type,product_name,brand_name,manufacturer,made_in_country,test_method,qualifier,lead_concentration_ppm&$limit=50000";
 const PURE_EARTH_DOWNLOAD_URL =
   "https://zenodo.org/records/10444602/files/RMS%20XRF%20dataset%20%2820240106%29.xlsx?download=1";
-
-export const EXTERNAL_SOURCE_EXEMPTIONS = {
-  plasticlist_bay_area_2024:
-    "Managed by the existing PlasticList-specific importer.",
-} satisfies Record<ExternallyManagedProductTestAdapterKey, string>;
 
 const SYNC_ADAPTER_DISPATCH = {
   nyc_dohmh_consumer_products: async () =>
@@ -100,7 +85,6 @@ const SYNC_ADAPTER_DISPATCH = {
 } satisfies Record<SyncManagedProductTestAdapterKey, () => Promise<AdapterOutput>>;
 
 async function main(): Promise<void> {
-  assertCompleteEnabledSourceExecutionPolicy();
   const outputs = await Promise.all(
     SYNC_MANAGED_PRODUCT_TEST_ADAPTER_KEYS.map((sourceKey) =>
       SYNC_ADAPTER_DISPATCH[sourceKey]()
@@ -119,10 +103,7 @@ async function main(): Promise<void> {
   );
 
   await mkdir(OUTPUT_DIR, { recursive: true });
-  await Promise.all([
-    writeCsv(PRODUCT_TESTS_CSV, PRODUCT_TEST_HEADERS, tests),
-    writeFile(SOURCE_COUNTS_TSV, buildProductTestSourceCountManifest(tests)),
-  ]);
+  await writeCsv(PRODUCT_TESTS_CSV, PRODUCT_TEST_HEADERS, tests);
 
   const counts = countBy(tests, (row) => row.source_key);
   console.log(`Wrote ${tests.length} product test rows.`);
@@ -132,15 +113,6 @@ async function main(): Promise<void> {
   const skipped = combineDiagnostics(outputs);
   for (const [diagnostic, count] of Object.entries(skipped).sort()) {
     console.log(`Skipped ${diagnostic}: ${count}`);
-  }
-}
-
-function assertCompleteEnabledSourceExecutionPolicy(): void {
-  const exemptKeys = Object.keys(EXTERNAL_SOURCE_EXEMPTIONS).sort();
-  const expectedExemptKeys = [...EXTERNALLY_MANAGED_PRODUCT_TEST_ADAPTER_KEYS]
-    .sort();
-  if (exemptKeys.join("|") !== expectedExemptKeys.join("|")) {
-    throw new Error("Product-test external-source exemptions are incomplete");
   }
 }
 

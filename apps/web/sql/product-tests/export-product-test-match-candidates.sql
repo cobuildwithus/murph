@@ -16,11 +16,22 @@ WITH source_products AS MATERIALIZED (
     MIN(tests.supplement_id) AS current_supplement_id,
     MIN(tests.match_method) AS current_match_method,
     md5(jsonb_build_object(
-      'version', 'product-test-link-state-fingerprint-v1',
+      'version', 'product-test-remap-preimage-fingerprint-v2',
       'foodId', MIN(tests.food_id),
       'supplementId', MIN(tests.supplement_id),
       'matchMethod', MIN(tests.match_method),
-      'targetFingerprint', NULL
+      'targetFingerprint', NULL,
+      'observationRevisions', jsonb_agg(
+        jsonb_build_array(
+          tests.source_result_id,
+          tests.contaminant_key,
+          to_char(
+            tests.imported_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+          )
+        )
+        ORDER BY tests.source_result_id, tests.contaminant_key
+      )
     )::text) AS current_state_fingerprint,
     md5(jsonb_build_object(
       'version', 'product-test-source-fingerprint-v2',
