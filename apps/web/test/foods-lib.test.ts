@@ -17,6 +17,8 @@ const emptyContaminants = {
   observationCount: 0,
   observations: [],
 };
+const productTestSourceDataOriginFilter =
+  "data_origin NOT IN ('plasticlist_bay_area_2024', 'nyc_dohmh_consumer_products', 'king_county_consumer_products', 'pure_earth_rms_2024')";
 
 function isProductTestsQuery(text: string): boolean {
   return text.includes('product_tests.id AS "productTestId"');
@@ -104,11 +106,11 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain("name % query.raw_q");
     expect(searchCall?.text).not.toContain("OR name % query.raw_q");
     expect(searchCall?.text).toContain("FROM foods, query");
-    expect(searchCall?.text).toContain(
-      "NOT murph_product_test_legacy_source_backed_origin(data_origin)",
+    expect(searchCall?.text).toContain(productTestSourceDataOriginFilter);
+    expect(searchCall?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
     );
     expect(searchCall?.text).not.toContain("FROM product_tests product_test_sources");
-    expect(searchCall?.text).not.toContain("plasticlist_bay_area_2024");
     expect(searchCall?.text).not.toMatch(
       /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM foods, query/u,
     );
@@ -965,11 +967,11 @@ describe("foods query helpers", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("id = $1");
-    expect(calls[0]?.text).toContain(
-      "NOT murph_product_test_legacy_source_backed_origin(data_origin)",
+    expect(calls[0]?.text).toContain(productTestSourceDataOriginFilter);
+    expect(calls[0]?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
     );
     expect(calls[0]?.text).not.toContain("FROM product_tests product_test_sources");
-    expect(calls[0]?.text).not.toContain("plasticlist_bay_area_2024");
     expect(calls[0]?.text).not.toContain("FROM supplements");
     expect(calls[0]?.values).toEqual(["fdc:123", false]);
   });
