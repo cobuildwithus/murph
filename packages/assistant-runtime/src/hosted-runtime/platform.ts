@@ -251,6 +251,7 @@ export interface HostedRuntimeLinqSendRequest {
   idempotencyKey?: string | null;
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
+  nativeReplyRequested?: true;
   replyToMessageId?: string | null;
   target: string;
   targetKind?: HostedRuntimeProviderTargetKind | null;

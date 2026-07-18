@@ -25,6 +25,7 @@ import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
   AssistantBeforeProviderAcceptedInputsHook,
+  AssistantFinishWithoutReplyAcceptedHook,
   AssistantHostedDeliveryIdempotencyContext,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
@@ -55,6 +56,10 @@ import {
   compareAssistantInputCursors,
   type AssistantInputConversationRef,
 } from '../input-store.js'
+import {
+  readAssistantInputMessageRef,
+  readAssistantTargetProviderScalar,
+} from '../message-target-selection.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -666,7 +671,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
           : [],
         reason: ASSISTANT_NO_REPLY_SUPPRESSION_REASON,
       }
-      if (event.messageReactionsAvailable === true) {
+      if (event.messageReactionPending) {
         deferredTerminalSuppressionEvidence.push(evidenceDraft)
       } else {
         terminalLinqCleanup = mergeAssistantTerminalLinqCleanupMessageIds([
@@ -1629,11 +1634,7 @@ async function executeAssistantAutoReply(input: {
   signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
-  onFinishWithoutReplyAccepted?: ((event: {
-    acceptedInputIds: readonly string[]
-    deliveryContextOrdinal: number
-    messageReactionsAvailable?: boolean | null
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -2227,7 +2228,7 @@ function isSameAutoReplyDeliveryRoute(input: {
     input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-    readProviderRouteScalar(replyTarget?.threadId) === input.threadId
+    readAssistantTargetProviderScalar(replyTarget?.threadId) === input.threadId
   )
 }
 
@@ -2511,8 +2512,18 @@ ${attachmentContext}`
       if (sections.length <= 1) {
         return null
       }
+      const messageRef = readAssistantInputMessageRef({
+        conversation: candidate.event.conversation,
+        inputId: candidate.event.inputId,
+        replyTarget: candidate.event.replyTarget,
+        source: candidate.event.source,
+        sourceMetadata: candidate.event.sourceMetadata,
+      })
       const prefix = candidates.length > 1 ? `Input ${index + 1}:\n` : ''
-      return `${prefix}${sections.join('\n\n')}`
+      return `${prefix}${[
+        ...(messageRef ? [`Message ref: ${messageRef}`] : []),
+        ...sections,
+      ].join('\n\n')}`
     })
     .filter((section): section is string => section !== null)
 
@@ -2790,7 +2801,7 @@ function readAssistantInputCandidateMessageReactionsAvailable(input: {
     return false
   }
 
-  const messageId = readProviderRouteScalar(replyTarget?.messageId)
+  const messageId = readAssistantTargetProviderScalar(replyTarget?.messageId)
   if (!messageId) {
     return false
   }
@@ -2809,7 +2820,7 @@ function readPromptInputReplyTargetMessageId(input: {
     return null
   }
 
-  return readProviderRouteScalar(replyTarget?.messageId)
+  return readAssistantTargetProviderScalar(replyTarget?.messageId)
 }
 
 function readAutoReplyDeliveryTarget(
@@ -2825,7 +2836,9 @@ function readAutoReplyDeliveryTarget(
 function readAutoReplyConversationDeliveryTarget(
   context: AssistantAutoReplyGroupContext,
 ): string | null {
-  return readProviderRouteScalar(context.firstItem.summary.conversation.threadId)
+  return readAssistantTargetProviderScalar(
+    context.firstItem.summary.conversation.threadId,
+  )
 }
 
 function shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(
@@ -2848,7 +2861,7 @@ function shouldSuppressHostedTelegramAutoReplyMissingDeliveryTarget(
     return true
   }
 
-  return readProviderRouteScalar(
+  return readAssistantTargetProviderScalar(
     context.firstItem.summary.conversation.threadId,
   ) === null
 }
@@ -2868,7 +2881,7 @@ function readAssistantInputReplyTargetDeliveryTarget(
   if (!replyTargetUsesThreadAsExplicitDeliveryTarget(replyTarget)) {
     return null
   }
-  return readProviderRouteScalar(replyTarget?.threadId)
+  return readAssistantTargetProviderScalar(replyTarget?.threadId)
 }
 
 function readAutoReplyConversationRef(
@@ -2919,8 +2932,8 @@ function readLatestAssistantInputReplyTargetCandidate(input: {
       replyTargetChannel === expectedChannel &&
       replyTargetChannel === readAssistantInputCandidateChannel(candidate) &&
       (
-        readProviderRouteScalar(replyTarget.threadId) ||
-        readProviderRouteScalar(replyTarget.messageId)
+        readAssistantTargetProviderScalar(replyTarget.threadId) ||
+        readAssistantTargetProviderScalar(replyTarget.messageId)
       )
     ) {
       return candidate
@@ -2942,21 +2955,9 @@ function readLatestAssistantInputReplyTargetMessageId(input: {
 function readAssistantInputCandidateReplyTargetMessageId(
   candidate: AssistantInputCandidate | null,
 ): string | undefined {
-  return readProviderRouteScalar(candidate?.event.replyTarget?.messageId) ?? undefined
-}
-
-function readProviderRouteScalar(value: string | null | undefined): string | null {
-  const normalized = normalizeNullableString(value)
-  if (
-    !normalized ||
-    /(?:^|:)ain_/u.test(normalized) ||
-    /(?:^|:)hid_/u.test(normalized) ||
-    normalized.includes('hbid:') ||
-    normalized.includes('hbidx:')
-  ) {
-    return null
-  }
-  return normalized
+  return readAssistantTargetProviderScalar(
+    candidate?.event.replyTarget?.messageId,
+  ) ?? undefined
 }
 
 function readAssistantInputCandidateChannel(
@@ -3278,7 +3279,7 @@ function resolveAutoReplyLinqProviderMessageIdsFromContext(
 }
 
 function readLinqProviderMessageId(value: string | null | undefined): string | null {
-  return readProviderRouteScalar(value)
+  return readAssistantTargetProviderScalar(value)
 }
 
 function findRepairableTerminalEvidencePartitionsForGroup(input: {
@@ -3777,7 +3778,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   session: AssistantSession | null
   vault: string
 }): Promise<boolean> {
-  const inputProviderMessageId = readProviderRouteScalar(
+  const inputProviderMessageId = readAssistantTargetProviderScalar(
     input.input.replyTarget?.messageId,
   )
   const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
@@ -4190,9 +4191,11 @@ function readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
   delivery: AssistantAutoReplyOutboxMessageDelivery,
 ): string[] {
   const ids = [
-    readProviderRouteScalar(delivery.providerMessageId),
+    readAssistantTargetProviderScalar(delivery.providerMessageId),
     ...(Array.isArray(delivery.providerMessageIds)
-      ? delivery.providerMessageIds.map((id) => readProviderRouteScalar(id))
+      ? delivery.providerMessageIds.map((id) =>
+          readAssistantTargetProviderScalar(id),
+        )
       : []),
   ].filter((id): id is string => id !== null)
   return [...new Set(ids)]

@@ -26,6 +26,30 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('uses one visible message ref for optional replies and reactions', async () => {
+    const groupChat = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
+      'utf8',
+    )
+    const normalized = groupChat.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'React with `murph.react_to_message`, using the exact visible accepted-message `message_ref`',
+    )
+    expect(normalized).toContain(
+      'Keep ordinary replies flat. In a busy room, use `murph.select_reply_target`',
+    )
+    expect(normalized).toContain(
+      'The selection applies to the whole response, including every `---` bubble.',
+    )
+    expect(normalized).toContain(
+      'Reactions and reply selection remain independent; neither action implies the other.',
+    )
+    expect(normalized).toContain(
+      'Never invent a ref or target a message merely because a ref is available.',
+    )
+  })
+
   it('targets laugh reactions at the laughable instead of a laughter token', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
@@ -39,10 +63,10 @@ describe('assistant group-chat style guidance', () => {
       'A bare or mostly laughter reply fails this test.',
     )
     expect(normalized).toContain(
-      'never laugh-react to a laughter reply as a proxy for the earlier joke',
+      'laugh-react to the laughter reply itself as a proxy for the earlier joke',
     )
     expect(normalized).toContain(
-      'If its target or social meaning is ambiguous, do not react.',
+      'If its target or social meaning is ambiguous, do not react.'
     )
   })
 })

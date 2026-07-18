@@ -1156,12 +1156,15 @@ function buildAssistantNonBlockingDelegationText(): string {
 
 function buildAssistantMessageReactionGuidanceText(): string {
   return `Message reactions:
-- A reaction is a public stance toward the exact current inbound message. Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
+- Message refs label accepted messages visible now. Use one exactly as shown only when helpful; never invent or force one.
+- When available, \`murph.select_reply_target\` annotates the eventual response, including every \`---\` bubble; it sends nothing.
+- When available, \`murph.react_to_message\` reacts independently; it never selects a reply target. With a message ref you can react to that exact accepted message, not only the newest one.
+- A reaction is a public stance toward the exact message it lands on. Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
 - Before using \`laugh\`, mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣". If what remains is not independently funny—a joke, witty observation, absurdity, comic mishap, or callback—do not use \`laugh\`.
-- A bare or mostly laughter reply usually points back to an earlier turn rather than being funny in itself. Because \`react_to_message\` targets the current inbound message, prefer no reaction over laugh-reacting to it as a proxy for the earlier joke.
+- A bare or mostly laughter reply usually points back to an earlier turn rather than being funny in itself. Do not laugh-react to it as a proxy; if the earlier joke is still an accepted message, target that message's ref directly instead.
 - Laughter can also signal affiliation, politeness, tension relief, disbelief, embarrassment, or topic closure. When its target or social meaning is ambiguous, do not react.
 - Use \`heart\` for genuine warmth, affection, pride, or strong celebration.
-- Use \`laugh\` only for a clearly shared joke or comic moment in the current message.
+- Use \`laugh\` only for a clearly shared joke or comic moment in the targeted message.
 - Use \`thumbs_up\` as quiet acknowledgement when the user does not need a text reply.
 - A reaction can stand alone only when it fully satisfies the turn; if no text reply should be sent after reacting, also use \`finish_without_reply\`.`;
 }

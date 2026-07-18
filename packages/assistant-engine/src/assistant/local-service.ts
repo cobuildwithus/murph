@@ -45,7 +45,6 @@ import {
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
   resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
-  supportsAssistantCurrentAudienceMessageReaction,
   type AssistantCurrentAudienceDeliveryFields,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
@@ -146,6 +145,10 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import {
+  resolveAssistantAcceptedMessageTarget,
+  type AssistantAcceptedMessageTargetAuthorizer,
+} from './message-target-selection.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   assistantChannelSupportsReplyBubbles,
@@ -960,12 +963,64 @@ export async function sendAssistantMessageLocal(
         const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
           [...acceptedInputIdsForProviderRequest],
         ]
-        const resolveAcceptedInputIdsForDeliveryContextOrdinal = (
+        const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+          async (authorizationInput) => {
+            const acceptedInputIds =
+              acceptedInputIdsByDeliveryContextOrdinal[
+                authorizationInput.deliveryContextOrdinal
+              ]
+            const deliveryContext =
+              replyDeliveryContexts[authorizationInput.deliveryContextOrdinal]
+            if (!acceptedInputIds || !deliveryContext) {
+              return null
+            }
+            try {
+              const target = await resolveAssistantAcceptedMessageTarget({
+                acceptedInputIds,
+                action: authorizationInput.action,
+                messageRef: authorizationInput.messageRef,
+                route: resolveAssistantCurrentAudienceDeliveryFields({
+                  input: applyAssistantReplyDeliveryContext({
+                    context: deliveryContext,
+                    input: currentInput,
+                  }),
+                  session: currentSession,
+                  sharedPlan,
+                }),
+                vault: currentInput.vault,
+              })
+              return { targetInputId: target.targetInputId }
+            } catch (error) {
+              if (
+                error instanceof VaultCliError &&
+                error.code === 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE'
+              ) {
+                return null
+              }
+              throw error
+            }
+          }
+        // Cumulative through the ordinal: the no-reply hook is a pre-marker
+        // durability fence over every input already admitted into the provider
+        // turn, while each per-ordinal entry stays exact for target
+        // authorization and effect-time revalidation.
+        const resolveAcceptedInputIdsThroughDeliveryContextOrdinal = (
           deliveryContextOrdinal: number,
-        ): readonly string[] => [
-          ...(acceptedInputIdsByDeliveryContextOrdinal[deliveryContextOrdinal] ??
-            acceptedInputIdsForProviderRequest),
-        ]
+        ): readonly string[] => {
+          if (
+            deliveryContextOrdinal >=
+              acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            return [...acceptedInputIdsForProviderRequest]
+          }
+          return [
+            ...new Set(
+              acceptedInputIdsByDeliveryContextOrdinal
+                .slice(0, deliveryContextOrdinal + 1)
+                .flat(),
+            ),
+          ]
+        }
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
@@ -1025,7 +1080,7 @@ export async function sendAssistantMessageLocal(
             )
             acceptedInputIdsByDeliveryContextOrdinal[
               replyDeliveryContexts.length - 1
-            ] = [...accepted.acceptedInputJournal.inputIds]
+            ] = accepted.acceptedInputItems.map((item) => item.id)
             if (drainInput.continuation) {
               providerRequestJournal =
                 await runtimeState.turns.acceptedInputs.updateProviderRequest({
@@ -1060,6 +1115,7 @@ export async function sendAssistantMessageLocal(
         const providerOutcome = await executeCodexTurnWithRecovery({
           acceptedInputItems: providerRequestAcceptedInputItems,
           activeTurnSteering: turnInputController,
+          authorizeAcceptedMessageTarget,
           input: currentInput,
           onFinishWithoutReplyAccepted: async (event) => {
             await drainLiveSteeredActiveTurnInputs({
@@ -1072,30 +1128,14 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               vault: currentInput.vault,
             })
-            const noReplyDeliveryContext =
-              resolveAssistantReplyDeliveryContextForSegment({
-                contexts: replyDeliveryContexts,
-                deliveryContextOrdinal: event.deliveryContextOrdinal,
-              })
-            const noReplyInput = noReplyDeliveryContext.context
-              ? applyAssistantReplyDeliveryContext({
-                  context: noReplyDeliveryContext.context,
-                  input: currentInput,
-                })
-              : currentInput
+            const acceptedInputIds =
+              resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                event.deliveryContextOrdinal,
+              )
             await currentInput.onFinishWithoutReplyAccepted?.({
-              acceptedInputIds:
-                resolveAcceptedInputIdsForDeliveryContextOrdinal(
-                  event.deliveryContextOrdinal,
-                ),
+              acceptedInputIds,
               deliveryContextOrdinal: event.deliveryContextOrdinal,
-              messageReactionsAvailable:
-                noReplyDeliveryContext.invalidDeliveryContextOrdinal === null &&
-                supportsAssistantCurrentAudienceMessageReaction({
-                  input: noReplyInput,
-                  session: currentSession,
-                  sharedPlan,
-                }),
+              messageReactionPending: event.messageReactionPending,
             })
           },
           onFinishWithoutReplyRecorded: async (event) => {
@@ -1342,6 +1382,7 @@ export async function sendAssistantMessageLocal(
               deliverySession,
               reactionDeliveryOutcomes,
             } = await deliverAssistantProviderReactions({
+              acceptedInputIdsByDeliveryContextOrdinal,
               currentInput,
               providerResult: failedNoReplyProviderResult,
               replyDeliveryContexts,
@@ -1544,6 +1585,12 @@ export async function sendAssistantMessageLocal(
             deliveryContext: resolvedDeliveryContext.context,
             response: segment.response,
             media: segment.media ?? [],
+            ...(segment.targetInputId
+              ? {
+                  deliveryContextOrdinal: segment.deliveryContextOrdinal,
+                  targetInputId: segment.targetInputId,
+                }
+              : {}),
           })
         }
         const precedingResponses = precedingResponseSegments.map((segment) =>
@@ -1630,6 +1677,26 @@ export async function sendAssistantMessageLocal(
         try {
           precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
             input: currentInput,
+            resolveSegmentDeliveryInput: async (segmentInput) => {
+              const targetInputId = segmentInput.segment.targetInputId
+              const deliveryContextOrdinal =
+                segmentInput.segment.deliveryContextOrdinal
+              if (
+                !targetInputId ||
+                deliveryContextOrdinal === undefined
+              ) {
+                return segmentInput.input
+              }
+              return await applyAssistantAcceptedMessageTargetToDeliveryInput({
+                acceptedInputIdsByDeliveryContextOrdinal,
+                action: 'native-reply',
+                deliveryContextOrdinal,
+                input: segmentInput.input,
+                session: segmentInput.session,
+                sharedPlan,
+                targetInputId,
+              })
+            },
             segments: precedingResponseSegments,
             session,
             sharedPlan,
@@ -1703,16 +1770,45 @@ export async function sendAssistantMessageLocal(
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
         const replyDispatchStartedAt = Date.now()
-        const deliveryOutcome =
-          finalResponseText !== null
-            ? await dispatchAssistantReply({
+        let finalDeliveryInput = finalReplyInput
+        let finalTargetResolutionError: ReturnType<
+          typeof normalizeAssistantDeliveryError
+        > | null = null
+        if (finalResponseText !== null && providerResult.targetInputId) {
+          try {
+            finalDeliveryInput =
+              await applyAssistantAcceptedMessageTargetToDeliveryInput({
+                acceptedInputIdsByDeliveryContextOrdinal,
+                action: 'native-reply',
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
                 input: finalReplyInput,
-                media: providerResult.responseMedia ?? [],
-                response: rawFinalResponseText ?? '',
                 session: deliverySession,
                 sharedPlan,
-                turnId: currentUserTurn.turnId,
+                targetInputId: providerResult.targetInputId,
               })
+          } catch (error) {
+            finalTargetResolutionError = normalizeAssistantDeliveryError(error)
+          }
+        }
+        const deliveryOutcome =
+          finalResponseText !== null
+            ? finalTargetResolutionError
+              ? {
+                  kind: 'failed' as const,
+                  error: finalTargetResolutionError,
+                  intentId: null,
+                  media: [...(providerResult.responseMedia ?? [])],
+                  session: deliverySession,
+                }
+              : await dispatchAssistantReply({
+                  input: finalDeliveryInput,
+                  media: providerResult.responseMedia ?? [],
+                  response: rawFinalResponseText ?? '',
+                  session: deliverySession,
+                  sharedPlan,
+                  turnId: currentUserTurn.turnId,
+                })
             : resolveAssistantNoReplyDeliveryOutcome({
                 precedingDeliveryOutcomes,
                 session: deliverySession,
@@ -1721,7 +1817,7 @@ export async function sendAssistantMessageLocal(
         const finalReplyDeliveryFields =
           finalResponseText !== null
             ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: finalReplyInput,
+                input: finalDeliveryInput,
                 session: deliveryOutcome.session,
                 sharedPlan,
               })
@@ -1734,6 +1830,7 @@ export async function sendAssistantMessageLocal(
             typingIndicatorDeliveryFields,
           })
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
+          acceptedInputIdsByDeliveryContextOrdinal,
           currentInput,
           providerResult,
           replyDeliveryContexts,
@@ -2335,6 +2432,7 @@ function buildAssistantResponseMediaTranscriptText(
 }
 
 async function deliverAssistantProviderReactions(input: {
+  acceptedInputIdsByDeliveryContextOrdinal: readonly (readonly string[])[]
   currentInput: AssistantMessageInput
   providerResult: ExecutedAssistantProviderTurnResult
   replyDeliveryContexts: readonly AssistantReplyDeliveryContext[]
@@ -2371,10 +2469,32 @@ async function deliverAssistantProviderReactions(input: {
       continue
     }
 
-    const reactionInput = applyAssistantReplyDeliveryContext({
+    const baseReactionInput = applyAssistantReplyDeliveryContext({
       context: resolvedDeliveryContext.context,
       input: input.currentInput,
     })
+    let reactionInput: AssistantMessageInput
+    try {
+      reactionInput = await applyAssistantAcceptedMessageTargetToDeliveryInput({
+        acceptedInputIdsByDeliveryContextOrdinal:
+          input.acceptedInputIdsByDeliveryContextOrdinal,
+        action: 'reaction',
+        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+        input: baseReactionInput,
+        session: deliverySession,
+        sharedPlan: input.sharedPlan,
+        targetInputId: reaction.targetInputId,
+      })
+    } catch (error) {
+      reactionDeliveryOutcomes.push({
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(error),
+        intentId: null,
+        media: [],
+        session: deliverySession,
+      })
+      continue
+    }
     const reactionOutcome = await deliverAssistantReaction({
       deliveryContextOrdinal: reaction.deliveryContextOrdinal,
       input: reactionInput,
@@ -2391,6 +2511,42 @@ async function deliverAssistantProviderReactions(input: {
     deliverySession,
     reactionDeliveryOutcomes,
   }
+}
+
+async function applyAssistantAcceptedMessageTargetToDeliveryInput(input: {
+  acceptedInputIdsByDeliveryContextOrdinal: readonly (readonly string[])[]
+  action: 'native-reply' | 'reaction'
+  deliveryContextOrdinal: number
+  input: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  targetInputId: string
+}): Promise<AssistantMessageInput> {
+  const acceptedInputIds =
+    input.acceptedInputIdsByDeliveryContextOrdinal[input.deliveryContextOrdinal]
+  const target = await resolveAssistantAcceptedMessageTarget({
+    acceptedInputIds: acceptedInputIds ?? [],
+    action: input.action,
+    messageRef: input.targetInputId,
+    route: resolveAssistantCurrentAudienceDeliveryFields({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    }),
+    vault: input.input.vault,
+  })
+
+  return applyAssistantReplyDeliveryContextOverrides({
+    input: input.input,
+    overrides: {
+      ...(input.action === 'native-reply'
+        ? { deliveryNativeReplyRequested: true as const }
+        : target.deliveryMessageReactionsAvailable === true
+          ? { deliveryMessageReactionsAvailable: true }
+          : {}),
+      deliveryReplyToMessageId: target.deliveryReplyToMessageId,
+    },
+  })
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {

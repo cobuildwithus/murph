@@ -3654,6 +3654,8 @@ describe("runHostedAssistantAutomationLane", () => {
           schema: "murph.assistant-provider-plan-diagnostics.v1",
           type: "assistant.provider.plan",
           codexContinuation: "provider-state-optimization",
+          messageTargetDynamicToolsAvailable: true,
+          messageTargetingAvailable: true,
           providerRequestOrdinal: 0,
           resumeCodexThreadIdPresent: true,
           routePlanningElapsedMs: 42,
@@ -3699,6 +3701,8 @@ describe("runHostedAssistantAutomationLane", () => {
       phase: "wake.running",
       redacted: expect.objectContaining({
         codexContinuation: "provider-state-optimization",
+        messageTargetDynamicToolsAvailable: true,
+        messageTargetingAvailable: true,
         providerPlanKind: "provider.plan",
         providerRequestOrdinal: 0,
         requestId: "req_provider_trace",

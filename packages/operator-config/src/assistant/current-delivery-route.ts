@@ -364,13 +364,14 @@ function looksLikeRedactedAssistantRoutePlaceholder(
   value: string | null | undefined,
 ): boolean {
   const target = normalizeAssistantRouteString(value)
+  const normalizedTarget = target?.toLowerCase() ?? null
   return (
-    target !== null &&
-    (/(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target) ||
-      /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target) ||
-      target.includes('hbid:') ||
-      target.includes('hbidx:') ||
-      target.startsWith('[redacted'))
+    normalizedTarget !== null &&
+    (/(?:^|:)hid_[a-z0-9_-]+/u.test(normalizedTarget) ||
+      /(?:^|:)ain_[a-z0-9_-]+/u.test(normalizedTarget) ||
+      normalizedTarget.includes('hbid:') ||
+      normalizedTarget.includes('hbidx:') ||
+      normalizedTarget.startsWith('[redacted'))
   )
 }
 

@@ -174,7 +174,7 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
-    messageReactionsAvailable?: boolean;
+    messageTargetingAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
@@ -200,8 +200,11 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
-        options.messageReactionsAvailable !== true
-        && name === "murph.react_to_message"
+        options.messageTargetingAvailable !== true
+        && (
+          name === "murph.react_to_message"
+          || name === "murph.select_reply_target"
+        )
       ) {
         return false;
       }
