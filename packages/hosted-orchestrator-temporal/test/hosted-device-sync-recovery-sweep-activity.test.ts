@@ -67,6 +67,29 @@ describe("runHostedDeviceSyncRecoverySweep", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
   });
 
+  it("accepts an older Web response during rolling deployment", async () => {
+    await stubHostedWebEnvironment();
+    const response = buildRecoverySweepResponse();
+    const olderWebResponse = {
+      dueReconcileSweeper: response.dueReconcileSweeper,
+      preferenceHandoffSweeper: response.preferenceHandoffSweeper,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(olderWebResponse)));
+
+    await expect(runHostedDeviceSyncRecoverySweep()).resolves.toEqual({
+      ...response,
+      clinicalRetrievalHandoffSweeper: {
+        candidateRuns: 0,
+        handoffAccepted: 0,
+        handoffAttempted: 0,
+        handoffFailed: 0,
+        handoffLimit: 0,
+        handoffSkippedInactive: 0,
+        skippedCandidateRuns: 0,
+      },
+    });
+  });
+
   it("rejects invalid scheduled wake sweep responses as non-retryable protocol errors", async () => {
     await stubHostedWebEnvironment();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
@@ -109,6 +132,15 @@ async function createEphemeralPrivateJwkJson(): Promise<string> {
 
 function buildRecoverySweepResponse() {
   return {
+    clinicalRetrievalHandoffSweeper: {
+      candidateRuns: 1,
+      handoffAccepted: 1,
+      handoffAttempted: 1,
+      handoffFailed: 0,
+      handoffLimit: 25,
+      handoffSkippedInactive: 0,
+      skippedCandidateRuns: 0,
+    },
     dueReconcileSweeper: {
       dueConnections: 2,
       skippedDueConnections: 0,

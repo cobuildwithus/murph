@@ -11,8 +11,19 @@ import {
 } from "./http-client.js";
 
 export interface HostedDeviceSyncRecoverySweepResult {
+  clinicalRetrievalHandoffSweeper: HostedClinicalRetrievalHandoffSweeperResult;
   dueReconcileSweeper: HostedDeviceSyncDueReconcileSweeperResult;
   preferenceHandoffSweeper: HostedPreferenceHandoffSweeperResult;
+}
+
+export interface HostedClinicalRetrievalHandoffSweeperResult {
+  candidateRuns: number;
+  handoffAccepted: number;
+  handoffAttempted: number;
+  handoffFailed: number;
+  handoffLimit: number;
+  handoffSkippedInactive: number;
+  skippedCandidateRuns: number;
 }
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
@@ -65,12 +76,53 @@ function parseHostedDeviceSyncRecoverySweepResult(
 ): HostedDeviceSyncRecoverySweepResult {
   const record = requireRecord(value, "Hosted device-sync scheduled wake sweep response");
   return {
+    clinicalRetrievalHandoffSweeper: record.clinicalRetrievalHandoffSweeper === undefined
+      ? emptyClinicalRetrievalHandoffSweeperResult()
+      : parseClinicalRetrievalHandoffSweeperResult(
+          record.clinicalRetrievalHandoffSweeper,
+        ),
     dueReconcileSweeper: parseDueReconcileSweeperResult(
       record.dueReconcileSweeper,
     ),
     preferenceHandoffSweeper: parsePreferenceHandoffSweeperResult(
       record.preferenceHandoffSweeper,
     ),
+  };
+}
+
+function parseClinicalRetrievalHandoffSweeperResult(
+  value: unknown,
+): HostedClinicalRetrievalHandoffSweeperResult {
+  const record = requireRecord(
+    value,
+    "Hosted Clinical Records handoff sweep response",
+  );
+  return {
+    candidateRuns: requireCount(record.candidateRuns, "candidateRuns"),
+    handoffAccepted: requireCount(record.handoffAccepted, "handoffAccepted"),
+    handoffAttempted: requireCount(record.handoffAttempted, "handoffAttempted"),
+    handoffFailed: requireCount(record.handoffFailed, "handoffFailed"),
+    handoffLimit: requireCount(record.handoffLimit, "handoffLimit"),
+    handoffSkippedInactive: requireCount(
+      record.handoffSkippedInactive,
+      "handoffSkippedInactive",
+    ),
+    skippedCandidateRuns: requireCount(
+      record.skippedCandidateRuns,
+      "skippedCandidateRuns",
+    ),
+  };
+}
+
+function emptyClinicalRetrievalHandoffSweeperResult(): HostedClinicalRetrievalHandoffSweeperResult {
+  return {
+    candidateRuns: 0,
+    handoffAccepted: 0,
+    handoffAttempted: 0,
+    handoffFailed: 0,
+    handoffLimit: 0,
+    handoffSkippedInactive: 0,
+    skippedCandidateRuns: 0,
   };
 }
 

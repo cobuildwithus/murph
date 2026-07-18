@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-13
+Last verified: 2026-07-18
 
 ## Product outcome
 
@@ -23,8 +23,10 @@ does not expose a compatible patient-facing SMART endpoint.
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
    member-bound connect intent. Generic intents carry no provider choice. The
-   browser claim stays in the URL fragment so it is not sent in referrers or
-   routine server request logs. At most one incomplete intent may exist per
+   browser claim starts in the URL fragment so it is not sent in referrers or
+   routine server request logs, then moves into the current history entry so a
+   sign-in or pre-authorization reload can resume after the visible fragment is
+   scrubbed. It is removed before navigation to Epic. At most one incomplete intent may exist per
    member; creating a new intent supersedes any prior uncompleted flow.
 2. The connect page verifies the current Murph app session and health-data
    consent, then searches Murph's server-owned Epic directory. A provider may
@@ -44,7 +46,10 @@ does not expose a compatible patient-facing SMART endpoint.
 5. A successful member/provider connection atomically creates its one queued
    retrieval generation and durable system-mailbox wake. A second authorization
    for that member/provider pair fails closed before provider discovery when
-   possible and again at the unique persistence boundary.
+   possible and again at the unique persistence boundary. The existing Temporal
+   recovery schedule re-signals a bounded set of exact queued-generation wakes
+   that remain ahead of their mailbox lane watermark; it creates no second run,
+   wake, receipt, or retrieval generation.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through
    the Clinical Records vault use case. The web control plane records only
@@ -135,7 +140,8 @@ uses `patient=<launch-patient>&_count=100`. Provider redirects are disabled. A
 continuation must remain on the same origin and family path; only its query may
 change. Root pages omit `pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
-root-reachable chain. The exact validated provider link text is the provenance
+root-reachable chain. Formally marked Bundle search-outcome entries remain in
+raw-page counts but do not enter patient-family mapping. The exact validated provider link text is the provenance
 and logical-page identity; URL parsing is used only for network policy and
 fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
@@ -167,6 +173,10 @@ any final raw page or manifest is persisted. The beta requests no
 retrieval immediately after authorization. On the normal path, an expired
 one-shot access token transitions to authorization-required instead of creating
 a background refresh lifecycle.
+Unqualified single laboratory reference ranges are retained when their numeric
+boundaries use units compatible with the result, or when they provide a bounded
+text range. Multiple, qualified, inverted, malformed, or unit-incompatible
+ranges hold the containing observation for review instead of being dropped.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final

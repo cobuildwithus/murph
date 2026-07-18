@@ -21,6 +21,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
 };
 
 type RenderClientComponentOptions = {
+  historyState?: unknown;
   location?: Record<string, string>;
 };
 
@@ -46,7 +47,6 @@ export async function renderClientComponent(
   const assign = vi.fn();
   const open = vi.fn();
   const reload = vi.fn();
-  const replaceState = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
@@ -56,6 +56,30 @@ export async function renderClientComponent(
     },
   });
   const history = Object.create(window.history ?? null) as History;
+  let currentHistoryState = options.historyState ?? history.state;
+  Object.defineProperty(history, "state", {
+    configurable: true,
+    get: () => currentHistoryState,
+  });
+  const replaceState = vi.fn((
+    state: unknown,
+    title: string,
+    url?: string | URL | null,
+  ) => {
+    void title;
+    currentHistoryState = state;
+    if (url === undefined || url === null) {
+      return;
+    }
+    const nextUrl = new URL(url.toString(), window.location.href);
+    Object.assign(window.location, {
+      hash: nextUrl.hash,
+      href: nextUrl.toString(),
+      origin: nextUrl.origin,
+      pathname: nextUrl.pathname,
+      search: nextUrl.search,
+    });
+  });
   Object.defineProperty(history, "replaceState", {
     configurable: true,
     value: replaceState,

@@ -202,6 +202,15 @@ function buildScheduleClient() {
 
 function buildRecoverySweepResponse() {
   return {
+    clinicalRetrievalHandoffSweeper: {
+      candidateRuns: 1,
+      handoffAccepted: 1,
+      handoffAttempted: 1,
+      handoffFailed: 0,
+      handoffLimit: 25,
+      handoffSkippedInactive: 0,
+      skippedCandidateRuns: 0,
+    },
     dueReconcileSweeper: {
       dueConnections: 2,
       skippedDueConnections: 0,

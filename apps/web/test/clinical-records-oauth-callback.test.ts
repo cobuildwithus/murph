@@ -46,6 +46,7 @@ describe("Clinical Records OAuth callback", () => {
       code: "CLINICAL_RECORD_AUTHORIZATION_DECLINED",
       errorType: "clinical-records",
       providerDenied: true,
+      providerError: true,
     });
     expect(JSON.stringify(warning.mock.calls)).not.toContain("secret-state");
     expect(JSON.stringify(warning.mock.calls)).not.toContain("secret-code");
@@ -65,7 +66,25 @@ describe("Clinical Records OAuth callback", () => {
       code: "UNEXPECTED",
       errorType: "unexpected",
       providerDenied: false,
+      providerError: false,
     });
     expect(JSON.stringify(warning.mock.calls)).not.toContain("sensitive provider body");
+  });
+
+  it("does not describe a provider outage as a patient denial", async () => {
+    mocks.finishClinicalRecordAuthorization.mockRejectedValue(new Error("provider unavailable"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await route.GET(new Request(
+      "https://join.example.test/api/clinical-records/oauth/callback?state=safe-state&error=temporarily_unavailable",
+    ));
+
+    expect(mocks.finishClinicalRecordAuthorization).toHaveBeenCalledWith(expect.objectContaining({
+      providerDenied: false,
+      providerError: true,
+    }));
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/records?clinicalRecords=failed",
+    );
   });
 });

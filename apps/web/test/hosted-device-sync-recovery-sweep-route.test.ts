@@ -34,6 +34,15 @@ describe("hosted device-sync scheduled wake sweep route", () => {
       HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID,
     );
     mocks.runHostedDeviceSyncRecoverySweep.mockResolvedValue({
+      clinicalRetrievalHandoffSweeper: {
+        candidateRuns: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+        handoffFailed: 0,
+        handoffLimit: 25,
+        handoffSkippedInactive: 0,
+        skippedCandidateRuns: 0,
+      },
       dueReconcileSweeper: {
         dueConnections: 1,
         skippedDueConnections: 0,
@@ -75,6 +84,15 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     );
     expect(mocks.runHostedDeviceSyncRecoverySweep).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
+      clinicalRetrievalHandoffSweeper: {
+        candidateRuns: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+        handoffFailed: 0,
+        handoffLimit: 25,
+        handoffSkippedInactive: 0,
+        skippedCandidateRuns: 0,
+      },
       dueReconcileSweeper: {
         dueConnections: 1,
         skippedDueConnections: 0,

@@ -145,8 +145,12 @@ empty JSON request to the hosted web command at
 `/api/internal/device-sync/recovery-sweep`; the legacy route name is retained
 for compatibility. Web reads due-reconcile facts, records due-reconcile wake
 markers, appends bounded `device-sync.wake` mailbox handoffs, reissues bounded
-pointer-only signals for pending preference rows, and returns count-only
-summaries. Preference recovery creates no receipt or second work record.
+pointer-only signals for pending preference rows and exact queued Clinical
+Records wakes that remain ahead of their mailbox lane watermark, and returns
+count-only summaries. These handoff recoveries create no receipt, second work
+record, or second Clinical Records generation. The activity accepts a missing
+Clinical Records summary from an older Web deployment as zero counts during a
+rolling deploy.
 
 Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
 append one bounded mailbox handoff, and runtime maintenance drains pending dirty

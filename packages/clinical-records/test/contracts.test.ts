@@ -13,6 +13,7 @@ import {
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
   isClinicalFhirUrlWithinBase,
+  isClinicalFhirUrlWithinBaseResourceType,
   normalizeClinicalFhirPatientId,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
@@ -204,6 +205,16 @@ describe("clinical records contracts", () => {
     expect(isClinicalFhirUrlWithinBase({
       fhirBaseUrlHash: FHIR_BASE_URL_HASH,
       url: "https://ehr.example.test/fhir2/Observation?page=2",
+    })).toBe(false);
+    expect(isClinicalFhirUrlWithinBaseResourceType({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      resourceType: "Observation",
+      url: `${FHIR_BASE_URL}/Observation?page=2`,
+    })).toBe(true);
+    expect(isClinicalFhirUrlWithinBaseResourceType({
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      resourceType: "Observation",
+      url: `${FHIR_BASE_URL}/Condition?page=2`,
     })).toBe(false);
     expect(hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`)).toMatch(/^[a-f0-9]{64}$/u);
     expect(hashClinicalFhirPageUrl(` ${FHIR_BASE_URL}/Observation?page=2`)).not.toBe(
