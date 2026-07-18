@@ -155,8 +155,11 @@ describe("group disclosure tool contracts", () => {
     [{
       action: "ask_member",
       grantId: " disclosure_grant_123 ",
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
+      origin: {
+        assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: ORIGIN_SESSION_ID,
+      },
       question: " Is this member free? ",
     }, { action: "ask_member", grantId: "disclosure_grant_123", question: "Is this member free?" }],
     [{
@@ -175,8 +178,11 @@ describe("group disclosure tool contracts", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask_member",
       grantId: "disclosure_grant_123",
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
+      origin: {
+        assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: ORIGIN_SESSION_ID,
+      },
       permissionText: "model authority",
       question: "Question",
     })).toThrow(/not allowed/u);

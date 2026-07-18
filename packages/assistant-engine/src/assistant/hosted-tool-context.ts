@@ -114,7 +114,10 @@ export interface AssistantHostedToolContext {
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
-  sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
+  sendVaultFile(
+    ref: string,
+    toolCallId?: string | null,
+  ): Promise<AssistantHostedVaultFileSendResult>
 }
 
 type AssistantHostedToolDeliveryContext = {
@@ -152,7 +155,10 @@ export function createAssistantHostedToolContext(input: {
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
-  sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
+  sendVaultFile?: (
+    ref: string,
+    toolCallId?: string | null,
+  ) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {

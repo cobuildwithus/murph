@@ -32,6 +32,9 @@ import {
   assistantChannelSupportsReplyBubbles,
 } from "./reply-bubbles.js";
 import type { AssistantConversationScope } from "./conversation-policy.js";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "./generated-delivery-files.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -1274,8 +1277,9 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
-    "- When `murph.send_vault_file` returns `status: \"pending\"`, explain naturally that approval is required, using the returned filename when useful. The file is not attached yet. The runtime appends the exact approval link outside model context; do not invent, request, or print an approval URL and do not call `finish_without_reply`.",
-    "- When `murph.send_vault_file` returns `status: \"approved\"`, write a concise, natural reply using the returned filename when useful, such as \"Here it is: report.pdf.\" Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or \"delivery is not confirmed\" as stock user-facing copy. Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`. Do not call `finish_without_reply` for the file send.",
+    `- Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Do not use runtime staging for "prepare now, maybe send later," and never move or copy existing, user-owned, canonical, or durable files there.`,
+    "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",
+    "- On `status: \"approved\"`: reply naturally with the filename (for example, \"Here it is: report.pdf.\"). Never expose `deliveryStatus`, approval/queue mechanics, or stock \"delivery is not confirmed\" copy; claim success only after later evidence says `sent`. Do not call `finish_without_reply`.",
   ].join("\n");
 }
 
