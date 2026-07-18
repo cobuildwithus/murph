@@ -46,6 +46,7 @@ import type {
 } from './codex-thread-route.js'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
@@ -158,6 +159,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
+  // Generic engine-owned invocation identity. Unlike the newsletter authority,
+  // this grants no side effect by itself and is never model supplied.
+  scheduledInvocationAuthority?: HostedRuntimeScheduledAutomationAuthority | null
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.
   scheduledOccurrenceAt?: string | null

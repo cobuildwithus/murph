@@ -162,8 +162,7 @@ export async function handleHostedRuntimeGroupTool(input: {
     const admission = await requestHostedGroupMemberAssistantAsk({
       grantId: input.request.grantId,
       memberId: input.memberId,
-      originAssistantInputId: input.request.originAssistantInputId,
-      originSessionId: input.request.originSessionId,
+      origin: input.request.origin,
       question: input.request.question,
     });
     if (admission.mailboxWake) {

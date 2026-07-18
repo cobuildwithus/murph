@@ -23,6 +23,7 @@ import {
 } from "../contracts.ts";
 import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
+  parseHostedExecutionAssistantAskOrigin,
   parseHostedExecutionAssistantAskOriginInputId,
   parseHostedExecutionAssistantAskResult,
 } from "../assistant-ask-payload.ts";
@@ -985,25 +986,58 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
+    const grantId = parseHostedRuntimeGroupDisclosureGrantId(
+      record.grantId,
+      `${label} grantId`,
+    );
+    const question = parseHostedRuntimeGroupAskBoundedText({
+      label: `${label} question`,
+      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+      value: record.question,
+    });
+
+    // Consumer-first rollout compatibility for an already-deployed runner.
+    if (record.origin === undefined) {
+      assertAllowedObjectKeys(
+        record,
+        new Set([
+          "action",
+          "grantId",
+          "originAssistantInputId",
+          "originSessionId",
+          "question",
+        ]),
+        label,
+      );
+      return {
+        action,
+        grantId,
+        origin: {
+          assistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+            record.originAssistantInputId,
+            `${label} originAssistantInputId`,
+          ),
+          kind: "accepted_input",
+          sessionId: parseHostedRuntimeGroupAskBoundedText({
+            label: `${label} originSessionId`,
+            maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+            value: record.originSessionId,
+          }),
+        },
+        question,
+      };
+    }
+
     assertAllowedObjectKeys(
       record,
-      new Set([
-        "action",
-        "grantId",
-        "originAssistantInputId",
-        "originSessionId",
-        "question",
-      ]),
+      new Set(["action", "grantId", "origin", "question"]),
       label,
     );
-    return {
-      action,
-      grantId: parseHostedRuntimeGroupDisclosureGrantId(
-        record.grantId,
-        `${label} grantId`,
-      ),
-      ...parseHostedRuntimeGroupAssistantAskFields(record, label),
-    };
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    return { action, grantId, origin, question };
   }
   if (action === "post_disclosure_request") {
     assertAllowedObjectKeys(

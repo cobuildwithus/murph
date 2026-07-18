@@ -282,6 +282,52 @@ describe('assistant Codex turn planning', () => {
     // the provider boundary; maintenance turns must never carry it.
     expect(maintenancePlan.sessionContext).toBeUndefined()
 
+    const internalPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      hostedToolContext: {
+        groupTool: {
+          request: vi.fn(),
+        },
+      } as unknown as AssistantHostedToolContext,
+      input: {
+        ...createMessageInput(),
+        scheduledInvocationAuthority: {
+          automationId: 'automation_call_circle',
+          occurrenceAt: '2026-07-20T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+      },
+      preferenceContext,
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'internal-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(internalPlan.dynamicTools.map((tool) => tool.name)).toEqual(['group'])
+    expect(internalPlan.systemPrompt).toContain(
+      'Internal group-runtime execution rules:',
+    )
+    expect(internalPlan.systemPrompt).toContain(
+      'It has no human audience',
+    )
+    expect(internalPlan.systemPrompt).toContain(
+      'Use only `read_current` and `ask_member`',
+    )
+    expect(internalPlan.systemPrompt).not.toContain(
+      'Maintenance execution rules:',
+    )
+    expect(internalPlan.systemPrompt).not.toContain(
+      'Notification execution rules:',
+    )
+    expect(internalPlan.systemPrompt).not.toContain('hypertension')
+    expect(internalPlan.systemPrompt).not.toContain('device sync pending')
+    expect(internalPlan.sessionContext).toBeUndefined()
+
     const notificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),

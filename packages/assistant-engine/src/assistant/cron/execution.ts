@@ -5,6 +5,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   type AutomationQueryRecord,
@@ -652,6 +653,11 @@ export async function executeClaimedAssistantCronJob(
             occurrenceAt,
             trigger: input.trigger,
           }),
+          scheduledInvocationAuthority: resolveAssistantCronScheduledInvocationAuthority({
+            job: input.job,
+            occurrenceAt,
+            trigger: input.trigger,
+          }),
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
           signal: yieldCancellation.signal,
@@ -1088,6 +1094,24 @@ function resolveAssistantCronAutomationTargetOverride(
   return job.kind === 'canonical' && job.source.kind === 'automation'
     ? job.source.assistantTargetOverride
     : null
+}
+
+export function resolveAssistantCronScheduledInvocationAuthority(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  trigger: AssistantCronTrigger
+}): HostedRuntimeScheduledAutomationAuthority | null {
+  if (
+    input.trigger !== 'scheduled' ||
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
+    return null
+  }
+  return {
+    automationId: input.job.source.automationId,
+    occurrenceAt: input.occurrenceAt,
+  }
 }
 
 function resolveAssistantCronScheduledNewsletterAuthority(input: {

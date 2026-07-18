@@ -230,6 +230,7 @@ export interface HostedExecutionAssistantNotificationRequestedEvent
 export const HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS = 1_200;
 export const HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS = 4_000;
 export const HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS = 120;
+export const HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS = 1_000;
 export const HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS = 10 * 60 * 1_000;
 
 export interface HostedExecutionAssistantAskJoinedGroupTarget {
@@ -249,6 +250,22 @@ export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget;
 
+export interface HostedExecutionAssistantAskAcceptedInputOrigin {
+  assistantInputId: string;
+  kind: "accepted_input";
+  sessionId: string;
+}
+
+export interface HostedExecutionAssistantAskAutomationOccurrenceOrigin {
+  automationId: string;
+  kind: "automation_occurrence";
+  occurrenceAt: string;
+}
+
+export type HostedExecutionAssistantAskOrigin =
+  | HostedExecutionAssistantAskAcceptedInputOrigin
+  | HostedExecutionAssistantAskAutomationOccurrenceOrigin;
+
 export type HostedExecutionAssistantAskResult =
   | {
       answer: string;
@@ -259,16 +276,26 @@ export type HostedExecutionAssistantAskResult =
       outcome: "cannot_answer";
     };
 
-export interface HostedExecutionAssistantAskRequestedPayload {
+export interface HostedExecutionAssistantAskJoinedGroupRequestedPayload {
   expiresAt: string;
   originAssistantInputId: string;
   originSessionId: string;
   question: string;
-  target: HostedExecutionAssistantAskTarget;
+  target: HostedExecutionAssistantAskJoinedGroupTarget;
 }
 
-export interface HostedExecutionAssistantAskCompletedPayload {
-  deliveryMode?: "reviewed_exact";
+export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskConsentedMemberTarget;
+}
+
+export type HostedExecutionAssistantAskRequestedPayload =
+  | HostedExecutionAssistantAskJoinedGroupRequestedPayload
+  | HostedExecutionAssistantAskConsentedMemberRequestedPayload;
+
+export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;
   originAssistantInputId: string;
   originSessionId: string;
@@ -277,6 +304,29 @@ export interface HostedExecutionAssistantAskCompletedPayload {
   result: HostedExecutionAssistantAskResult;
   targetLabel: string | null;
 }
+
+export type HostedExecutionAssistantAskConsentedMemberCompletedPayload =
+  | {
+      expiresAt: string;
+      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+      question: string;
+      requestId: string;
+      result: HostedExecutionAssistantAskResult;
+      targetLabel: null;
+    }
+  | {
+      expiresAt: string;
+      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
+      permissionText: string;
+      question: string;
+      requestId: string;
+      result: HostedExecutionAssistantAskResult;
+      targetLabel: null;
+    };
+
+export type HostedExecutionAssistantAskCompletedPayload =
+  | HostedExecutionAssistantAskJoinedGroupCompletedPayload
+  | HostedExecutionAssistantAskConsentedMemberCompletedPayload;
 
 export interface HostedExecutionAssistantAskRequestedEvent
   extends HostedExecutionBaseEvent {

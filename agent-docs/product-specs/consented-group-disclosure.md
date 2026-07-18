@@ -9,11 +9,18 @@ Last verified: 2026-07-16
 Add one narrow composition of the existing Assistant Ask protocol:
 
 ```text
-an authenticated group Murph asks one current member's private Murph
-one bounded question under that member's exact active disclosure grant
+an authenticated group Murph receives one trusted invocation
+it asks one current member's private Murph one bounded question
+under that member's exact active disclosure grant
 the private Murph proposes one answer
 one fresh outgoing reviewer either allows those exact bytes or denies them
 ```
+
+Consent, invocation, and delivery are separate authorities. The grant is standing,
+revocable consent. An accepted group input or a claimed scheduled automation
+occurrence supplies one request's causal and replay identity. Delivery is either
+exactly back to the accepted group conversation or internal to an isolated
+no-delivery group-runtime turn.
 
 Group membership is necessary but never sufficient. The member must separately
 grant the exact immutable natural-language permission shown in the room. The
@@ -49,20 +56,24 @@ review the candidate disclosure inside that boundary.
 4. `read_current` exposes each active grant to the group runtime as an opaque
    `grantId` beside the exact `permissionText` and bound member. The selector is
    authority metadata, not a fact supplied by a person or model.
-5. For a fresh accepted group input, group Murph calls
-   `murph.group(action="ask_member")` with one self-contained question and the
-   exact `grantId` returned by the current read. Web resolves all member,
-   membership, runtime, route, mailbox, and callback identity. That accepted
-   input owns at most one request; another grant or question requires another
-   fresh group input.
+5. During either a fresh accepted group input or a claimed scheduled group
+   automation occurrence, group Murph calls `murph.group(action="ask_member")`
+   with one self-contained question and the exact `grantId` returned by the
+   current read. Trusted runtime code injects the invocation and delivery mode;
+   the model never supplies them. One invocation owns at most one request per
+   grant. Exact retry reuses it, while a changed question for that grant
+   conflicts. The same occurrence may ask other grants independently.
 6. The member's private runtime runs one read-only candidate pass against its
    restored workspace. A separate fresh-context pass reviews only the immutable
    permission text, incoming question, and proposed answer.
-7. An allowed answer returns to the originating group byte-for-byte. No later
-   model rewrites, summarizes, expands, or contextualizes it. A denied or
-   candidate-declared cannot-answer becomes one fixed non-disclosing response.
-   Infrastructure failure retries under the existing mailbox policy and may
-   expire without disclosing anything.
+7. An accepted-input answer returns to the originating group conversation
+   byte-for-byte. A scheduled answer returns only to an isolated group-runtime
+   turn with no route, outbox, notification, phone-call, connected-app, or
+   unrelated group-mutation capability. That turn may update only minimum
+   bounded coordinator state and must finish with an exact skip/no-delivery
+   decision. A denied or candidate-declared cannot-answer becomes the fixed
+   non-disclosing result. Infrastructure failure retries under the existing
+   mailbox policy and may expire without disclosing anything.
 
 In a private conversation, `list_memberships` returns the member's own active
 grants in a top-level `disclosureGrants` array. A member may revoke one only
@@ -73,12 +84,14 @@ group.
 
 ## Authority and lifecycle invariants
 
-- The originating turn must have an accepted, authenticated, non-direct group
-  route bound to the exact synthetic group runtime. Direct, email-derived,
-  unknown, stale, or model-supplied routing is not authority.
-- The model never supplies a member, membership, runtime, mailbox, session,
-  callback, or return-route id. It may use only a current server-issued
-  `grantId` from the live group read.
+- A consented request must have one trusted group invocation: either an
+  accepted, authenticated, non-direct group route bound to the exact synthetic
+  group runtime, or the claimed occurrence of a canonical scheduled automation
+  running in that group runtime. Direct, email-derived, unknown, stale, or
+  model-supplied invocation data is not authority.
+- The model never supplies invocation, delivery mode, member, membership,
+  runtime, mailbox, session, callback, or return-route identity. It may use only
+  a current server-issued `grantId` from the live group read.
 - One immutable permission record owns the canonical text and digest. One
   append-only grant generation binds that permission to one membership. The
   exact text is encrypted through the existing hosted member private-field
@@ -119,10 +132,12 @@ group.
   remains deliverable after retention removes the expired mailbox rows.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
-- One accepted group input owns at most one request targeting one grant and one
-  question. Exact replay reuses it; a different grant, question, or session
-  conflicts. There is no implicit roster fan-out, label matching, fallback
-  member, or arbitrary target id.
+- Request identity is the group runtime, exact grant, and trusted invocation.
+  One invocation therefore owns at most one question per grant. Exact replay
+  reuses it; a changed question conflicts; a different grant in the same
+  invocation and the same grant in a later occurrence are independent. There is
+  no implicit roster fan-out, label matching, fallback member, or arbitrary
+  target id.
 - The existing ten-minute Assistant Ask lifetime, deterministic request and
   completion ids, encrypted mailbox retry, first-committed-completion rule, and
   outbox-owned queued-delivery deadline own durability. Retried work cannot
@@ -195,8 +210,10 @@ DSL, rewrite loop, or chain of reviewers.
 - No broad vault browse or group-mounted personal workspace.
 - No membership-implied access or owner override.
 - No write access to the member's vault or side-effecting target tools.
-- No multi-member query, fan-out, aggregation, broadcast, or scheduler.
-- No autonomous follow-up, recursion, background polling, or standing agent.
+- No multi-member query, implicit fan-out API, aggregation service, or broadcast.
+  A normal group automation may call the one-to-one primitive repeatedly under
+  one bounded occurrence.
+- No new scheduler. Existing group-runtime automations own recurring wakeups.
 - No new queue, workflow, service, container, result table, policy engine, or
   general cross-agent registry.
 

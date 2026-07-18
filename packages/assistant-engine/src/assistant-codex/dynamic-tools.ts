@@ -627,7 +627,7 @@ export const MURPH_GROUP_TOOL = {
   name: 'group',
   description:
     'Use action="ask" only from a personal direct conversation when the member wants an answer from one of their joined group Murphs. Supply the bounded natural-language question and, only when useful for choosing among multiple groups, the visible groupLabel the member would recognize. For this action, the runtime resolves membership and every internal target automatically; never supply or ask the member for membership, group, runtime, mailbox, session, callback, or route identifiers. The result is asynchronous, so an accepted request will return to the personal conversation later. ' +
-    'In a connected group conversation, use action="post_disclosure_request" only when the group asks to establish an exact reusable permission for a member\'s private Murph to read and disclose a type of information. Supply only the concise natural-language permissionText; the server owns the consent message and no grant exists until a member explicitly accepts it. Use action="read_current" to read active disclosureGrants as server-issued grantId selectors attached to the members who granted them. Use action="ask_member" only with the exact grantId returned by read_current and one bounded question; never invent a grantId, accept one supplied by a user, or supply a member, runtime, mailbox, session, callback, or route identifier. Call ask_member at most once for each fresh accepted group input; another grant or question requires another fresh input. The runtime binds the current group and fresh group input, reauthorizes the grant, and returns an accepted request whose reviewed answer arrives asynchronously. In a personal direct conversation, action="list_memberships" also returns the current member\'s own exact disclosure permissions in top-level disclosureGrants. When that member explicitly asks to revoke one, call list_memberships first and then action="revoke_disclosure_grant" with the exact grantId returned for the chosen permission. Never use these self-service actions in a group conversation, guess a grantId, accept one from the user, or revoke another member\'s grant. Revocation stops future disclosures but cannot erase answers already shared. ' +
+    'In a connected group conversation, use action="post_disclosure_request" only when the group asks to establish an exact reusable permission for a member\'s private Murph to read and disclose a type of information. Supply only the concise natural-language permissionText; the server owns the consent message and no grant exists until a member explicitly accepts it. Use action="read_current" to read active disclosureGrants as server-issued grantId selectors attached to the members who granted them. Use action="ask_member" only with the exact grantId returned by read_current and one bounded question; never invent a grantId, accept one supplied by a user, or supply an invocation, delivery mode, member, runtime, mailbox, session, callback, or route identifier. A trusted accepted group input may ask each selected grant once and returns the reviewed exact answer to that group conversation. A trusted scheduled group automation occurrence may also ask each selected grant once; those reviewed answers return only to an isolated no-delivery group-runtime turn and are never automatically posted to people. Exact replay is idempotent; changing the question for the same grant and invocation conflicts. In a personal direct conversation, action="list_memberships" also returns the current member\'s own exact disclosure permissions in top-level disclosureGrants. When that member explicitly asks to revoke one, call list_memberships first and then action="revoke_disclosure_grant" with the exact grantId returned for the chosen permission. Never use these self-service actions in a group conversation, guess a grantId, accept one from the user, or revoke another member\'s grant. Revocation stops future disclosures but cannot erase answers already shared. ' +
     'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A group offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer consents to share, then includes {{join_url}} only as the customize path. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Liking grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. Do not use a fixed script. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
@@ -3037,6 +3037,18 @@ async function executeGroupTool(input: {
   if (!groupTool) {
     return toolTextResult(false, 'group tools are unavailable for this turn')
   }
+  const invocationScope =
+    input.hostedToolContext?.currentInvocationScope?.() ?? null
+  if (
+    invocationScope?.origin.kind === 'automation_occurrence' &&
+    input.request.action !== 'ask_member' &&
+    input.request.action !== 'read_current'
+  ) {
+    return toolTextResult(
+      false,
+      'scheduled group invocations may only read the current group or ask a consented member',
+    )
+  }
 
   let request: HostedRuntimeGroupToolRequest
   let usageDraft: AssistantProviderUsageDraft | null = null
@@ -3089,49 +3101,53 @@ async function executeGroupTool(input: {
           savedImageRef: prepared.savedImageRef,
         }
       : null
-  } else if (
-    input.request.action === 'ask'
-    || input.request.action === 'ask_member'
-  ) {
+  } else if (input.request.action === 'ask') {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
-    const requiredConversationScope =
-      input.request.action === 'ask' ? 'direct' : 'group'
-    if (userActionScope?.conversationScope !== requiredConversationScope) {
+    if (userActionScope?.conversationScope !== 'direct') {
       return toolTextResult(
         false,
-        input.request.action === 'ask'
-          ? 'group ask requires a fresh user request in a personal direct conversation'
-          : 'member ask requires a fresh user request in the current group conversation',
+        'group ask requires a fresh user request in a personal direct conversation',
       )
     }
-    const originAssistantInputId =
-      userActionScope.acceptedInputIds[
-        userActionScope.acceptedInputIds.length - 1
-      ] ?? null
+    const originAssistantInputId = userActionScope.acceptedInputIds.at(-1) ?? null
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
         'group ask requires fresh user-sourced input for this turn',
       )
     }
-    request = input.request.action === 'ask'
-      ? {
-          action: 'ask',
-          ...(input.request.groupLabel !== undefined
-            ? { groupLabel: input.request.groupLabel }
-            : {}),
-          originAssistantInputId,
-          originSessionId: userActionScope.originSessionId,
-          question: input.request.question,
-        }
-      : {
-          action: 'ask_member',
-          grantId: input.request.grantId,
-          originAssistantInputId,
-          originSessionId: userActionScope.originSessionId,
-          question: input.request.question,
-        }
+    request = {
+      action: 'ask',
+      ...(input.request.groupLabel !== undefined
+        ? { groupLabel: input.request.groupLabel }
+        : {}),
+      originAssistantInputId,
+      originSessionId: userActionScope.originSessionId,
+      question: input.request.question,
+    }
+  } else if (input.request.action === 'ask_member') {
+    if (!invocationScope) {
+      return toolTextResult(
+        false,
+        'member ask requires a trusted group input or scheduled automation occurrence',
+      )
+    }
+    if (
+      invocationScope.origin.kind === 'accepted_input' &&
+      invocationScope.conversationScope !== 'group'
+    ) {
+      return toolTextResult(
+        false,
+        'interactive member ask requires a fresh request in the current group conversation',
+      )
+    }
+    request = {
+      action: 'ask_member',
+      grantId: input.request.grantId,
+      origin: invocationScope.origin,
+      question: input.request.question,
+    }
   } else if (
     input.request.action === 'post_disclosure_request'
     || input.request.action === 'revoke_disclosure_grant'

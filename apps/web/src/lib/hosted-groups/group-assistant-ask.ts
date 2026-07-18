@@ -18,6 +18,11 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
+  type HostedExecutionAssistantAskAcceptedInputOrigin,
+  type HostedExecutionAssistantAskAutomationOccurrenceOrigin,
+  type HostedExecutionAssistantAskCompletedPayload,
+  type HostedExecutionAssistantAskOrigin,
+  type HostedExecutionAssistantAskRequestedPayload,
   type HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -57,7 +62,7 @@ export const HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED_ENV =
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
-  "murph.hosted-group-member-assistant-ask.request.v1";
+  "murph.hosted-group-member-assistant-ask.request.v2";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_NAMESPACE =
   "murph.hosted-assistant-ask.completion.v1";
 const HOSTED_ASSISTANT_ASK_COMPLETION_ID_PREFIX = "aask_done_";
@@ -98,17 +103,36 @@ export interface HostedAssistantAskControlResult {
   response: HostedRuntimeAssistantAskControlResponse;
 }
 
-type HostedAssistantAskAuthority = {
+type HostedAssistantAskLegacyAuthority = {
+  deliveryMode: "legacy";
   expiresAt: string;
   originAssistantInputId: string;
   originMemberId: string;
   originSessionId: string;
   question: string;
   targetLabel: string | null;
+};
+
+type HostedAssistantAskConsentedAuthority = {
+  expiresAt: string;
+  originMemberId: string;
+  permissionText: string;
+  question: string;
+  targetLabel: null;
 } & (
-  | { deliveryMode: "legacy" }
-  | { deliveryMode: "reviewed_exact"; permissionText: string }
+  | {
+      deliveryMode: "reviewed_exact";
+      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+    }
+  | {
+      deliveryMode: "internal";
+      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
+    }
 );
+
+type HostedAssistantAskAuthority =
+  | HostedAssistantAskLegacyAuthority
+  | HostedAssistantAskConsentedAuthority;
 
 interface HostedAssistantAskRequestReadResult {
   authority: HostedAssistantAskAuthority | null;
@@ -149,16 +173,28 @@ export function createHostedAssistantAskCompletionId(requestId: string): string 
 }
 
 export function createHostedGroupMemberAssistantAskRequestId(input: {
+  grantId: string;
   groupRuntimeMemberId: string;
-  originAssistantInputId: string;
+  origin: HostedExecutionAssistantAskOrigin;
 }): string {
-  return `aask_req_${createHash("sha256")
+  const hash = createHash("sha256")
     .update(HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE)
     .update("\0")
     .update(input.groupRuntimeMemberId)
     .update("\0")
-    .update(input.originAssistantInputId)
-    .digest("hex")}`;
+    .update(input.grantId)
+    .update("\0")
+    .update(input.origin.kind)
+    .update("\0");
+  if (input.origin.kind === "accepted_input") {
+    hash.update(input.origin.assistantInputId);
+  } else {
+    hash
+      .update(input.origin.automationId)
+      .update("\0")
+      .update(input.origin.occurrenceAt);
+  }
+  return `aask_req_${hash.digest("hex")}`;
 }
 
 export async function requestHostedGroupAssistantAsk(input: {
@@ -312,8 +348,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
   grantId: string;
   memberId: string;
   now?: Date;
-  originAssistantInputId: string;
-  originSessionId: string;
+  origin: HostedExecutionAssistantAskOrigin;
   prisma?: HostedAssistantAskPrismaClient;
   question: string;
 }): Promise<HostedGroupMemberAssistantAskAdmission> {
@@ -333,14 +368,13 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
     value: input.question,
   });
-  const originSessionId = normalizeHostedAssistantAskText({
-    label: "Hosted assistant ask origin session ID",
-    maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-    value: input.originSessionId,
+  const invocation = normalizeHostedGroupMemberAssistantAskInvocation({
+    origin: input.origin,
   });
   const requestId = createHostedGroupMemberAssistantAskRequestId({
+    grantId,
     groupRuntimeMemberId: input.memberId,
-    originAssistantInputId: input.originAssistantInputId,
+    origin: invocation.origin,
   });
 
   return prisma.$transaction(async (tx) => {
@@ -359,8 +393,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
         grantId,
         groupRuntimeMemberId: input.memberId,
         now,
-        originAssistantInputId: input.originAssistantInputId,
-        originSessionId,
+        origin: invocation.origin,
         question,
         requestId,
         tx,
@@ -375,18 +408,18 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     if (!authority) {
       return unavailableAdmission("grant_unavailable");
     }
-    if (!await isEligibleGroupAssistantAskCallerTx({
+    if (!await isEligibleGroupAssistantAskInvocationTx({
       groupRuntimeMemberId: input.memberId,
       now,
-      originAssistantInputId: input.originAssistantInputId,
+      origin: invocation.origin,
       tx,
     })) {
       return unavailableAdmission("origin_unavailable");
     }
     if (!await isEligiblePersonalAssistantAskTargetTx({
-        memberId: authority.targetMemberId,
-        tx,
-      })) {
+      memberId: authority.targetMemberId,
+      tx,
+    })) {
       return unavailableAdmission("grant_unavailable");
     }
 
@@ -394,19 +427,20 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     const expiresAt = new Date(
       now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
     ).toISOString();
+    const target = {
+      grantId: authority.grantId,
+      kind: "consented_member" as const,
+      membershipId: authority.membershipId,
+      permissionDigest: authority.permissionDigest,
+    };
+    const ask: HostedExecutionAssistantAskRequestedPayload = {
+      expiresAt,
+      origin: invocation.origin,
+      question,
+      target,
+    };
     const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt,
-        originAssistantInputId: input.originAssistantInputId,
-        originSessionId,
-        question,
-        target: {
-          grantId: authority.grantId,
-          kind: "consented_member",
-          membershipId: authority.membershipId,
-          permissionDigest: authority.permissionDigest,
-        },
-      },
+      ask,
       eventId: requestId,
       memberId: authority.targetMemberId,
       occurredAt,
@@ -426,9 +460,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
         expectedUserId: authority.targetMemberId,
         mailboxItemId: requestId,
       },
-      result: {
-        status: "accepted",
-      },
+      result: { status: "accepted" },
     };
   });
 }
@@ -475,14 +507,7 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
           existingExpiresAt: existingCompletion.expiresAt ?? null,
           existingKind: existingCompletion.kind,
           existingUserId: existingCompletion.userId,
-          expectedExpiresAt: authority.expiresAt,
-          expectedDeliveryMode: authority.deliveryMode === "reviewed_exact"
-            ? "reviewed_exact"
-            : undefined,
-          expectedOriginAssistantInputId: authority.originAssistantInputId,
-          expectedOriginMemberId: authority.originMemberId,
-          expectedOriginSessionId: authority.originSessionId,
-          expectedQuestion: authority.question,
+          expectedAuthority: authority,
           expectedRequestId: input.request.requestId,
           now,
           tx,
@@ -505,7 +530,7 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
           },
         };
       }
-      if (authority.deliveryMode === "reviewed_exact") {
+      if (authority.deliveryMode !== "legacy") {
         return {
           mailboxWake: null,
           response: {
@@ -548,18 +573,11 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
 
     const occurredAt = now.toISOString();
     const wake = buildHostedExecutionAssistantAskCompletedWake({
-      ask: {
-        ...(authority.deliveryMode === "reviewed_exact"
-          ? { deliveryMode: "reviewed_exact" as const }
-          : {}),
-        expiresAt: authority.expiresAt,
-        originAssistantInputId: authority.originAssistantInputId,
-        originSessionId: authority.originSessionId,
-        question: authority.question,
+      ask: buildHostedAssistantAskCompletedPayload({
+        authority,
         requestId: input.request.requestId,
         result: input.request.result,
-        targetLabel: authority.targetLabel,
-      },
+      }),
       eventId: completionId,
       memberId: authority.originMemberId,
       occurredAt,
@@ -684,7 +702,8 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || !isHostedExecutionAssistantAskCompletedWake(completionWake)
     || completionWake.eventId !== completionId
     || completionWake.userId !== input.boundRuntimeMemberId
-    || completionWake.ask.deliveryMode !== "reviewed_exact"
+    || !("origin" in completionWake.ask)
+    || completionWake.ask.origin.kind !== "accepted_input"
     || completionWake.ask.expiresAt !== completionItem.expiresAt
     || createHostedAssistantAskCompletionId(completionWake.ask.requestId)
       !== completionId
@@ -721,9 +740,10 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || authority.deliveryMode !== "reviewed_exact"
     || authority.originMemberId !== input.boundRuntimeMemberId
     || authority.expiresAt !== completionWake.ask.expiresAt
-    || authority.originAssistantInputId
-      !== completionWake.ask.originAssistantInputId
-    || authority.originSessionId !== completionWake.ask.originSessionId
+    || !hostedAssistantAskOriginsEqual(
+      authority.origin,
+      completionWake.ask.origin,
+    )
     || authority.question !== completionWake.ask.question
   ) {
     if (supportsSafeFallback) {
@@ -767,10 +787,11 @@ async function replayHostedGroupAssistantAskTx(input: {
     || wake.eventId !== input.requestId
     || wake.userId !== input.existingUserId
     || wake.ask.expiresAt !== input.expiresAt
+    || "origin" in wake.ask
+    || wake.ask.target.kind !== "joined_group"
     || wake.ask.originAssistantInputId !== input.originAssistantInputId
     || wake.ask.originSessionId !== input.originSessionId
     || wake.ask.question !== input.question
-    || wake.ask.target.kind !== "joined_group"
     || wake.ask.target.requestedLabel !== input.requestedLabel
     || createHostedAssistantAskRequestId({
       memberId: input.memberId,
@@ -812,8 +833,7 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
   grantId: string;
   groupRuntimeMemberId: string;
   now: Date;
-  originAssistantInputId: string;
-  originSessionId: string;
+  origin: HostedExecutionAssistantAskOrigin;
   question: string;
   requestId: string;
   tx: Prisma.TransactionClient;
@@ -839,14 +859,15 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
     || wake.eventId !== input.requestId
     || wake.userId !== input.existingUserId
     || wake.ask.expiresAt !== input.expiresAt
-    || wake.ask.originAssistantInputId !== input.originAssistantInputId
-    || wake.ask.originSessionId !== input.originSessionId
-    || wake.ask.question !== input.question
+    || !("origin" in wake.ask)
     || wake.ask.target.kind !== "consented_member"
+    || !hostedAssistantAskOriginsEqual(wake.ask.origin, input.origin)
+    || wake.ask.question !== input.question
     || wake.ask.target.grantId !== input.grantId
     || createHostedGroupMemberAssistantAskRequestId({
+      grantId: wake.ask.target.grantId,
       groupRuntimeMemberId: input.groupRuntimeMemberId,
-      originAssistantInputId: wake.ask.originAssistantInputId,
+      origin: wake.ask.origin,
     }) !== input.requestId
   ) {
     return unavailableAdmission("request_conflict");
@@ -863,18 +884,18 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
   if (!authority) {
     return unavailableAdmission("grant_unavailable");
   }
-  if (!await isEligibleGroupAssistantAskCallerTx({
+  if (!await isEligibleGroupAssistantAskInvocationTx({
     groupRuntimeMemberId: input.groupRuntimeMemberId,
     now: input.now,
-    originAssistantInputId: wake.ask.originAssistantInputId,
+    origin: wake.ask.origin,
     tx: input.tx,
   })) {
     return unavailableAdmission("origin_unavailable");
   }
   if (!await isEligiblePersonalAssistantAskTargetTx({
-      memberId: authority.targetMemberId,
-      tx: input.tx,
-    })) {
+    memberId: authority.targetMemberId,
+    tx: input.tx,
+  })) {
     return unavailableAdmission("grant_unavailable");
   }
 
@@ -883,9 +904,7 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
       expectedUserId: input.existingUserId,
       mailboxItemId: input.requestId,
     },
-    result: {
-      status: "accepted",
-    },
+    result: { status: "accepted" },
   };
 }
 
@@ -928,7 +947,7 @@ async function readHostedAssistantAskAuthorityTx(input: {
     return { authority: null, terminalReason: "unavailable" };
   }
 
-  if (wake.ask.target.kind === "joined_group") {
+  if (!("origin" in wake.ask)) {
     const membershipAuthority = await readHostedAssistantAskMembershipAuthorityTx({
       expectedOriginMemberId: null,
       expectedTargetRuntimeMemberId: item.userId,
@@ -970,10 +989,10 @@ async function readHostedAssistantAskAuthorityTx(input: {
   });
   if (
     !disclosureAuthority
-    || !await isEligibleGroupAssistantAskCallerTx({
+    || !await isEligibleGroupAssistantAskInvocationTx({
       groupRuntimeMemberId: disclosureAuthority.groupRuntimeMemberId,
       now: input.now,
-      originAssistantInputId: wake.ask.originAssistantInputId,
+      origin: wake.ask.origin,
       tx: input.tx,
     })
     || !await isEligiblePersonalAssistantAskTargetTx({
@@ -981,24 +1000,29 @@ async function readHostedAssistantAskAuthorityTx(input: {
       tx: input.tx,
     })
     || createHostedGroupMemberAssistantAskRequestId({
+      grantId: wake.ask.target.grantId,
       groupRuntimeMemberId: disclosureAuthority.groupRuntimeMemberId,
-      originAssistantInputId: wake.ask.originAssistantInputId,
+      origin: wake.ask.origin,
     }) !== input.requestId
   ) {
     return { authority: null, terminalReason: "unavailable" };
   }
 
+  const consentedAuthorityCommon = {
+    expiresAt: wake.ask.expiresAt,
+    originMemberId: disclosureAuthority.groupRuntimeMemberId,
+    permissionText: disclosureAuthority.permissionText,
+    question: wake.ask.question,
+    targetLabel: null,
+  } as const;
+  const origin = wake.ask.origin;
   return {
-    authority: {
-      deliveryMode: "reviewed_exact",
-      expiresAt: wake.ask.expiresAt,
-      originAssistantInputId: wake.ask.originAssistantInputId,
-      originMemberId: disclosureAuthority.groupRuntimeMemberId,
-      originSessionId: wake.ask.originSessionId,
-      permissionText: disclosureAuthority.permissionText,
-      question: wake.ask.question,
-      targetLabel: null,
-    },
+    // Delivery is derived from the trusted origin kind, not a separate wire
+    // field: an automation occurrence completes internally, an accepted input
+    // is reviewed and delivered to the group conversation.
+    authority: origin.kind === "automation_occurrence"
+      ? { ...consentedAuthorityCommon, deliveryMode: "internal", origin }
+      : { ...consentedAuthorityCommon, deliveryMode: "reviewed_exact", origin },
     terminalReason: null,
   };
 }
@@ -1124,10 +1148,10 @@ async function isEligiblePersonalAssistantAskCallerTx(input: {
   return originWake !== null && isHostedAssistantAskDirectConversation(originWake);
 }
 
-async function isEligibleGroupAssistantAskCallerTx(input: {
+async function isEligibleGroupAssistantAskInvocationTx(input: {
   groupRuntimeMemberId: string;
   now: Date;
-  originAssistantInputId: string;
+  origin: HostedExecutionAssistantAskOrigin;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const container = await input.tx.hostedThreadContainer.findUnique({
@@ -1144,8 +1168,14 @@ async function isEligibleGroupAssistantAskCallerTx(input: {
     return false;
   }
 
+  if (input.origin.kind === "automation_occurrence") {
+    return true;
+  }
+  if (input.origin.kind !== "accepted_input") {
+    return false;
+  }
   const originWake = await readHostedMailboxConversationWakeByAssistantInputId({
-    assistantInputId: input.originAssistantInputId,
+    assistantInputId: input.origin.assistantInputId,
     availableAt: input.now,
     memberId: input.groupRuntimeMemberId,
     prisma: input.tx,
@@ -1240,25 +1270,20 @@ async function hasHostedAssistantAskRuntimeAccessForUpdateTx(input: {
 
 async function isMatchingHostedAssistantAskCompletionTx(input: {
   completionId: string;
-  expectedDeliveryMode: "reviewed_exact" | undefined;
   existingDedupeKey: string;
   existingExpiresAt: string | null;
   existingKind: string;
   existingUserId: string;
-  expectedExpiresAt: string;
-  expectedOriginAssistantInputId: string;
-  expectedOriginMemberId: string;
-  expectedOriginSessionId: string;
-  expectedQuestion: string;
+  expectedAuthority: HostedAssistantAskAuthority;
   expectedRequestId: string;
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (
     input.existingDedupeKey !== input.completionId
-    || input.existingExpiresAt !== input.expectedExpiresAt
+    || input.existingExpiresAt !== input.expectedAuthority.expiresAt
     || input.existingKind !== "assistant.ask.completed"
-    || input.existingUserId !== input.expectedOriginMemberId
+    || input.existingUserId !== input.expectedAuthority.originMemberId
   ) {
     return false;
   }
@@ -1271,14 +1296,82 @@ async function isMatchingHostedAssistantAskCompletionTx(input: {
     wake
     && isHostedExecutionAssistantAskCompletedWake(wake)
     && wake.eventId === input.completionId
-    && wake.userId === input.expectedOriginMemberId
-    && wake.ask.deliveryMode === input.expectedDeliveryMode
-    && wake.ask.originAssistantInputId === input.expectedOriginAssistantInputId
-    && wake.ask.originSessionId === input.expectedOriginSessionId
-    && wake.ask.question === input.expectedQuestion
-    && wake.ask.requestId === input.expectedRequestId
-    && wake.ask.expiresAt === input.expectedExpiresAt,
+    && wake.userId === input.expectedAuthority.originMemberId
+    && hostedAssistantAskCompletionMatchesAuthority({
+      authority: input.expectedAuthority,
+      payload: wake.ask,
+      requestId: input.expectedRequestId,
+    }),
   );
+}
+
+function buildHostedAssistantAskCompletedPayload(input: {
+  authority: HostedAssistantAskAuthority;
+  requestId: string;
+  result: HostedExecutionAssistantAskCompletedPayload["result"];
+}): HostedExecutionAssistantAskCompletedPayload {
+  const common = {
+    expiresAt: input.authority.expiresAt,
+    question: input.authority.question,
+    requestId: input.requestId,
+    result: input.result,
+    targetLabel: input.authority.targetLabel,
+  };
+  if (input.authority.deliveryMode === "legacy") {
+    return {
+      ...common,
+      originAssistantInputId: input.authority.originAssistantInputId,
+      originSessionId: input.authority.originSessionId,
+    };
+  }
+  if (input.authority.deliveryMode === "reviewed_exact") {
+    return {
+      ...common,
+      origin: input.authority.origin,
+      targetLabel: null,
+    };
+  }
+  return {
+    ...common,
+    origin: input.authority.origin,
+    permissionText: input.authority.permissionText,
+    targetLabel: null,
+  };
+}
+
+function hostedAssistantAskCompletionMatchesAuthority(input: {
+  authority: HostedAssistantAskAuthority;
+  payload: HostedExecutionAssistantAskCompletedPayload;
+  requestId: string;
+}): boolean {
+  if (
+    input.payload.expiresAt !== input.authority.expiresAt
+    || input.payload.question !== input.authority.question
+    || input.payload.requestId !== input.requestId
+    || input.payload.targetLabel !== input.authority.targetLabel
+  ) {
+    return false;
+  }
+  if (input.authority.deliveryMode === "legacy") {
+    return !("origin" in input.payload)
+      && input.payload.originAssistantInputId
+        === input.authority.originAssistantInputId
+      && input.payload.originSessionId === input.authority.originSessionId;
+  }
+  if (
+    !("origin" in input.payload)
+    || !hostedAssistantAskOriginsEqual(
+      input.payload.origin,
+      input.authority.origin,
+    )
+  ) {
+    return false;
+  }
+  return input.authority.deliveryMode !== "internal"
+    || (
+      "permissionText" in input.payload
+      && input.payload.permissionText === input.authority.permissionText
+    );
 }
 
 function resolveHostedAssistantAskMembership(input: {
@@ -1388,6 +1481,68 @@ function isHostedAssistantAskBoundGroupConversation(
     && wake.message.routeAuthority.threadId === wake.message.linqMessage.chatId;
 }
 
+function normalizeHostedGroupMemberAssistantAskInvocation(input: {
+  origin: HostedExecutionAssistantAskOrigin;
+}):
+  | {
+      deliveryMode: "reviewed_exact";
+      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+    }
+  | {
+      deliveryMode: "internal";
+      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
+    } {
+  if (input.origin.kind === "accepted_input") {
+    return {
+      deliveryMode: "reviewed_exact",
+      origin: {
+        assistantInputId: normalizeHostedAssistantAskText({
+          label: "Hosted assistant ask accepted input ID",
+          maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+          value: input.origin.assistantInputId,
+        }),
+        kind: input.origin.kind,
+        sessionId: normalizeHostedAssistantAskText({
+          label: "Hosted assistant ask origin session ID",
+          maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+          value: input.origin.sessionId,
+        }),
+      },
+    };
+  }
+  return {
+    deliveryMode: "internal",
+    origin: {
+      automationId: normalizeHostedAssistantAskText({
+        label: "Hosted assistant ask automation ID",
+        maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+        value: input.origin.automationId,
+      }),
+      kind: input.origin.kind,
+      occurrenceAt: normalizeHostedAssistantAskTimestamp(
+        input.origin.occurrenceAt,
+        "Hosted assistant ask occurrence",
+      ),
+    },
+  };
+}
+
+function hostedAssistantAskOriginsEqual(
+  left: HostedExecutionAssistantAskOrigin,
+  right: HostedExecutionAssistantAskOrigin,
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  return left.kind === "accepted_input" && right.kind === "accepted_input"
+    ? left.assistantInputId === right.assistantInputId
+      && left.sessionId === right.sessionId
+    : left.kind === "automation_occurrence"
+      && right.kind === "automation_occurrence"
+      && left.automationId === right.automationId
+      && left.occurrenceAt === right.occurrenceAt;
+}
+
 function normalizeHostedAssistantAskSelector(
   value: string | null | undefined,
 ): string | null {
@@ -1442,6 +1597,21 @@ function normalizeHostedAssistantAskText(input: {
     throw new TypeError(
       `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
     );
+  }
+  return normalized;
+}
+
+function normalizeHostedAssistantAskTimestamp(
+  value: string,
+  label: string,
+): string {
+  const normalized = value.trim();
+  const timestampMs = Date.parse(normalized);
+  if (
+    !Number.isFinite(timestampMs)
+    || new Date(timestampMs).toISOString() !== normalized
+  ) {
+    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
   }
   return normalized;
 }

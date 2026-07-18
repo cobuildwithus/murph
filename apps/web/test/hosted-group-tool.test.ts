@@ -422,8 +422,11 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "ask_member",
         grantId: "grant_sleep",
-        originAssistantInputId: `ain_${"b".repeat(32)}`,
-        originSessionId: "session_group",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
         question: "How has the grantor been sleeping lately?",
       },
       scheduleMailboxWake,
@@ -435,8 +438,11 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.requestHostedGroupMemberAssistantAsk).toHaveBeenCalledWith({
       grantId: "grant_sleep",
       memberId: "member_group_runtime",
-      originAssistantInputId: `ain_${"b".repeat(32)}`,
-      originSessionId: "session_group",
+      origin: {
+        assistantInputId: `ain_${"b".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
       question: "How has the grantor been sleeping lately?",
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({

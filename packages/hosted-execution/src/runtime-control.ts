@@ -20,12 +20,14 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "./contracts.ts";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
@@ -897,7 +899,8 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
-export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS = 1_000;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS =
+  HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX = 25;
 export const HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX = 25;
 
@@ -1009,8 +1012,7 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "ask_member";
       grantId: string;
-      originAssistantInputId: string;
-      originSessionId: string;
+      origin: HostedExecutionAssistantAskOrigin;
       question: string;
     }
   | {
@@ -1192,10 +1194,13 @@ export interface HostedRuntimeNewsletterParticipantSummary {
   memberId: string;
 }
 
-export interface HostedRuntimeNewsletterScheduledAuthority {
+export interface HostedRuntimeScheduledAutomationAuthority {
   automationId: string;
   occurrenceAt: string;
 }
+
+export type HostedRuntimeNewsletterScheduledAuthority =
+  HostedRuntimeScheduledAutomationAuthority;
 
 export interface HostedRuntimeNewsletterToolSendRequest {
   groupId: string;

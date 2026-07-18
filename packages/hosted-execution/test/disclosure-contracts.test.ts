@@ -33,8 +33,11 @@ const PERMISSION_TEXT = "Share calendar availability only for coordinating a cal
 function createConsentedMemberAsk(): HostedExecutionAssistantAskRequestedPayload {
   return {
     expiresAt: EXPIRES_AT,
-    originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-    originSessionId: ORIGIN_SESSION_ID,
+    origin: {
+      assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      kind: "accepted_input",
+      sessionId: ORIGIN_SESSION_ID,
+    },
     question: "Is this member free Tuesday afternoon?",
     target: {
       grantId: "disclosure_grant_123",
@@ -70,8 +73,8 @@ describe("consented member Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
-  it("adds reviewed delivery without changing the legacy completion shape", () => {
-    const completion = {
+  it("derives reviewed delivery from the accepted-input origin, not a delivery field", () => {
+    const legacyCompletion = {
       expiresAt: EXPIRES_AT,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       originSessionId: ORIGIN_SESSION_ID,
@@ -80,17 +83,39 @@ describe("consented member Assistant Ask contracts", () => {
       result: { answer: "Tuesday after 3pm.", outcome: "answered" as const },
       targetLabel: "Member",
     };
-    expect(parseHostedExecutionAssistantAskCompletedPayload(completion)).toEqual(completion);
-    expect(buildHostedExecutionAssistantAskCompletedWake({
-      ask: { ...completion, deliveryMode: "reviewed_exact" },
+    expect(
+      parseHostedExecutionAssistantAskCompletedPayload(legacyCompletion),
+    ).toEqual(legacyCompletion);
+
+    const reviewedCompletion = {
+      expiresAt: EXPIRES_AT,
+      origin: {
+        assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        kind: "accepted_input" as const,
+        sessionId: ORIGIN_SESSION_ID,
+      },
+      question: "Is this member free Tuesday afternoon?",
+      requestId: "haask_request_123",
+      result: { answer: "Tuesday after 3pm.", outcome: "answered" as const },
+      targetLabel: null,
+    };
+    const wake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: reviewedCompletion,
       eventId: "haask_completion_123",
       memberId: "member_group_runtime",
       occurredAt: REQUESTED_AT,
-    }).ask.deliveryMode).toBe("reviewed_exact");
+    });
+    if (!("origin" in wake.ask)) throw new Error("expected consented completion");
+    expect(wake.ask.origin.kind).toBe("accepted_input");
+    expect(
+      parseHostedExecutionAssistantAskCompletedPayload(reviewedCompletion),
+    ).toEqual(reviewedCompletion);
+    // A reviewed (accepted-input) completion never carries the private
+    // permission text that only the internal automation path discloses.
     expect(() => parseHostedExecutionAssistantAskCompletedPayload({
-      ...completion,
-      deliveryMode: "unreviewed",
-    })).toThrow(/deliveryMode is invalid/u);
+      ...reviewedCompletion,
+      permissionText: "should not appear on a reviewed completion",
+    })).toThrow(/unsupported field/u);
   });
 
   it("parses only bounded disclosure prepare authority", () => {

@@ -60,6 +60,16 @@ const GROUP_RUNTIME_MEMBER_ID = "member-group-runtime";
 const TARGET_MEMBER_ID = "member-personal";
 const ORIGIN_ASSISTANT_INPUT_ID = `ain_${"b".repeat(32)}`;
 const ORIGIN_SESSION_ID = "session_group";
+const ACCEPTED_ORIGIN = {
+  assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+  kind: "accepted_input" as const,
+  sessionId: ORIGIN_SESSION_ID,
+};
+const SCHEDULED_ORIGIN = {
+  automationId: "automation_call_circle",
+  kind: "automation_occurrence" as const,
+  occurrenceAt: NOW.toISOString(),
+};
 const GRANT_ID = "hgrpdg_current";
 const MEMBERSHIP_ID = "hgrpm_current";
 const PERMISSION_DIGEST = "d".repeat(64);
@@ -120,16 +130,42 @@ function groupOriginWake(input: {
 
 function disclosureRequestWake() {
   const requestId = createHostedGroupMemberAssistantAskRequestId({
+    grantId: GRANT_ID,
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-    originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    origin: ACCEPTED_ORIGIN,
   });
   return buildHostedExecutionAssistantAskRequestedWake({
     ask: {
       expiresAt: new Date(
         NOW.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
       ).toISOString(),
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
+      origin: ACCEPTED_ORIGIN,
+      question: QUESTION,
+      target: {
+        grantId: GRANT_ID,
+        kind: "consented_member",
+        membershipId: MEMBERSHIP_ID,
+        permissionDigest: PERMISSION_DIGEST,
+      },
+    },
+    eventId: requestId,
+    memberId: TARGET_MEMBER_ID,
+    occurredAt: NOW.toISOString(),
+  });
+}
+
+function internalDisclosureRequestWake() {
+  const requestId = createHostedGroupMemberAssistantAskRequestId({
+    grantId: GRANT_ID,
+    groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+    origin: SCHEDULED_ORIGIN,
+  });
+  return buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt: new Date(
+        NOW.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+      ).toISOString(),
+      origin: SCHEDULED_ORIGIN,
       question: QUESTION,
       target: {
         grantId: GRANT_ID,
@@ -149,10 +185,8 @@ function reviewedCompletionWake(
 ) {
   return buildHostedExecutionAssistantAskCompletedWake({
     ask: {
-      deliveryMode: "reviewed_exact",
       expiresAt: requestWake.ask.expiresAt,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
+      origin: ACCEPTED_ORIGIN,
       question: QUESTION,
       requestId: requestWake.eventId,
       result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
@@ -214,8 +248,7 @@ function requestDisclosure(
     grantId: GRANT_ID,
     memberId: GROUP_RUNTIME_MEMBER_ID,
     now: NOW,
-    originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-    originSessionId: ORIGIN_SESSION_ID,
+    origin: ACCEPTED_ORIGIN,
     question: QUESTION,
     ...overrides,
     prisma: prisma as never,
@@ -266,8 +299,9 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
   it("pins the exact current grant generation before waking the personal runtime", async () => {
     const { prisma } = createPrisma();
     const requestId = createHostedGroupMemberAssistantAskRequestId({
+      grantId: GRANT_ID,
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      origin: ACCEPTED_ORIGIN,
     });
 
     await expect(requestDisclosure(prisma, {
@@ -339,21 +373,28 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
-  it("admits at most one grant from the same group input under concurrent calls", async () => {
+  it("admits one request per grant from the same trusted invocation", async () => {
     const secondGrantId = "hgrpdg_second";
     const { prisma, tx } = createPrisma();
-    let storedWake: ReturnType<typeof disclosureRequestWake> | null = null;
+    const storedWakes = new Map<string, ReturnType<typeof disclosureRequestWake>>();
     mocks.readHostedMailboxItemById.mockImplementation(async (input: {
       mailboxItemId: string;
-    }) => storedWake?.eventId === input.mailboxItemId
-      ? mailboxItemForWake(storedWake)
-      : null);
+    }) => {
+      const wake = storedWakes.get(input.mailboxItemId);
+      return wake ? mailboxItemForWake(wake) : null;
+    });
     mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
       mailboxItemId: string;
-    }) => storedWake?.eventId === input.mailboxItemId ? storedWake : null);
+    }) => storedWakes.get(input.mailboxItemId) ?? null);
+    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockImplementation(
+      async (input: { grantId: string }) => ({
+        ...disclosureAuthority(),
+        grantId: input.grantId,
+      }),
+    );
     mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
       async (input: { envelope: ReturnType<typeof disclosureRequestWake> }) => {
-        storedWake = input.envelope;
+        storedWakes.set(input.envelope.eventId, input.envelope);
         return {
           dedupeConflict: false,
           duplicate: false,
@@ -366,9 +407,15 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       },
     );
 
-    const requestId = createHostedGroupMemberAssistantAskRequestId({
+    const firstRequestId = createHostedGroupMemberAssistantAskRequestId({
+      grantId: GRANT_ID,
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      origin: ACCEPTED_ORIGIN,
+    });
+    const secondRequestId = createHostedGroupMemberAssistantAskRequestId({
+      grantId: secondGrantId,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      origin: ACCEPTED_ORIGIN,
     });
     const request = (grantId: string) => requestDisclosure(prisma, { grantId });
 
@@ -377,55 +424,48 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
         {
           mailboxWake: {
             expectedUserId: TARGET_MEMBER_ID,
-            mailboxItemId: requestId,
+            mailboxItemId: firstRequestId,
           },
           result: { status: "accepted" },
         },
         {
-          mailboxWake: null,
-          result: { status: "unavailable", unavailableReason: "request_conflict" },
+          mailboxWake: {
+            expectedUserId: TARGET_MEMBER_ID,
+            mailboxItemId: secondRequestId,
+          },
+          result: { status: "accepted" },
         },
       ]);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(tx.$queryRaw.mock.calls.map((call) => call[2])).toEqual([
-      requestId,
-      requestId,
-    ]);
-    for (const callIndex of [0, 1]) {
-      expect(tx.$queryRaw.mock.invocationCallOrder[callIndex]).toBeLessThan(
-        mocks.readHostedMailboxItemById.mock.invocationCallOrder[callIndex] ?? 0,
-      );
-    }
-    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+    expect(new Set(tx.$queryRaw.mock.calls.map((call) => call[2]))).toEqual(
+      new Set([firstRequestId, secondRequestId]),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
   });
 
-  it("allows another grant only from a fresh accepted group input", async () => {
-    const freshOriginAssistantInputId = `ain_${"c".repeat(32)}`;
-    const secondGrantId = "hgrpdg_second";
-    const secondTargetMemberId = "member-personal-second";
+  it("allows the same grant again from a later scheduled occurrence", async () => {
+    const laterOrigin = {
+      ...SCHEDULED_ORIGIN,
+      occurrenceAt: "2026-07-23T12:00:00.000Z",
+    };
     const { prisma } = createPrisma();
-    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue({
-      ...disclosureAuthority(),
-      grantId: secondGrantId,
-      membershipId: "hgrpm_second",
-      permissionDigest: "e".repeat(64),
-      targetMemberId: secondTargetMemberId,
-    });
     const requestId = createHostedGroupMemberAssistantAskRequestId({
+      grantId: GRANT_ID,
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      originAssistantInputId: freshOriginAssistantInputId,
+      origin: laterOrigin,
     });
 
     await expect(requestDisclosure(prisma, {
-      grantId: secondGrantId,
-      originAssistantInputId: freshOriginAssistantInputId,
+      origin: laterOrigin,
     })).resolves.toEqual({
       mailboxWake: {
-        expectedUserId: secondTargetMemberId,
+        expectedUserId: TARGET_MEMBER_ID,
         mailboxItemId: requestId,
       },
       result: { status: "accepted" },
     });
+    expect(mocks.readHostedMailboxConversationWakeByAssistantInputId)
+      .not.toHaveBeenCalled();
   });
 
   it("propagates unexpected group-route failures for retry", async () => {
@@ -454,8 +494,12 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       result: { status: "accepted" },
     });
     for (const overrides of [
-      { grantId: "hgrpdg_different" },
-      { originSessionId: "session_different" },
+      {
+        origin: {
+          ...ACCEPTED_ORIGIN,
+          sessionId: "session_different",
+        },
+      },
       { question: "A different question" },
     ]) {
       await expect(requestDisclosure(prisma, overrides)).resolves.toEqual({
@@ -554,7 +598,7 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         ask: expect.objectContaining({
-          deliveryMode: "reviewed_exact",
+          origin: ACCEPTED_ORIGIN,
           requestId: wake.eventId,
           result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
         }),
@@ -565,6 +609,50 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       itemId: completionId,
       tx: expect.any(Object),
     });
+  });
+
+  it("appends a scheduled result only as an internal group-runtime completion", async () => {
+    const wake = internalDisclosureRequestWake();
+    const completionId = createHostedAssistantAskCompletionId(wake.eventId);
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === wake.eventId ? mailboxItemForWake(wake) : null);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: TARGET_MEMBER_ID,
+      now: NOW,
+      prisma: prisma as never,
+      request: {
+        action: "complete",
+        requestId: wake.eventId,
+        result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
+      },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
+      },
+      response: { action: "complete", status: "completed" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        ask: expect.objectContaining({
+          origin: SCHEDULED_ORIGIN,
+          permissionText: PERMISSION_TEXT,
+          requestId: wake.eventId,
+          result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
+        }),
+        eventId: completionId,
+        userId: GROUP_RUNTIME_MEMBER_ID,
+      }),
+      expiresAt: wake.ask.expiresAt,
+      itemId: completionId,
+      tx: expect.any(Object),
+    });
+    expect(mocks.readHostedMailboxConversationWakeByAssistantInputId)
+      .not.toHaveBeenCalled();
   });
 
   it("revalidates the exact live grant at provider dispatch entry", async () => {

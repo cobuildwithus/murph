@@ -566,12 +566,94 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).toHaveBeenCalledWith({
       action: "ask_member",
       grantId: "hdg_member_sleep",
-      originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
-      originSessionId: "session_group",
+      origin: {
+        assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
       question: "How much sleep did they get last night?",
     });
     groupRequest.mockClear();
     expect((await run("direct")).rpcResult.success).toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it("injects scheduled occurrence authority for an internal member ask", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "ask_member",
+      grantId: "hdg_member_availability",
+      question: "Which coarse call windows work over the next week?",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "ask_member",
+      result: { status: "accepted" },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            automationId: "automation_call_circle",
+            kind: "automation_occurrence",
+            occurrenceAt: "2026-07-20T13:00:00.000Z",
+          },
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "ask_member",
+      grantId: "hdg_member_availability",
+      origin: {
+        automationId: "automation_call_circle",
+        kind: "automation_occurrence",
+        occurrenceAt: "2026-07-20T13:00:00.000Z",
+      },
+      question: "Which coarse call windows work over the next week?",
+    });
+  });
+
+  it("limits scheduled group invocations to read_current and ask_member", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Not allowed from cron",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>();
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            automationId: "automation_call_circle",
+            kind: "automation_occurrence",
+            occurrenceAt: "2026-07-20T13:00:00.000Z",
+          },
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
@@ -2241,15 +2323,31 @@ function sharedDailyMetricGrantor(input: {
 }
 
 function createGroupHostedToolContext(input: {
+  currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   groupRequest?: GroupToolRequest;
 } = {}): AssistantHostedToolContext {
+  const currentUserActionScope = input.currentUserActionScope ?? (() => null);
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentUserActionScope: input.currentUserActionScope ?? (() => null),
+    currentInvocationScope: input.currentInvocationScope ?? (() => {
+      const scope = currentUserActionScope();
+      const assistantInputId = scope?.acceptedInputIds.at(-1) ?? null;
+      return scope && assistantInputId
+        ? {
+            conversationScope: scope.conversationScope,
+            origin: {
+              assistantInputId,
+              kind: "accepted_input" as const,
+              sessionId: scope.originSessionId,
+            },
+          }
+        : null;
+    }),
+    currentUserActionScope,
     currentScheduledAutomationAuthority: () => null,
     familyPlanTool: null,
     groupTool: {

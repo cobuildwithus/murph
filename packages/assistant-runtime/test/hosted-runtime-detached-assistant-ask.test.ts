@@ -814,24 +814,33 @@ function createPendingAsk(input: {
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: {
-        expiresAt: "2026-07-15T12:10:00.000Z",
-        originAssistantInputId: `ain_${"a".repeat(32)}`,
-        originSessionId: "session_private",
-        question: "private question",
-        target: input.consented
-          ? {
+      ask: input.consented
+        ? {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            origin: {
+              assistantInputId: `ain_${"a".repeat(32)}`,
+              kind: "accepted_input" as const,
+              sessionId: "session_private",
+            },
+            question: "private question",
+            target: {
               grantId: "grant_calendar",
-              kind: "consented_member",
+              kind: "consented_member" as const,
               membershipId: "membership_synthetic_ask",
               permissionDigest: "d".repeat(64),
-            }
-          : {
-              kind: "joined_group",
+            },
+          }
+        : {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            originAssistantInputId: `ain_${"a".repeat(32)}`,
+            originSessionId: "session_private",
+            question: "private question",
+            target: {
+              kind: "joined_group" as const,
               membershipId: "membership_synthetic_ask",
               requestedLabel: "100 Club",
             },
-      },
+          },
       eventId: input.eventId,
       kind: "assistant.ask.requested",
       occurredAt: TEST_NOW,

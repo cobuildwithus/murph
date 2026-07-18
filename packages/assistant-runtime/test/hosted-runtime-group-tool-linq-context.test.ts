@@ -165,15 +165,21 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     await groupTool.request({
       action: "ask_member",
       grantId: "hdg_calendar",
-      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
-      originSessionId: "session_group",
+      origin: {
+        assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
       question: "Are you available Tuesday afternoon?",
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "ask_member",
       grantId: "hdg_calendar",
-      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
-      originSessionId: "session_group",
+      origin: {
+        assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
       question: "Are you available Tuesday afternoon?",
     });
 
@@ -376,8 +382,11 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       {
         action: "ask_member" as const,
         grantId: "hdg_calendar",
-        originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
-        originSessionId: "session_group",
+        origin: {
+          assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+          kind: "accepted_input" as const,
+          sessionId: "session_group",
+        },
         question: "Are you available Tuesday afternoon?",
       },
       {

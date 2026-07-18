@@ -127,6 +127,14 @@ const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
+const ASSISTANT_NOTIFICATION_INTERNAL_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'notification-decision',
+  threadScope: 'isolated-thread',
+  toolProfile: 'internal-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -136,10 +144,15 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy = {
-  kind: 'maintenance-exact-skip'
-  privateSummary: string
-}
+export type AssistantNotificationTurnPolicy =
+  | {
+      kind: 'maintenance-exact-skip'
+      privateSummary: string
+    }
+  | {
+      kind: 'internal-exact-skip'
+      privateSummary: string
+    }
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -194,6 +207,7 @@ export interface AssistantNotificationInput
       | 'reviewedAssistantAskCompletionExpiresAt'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
+      | 'scheduledInvocationAuthority'
       | 'scheduledOccurrenceAt'
       | 'serviceTier'
       | 'showThinkingTraces'
@@ -256,8 +270,8 @@ export async function sendAssistantNotificationLocal(
             }
           : null
       const resolved =
-        isAssistantNotificationMaintenanceExactSkip(input)
-          ? createAssistantMaintenanceNotificationResolvedSession({
+        isAssistantNotificationExactSkip(input)
+          ? createAssistantIsolatedNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
               message: messageInput,
@@ -334,28 +348,43 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const internalTurn = isAssistantNotificationInternalExactSkip(input)
+      const hostedNewsletterTool = internalTurn
+        ? null
+        : executionContext?.hosted?.newsletterTool ?? null
       const hostedDeviceTool =
-        !isAssistantNotificationMaintenanceExactSkip(input) &&
+        !isAssistantNotificationExactSkip(input) &&
         conversationScope === 'direct'
           ? executionContext?.hosted?.deviceTool ?? null
           : null
+      const hostedGroupTool = internalTurn
+        ? executionContext?.hosted?.groupTool ?? null
+        : null
       const hostedToolContext =
-        hostedNewsletterTool || hostedDeviceTool
+        hostedNewsletterTool || hostedDeviceTool || hostedGroupTool
           ? createAssistantHostedToolContext({
               deviceTool: hostedDeviceTool,
+              groupTool: hostedGroupTool,
               newsletterTool: hostedNewsletterTool,
               messageInput,
-              newsletterOutbox: {
-                turnId,
-                vault: input.vault,
-              },
-              recordNewsletterSendResult: (result) => {
-                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                  current: newsletterSendResult ?? null,
-                  next: result.result,
-                })
-              },
+              ...(hostedNewsletterTool
+                ? {
+                    newsletterOutbox: {
+                      turnId,
+                      vault: input.vault,
+                    },
+                  }
+                : {}),
+              ...(hostedNewsletterTool
+                ? {
+                    recordNewsletterSendResult: (result) => {
+                      newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
+                        current: newsletterSendResult ?? null,
+                        next: result.result,
+                      })
+                    },
+                  }
+                : {}),
               session: resolved.session,
             })
           : null
@@ -364,7 +393,7 @@ export async function sendAssistantNotificationLocal(
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
-        isAssistantNotificationMaintenanceExactSkip(input)
+        isAssistantNotificationExactSkip(input)
           ? null
           : startAssistantChannelTypingIndicator({
               channelDependencies:
@@ -507,9 +536,9 @@ export async function sendAssistantNotificationLocal(
           )
         }
 
-        if (isAssistantNotificationMaintenanceExactSkip(input)) {
+        if (isAssistantNotificationExactSkip(input)) {
           try {
-            assertAssistantMaintenanceNotificationDecision({
+            assertAssistantExactSkipNotificationDecision({
               decision,
               policy: input.turnPolicy,
             })
@@ -1168,9 +1197,9 @@ function buildAssistantNotificationMessageInput(
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
   const instructions = normalizeRequiredText(input.instructions, 'instructions')
-  // One overlay for every maintenance-turn divergence, so the fields cannot
-  // drift apart across separate conditional spreads.
-  const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
+  // Isolated no-delivery turns never participate in normal conversation memory
+  // or failure transcript audit. Maintenance alone receives maintenance evidence.
+  const isolatedTurnOverlay = isAssistantNotificationExactSkip(input)
     ? {
         codexConfigOverrides:
           ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
@@ -1178,7 +1207,7 @@ function buildAssistantNotificationMessageInput(
       }
     : {}
   return {
-    ...maintenanceOverlay,
+    ...isolatedTurnOverlay,
     abortSignal: input.abortSignal,
     actorId: input.actorId,
     alias: input.alias,
@@ -1223,6 +1252,7 @@ function buildAssistantNotificationMessageInput(
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
+    scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
@@ -1336,8 +1366,11 @@ async function deliverAssistantNotificationMessage(input: {
 function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
 ) {
-  return isAssistantNotificationMaintenanceExactSkip(input)
-    ? ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
+  if (isAssistantNotificationMaintenanceExactSkip(input)) {
+    return ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
+  }
+  return isAssistantNotificationInternalExactSkip(input)
+    ? ASSISTANT_NOTIFICATION_INTERNAL_TURN_PROFILE
     : ASSISTANT_NOTIFICATION_TURN_PROFILE
 }
 
@@ -1345,7 +1378,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
-  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
+  if (isAssistantNotificationExactSkip(input.input)) {
     return 'preserve-existing'
   }
 
@@ -1354,7 +1387,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
     : 'preserve-existing'
 }
 
-function createAssistantMaintenanceNotificationResolvedSession(input: {
+function createAssistantIsolatedNotificationResolvedSession(input: {
   boundaryDefaultTarget:
     Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
   defaults: Parameters<typeof resolveAssistantSessionTarget>[0]['defaults']
@@ -1404,6 +1437,19 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
+function isAssistantNotificationInternalExactSkip(
+  input: AssistantNotificationInput,
+): boolean {
+  return input.turnPolicy?.kind === 'internal-exact-skip'
+}
+
+function isAssistantNotificationExactSkip(
+  input: AssistantNotificationInput,
+): boolean {
+  return isAssistantNotificationMaintenanceExactSkip(input) ||
+    isAssistantNotificationInternalExactSkip(input)
+}
+
 // Only maintenance turns consume this signal (to decide whether a failed run
 // already performed non-replayable memory writes); it is derived from the
 // committed provider events rather than trusted from provider metadata.
@@ -1440,21 +1486,27 @@ function isAssistantMaintenanceMemoryMutationCommand(
   )
 }
 
-function assertAssistantMaintenanceNotificationDecision(input: {
+function assertAssistantExactSkipNotificationDecision(input: {
   decision: AssistantNotificationDecision
   policy: AssistantNotificationTurnPolicy | null | undefined
 }): void {
   if (
-    input.policy?.kind === 'maintenance-exact-skip' &&
+    input.policy &&
     input.decision.kind === 'skip' &&
     input.decision.privateSummary === input.policy.privateSummary
   ) {
     return
   }
 
+  if (input.policy?.kind === 'maintenance-exact-skip') {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+      'Assistant maintenance notification must return the exact configured skip decision.',
+    )
+  }
   throw new VaultCliError(
-    'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-    'Assistant maintenance notification must return the exact configured skip decision.',
+    'ASSISTANT_NOTIFICATION_INTERNAL_DECISION_INVALID',
+    'Assistant internal turn must return the exact configured skip decision.',
   )
 }
 
