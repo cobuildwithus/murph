@@ -503,6 +503,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const legacySchema = `product_test_remap_legacy_${randomUUID().replaceAll("-", "")}`;
       const freshSchema = `product_test_remap_fresh_${randomUUID().replaceAll("-", "")}`;
       const pristineSchema = `product_test_remap_pristine_${randomUUID().replaceAll("-", "")}`;
+      const latestPristineSchema
+        = `product_test_remap_latest_${randomUUID().replaceAll("-", "")}`;
       const firstDecision = await remapRow({
         sourceId: "manual",
         targetFoodId: "food-a",
@@ -516,7 +518,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
       });
 
       try {
-        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+        for (const portableSchema of [
+          legacySchema,
+          freshSchema,
+          pristineSchema,
+          latestPristineSchema,
+        ]) {
           await client.query(`
             CREATE SCHEMA ${portableSchema};
             CREATE TABLE ${portableSchema}.foods
@@ -532,11 +539,18 @@ describe.runIf(Boolean(testDatabaseUrl))(
               ('food-a', 'canonical-a', 'brand_site', 'food-a', 100,
                 'Target A', 'Example', '00012348', false, 'Target A Example'),
               ('food-b', 'canonical-b', 'brand_site', 'food-b', 100,
-                'Target B', 'Example', '00054321', false, 'Target B Example');
+                'Target B', 'Example', '00054321', false, 'Target B Example'),
+              ('food-c', 'canonical-c', 'brand_site', 'food-c', 100,
+                'Target C', 'Example', NULL, false, 'Target C Example');
           `);
         }
 
-        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+        for (const portableSchema of [
+          legacySchema,
+          freshSchema,
+          pristineSchema,
+          latestPristineSchema,
+        ]) {
           const isLegacy = portableSchema === legacySchema;
           await client.query(`
             INSERT INTO ${portableSchema}.product_tests (
@@ -560,6 +574,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
         const legacyUrl = portableDatabaseUrl(legacySchema);
         const freshUrl = portableDatabaseUrl(freshSchema);
         const pristineUrl = portableDatabaseUrl(pristineSchema);
+        const latestPristineUrl = portableDatabaseUrl(latestPristineSchema);
 
         for (const databaseUrl of [legacyUrl, freshUrl]) {
           expect((await runRemap(
@@ -612,8 +627,82 @@ describe.runIf(Boolean(testDatabaseUrl))(
               stderr: expect.stringContaining("non-monotonic generation"),
             });
         }
+
+        expect((await runRemap([secondDecision], ["--apply"])).stdout)
+          .toContain("mutations=1 noops=0");
+        for (const driftedSchema of [schemaName, legacySchema, freshSchema, pristineSchema]) {
+          await client.query(`
+            UPDATE ${driftedSchema}.product_tests
+            SET
+              food_id = NULL,
+              supplement_id = NULL,
+              match_method = 'source_only',
+              tested_product_name = 'Drifted Product'
+            WHERE source_key = 'catalog' AND tested_source_product_id = 'manual';
+            UPDATE ${driftedSchema}.product_tests
+            SET tested_product_name = 'Manual Product'
+            WHERE source_key = 'catalog' AND tested_source_product_id = 'manual';
+          `);
+        }
+
+        for (const databaseUrl of [scopedDatabaseUrl, legacyUrl, freshUrl, pristineUrl]) {
+          for (const obsoleteDecision of [firstDecision, secondDecision]) {
+            await expect(runRemap([obsoleteDecision], ["--apply"], databaseUrl))
+              .rejects.toMatchObject({
+                stderr: expect.stringContaining("non-monotonic generation"),
+              });
+          }
+        }
+
+        const thirdDecision = await remapRow({
+          sourceId: "manual",
+          targetFoodId: "food-c",
+          matchMethod: "manual_confirmed",
+          reviewNote: "The restored source identity and target C were re-reviewed.",
+        });
+        expect(thirdDecision.desired_remap_revision).toBe("3");
+
+        for (const databaseUrl of [
+          scopedDatabaseUrl,
+          legacyUrl,
+          freshUrl,
+          pristineUrl,
+          latestPristineUrl,
+        ]) {
+          expect((await runRemap([thirdDecision], ["--apply"], databaseUrl)).stdout)
+            .toContain("mutations=1 noops=0");
+        }
+
+        const generationThreeStates = await Promise.all(
+          [schemaName, legacySchema, freshSchema, pristineSchema, latestPristineSchema]
+            .map((portableSchema) => portableState(portableSchema, "manual")),
+        );
+        expect(new Set(
+          generationThreeStates.map((state) => state.current_state_fingerprint),
+        ).size).toBe(1);
+        expect(generationThreeStates[0]).toMatchObject({
+          food_id: "food-c",
+          match_method: "manual_confirmed",
+          remap_revision: "3",
+        });
+
+        for (const databaseUrl of [
+          scopedDatabaseUrl,
+          legacyUrl,
+          freshUrl,
+          pristineUrl,
+          latestPristineUrl,
+        ]) {
+          expect((await runRemap([thirdDecision], ["--apply"], databaseUrl)).stdout)
+            .toContain("mutations=0 noops=1");
+        }
       } finally {
-        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+        for (const portableSchema of [
+          legacySchema,
+          freshSchema,
+          pristineSchema,
+          latestPristineSchema,
+        ]) {
           await client.query(`DROP SCHEMA IF EXISTS ${portableSchema} CASCADE`);
         }
       }

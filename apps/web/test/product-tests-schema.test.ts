@@ -506,11 +506,11 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("product_tests_source_only_link_check");
     expect(schemaSql).toContain("product_tests_source_only_idx");
     expect(schemaSql).toContain("match_method = 'source_only'");
-    expect(schemaSql).toContain(
-      "murph_product_test_legacy_source_backed_origin(\n            source_food.data_origin",
+    expect(schemaSql).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_food\.data_origin/u,
     );
-    expect(schemaSql).toContain(
-      "murph_product_test_legacy_source_backed_origin(\n            source_supplement.data_origin",
+    expect(schemaSql).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_supplement\.data_origin/u,
     );
     const sourceSupplementRepairSql = schemaSql.slice(
       schemaSql.indexOf("FROM supplements source_supplement"),

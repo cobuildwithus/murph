@@ -106,9 +106,11 @@ Existing product-test link targets are preserved on default reruns only while
 the refreshed source row still names the same source product id, tested product
 name, tested brand, and tested UPC. If a source refresh reuses a result id for
 a different tested source product, the row is repaired back to `source_only`
-before the new source facts are applied. Any
+before the new source facts are applied, while retaining the group's reviewed
+generation high-watermark. Any
 legacy contaminant-source-backed product link is also repaired back to
-`source_only` by the schema before source-backed placeholder cleanup runs.
+`source_only` by the schema before source-backed placeholder cleanup runs, with
+the same high-watermark retention.
 That cleanup uses the closed set of historical placeholder origins rather than
 the current catalog-key set: a future source key that happens to equal a real
 label origin must not hide or invalidate that label.
@@ -226,7 +228,10 @@ timestamps. Revision zero means genuinely unreviewed `source_only` state;
 applying a reviewed decision assigns its exact artifact-owned revision to every
 covered observation instead of incrementing database-local history. Later
 source observations that inherit a reviewed group decision inherit that same
-revision. This preserves all required outcomes with the existing
+revision. Source identity drift or schema demotion clears a disproven link but
+retains the nondecreasing reviewed-generation high-watermark, so restoring old
+source facts cannot make an obsolete artifact valid again. This preserves all
+required outcomes with the existing
 `product_tests` owner:
 
 - the same committed artifact can bootstrap independently imported equivalent
@@ -425,7 +430,9 @@ multi-source refresh is not deletion authority. Existing reviewed links are
 preserved only when the refreshed source row still names the same source
 product id, tested product name, tested brand, canonical UPC, raw reported UPC,
 and published package size; source identity drift repairs the row back to
-`source_only` for review.
+`source_only` for review while retaining the group's reviewed-generation
+high-watermark. A replacement decision must use a strictly higher artifact
+generation; older and same-generation contradictory artifacts remain invalid.
 
 Canonical `tested_product_upc` values are checksum-valid GTIN-8/12/13/14 only.
 Formatting copied from a source, including invalid or incomplete identifiers,

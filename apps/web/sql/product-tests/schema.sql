@@ -560,7 +560,23 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = 0,
+  remap_revision = (
+    SELECT MAX(group_revision.remap_revision)
+    FROM product_tests group_revision
+    WHERE
+      group_revision.source_key = grouped_tests.source_key
+      AND (
+        (
+          grouped_tests.tested_source_product_id IS NOT NULL
+          AND group_revision.tested_source_product_id
+            = grouped_tests.tested_source_product_id
+        )
+        OR (
+          grouped_tests.tested_source_product_id IS NULL
+          AND group_revision.id = grouped_tests.id
+        )
+      )
+  ),
   imported_at = now()
 WHERE EXISTS (
   SELECT 1
@@ -814,39 +830,71 @@ ALTER TABLE product_tests
 CREATE INDEX IF NOT EXISTS product_tests_source_key_idx
   ON product_tests (source_key);
 
-UPDATE product_tests
+UPDATE product_tests grouped_tests
 SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = 0
-WHERE
-  (
-    (
-      food_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM foods source_food
-        WHERE
-          source_food.id = product_tests.food_id
-          AND murph_product_test_legacy_source_backed_origin(
-            source_food.data_origin
-          )
+  remap_revision = (
+    SELECT MAX(group_revision.remap_revision)
+    FROM product_tests group_revision
+    WHERE
+      group_revision.source_key = grouped_tests.source_key
+      AND (
+        (
+          grouped_tests.tested_source_product_id IS NOT NULL
+          AND group_revision.tested_source_product_id
+            = grouped_tests.tested_source_product_id
+        )
+        OR (
+          grouped_tests.tested_source_product_id IS NULL
+          AND group_revision.id = grouped_tests.id
+        )
+      )
+  )
+WHERE EXISTS (
+  SELECT 1
+  FROM product_tests legacy_target
+  WHERE
+    legacy_target.source_key = grouped_tests.source_key
+    AND (
+      (
+        grouped_tests.tested_source_product_id IS NOT NULL
+        AND legacy_target.tested_source_product_id
+          = grouped_tests.tested_source_product_id
+      )
+      OR (
+        grouped_tests.tested_source_product_id IS NULL
+        AND legacy_target.id = grouped_tests.id
       )
     )
-    OR (
-      supplement_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM supplements source_supplement
-        WHERE
-          source_supplement.id = product_tests.supplement_id
-          AND murph_product_test_legacy_source_backed_origin(
-            source_supplement.data_origin
-          )
+    AND (
+      (
+        legacy_target.food_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM foods source_food
+          WHERE
+            source_food.id = legacy_target.food_id
+            AND murph_product_test_legacy_source_backed_origin(
+              source_food.data_origin
+            )
+        )
+      )
+      OR (
+        legacy_target.supplement_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM supplements source_supplement
+          WHERE
+            source_supplement.id = legacy_target.supplement_id
+            AND murph_product_test_legacy_source_backed_origin(
+              source_supplement.data_origin
+            )
+        )
       )
     )
-  );
+);
 
 ALTER TABLE product_tests
   DROP CONSTRAINT IF EXISTS product_tests_source_only_link_check,

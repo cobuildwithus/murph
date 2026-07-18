@@ -136,36 +136,34 @@ BEGIN
 END $$;
 
 CREATE TEMP TABLE source_only_product_test_groups_to_demote ON COMMIT DROP AS
-SELECT incoming.source_key, incoming.tested_source_product_id
+SELECT
+  incoming.source_key,
+  incoming.tested_source_product_id,
+  MAX(existing.remap_revision) AS remap_revision
 FROM source_only_product_test_incoming_identities incoming
-WHERE
-  EXISTS (
-    SELECT 1
-    FROM product_tests existing
-    WHERE
-      existing.source_key = incoming.source_key
-      AND existing.tested_source_product_id = incoming.tested_source_product_id
-      AND NOT (
-        existing.tested_product_name IS NOT DISTINCT FROM incoming.tested_product_name
-        AND existing.tested_product_brand IS NOT DISTINCT FROM incoming.tested_product_brand
-        AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
-        AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
-        AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
-      )
-  );
+JOIN product_tests existing
+  ON existing.source_key = incoming.source_key
+  AND existing.tested_source_product_id = incoming.tested_source_product_id
+GROUP BY incoming.source_key, incoming.tested_source_product_id
+HAVING BOOL_OR(NOT (
+  existing.tested_product_name IS NOT DISTINCT FROM incoming.tested_product_name
+  AND existing.tested_product_brand IS NOT DISTINCT FROM incoming.tested_product_brand
+  AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
+  AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
+  AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
+));
 
 UPDATE product_tests existing
 SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = 0,
+  remap_revision = groups_to_demote.remap_revision,
   imported_at = now()
 FROM source_only_product_test_groups_to_demote groups_to_demote
 WHERE
   existing.source_key = groups_to_demote.source_key
-  AND existing.tested_source_product_id = groups_to_demote.tested_source_product_id
-  AND existing.match_method <> 'source_only';
+  AND existing.tested_source_product_id = groups_to_demote.tested_source_product_id;
 
 CREATE TEMP TABLE source_only_product_test_group_link_candidates ON COMMIT DROP AS
 SELECT DISTINCT
@@ -250,7 +248,6 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = 0,
   imported_at = now()
 FROM source_only_product_tests_import current_import
 WHERE
@@ -340,7 +337,11 @@ SELECT
   NULLIF(collected_on, '')::date,
   NULLIF(tested_on, '')::date,
   COALESCE(group_links.match_method, current_import.match_method),
-  COALESCE(group_links.remap_revision, 0),
+  COALESCE(
+    group_links.remap_revision,
+    groups_to_demote.remap_revision,
+    0
+  ),
   current_import.contaminant_key,
   current_import.contaminant_name,
   current_import.result_operator,
@@ -367,6 +368,10 @@ FROM source_only_product_tests_import current_import
 LEFT JOIN source_only_product_test_group_links group_links
   ON group_links.source_key = current_import.source_key
   AND group_links.tested_source_product_id
+    = NULLIF(current_import.tested_source_product_id, '')
+LEFT JOIN source_only_product_test_groups_to_demote groups_to_demote
+  ON groups_to_demote.source_key = current_import.source_key
+  AND groups_to_demote.tested_source_product_id
     = NULLIF(current_import.tested_source_product_id, '')
 ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET

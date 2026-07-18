@@ -106,11 +106,11 @@ describe("product-test measurement metadata contract", () => {
       "source_sample_count IS NULL OR source_sample_count > 0",
     );
     expect(schema).toContain("CREATE INDEX IF NOT EXISTS product_tests_source_key_idx");
-    expect(schema).toContain(
-      "murph_product_test_legacy_source_backed_origin(\n            source_food.data_origin",
+    expect(schema).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_food\.data_origin/u,
     );
-    expect(schema).toContain(
-      "murph_product_test_legacy_source_backed_origin(\n            source_supplement.data_origin",
+    expect(schema).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_supplement\.data_origin/u,
     );
     expect(sourceOnlyImport).toContain("source_only_product_test_group_links");
     expect(sourceOnlyImport).toContain("existing.remap_revision");
@@ -118,7 +118,7 @@ describe("product-test measurement metadata contract", () => {
       "remap_revision = group_links.remap_revision",
     );
     expect(sourceOnlyImport).toContain(
-      "COALESCE(group_links.remap_revision, 0)",
+      "groups_to_demote.remap_revision",
     );
     expect(sourceOnlyImport).toContain(
       "product_tests.match_method = 'source_only'",
@@ -834,18 +834,18 @@ describe.runIf(Boolean(testDatabaseUrl))(
           id, food_id, source_key, source_result_id, source_name,
           tested_product_name, tested_product_upc, tested_source_product_id,
           match_method, contaminant_key, contaminant_name, result_operator,
-          result_value, result_unit, result_basis
+          result_value, result_unit, result_basis, remap_revision
         ) VALUES
           (
             'catalog:legacy:lead', 'target-food', 'catalog', 'legacy-lead',
             'Catalog', 'Legacy Product', '036000291453', 'product-1',
-            'exact_upc', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass'
+            'exact_upc', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass', 5
           ),
           (
             'catalog:legacy:cadmium', 'target-food', 'catalog', 'legacy-cadmium',
             'Catalog', 'Legacy Product', '036000291453', 'product-1',
             'manual_confirmed', 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
-            'product_mass'
+            'product_mass', 7
           );
       `);
 
@@ -872,14 +872,14 @@ describe.runIf(Boolean(testDatabaseUrl))(
         {
           food_id: null,
           match_method: "source_only",
-          remap_revision: "0",
+          remap_revision: "7",
           tested_product_upc: null,
           tested_product_upc_raw: "036000291453",
         },
         {
           food_id: null,
           match_method: "source_only",
-          remap_revision: "0",
+          remap_revision: "7",
           tested_product_upc: null,
           tested_product_upc_raw: "036000291453",
         },
@@ -930,9 +930,121 @@ describe.runIf(Boolean(testDatabaseUrl))(
         {
           food_id: null,
           match_method: "source_only",
-          remap_revision: "0",
+          remap_revision: "7",
           tested_product_name: "Different Cinnamon",
         },
+      ]);
+    });
+
+    it("retains the reviewed high-watermark through complete identity replacement and restoration", async () => {
+      await client.query(`
+        INSERT INTO foods (id, data_origin)
+        VALUES ('target-food', 'brand_site');
+
+        INSERT INTO product_tests (
+          id, food_id, source_key, source_result_id, source_name,
+          tested_product_name, tested_product_brand, tested_product_upc_raw,
+          tested_source_product_id, match_method, remap_revision,
+          contaminant_key, contaminant_name, result_operator, result_value,
+          result_unit, result_basis
+        ) VALUES
+          (
+            'catalog:old:lead', 'target-food', 'catalog', 'old', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
+            'manual_confirmed', 5, 'lead', 'Lead', 'eq', 1, 'ppm',
+            'product_mass'
+          ),
+          (
+            'catalog:prior:cadmium', NULL, 'catalog', 'prior', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
+            'source_only', 7, 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
+            'product_mass'
+          );
+      `);
+
+      await runImport([{
+        id: "catalog:replacement:lead",
+        sourceResultId: "replacement",
+        contaminantKey: "lead",
+        contaminantName: "Lead",
+        lotCode: "LOT-B",
+        resultValue: "1",
+        testedProductName: "Different Cinnamon",
+      }], { replaceSource: true });
+      await runImport([{
+        id: "catalog:restored:lead",
+        sourceResultId: "restored",
+        contaminantKey: "lead",
+        contaminantName: "Lead",
+        lotCode: "LOT-C",
+        resultValue: "1",
+      }], { replaceSource: true });
+
+      const restored = await client.query<{
+        food_id: string | null;
+        match_method: string;
+        remap_revision: string;
+        source_result_id: string;
+        tested_product_name: string | null;
+      }>(`
+        SELECT
+          source_result_id,
+          food_id,
+          match_method,
+          remap_revision::text,
+          tested_product_name
+        FROM product_tests
+        WHERE source_key = 'catalog'
+      `);
+      expect(restored.rows).toEqual([{
+        source_result_id: "restored",
+        food_id: null,
+        match_method: "source_only",
+        remap_revision: "7",
+        tested_product_name: "Ground Cinnamon",
+      }]);
+    });
+
+    it("preserves the group high-watermark when schema repair demotes a legacy target", async () => {
+      await client.query(`
+        INSERT INTO foods (id, data_origin)
+        VALUES ('legacy-target', 'plasticlist_bay_area_2024');
+
+        INSERT INTO product_tests (
+          id, food_id, source_key, source_result_id, source_name,
+          tested_product_name, tested_source_product_id, match_method,
+          remap_revision, contaminant_key, contaminant_name, result_operator,
+          result_value, result_unit, result_basis
+        ) VALUES
+          (
+            'catalog:legacy-target:lead', 'legacy-target', 'catalog',
+            'legacy-target-lead', 'Catalog', 'Legacy Target', 'product-1',
+            'manual_confirmed', 5, 'lead', 'Lead', 'eq', 1, 'ppm',
+            'product_mass'
+          ),
+          (
+            'catalog:legacy-target:cadmium', NULL, 'catalog',
+            'legacy-target-cadmium', 'Catalog', 'Legacy Target', 'product-1',
+            'source_only', 7, 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
+            'product_mass'
+          );
+      `);
+
+      await client.query(schemaSql);
+
+      const repaired = await client.query<{
+        food_id: string | null;
+        match_method: string;
+        remap_revision: string;
+      }>(`
+        SELECT food_id, match_method, remap_revision::text
+        FROM product_tests
+        WHERE source_key = 'catalog'
+        ORDER BY contaminant_key
+      `);
+      expect(repaired.rows).toEqual([
+        { food_id: null, match_method: "source_only", remap_revision: "7" },
+        { food_id: null, match_method: "source_only", remap_revision: "7" },
       ]);
     });
 
