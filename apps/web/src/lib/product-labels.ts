@@ -1762,6 +1762,10 @@ function productLabelSourceFilterSql(columnSql: string): string {
   return `NOT murph_product_test_legacy_source_backed_origin(${columnSql})`;
 }
 
+function sqlStringLiteral(value: string): string {
+  return `'${value.replace(/'/gu, "''")}'`;
+}
+
 function isObjectRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === "object" && value !== null;
 }
