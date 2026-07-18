@@ -86,14 +86,20 @@ function createSnapshotTestCodec() {
   return { encryptInputs, encryptedValues };
 }
 
+function createPrismaClientTestDouble(value: object): PrismaClient {
+  // The generated client is wider than this unit's store seam. Each test
+  // supplies every Prisma method the operation can exercise.
+  return value as PrismaClient;
+}
+
 function createPrisma() {
   const updateMany = vi.fn().mockResolvedValue({ count: 1 });
   const tx = { hostedVaultShare: { updateMany } };
-  const prisma = {
+  const prisma = createPrismaClientTestDouble({
     $transaction: vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) =>
       callback(tx)
     ),
-  } as unknown as PrismaClient;
+  });
   return { prisma, updateMany };
 }
 
@@ -256,7 +262,7 @@ describe("readDeliverableHostedVaultShareProjectionScopes", () => {
 
     await expect(readDeliverableHostedVaultShareProjectionScopes({
       grantorMemberId: SHARE.grantorMemberId,
-      prisma: { hostedVaultShare: { findMany } } as unknown as PrismaClient,
+      prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
     })).resolves.toEqual([SLEEP_SCOPE, profileScope]);
   });
 });

@@ -92,6 +92,12 @@ function installCiphertexts(values: Record<string, string>): void {
   });
 }
 
+function createPrismaClientTestDouble(value: object): PrismaClient {
+  // The generated client is wider than this unit's transaction seam. The
+  // tests provide every method exercised by the shared-read operation.
+  return value as PrismaClient;
+}
+
 function createPrisma(input: {
   connections?: unknown[];
   group?: { members: Array<{ id: string; memberId: string }> } | null;
@@ -121,7 +127,7 @@ function createPrisma(input: {
   return {
     deviceConnectionFindMany,
     hostedVaultShareFindMany,
-    prisma: { $transaction: transaction } as unknown as PrismaClient,
+    prisma: createPrismaClientTestDouble({ $transaction: transaction }),
     transaction,
   };
 }
