@@ -9,6 +9,7 @@ import {
 } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 import { renderClientComponent } from "./render-client-component";
@@ -133,7 +134,7 @@ describe("Clinical Records connect page", () => {
     expect(queueMicrotask).toHaveBeenCalled();
   });
 
-  it("scrubs the claim before search and sends it only in the exact SMART start body", async () => {
+  it("scrubs the claim, sends it only in the SMART start body, and closes a committed BFCache flow", async () => {
     const claim = `cr_${"a".repeat(32)}`;
     mocks.requestHostedOnboardingJson
       .mockResolvedValueOnce({
@@ -199,6 +200,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
         method: "POST",
+        onSuccessfulResponseHeaders: expect.any(Function),
         payload: {
           claim,
           providerDirectoryEntryId: "epic-piedmont",
@@ -210,14 +212,16 @@ describe("Clinical Records connect page", () => {
       );
     });
     expect(String(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.url)).not.toContain(claim);
+    expect(JSON.stringify(rendered.replaceState.mock.lastCall?.[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Opening Epic");
 
     await restoreFromBackForwardCache(rendered);
 
-    expect(findButton(rendered, "Continue").disabled).toBe(false);
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).not.toContain("Piedmont Healthcare");
   });
 
-  it("blocks duplicate provider searches while the first request is pending", async () => {
+  it("blocks duplicate searches and ignores a stale response after BFCache restore", async () => {
     const claim = `cr_${"b".repeat(32)}`;
     let resolveSearch!: (value: unknown) => void;
     mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
@@ -275,10 +279,76 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(rendered.container.textContent).toContain("No matching Epic organizations found");
+    expect(rendered.container.textContent).not.toContain("No matching Epic organizations found");
     await vi.waitFor(() => {
       expect(input.hasAttribute("readOnly")).toBe(false);
     });
+  });
+
+  it("closes a stale SMART start after its committed response reaches a BFCache-restored page", async () => {
+    const claim = `cr_${"d".repeat(32)}`;
+    let resolveStart!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1",
+        ok: true,
+        providers: [{
+          brandName: "Piedmont Healthcare",
+          facilities: [],
+          id: "epic-piedmont",
+          sourceSystem: "epic-fhir",
+        }],
+      })
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveStart = resolve;
+      }));
+
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Accept health-data consent");
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => {
+      setInputValue(rendered.window, input, "Piedmont");
+    });
+    await submitProviderSearch(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Piedmont Healthcare");
+    });
+
+    await clickButton(rendered, "Continue");
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Opening Epic");
+    });
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveStart({
+        authorizationUrl: "https://epic.example.test/oauth2/authorize?state=safe-state",
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.assign).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
   });
 
   it("marks earlier results stale while a new search is pending", async () => {
@@ -490,7 +560,7 @@ describe("Clinical Records connect page", () => {
     expect(input.hasAttribute("readOnly")).toBe(false);
   });
 
-  it("refuses a non-HTTPS provider authorization redirect", async () => {
+  it("closes a committed connection flow when a successful response has a non-HTTPS redirect", async () => {
     const claim = `cr_${"d".repeat(32)}`;
     mocks.requestHostedOnboardingJson
       .mockResolvedValueOnce({
@@ -540,11 +610,69 @@ describe("Clinical Records connect page", () => {
     await clickButton(rendered, "Continue");
 
     await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain(
-        "Could not continue with Piedmont Healthcare",
-      );
+      expect(rendered.container.textContent).toContain("Connection link unavailable");
     });
     expect(rendered.assign).not.toHaveBeenCalled();
+  });
+
+  it("does not resurrect a server-rejected connection claim after remount", async () => {
+    const claim = `cr_${"e".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1",
+        ok: true,
+        providers: [{
+          brandName: "Piedmont Healthcare",
+          facilities: [],
+          id: "epic-piedmont",
+          sourceSystem: "epic-fhir",
+        }],
+      })
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "CLINICAL_RECORD_CONNECT_INTENT_USED",
+        message: "This connection link has already been used.",
+      }));
+
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Accept health-data consent");
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => {
+      setInputValue(rendered.window, input, "Piedmont");
+    });
+    await submitProviderSearch(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Piedmont Healthcare");
+    });
+    await clickButton(rendered, "Continue");
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Connection link unavailable");
+    });
+
+    await rendered.rerender(createElement(RecordsConnectClient, {
+      authenticated: true,
+      key: "reloaded",
+    }));
+
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).not.toContain("Accept health-data consent");
+    expect(JSON.stringify(rendered.window.history.state)).not.toContain(claim);
   });
 });
 
@@ -592,6 +720,50 @@ describe("Clinical Records status page", () => {
 
     await restoreFromBackForwardCache(rendered);
 
+    expect(findButton(rendered, "Connect Epic").disabled).toBe(false);
+  });
+
+  it("ignores a stale private-intent response after BFCache restore", async () => {
+    const claim = `cr_${"e".repeat(32)}`;
+    let resolveIntent!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
+      resolveIntent = resolve;
+    }));
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
+    });
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Connect Epic");
+    expect(rendered.container.textContent).toContain("Preparing private link");
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveIntent({
+        claim,
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.assign).not.toHaveBeenCalled();
     expect(findButton(rendered, "Connect Epic").disabled).toBe(false);
   });
 
@@ -664,6 +836,59 @@ describe("Clinical Records status page", () => {
     expect(disconnectNotice.getAttribute("tabindex")).toBe("-1");
     expect(disconnectNotice.className).toContain("focus-visible:ring-2");
     expect(disconnectNotice.className).not.toContain("focus:ring-2");
+  });
+
+  it("ignores a stale disconnect response after BFCache restore", async () => {
+    const connection = makeConnection();
+    let resolveDisconnect!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
+      resolveDisconnect = resolve;
+    }));
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [connection],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
+    });
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Disconnect");
+    const confirmButtons = Array.from(rendered.container.querySelectorAll("button"))
+      .filter((button) => button.textContent?.trim() === "Disconnect");
+    expect(confirmButtons).toHaveLength(2);
+    await act(async () => {
+      confirmButtons[1]?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rendered.container.textContent).toContain("Disconnecting");
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveDisconnect({
+        connectionId: connection.connectionId,
+        ok: true,
+        status: "disconnected",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent).toContain(connection.displayName);
+    expect(rendered.container.textContent).toContain("Partially imported");
+    expect(rendered.container.textContent).not.toContain("No active Epic connections");
+    expect(rendered.container.textContent).not.toContain("Epic connection disconnected");
   });
 
   it("uses an affirmative badge only for completion and truthful attention copy", async () => {
