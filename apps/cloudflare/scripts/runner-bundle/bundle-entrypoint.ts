@@ -90,12 +90,12 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // clarifiers, four-child hosted concurrency) it grew to ~7,489,000B local.
 // Rather than keep ratcheting this baseline by a few KB per merge on a
 // fast-moving shared main — which broke local dev:reset repeatedly because
-// local macOS runs ~40KB heavier than the CI Linux measurement — set a round
-// 7.5MB ceiling with deliberate operational headroom above the current
-// closure. This intentionally loosens the boot-surface creep guard; the
-// forbidden-input markers below and the fixed 9.3MB total ceiling remain the
-// hard backstops. Re-tighten to a measured value if boot-closure creep needs
-// active policing again.
+// local macOS runs ~40 KB heavier than the CI Linux measurement — use a round
+// 7.5 MB baseline. The variance tolerance and operational allowance below
+// provide the headroom. This intentionally loosens the boot-surface creep
+// guard; the forbidden-input markers below and fixed 9.3 MB total ceiling
+// remain the hard backstops. Re-tighten to a measured value if boot-closure
+// creep needs active policing again.
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_500_000;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the

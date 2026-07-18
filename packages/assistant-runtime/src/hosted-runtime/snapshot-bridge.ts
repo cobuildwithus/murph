@@ -431,6 +431,7 @@ async function createHostedWorkspaceV2Snapshot(
       });
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
       assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
+        generatedDeliveryFilesQuiescent: true,
         now: new Date(),
         pendingInputIds,
         protectPendingProviderCleanupEvidence:
@@ -441,8 +442,13 @@ async function createHostedWorkspaceV2Snapshot(
       if (
         hasAssistantRuntimeResiduePrunedFiles(
           assistantRuntimeResiduePruneResult,
-        )
+        ) ||
+        assistantRuntimeResiduePruneResult
+          .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
+        const generatedDeliveryCleanupSkipped =
+          assistantRuntimeResiduePruneResult
+            .generatedDeliveryCleanupSkippedUntrustedOutbox;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
@@ -451,8 +457,10 @@ async function createHostedWorkspaceV2Snapshot(
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
-          level: "info",
-          message: "Hosted workspace snapshot pruned assistant runtime residue.",
+          level: generatedDeliveryCleanupSkipped ? "warn" : "info",
+          message: generatedDeliveryCleanupSkipped
+            ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
+            : "Hosted workspace snapshot pruned assistant runtime residue.",
           phase: "checkpoint",
           userId: input.userId,
         });
@@ -1052,6 +1060,7 @@ function countAssistantRuntimeResiduePrunedFiles(
     result.acceptedTurnInputJournalsPruned +
     result.autoReplyEvidenceFilesPruned +
     result.autoReplyIntentProvenancePruned +
+    result.generatedDeliveryFilesPruned +
     result.hostedMailboxInputItemMappingsPruned +
     result.inputEventsPruned +
     result.receiptsPruned
@@ -1061,7 +1070,13 @@ function countAssistantRuntimeResiduePrunedFiles(
 function createAssistantRuntimeResiduePruneLogDetails(
   result: AssistantRuntimeResiduePruneResult | null,
 ): HostedRuntimeRedactedJson {
-  if (!result || !hasAssistantRuntimeResiduePrunedFiles(result)) {
+  if (
+    !result ||
+    (
+      !hasAssistantRuntimeResiduePrunedFiles(result) &&
+      !result.generatedDeliveryCleanupSkippedUntrustedOutbox
+    )
+  ) {
     return {};
   }
   return {
@@ -1073,6 +1088,12 @@ function createAssistantRuntimeResiduePruneLogDetails(
       result.autoReplyEvidenceGroupsPruned,
     prunedAssistantRuntimeAutoReplyIntentProvenanceCount:
       result.autoReplyIntentProvenancePruned,
+    prunedAssistantRuntimeGeneratedDeliveryBytes:
+      result.generatedDeliveryBytesPruned,
+    prunedAssistantRuntimeGeneratedDeliveryFileCount:
+      result.generatedDeliveryFilesPruned,
+    assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
+      result.generatedDeliveryCleanupSkippedUntrustedOutbox,
     prunedAssistantRuntimeHostedMailboxInputItemMappingCount:
       result.hostedMailboxInputItemMappingsPruned,
     prunedAssistantRuntimeInputEventCount: result.inputEventsPruned,

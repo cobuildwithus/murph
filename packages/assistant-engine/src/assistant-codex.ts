@@ -4981,6 +4981,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'send-vault-file' ||
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
