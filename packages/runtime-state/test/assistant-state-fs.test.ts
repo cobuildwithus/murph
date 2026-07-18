@@ -322,7 +322,7 @@ test("adoptAssistantStateFileIntoExclusiveName rejects a target replaced before 
     try {
       await assert.rejects(
         adoptAssistantStateFileIntoExclusiveName(sourcePath, targetPath),
-        /changed during adoption/u,
+        /exactly 1 hard link/u,
       );
     } finally {
       assistantStateFsRace.afterNextUnlink = null;

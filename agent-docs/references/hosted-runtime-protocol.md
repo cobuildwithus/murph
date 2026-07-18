@@ -772,7 +772,9 @@ idempotently re-adopts the same owned bytes. A generated send without the
 provider's semantic tool-call id fails before adoption; the process-local JSON-RPC
 request id is not a substitute. Adoption uses an atomic no-clobber hard link,
 verifies the captured inode, removes the friendly source name, and then carries
-that identity through tightening the single-link target to `0600`. A safe existing
+that identity through tightening the single-link target to `0600`. The verified
+target handle stays open across source unlink and chmod, so destination
+delete/recreate and inode reuse cannot substitute different bytes. A safe existing
 deterministic target is treated as the idempotent prior result, and an interrupted
 same-inode two-link transfer is completed before normal adoption; source or
 destination swaps and validation failures fail closed. Accepted limitation: this

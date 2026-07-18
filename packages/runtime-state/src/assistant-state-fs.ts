@@ -36,21 +36,11 @@ export async function ensureAssistantStateDir(directoryPath: string): Promise<vo
 }
 
 export async function adoptAssistantStateFile(filePath: string): Promise<void> {
-  await adoptAssistantStateFileMatching(filePath);
-}
-
-async function adoptAssistantStateFileMatching(
-  filePath: string,
-  expectedEntry?: Awaited<ReturnType<typeof lstat>>,
-): Promise<void> {
   assertAssistantStatePath(filePath);
   await assertAssistantStatePathHasNoSymlinks(filePath);
 
   const initialEntry = await lstat(filePath);
   assertRegularAssistantStateFile(filePath, initialEntry);
-  if (expectedEntry) {
-    assertSameAssistantStateFile(filePath, expectedEntry, initialEntry);
-  }
   assertAssistantStateFileLinkCount(filePath, initialEntry, 1);
 
   await ensureAssistantStateParentDirectory(filePath);
@@ -228,17 +218,51 @@ async function finishAssistantStateLinkTransfer(
   expectedEntry: Awaited<ReturnType<typeof lstat>>,
 ): Promise<void> {
   await assertAssistantStateLinkPair(sourcePath, targetPath, expectedEntry);
-  // Drop the friendly link before chmod so adoption only changes a
-  // single-link runtime-owned inode.
-  await unlink(sourcePath);
-  await adoptAssistantStateFileMatching(targetPath, expectedEntry);
+  const targetHandle = await open(
+    targetPath,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  try {
+    const linkedHandleEntry = await targetHandle.stat();
+    assertRegularAssistantStateFile(targetPath, linkedHandleEntry);
+    assertSameAssistantStateFile(targetPath, expectedEntry, linkedHandleEntry);
+    assertAssistantStateFileLinkCount(targetPath, linkedHandleEntry, 2);
 
-  await assertAssistantStatePathHasNoSymlinks(targetPath);
-  const finalTargetEntry = await lstat(targetPath);
-  assertRegularAssistantStateFile(targetPath, finalTargetEntry);
-  assertSameAssistantStateFile(targetPath, expectedEntry, finalTargetEntry);
-  assertAssistantStateFileLinkCount(targetPath, finalTargetEntry, 1);
-  assertAssistantStateFileMode(targetPath, finalTargetEntry.mode);
+    await assertAssistantStatePathHasNoSymlinks(targetPath);
+    const linkedPathEntry = await lstat(targetPath);
+    assertRegularAssistantStateFile(targetPath, linkedPathEntry);
+    assertSameAssistantStateFile(targetPath, linkedHandleEntry, linkedPathEntry);
+    assertAssistantStateFileLinkCount(targetPath, linkedPathEntry, 2);
+
+    // Keep the verified target handle open across source unlink and chmod.
+    // A destination replacement then changes only the path, never the inode
+    // whose permissions are tightened.
+    await unlink(sourcePath);
+    const singleLinkHandleEntry = await targetHandle.stat();
+    assertRegularAssistantStateFile(targetPath, singleLinkHandleEntry);
+    assertSameAssistantStateFile(
+      targetPath,
+      expectedEntry,
+      singleLinkHandleEntry,
+    );
+    assertAssistantStateFileLinkCount(targetPath, singleLinkHandleEntry, 1);
+
+    await targetHandle.chmod(ASSISTANT_STATE_FILE_MODE);
+    const adoptedHandleEntry = await targetHandle.stat();
+    assertRegularAssistantStateFile(targetPath, adoptedHandleEntry);
+    assertSameAssistantStateFile(targetPath, expectedEntry, adoptedHandleEntry);
+    assertAssistantStateFileLinkCount(targetPath, adoptedHandleEntry, 1);
+    assertAssistantStateFileMode(targetPath, adoptedHandleEntry.mode);
+
+    await assertAssistantStatePathHasNoSymlinks(targetPath);
+    const finalTargetEntry = await lstat(targetPath);
+    assertRegularAssistantStateFile(targetPath, finalTargetEntry);
+    assertSameAssistantStateFile(targetPath, adoptedHandleEntry, finalTargetEntry);
+    assertAssistantStateFileLinkCount(targetPath, finalTargetEntry, 1);
+    assertAssistantStateFileMode(targetPath, finalTargetEntry.mode);
+  } finally {
+    await targetHandle.close();
+  }
 }
 
 async function unlinkAssistantStateLinkTargetBestEffort(
