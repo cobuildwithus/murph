@@ -74,13 +74,15 @@ describe("product-test reviewed remap safety contract", () => {
     expect(script).not.toContain("apps/web/sql/supplements/schema.sql");
     expect(script).not.toContain("$script_dir/schema.sql");
     expect(sql).toContain("compare-and-set conflict with unexpected current link state");
-    expect(sql).toContain("'version', 'product-test-remap-preimage-fingerprint-v2'");
+    expect(sql).toContain("'version', 'product-test-remap-preimage-fingerprint-v3'");
     expect(sql).toContain("'observationRevisions'");
     expect(sql).not.toContain("'foodId', NULL::text");
     expect(sql).toContain("product test remap source fingerprint is stale");
     expect(sql).toContain("product test remap target fingerprint is stale");
     expect(sql).toContain("'testedPackageSize', MIN(tests.tested_package_size)");
-    expect(sql).toContain("tests.imported_at = plan.before_imported_at");
+    expect(sql).toContain("tests.remap_revision = plan.before_remap_revision");
+    expect(sql).toContain("'remap_revision', 'imported_at'");
+    expect(sql).not.toContain("imported_at = now()");
     expect(sql).toContain("valid GTIN checksums, canonical GTIN equality");
     expect(sql).toContain("exact_source_id proof does not match");
     expect(sql).toMatch(/\\if :remap_apply[\s\S]*pg_advisory_xact_lock/u);
@@ -199,6 +201,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           food_id TEXT,
           supplement_id TEXT,
           match_method TEXT NOT NULL,
+          remap_revision BIGINT NOT NULL DEFAULT 0,
           imported_at TIMESTAMPTZ NOT NULL
         );
       `);
@@ -284,8 +287,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       expect(manifest).toContain("source_result_id");
       expect(manifest).toContain("tested_package_size");
       expect(manifest).toContain("before_food_id");
-      expect(manifest).toContain("2000-01-01");
-      expect(manifest).toContain("2001-01-01");
+      expect(manifest).toContain("before_remap_revision");
+      expect(manifest).toContain("after_remap_revision");
 
       const replayed = await runRemap([row], ["--apply"]);
       expect(replayed.stdout).toContain("mode=apply decisions=1 mutations=0 noops=1 observation_rows=0");
@@ -364,7 +367,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       });
     });
 
-    it("invalidates package-size drift but ignores lot and best-by drift", async () => {
+    it("invalidates identity drift and source-observation drift", async () => {
       await client.query(`
         UPDATE ${schemaName}.product_tests
         SET tested_package_size = '500 mL', tested_lot_code = 'LOT-A', tested_best_by = '2027-01'
@@ -391,7 +394,17 @@ describe.runIf(Boolean(testDatabaseUrl))(
         SET tested_package_size = '500 mL', tested_lot_code = 'LOT-B', tested_best_by = '2028-06'
         WHERE tested_source_product_id = 'stale'
       `);
-      expect((await runRemap([reviewed])).stdout).toContain("mutations=1");
+      await expect(runRemap([reviewed])).rejects.toMatchObject({
+        stderr: expect.stringContaining("compare-and-set conflict"),
+      });
+
+      const refreshed = await remapRow({
+        sourceId: "stale",
+        targetFoodId: "food-a",
+        matchMethod: "manual_confirmed",
+        reviewNote: "The refreshed source observation was reviewed.",
+      });
+      expect((await runRemap([refreshed])).stdout).toContain("mutations=1");
     });
 
     it("rejects a different existing link instead of overwriting it", async () => {
@@ -463,12 +476,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
         .toContain("mutations=0 noops=1");
     });
 
-    it("rejects a mutating artifact after observation revisions change", async () => {
-      const staleArtifact = await remapRow({
+    it("keeps mutating artifacts portable across operational import times", async () => {
+      const portableArtifact = await remapRow({
         sourceId: "stale",
         targetFoodId: "food-a",
         matchMethod: "manual_confirmed",
-        reviewNote: "The current observation revision was reviewed.",
+        reviewNote: "The source-owned observation was reviewed.",
       });
       await client.query(`
         UPDATE ${schemaName}.product_tests
@@ -476,18 +489,64 @@ describe.runIf(Boolean(testDatabaseUrl))(
         WHERE tested_source_product_id = 'stale'
       `);
 
-      await expect(runRemap([staleArtifact], ["--apply"]))
-        .rejects.toMatchObject({
-          stderr: expect.stringContaining("compare-and-set conflict"),
-        });
+      expect((await runRemap([portableArtifact], ["--apply"])).stdout)
+        .toContain("mutations=1");
+    });
 
-      const freshArtifact = await remapRow({
-        sourceId: "stale",
+    it("applies one reviewed artifact to independently imported equivalent schemas", async () => {
+      const replicaSchema = `product_test_remap_replica_${randomUUID().replaceAll("-", "")}`;
+      const portableArtifact = await remapRow({
+        sourceId: "manual",
         targetFoodId: "food-a",
         matchMethod: "manual_confirmed",
-        reviewNote: "The refreshed observation revision was reviewed.",
+        reviewNote: "The equivalent source snapshot and target were reviewed.",
       });
-      expect((await runRemap([freshArtifact])).stdout).toContain("mutations=1");
+
+      try {
+        await client.query(`
+          CREATE SCHEMA ${replicaSchema};
+          CREATE TABLE ${replicaSchema}.foods
+            (LIKE ${schemaName}.foods INCLUDING ALL);
+          CREATE TABLE ${replicaSchema}.supplements
+            (LIKE ${schemaName}.supplements INCLUDING ALL);
+          CREATE TABLE ${replicaSchema}.product_tests
+            (LIKE ${schemaName}.product_tests INCLUDING ALL);
+          INSERT INTO ${replicaSchema}.foods
+          SELECT * FROM ${schemaName}.foods;
+          INSERT INTO ${replicaSchema}.supplements
+          SELECT * FROM ${schemaName}.supplements;
+          INSERT INTO ${replicaSchema}.product_tests
+          SELECT * FROM ${schemaName}.product_tests;
+          UPDATE ${replicaSchema}.product_tests
+          SET imported_at = imported_at + interval '30 days';
+        `);
+
+        const replicaDatabaseUrl = new URL(scopedDatabaseUrl);
+        replicaDatabaseUrl.searchParams.set(
+          "options",
+          `-csearch_path=${replicaSchema},${schemaName},public -cstatement_timeout=2000`,
+        );
+        expect((await runRemap(
+          [portableArtifact],
+          ["--apply"],
+          replicaDatabaseUrl.toString(),
+        )).stdout).toContain("mutations=1");
+
+        const replicaState = await client.query<{
+          food_id: string | null;
+          match_method: string;
+        }>(`
+          SELECT MIN(food_id) AS food_id, MIN(match_method) AS match_method
+          FROM ${replicaSchema}.product_tests
+          WHERE tested_source_product_id = 'manual'
+        `);
+        expect(replicaState.rows).toEqual([{
+          food_id: "food-a",
+          match_method: "manual_confirmed",
+        }]);
+      } finally {
+        await client.query(`DROP SCHEMA IF EXISTS ${replicaSchema} CASCADE`);
+      }
     });
 
     it("requires a review note for manual and explicit source-only decisions", async () => {
@@ -735,6 +794,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
     async function runRemap(
       rows: RemapRow[],
       args: string[] = [],
+      databaseUrl: string = scopedDatabaseUrl,
     ): Promise<{ stderr: string; stdout: string }> {
       const remapPath = path.join(workDir, `${randomUUID()}.tsv`);
       await writeFile(remapPath, serializeRemaps(rows), { mode: 0o600 });
@@ -742,7 +802,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
         cwd: process.cwd(),
         env: {
           ...process.env,
-          MURPH_LABELS_DB_URL: scopedDatabaseUrl,
+          MURPH_LABELS_DB_URL: databaseUrl,
           PRODUCT_TEST_REMAPS_TSV_PATH: remapPath,
         },
         maxBuffer: 1024 * 1024,
@@ -798,10 +858,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
               jsonb_build_array(
                 source_result_id,
                 contaminant_key,
-                to_char(
-                  imported_at AT TIME ZONE 'UTC',
-                  'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
-                )
+                remap_revision,
+                md5((
+                  to_jsonb(product_tests)
+                    - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+                )::text)
               )
               ORDER BY source_result_id, contaminant_key
             ) AS observation_revisions
@@ -846,7 +907,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
             'testedPackageSize', tested_package_size
           )::text) AS source_fingerprint,
           md5(jsonb_build_object(
-            'version', 'product-test-remap-preimage-fingerprint-v2',
+            'version', 'product-test-remap-preimage-fingerprint-v3',
             'foodId', food_id,
             'supplementId', supplement_id,
             'matchMethod', match_method,

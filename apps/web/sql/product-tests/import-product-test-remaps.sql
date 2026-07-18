@@ -177,10 +177,11 @@ SELECT
     jsonb_build_array(
       tests.source_result_id,
       tests.contaminant_key,
-      to_char(
-        tests.imported_at AT TIME ZONE 'UTC',
-        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
-      )
+      tests.remap_revision,
+      md5((
+        to_jsonb(tests)
+          - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+      )::text)
     )
     ORDER BY tests.source_result_id, tests.contaminant_key
   ) AS observation_revisions,
@@ -323,7 +324,7 @@ SELECT
     'targetFingerprint', current_state_targets.current_target_fingerprint
   )::text) AS current_link_state_fingerprint,
   md5(jsonb_build_object(
-    'version', 'product-test-remap-preimage-fingerprint-v2',
+    'version', 'product-test-remap-preimage-fingerprint-v3',
     'foodId', current_state_targets.food_id,
     'supplementId', current_state_targets.supplement_id,
     'matchMethod', current_state_targets.match_method,
@@ -548,7 +549,7 @@ SELECT
   tests.food_id AS before_food_id,
   tests.supplement_id AS before_supplement_id,
   tests.match_method AS before_match_method,
-  tests.imported_at AS before_imported_at,
+  tests.remap_revision AS before_remap_revision,
   plan.after_food_id,
   plan.after_supplement_id,
   plan.after_match_method,
@@ -574,7 +575,7 @@ BEGIN
     food_id = plan.after_food_id,
     supplement_id = plan.after_supplement_id,
     match_method = plan.after_match_method,
-    imported_at = now()
+    remap_revision = plan.before_remap_revision + 1
   FROM product_test_remap_mutation_rows plan
   WHERE
     tests.source_key = plan.source_key
@@ -583,7 +584,7 @@ BEGIN
     AND tests.food_id IS NOT DISTINCT FROM plan.before_food_id
     AND tests.supplement_id IS NOT DISTINCT FROM plan.before_supplement_id
     AND tests.match_method = plan.before_match_method
-    AND tests.imported_at = plan.before_imported_at;
+    AND tests.remap_revision = plan.before_remap_revision;
 
   GET DIAGNOSTICS updated_rows = ROW_COUNT;
   IF updated_rows <> expected_rows THEN
@@ -591,7 +592,7 @@ BEGIN
   END IF;
 END $$;
 
-\copy (SELECT source_key, source_result_id, contaminant_key, tested_source_product_id, tested_package_size, source_fingerprint, expected_current_state_fingerprint, current_state_fingerprint, desired_state_fingerprint, before_food_id, before_supplement_id, before_match_method, before_imported_at, after_food_id, after_supplement_id, after_match_method, target_fingerprint, now() AS after_imported_at FROM product_test_remap_mutation_rows ORDER BY source_key, source_result_id, contaminant_key) TO __MANIFEST_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true)
+\copy (SELECT source_key, source_result_id, contaminant_key, tested_source_product_id, tested_package_size, source_fingerprint, expected_current_state_fingerprint, current_state_fingerprint, desired_state_fingerprint, before_food_id, before_supplement_id, before_match_method, before_remap_revision, after_food_id, after_supplement_id, after_match_method, before_remap_revision + 1 AS after_remap_revision, target_fingerprint FROM product_test_remap_mutation_rows ORDER BY source_key, source_result_id, contaminant_key) TO __MANIFEST_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true)
 \endif
 
 SELECT format(

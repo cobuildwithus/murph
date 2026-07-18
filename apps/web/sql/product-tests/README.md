@@ -218,6 +218,24 @@ appears at most once in the TSV. If the upstream source product identity drifts,
 the source import repairs affected rows back to `source_only`, and this remap
 import fails until the reviewed TSV is regenerated or manually re-reviewed.
 
+Committed remaps are portable reviewed decisions, not database-instance
+commands. A mutating decision fingerprints the source-owned observation fields
+and the current `remap_revision`; it never fingerprints operational
+`imported_at` timestamps. Every imported observation starts at revision zero,
+and an actual reviewed link mutation increments its revision in the same
+transaction. This preserves all required outcomes with the existing
+`product_tests` owner:
+
+- the same committed artifact can bootstrap independently imported equivalent
+  databases even when their import timestamps differ;
+- a source-observation change or an intervening contradictory remap invalidates
+  an obsolete mutating artifact;
+- an artifact whose desired link state is already present remains a zero-write
+  replay.
+
+Do not add a separate remap history table or service. Source content plus the
+row-owned monotonic revision is the complete mutation preimage.
+
 Import reviewed remaps with:
 
 ```sh

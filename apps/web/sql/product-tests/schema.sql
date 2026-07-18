@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS product_tests (
   uncertainty_unit TEXT,
   lab_name TEXT,
   test_method TEXT,
+  remap_revision BIGINT NOT NULL DEFAULT 0,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (source_key, source_result_id, contaminant_key),
   CONSTRAINT product_tests_id_check
@@ -515,7 +516,9 @@ CREATE TABLE IF NOT EXISTS product_tests (
   CONSTRAINT product_tests_lab_name_check
     CHECK (lab_name IS NULL OR btrim(lab_name) <> ''),
   CONSTRAINT product_tests_test_method_check
-    CHECK (test_method IS NULL OR btrim(test_method) <> '')
+    CHECK (test_method IS NULL OR btrim(test_method) <> ''),
+  CONSTRAINT product_tests_remap_revision_check
+    CHECK (remap_revision >= 0)
 );
 
 ALTER TABLE product_tests
@@ -541,7 +544,8 @@ ALTER TABLE product_tests
   ADD COLUMN IF NOT EXISTS reporting_limit_value NUMERIC,
   ADD COLUMN IF NOT EXISTS reporting_limit_unit TEXT,
   ADD COLUMN IF NOT EXISTS uncertainty_value NUMERIC,
-  ADD COLUMN IF NOT EXISTS uncertainty_unit TEXT;
+  ADD COLUMN IF NOT EXISTS uncertainty_unit TEXT,
+  ADD COLUMN IF NOT EXISTS remap_revision BIGINT NOT NULL DEFAULT 0;
 
 UPDATE product_tests
 SET evidence_type = 'laboratory_measurement'
@@ -556,6 +560,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
+  remap_revision = remap_revision + 1,
   imported_at = now()
 WHERE EXISTS (
   SELECT 1
@@ -660,6 +665,9 @@ ALTER TABLE product_tests
   DROP CONSTRAINT IF EXISTS product_tests_source_sample_count_check,
   ADD CONSTRAINT product_tests_source_sample_count_check
     CHECK (source_sample_count IS NULL OR source_sample_count > 0),
+  DROP CONSTRAINT IF EXISTS product_tests_remap_revision_check,
+  ADD CONSTRAINT product_tests_remap_revision_check
+    CHECK (remap_revision >= 0),
   DROP CONSTRAINT IF EXISTS product_tests_tested_lot_code_check,
   ADD CONSTRAINT product_tests_tested_lot_code_check
     CHECK (tested_lot_code IS NULL OR btrim(tested_lot_code) <> ''),
@@ -810,7 +818,8 @@ UPDATE product_tests
 SET
   food_id = NULL,
   supplement_id = NULL,
-  match_method = 'source_only'
+  match_method = 'source_only',
+  remap_revision = remap_revision + 1
 WHERE
   (
     (

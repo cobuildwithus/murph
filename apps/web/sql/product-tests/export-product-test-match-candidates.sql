@@ -16,7 +16,7 @@ WITH source_products AS MATERIALIZED (
     MIN(tests.supplement_id) AS current_supplement_id,
     MIN(tests.match_method) AS current_match_method,
     md5(jsonb_build_object(
-      'version', 'product-test-remap-preimage-fingerprint-v2',
+      'version', 'product-test-remap-preimage-fingerprint-v3',
       'foodId', MIN(tests.food_id),
       'supplementId', MIN(tests.supplement_id),
       'matchMethod', MIN(tests.match_method),
@@ -25,10 +25,11 @@ WITH source_products AS MATERIALIZED (
         jsonb_build_array(
           tests.source_result_id,
           tests.contaminant_key,
-          to_char(
-            tests.imported_at AT TIME ZONE 'UTC',
-            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
-          )
+          tests.remap_revision,
+          md5((
+            to_jsonb(tests)
+              - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+          )::text)
         )
         ORDER BY tests.source_result_id, tests.contaminant_key
       )

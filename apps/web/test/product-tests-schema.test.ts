@@ -568,6 +568,8 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("RENAME COLUMN authority_url TO threshold_url");
     expect(schemaSql).toContain("DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check");
     expect(schemaSql).toContain("DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check");
+    expect(schemaSql).toContain("remap_revision BIGINT NOT NULL DEFAULT 0");
+    expect(schemaSql).toContain("product_tests_remap_revision_check");
     expect(schemaSql).not.toContain("authority_key,\n    threshold_unit");
     expect(schemaSql).toContain("ALTER TABLE IF EXISTS foods\n  ADD COLUMN IF NOT EXISTS serving_grams NUMERIC");
     expect(schemaSql).toContain("ALTER TABLE IF EXISTS supplements\n  ADD COLUMN IF NOT EXISTS serving_grams NUMERIC");
@@ -793,6 +795,9 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain(".product-tests-work/seed-data/thresholds/");
     expect(readme).toContain("Reviewed Remaps");
     expect(readme).toContain("import-product-test-remaps.sh");
+    expect(readme).toContain("Committed remaps are portable reviewed decisions");
+    expect(readme).toContain("an intervening contradictory remap invalidates");
+    expect(readme).toContain("already present remains a zero-write");
     expect(readme).toContain("Supplement Label Imports");
     expect(readme).toContain("apps/web/sql/supplements/import.sh");
     expect(readme).toContain("apps/web/sql/supplements/import-dailymed.sh");

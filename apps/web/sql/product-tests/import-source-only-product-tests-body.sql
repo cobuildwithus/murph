@@ -159,6 +159,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
+  remap_revision = remap_revision + 1,
   imported_at = now()
 FROM source_only_product_test_groups_to_demote groups_to_demote
 WHERE
@@ -244,6 +245,10 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
+  remap_revision = remap_revision + CASE
+    WHEN tests.match_method = 'source_only' THEN 0
+    ELSE 1
+  END,
   imported_at = now()
 FROM source_only_product_tests_import current_import
 WHERE
@@ -373,6 +378,13 @@ DO UPDATE SET
   match_method = CASE
     WHEN product_tests.match_method = 'source_only' THEN EXCLUDED.match_method
     ELSE product_tests.match_method
+  END,
+  remap_revision = CASE
+    WHEN
+      product_tests.match_method = 'source_only'
+      AND EXCLUDED.match_method <> 'source_only'
+      THEN product_tests.remap_revision + 1
+    ELSE product_tests.remap_revision
   END,
   source_name = EXCLUDED.source_name,
   source_url = EXCLUDED.source_url,
