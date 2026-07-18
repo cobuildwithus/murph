@@ -113,6 +113,13 @@ describe("product-test measurement metadata contract", () => {
       "murph_product_test_legacy_source_backed_origin(\n            source_supplement.data_origin",
     );
     expect(sourceOnlyImport).toContain("source_only_product_test_group_links");
+    expect(sourceOnlyImport).toContain("existing.remap_revision");
+    expect(sourceOnlyImport).toContain(
+      "remap_revision = group_links.remap_revision",
+    );
+    expect(sourceOnlyImport).toContain(
+      "COALESCE(group_links.remap_revision, 0)",
+    );
     expect(sourceOnlyImport).toContain(
       "product_tests.match_method = 'source_only'",
     );
@@ -438,11 +445,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
           tested_product_name, tested_product_brand, tested_product_upc,
           tested_product_upc_raw, tested_source_product_id, match_method, contaminant_key,
           contaminant_name, result_operator, result_value, result_unit,
-          result_basis
+          result_basis, remap_revision
         ) VALUES (
           'catalog:retired:lead', 'target-food', 'catalog', 'retired', 'Catalog',
           'Ground Cinnamon', 'Example Spice', NULL, '12345678901', 'product-1',
-          'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass'
+          'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass', 7
         );
       `);
 
@@ -458,9 +465,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const result = await client.query<{
         food_id: string | null;
         match_method: string;
+        remap_revision: string;
         source_result_id: string;
       }>(`
-        SELECT source_result_id, food_id, match_method
+        SELECT source_result_id, food_id, match_method, remap_revision::text
         FROM product_tests
         WHERE source_key = 'catalog'
       `);
@@ -468,6 +476,48 @@ describe.runIf(Boolean(testDatabaseUrl))(
         source_result_id: "replacement",
         food_id: "target-food",
         match_method: "manual_confirmed",
+        remap_revision: "7",
+      }]);
+    });
+
+    it("carries an explicit reviewed source-only generation to later observations", async () => {
+      await client.query(`
+        INSERT INTO product_tests (
+          id, source_key, source_result_id, source_name,
+          tested_product_name, tested_product_brand, tested_product_upc_raw,
+          tested_source_product_id, match_method, remap_revision,
+          contaminant_key, contaminant_name, result_operator, result_value,
+          result_unit, result_basis
+        ) VALUES (
+          'catalog:old:lead', 'catalog', 'old', 'Catalog',
+          'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
+          'source_only', 4, 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass'
+        )
+      `);
+
+      await runImport([{
+        id: "catalog:new:cadmium",
+        sourceResultId: "new",
+        contaminantKey: "cadmium",
+        contaminantName: "Cadmium",
+        lotCode: "LOT-B",
+        resultValue: "0.2",
+      }]);
+
+      const generations = await client.query<{
+        match_methods: string;
+        remap_revisions: string;
+      }>(`
+        SELECT
+          COUNT(DISTINCT match_method)::text AS match_methods,
+          string_agg(DISTINCT remap_revision::text, ',' ORDER BY remap_revision::text)
+            AS remap_revisions
+        FROM product_tests
+        WHERE source_key = 'catalog' AND tested_source_product_id = 'product-1'
+      `);
+      expect(generations.rows).toEqual([{
+        match_methods: "1",
+        remap_revisions: "4",
       }]);
     });
 
@@ -591,18 +641,18 @@ describe.runIf(Boolean(testDatabaseUrl))(
           tested_product_name, tested_product_brand, tested_product_upc_raw,
           tested_source_product_id, match_method, contaminant_key,
           contaminant_name, result_operator, result_value, result_unit,
-          result_basis
+          result_basis, remap_revision
         ) VALUES
           (
             'catalog:old-1:lead', 'target-food', 'catalog', 'old-1', 'Catalog',
             'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
-            'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass'
+            'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass', 7
           ),
           (
             'catalog:old-2:cadmium', NULL, 'catalog', 'old-2', 'Catalog',
             'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
             'source_only', 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
-            'product_mass'
+            'product_mass', 0
           );
       `);
 
@@ -617,12 +667,14 @@ describe.runIf(Boolean(testDatabaseUrl))(
 
       const state = await client.query<{
         linked: string;
+        revisions: string;
         rows: string;
         target_states: string;
       }>(`
         SELECT
           COUNT(*)::text AS rows,
           COUNT(*) FILTER (WHERE match_method <> 'source_only')::text AS linked,
+          COUNT(DISTINCT remap_revision)::text AS revisions,
           COUNT(DISTINCT jsonb_build_array(
             food_id,
             supplement_id,
@@ -634,6 +686,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       expect(state.rows).toEqual([{
         rows: "3",
         linked: "3",
+        revisions: "1",
         target_states: "1",
       }]);
     });
@@ -738,6 +791,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
       await client.query(`
         ALTER TABLE product_tests
           DROP CONSTRAINT product_tests_tested_product_upc_check;
+        ALTER TABLE product_tests
+          DROP COLUMN remap_revision;
 
         INSERT INTO product_tests (
           id, source_key, source_result_id, source_name,
@@ -799,12 +854,14 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const migrated = await client.query<{
         food_id: string | null;
         match_method: string;
+        remap_revision: string;
         tested_product_upc: string | null;
         tested_product_upc_raw: string | null;
       }>(`
         SELECT
           food_id,
           match_method,
+          remap_revision::text,
           tested_product_upc,
           tested_product_upc_raw
         FROM product_tests
@@ -815,12 +872,14 @@ describe.runIf(Boolean(testDatabaseUrl))(
         {
           food_id: null,
           match_method: "source_only",
+          remap_revision: "0",
           tested_product_upc: null,
           tested_product_upc_raw: "036000291453",
         },
         {
           food_id: null,
           match_method: "source_only",
+          remap_revision: "0",
           tested_product_upc: null,
           tested_product_upc_raw: "036000291453",
         },
@@ -837,11 +896,11 @@ describe.runIf(Boolean(testDatabaseUrl))(
           tested_product_name, tested_product_brand, tested_product_upc,
           tested_product_upc_raw, tested_source_product_id, match_method, contaminant_key,
           contaminant_name, result_operator, result_value, result_unit,
-          result_basis
+          result_basis, remap_revision
         ) VALUES (
           'catalog:old:lead', 'target-food', 'catalog', 'old', 'Catalog',
           'Ground Cinnamon', 'Example Spice', NULL, '12345678901', 'product-1',
-          'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass'
+          'manual_confirmed', 'lead', 'Lead', 'eq', 1, 'ppm', 'product_mass', 7
         );
       `);
 
@@ -860,9 +919,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const result = await client.query<{
         food_id: string | null;
         match_method: string;
+        remap_revision: string;
         tested_product_name: string | null;
       }>(`
-        SELECT food_id, match_method, tested_product_name
+        SELECT food_id, match_method, remap_revision::text, tested_product_name
         FROM product_tests
         WHERE source_key = 'catalog' AND source_result_id = 'old'
       `);
@@ -870,6 +930,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
         {
           food_id: null,
           match_method: "source_only",
+          remap_revision: "0",
           tested_product_name: "Different Cinnamon",
         },
       ]);
@@ -885,12 +946,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
           tested_product_name, tested_product_brand, tested_product_upc_raw,
           tested_source_product_id, tested_lot_code, tested_package_size,
           match_method, contaminant_key, contaminant_name, result_operator,
-          result_value, result_unit, result_basis
+          result_value, result_unit, result_basis, remap_revision
         ) VALUES (
           'catalog:old:lead', 'target-food', 'catalog', 'old', 'Catalog',
           'Ground Cinnamon', 'Example Spice', '12345678901', 'product-1',
           'LOT-A', '1 L', 'manual_confirmed', 'lead', 'Lead', 'eq', 1,
-          'ppm', 'product_mass'
+          'ppm', 'product_mass', 7
         );
       `);
 
@@ -907,15 +968,17 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const result = await client.query<{
         food_id: string | null;
         match_method: string;
+        remap_revision: string;
         tested_lot_code: string | null;
       }>(`
-        SELECT food_id, match_method, tested_lot_code
+        SELECT food_id, match_method, remap_revision::text, tested_lot_code
         FROM product_tests
         WHERE source_key = 'catalog' AND source_result_id = 'old'
       `);
       expect(result.rows).toEqual([{
         food_id: "target-food",
         match_method: "manual_confirmed",
+        remap_revision: "7",
         tested_lot_code: "LOT-B",
       }]);
     });

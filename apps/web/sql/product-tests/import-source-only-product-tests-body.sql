@@ -159,7 +159,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = remap_revision + 1,
+  remap_revision = 0,
   imported_at = now()
 FROM source_only_product_test_groups_to_demote groups_to_demote
 WHERE
@@ -173,7 +173,8 @@ SELECT DISTINCT
   incoming.tested_source_product_id,
   existing.food_id,
   existing.supplement_id,
-  existing.match_method
+  existing.match_method,
+  existing.remap_revision
 FROM source_only_product_test_incoming_identities incoming
 JOIN product_tests existing
   ON existing.source_key = incoming.source_key
@@ -183,7 +184,10 @@ JOIN product_tests existing
   AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
   AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
   AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
-  AND existing.match_method <> 'source_only';
+  AND (
+    existing.match_method <> 'source_only'
+    OR existing.remap_revision > 0
+  );
 
 DO $$
 BEGIN
@@ -207,6 +211,7 @@ SET
   food_id = group_links.food_id,
   supplement_id = group_links.supplement_id,
   match_method = group_links.match_method,
+  remap_revision = group_links.remap_revision,
   imported_at = now()
 FROM
   source_only_product_test_group_links group_links,
@@ -245,10 +250,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = remap_revision + CASE
-    WHEN tests.match_method = 'source_only' THEN 0
-    ELSE 1
-  END,
+  remap_revision = 0,
   imported_at = now()
 FROM source_only_product_tests_import current_import
 WHERE
@@ -289,6 +291,7 @@ INSERT INTO product_tests (
   collected_on,
   tested_on,
   match_method,
+  remap_revision,
   contaminant_key,
   contaminant_name,
   result_operator,
@@ -337,6 +340,7 @@ SELECT
   NULLIF(collected_on, '')::date,
   NULLIF(tested_on, '')::date,
   COALESCE(group_links.match_method, current_import.match_method),
+  COALESCE(group_links.remap_revision, 0),
   current_import.contaminant_key,
   current_import.contaminant_name,
   current_import.result_operator,
@@ -382,8 +386,8 @@ DO UPDATE SET
   remap_revision = CASE
     WHEN
       product_tests.match_method = 'source_only'
-      AND EXCLUDED.match_method <> 'source_only'
-      THEN product_tests.remap_revision + 1
+      AND EXCLUDED.remap_revision > 0
+      THEN EXCLUDED.remap_revision
     ELSE product_tests.remap_revision
   END,
   source_name = EXCLUDED.source_name,

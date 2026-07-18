@@ -19,7 +19,8 @@ describe("product test integrity audit", () => {
     expect(sql).toContain("RAISE EXCEPTION 'product test audit failed:");
     expect(sql).toContain("source product identity drift");
     expect(sql).toContain("tested_package_size");
-    expect(sql).toContain("source product has mixed target state");
+    expect(sql).toContain("source product has mixed target or remap revision state");
+    expect(sql).toContain("COUNT(DISTINCT remap_revision) > 1");
     expect(sql).toContain("exact UPC link lacks exclusive proof");
     expect(sql).toContain(
       "murph_product_test_canonical_gtin(tests.tested_product_upc)",

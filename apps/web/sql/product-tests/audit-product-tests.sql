@@ -108,8 +108,9 @@ BEGIN
       supplement_id,
       match_method
     )) > 1
+      OR COUNT(DISTINCT remap_revision) > 1
   ) THEN
-    RAISE EXCEPTION 'product test audit failed: source product has mixed target state';
+    RAISE EXCEPTION 'product test audit failed: source product has mixed target or remap revision state';
   END IF;
 
   IF EXISTS (

@@ -560,7 +560,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = remap_revision + 1,
+  remap_revision = 0,
   imported_at = now()
 WHERE EXISTS (
   SELECT 1
@@ -819,7 +819,7 @@ SET
   food_id = NULL,
   supplement_id = NULL,
   match_method = 'source_only',
-  remap_revision = remap_revision + 1
+  remap_revision = 0
 WHERE
   (
     (

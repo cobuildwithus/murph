@@ -17,9 +17,10 @@ Optional env:
 
 The TSV columns are: source_key, tested_source_product_id, tested_product_name,
 tested_product_brand, tested_product_upc, tested_package_size, source_fingerprint,
-expected_current_state_fingerprint, food_id, supplement_id, target_fingerprint,
-match_method, source_id_namespace, review_note. Use source_only with blank product
-ids and a blank target fingerprint.
+source_snapshot_fingerprint, expected_current_state_fingerprint,
+desired_remap_revision, food_id, supplement_id, target_fingerprint, match_method,
+source_id_namespace, review_note. Use source_only with blank product ids and a
+blank target fingerprint.
 Use exact_upc, exact_source_id, or manual_confirmed with exactly one product id.
 exact_source_id additionally requires a mechanically verifiable namespace.
 
@@ -73,7 +74,7 @@ if [ ! -f "$remaps_tsv_path" ]; then
   exit 66
 fi
 
-expected_header=$'source_key\ttested_source_product_id\ttested_product_name\ttested_product_brand\ttested_product_upc\ttested_package_size\tsource_fingerprint\texpected_current_state_fingerprint\tfood_id\tsupplement_id\ttarget_fingerprint\tmatch_method\tsource_id_namespace\treview_note'
+expected_header=$'source_key\ttested_source_product_id\ttested_product_name\ttested_product_brand\ttested_product_upc\ttested_package_size\tsource_fingerprint\tsource_snapshot_fingerprint\texpected_current_state_fingerprint\tdesired_remap_revision\tfood_id\tsupplement_id\ttarget_fingerprint\tmatch_method\tsource_id_namespace\treview_note'
 IFS= read -r actual_header < "$remaps_tsv_path" || true
 actual_header="${actual_header%$'\r'}"
 if [ "$actual_header" != "$expected_header" ]; then

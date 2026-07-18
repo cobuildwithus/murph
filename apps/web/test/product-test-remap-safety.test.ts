@@ -19,7 +19,9 @@ const remapHeader = [
   "tested_product_upc",
   "tested_package_size",
   "source_fingerprint",
+  "source_snapshot_fingerprint",
   "expected_current_state_fingerprint",
+  "desired_remap_revision",
   "food_id",
   "supplement_id",
   "target_fingerprint",
@@ -73,13 +75,16 @@ describe("product-test reviewed remap safety contract", () => {
     expect(script).not.toContain("apps/web/sql/foods/schema.sql");
     expect(script).not.toContain("apps/web/sql/supplements/schema.sql");
     expect(script).not.toContain("$script_dir/schema.sql");
-    expect(sql).toContain("compare-and-set conflict with unexpected current link state");
-    expect(sql).toContain("'version', 'product-test-remap-preimage-fingerprint-v3'");
-    expect(sql).toContain("'observationRevisions'");
-    expect(sql).not.toContain("'foodId', NULL::text");
+    expect(sql).toContain("compare-and-set conflict with unexpected current decision state");
+    expect(sql).toContain("'version', 'product-test-remap-preimage-fingerprint-v4'");
+    expect(sql).toContain("'sourceSnapshotFingerprint'");
+    expect(sql).toMatch(
+      /'version', 'product-test-remap-preimage-fingerprint-v3'[\s\S]*'foodId', NULL::text[\s\S]*'matchMethod', 'source_only'[\s\S]*tests\.remap_revision/u,
+    );
     expect(sql).toContain("product test remap source fingerprint is stale");
     expect(sql).toContain("product test remap target fingerprint is stale");
     expect(sql).toContain("'testedPackageSize', MIN(tests.tested_package_size)");
+    expect(sql).toContain("remap_revision = plan.after_remap_revision");
     expect(sql).toContain("tests.remap_revision = plan.before_remap_revision");
     expect(sql).toContain("'remap_revision', 'imported_at'");
     expect(sql).not.toContain("imported_at = now()");
@@ -395,7 +400,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
         WHERE tested_source_product_id = 'stale'
       `);
       await expect(runRemap([reviewed])).rejects.toMatchObject({
-        stderr: expect.stringContaining("compare-and-set conflict"),
+        stderr: expect.stringContaining("source snapshot fingerprint is stale"),
       });
 
       const refreshed = await remapRow({
@@ -422,6 +427,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       expect(await currentState("conflict")).toMatchObject({
         food_id: "food-b",
         match_method: "manual_confirmed",
+        remap_revision: "0",
       });
     });
 
@@ -493,59 +499,123 @@ describe.runIf(Boolean(testDatabaseUrl))(
         .toContain("mutations=1");
     });
 
-    it("applies one reviewed artifact to independently imported equivalent schemas", async () => {
-      const replicaSchema = `product_test_remap_replica_${randomUUID().replaceAll("-", "")}`;
-      const portableArtifact = await remapRow({
+    it("converges migrated, independently imported, and pristine histories on absolute generations", async () => {
+      const legacySchema = `product_test_remap_legacy_${randomUUID().replaceAll("-", "")}`;
+      const freshSchema = `product_test_remap_fresh_${randomUUID().replaceAll("-", "")}`;
+      const pristineSchema = `product_test_remap_pristine_${randomUUID().replaceAll("-", "")}`;
+      const firstDecision = await remapRow({
         sourceId: "manual",
         targetFoodId: "food-a",
         matchMethod: "manual_confirmed",
         reviewNote: "The equivalent source snapshot and target were reviewed.",
       });
+      const explicitSourceOnly = await remapRow({
+        sourceId: "source-only",
+        matchMethod: "source_only",
+        reviewNote: "The source snapshot has no defensible product match.",
+      });
 
       try {
-        await client.query(`
-          CREATE SCHEMA ${replicaSchema};
-          CREATE TABLE ${replicaSchema}.foods
-            (LIKE ${schemaName}.foods INCLUDING ALL);
-          CREATE TABLE ${replicaSchema}.supplements
-            (LIKE ${schemaName}.supplements INCLUDING ALL);
-          CREATE TABLE ${replicaSchema}.product_tests
-            (LIKE ${schemaName}.product_tests INCLUDING ALL);
-          INSERT INTO ${replicaSchema}.foods
-          SELECT * FROM ${schemaName}.foods;
-          INSERT INTO ${replicaSchema}.supplements
-          SELECT * FROM ${schemaName}.supplements;
-          INSERT INTO ${replicaSchema}.product_tests
-          SELECT * FROM ${schemaName}.product_tests;
-          UPDATE ${replicaSchema}.product_tests
-          SET imported_at = imported_at + interval '30 days';
-        `);
+        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+          await client.query(`
+            CREATE SCHEMA ${portableSchema};
+            CREATE TABLE ${portableSchema}.foods
+              (LIKE ${schemaName}.foods INCLUDING ALL);
+            CREATE TABLE ${portableSchema}.supplements
+              (LIKE ${schemaName}.supplements INCLUDING ALL);
+            CREATE TABLE ${portableSchema}.product_tests
+              (LIKE ${schemaName}.product_tests INCLUDING ALL);
+            INSERT INTO ${portableSchema}.foods (
+              id, canonical_key, data_origin, data_origin_id,
+              data_origin_priority, name, brand, upc, off_market, search_text
+            ) VALUES
+              ('food-a', 'canonical-a', 'brand_site', 'food-a', 100,
+                'Target A', 'Example', '00012348', false, 'Target A Example'),
+              ('food-b', 'canonical-b', 'brand_site', 'food-b', 100,
+                'Target B', 'Example', '00054321', false, 'Target B Example');
+          `);
+        }
 
-        const replicaDatabaseUrl = new URL(scopedDatabaseUrl);
-        replicaDatabaseUrl.searchParams.set(
-          "options",
-          `-csearch_path=${replicaSchema},${schemaName},public -cstatement_timeout=2000`,
-        );
-        expect((await runRemap(
-          [portableArtifact],
-          ["--apply"],
-          replicaDatabaseUrl.toString(),
-        )).stdout).toContain("mutations=1");
+        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+          const isLegacy = portableSchema === legacySchema;
+          await client.query(`
+            INSERT INTO ${portableSchema}.product_tests (
+              source_key, source_result_id, contaminant_key,
+              tested_source_product_id, tested_product_name, tested_product_brand,
+              tested_product_upc, tested_product_upc_raw, tested_lot_code,
+              tested_best_by, tested_package_size, food_id, supplement_id,
+              match_method, remap_revision, imported_at
+            ) VALUES
+              ('catalog', 'manual-1', 'lead', 'manual', 'Manual Product', 'Example',
+                NULL, NULL, NULL, NULL, NULL, ${isLegacy ? "'food-a'" : "NULL"}, NULL,
+                ${isLegacy ? "'manual_confirmed'" : "'source_only'"}, 0, '2030-01-01'),
+              ('catalog', 'manual-2', 'cadmium', 'manual', 'Manual Product', 'Example',
+                NULL, NULL, NULL, NULL, NULL, ${isLegacy ? "'food-a'" : "NULL"}, NULL,
+                ${isLegacy ? "'manual_confirmed'" : "'source_only'"}, 0, '2031-01-01'),
+              ('catalog', 'source-only-1', 'lead', 'source-only', 'Unmatched Product', NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'source_only', 0, '2032-01-01');
+          `);
+        }
 
-        const replicaState = await client.query<{
-          food_id: string | null;
-          match_method: string;
-        }>(`
-          SELECT MIN(food_id) AS food_id, MIN(match_method) AS match_method
-          FROM ${replicaSchema}.product_tests
-          WHERE tested_source_product_id = 'manual'
-        `);
-        expect(replicaState.rows).toEqual([{
+        const legacyUrl = portableDatabaseUrl(legacySchema);
+        const freshUrl = portableDatabaseUrl(freshSchema);
+        const pristineUrl = portableDatabaseUrl(pristineSchema);
+
+        for (const databaseUrl of [legacyUrl, freshUrl]) {
+          expect((await runRemap(
+            [firstDecision, explicitSourceOnly],
+            ["--apply"],
+            databaseUrl,
+          )).stdout).toContain("mutations=2 noops=0");
+        }
+
+        expect(await portableState(legacySchema, "manual"))
+          .toEqual(await portableState(freshSchema, "manual"));
+        expect(await portableState(legacySchema, "source-only"))
+          .toEqual(await portableState(freshSchema, "source-only"));
+        expect(await portableState(legacySchema, "manual")).toMatchObject({
           food_id: "food-a",
+          remap_revision: "1",
+        });
+
+        await runRemap([firstDecision], ["--apply"]);
+        const secondDecision = await remapRow({
+          sourceId: "manual",
+          targetFoodId: "food-b",
+          matchMethod: "manual_confirmed",
+          reviewNote: "The first target was disproven and target B was reviewed.",
+        });
+        expect(secondDecision.desired_remap_revision).toBe("2");
+
+        for (const databaseUrl of [legacyUrl, freshUrl, pristineUrl]) {
+          expect((await runRemap([secondDecision], ["--apply"], databaseUrl)).stdout)
+            .toContain("mutations=1 noops=0");
+        }
+
+        const convergedStates = await Promise.all(
+          [legacySchema, freshSchema, pristineSchema]
+            .map((portableSchema) => portableState(portableSchema, "manual")),
+        );
+        expect(new Set(convergedStates.map((state) => state.current_state_fingerprint)).size)
+          .toBe(1);
+        expect(convergedStates[0]).toMatchObject({
+          food_id: "food-b",
           match_method: "manual_confirmed",
-        }]);
+          remap_revision: "2",
+        });
+
+        for (const databaseUrl of [legacyUrl, freshUrl, pristineUrl]) {
+          expect((await runRemap([secondDecision], ["--apply"], databaseUrl)).stdout)
+            .toContain("mutations=0 noops=1");
+          await expect(runRemap([firstDecision], ["--apply"], databaseUrl))
+            .rejects.toMatchObject({
+              stderr: expect.stringContaining("non-monotonic generation"),
+            });
+        }
       } finally {
-        await client.query(`DROP SCHEMA IF EXISTS ${replicaSchema} CASCADE`);
+        for (const portableSchema of [legacySchema, freshSchema, pristineSchema]) {
+          await client.query(`DROP SCHEMA IF EXISTS ${portableSchema} CASCADE`);
+        }
       }
     });
 
@@ -555,8 +625,14 @@ describe.runIf(Boolean(testDatabaseUrl))(
         matchMethod: "source_only",
         reviewNote: "No product-specific identity evidence was available.",
       });
-      const result = await runRemap([sourceOnly]);
-      expect(result.stdout).toContain("mutations=0 noops=1");
+      expect((await runRemap([sourceOnly], ["--apply"])).stdout)
+        .toContain("mutations=1 noops=0");
+      expect(await currentState("source-only")).toMatchObject({
+        match_method: "source_only",
+        remap_revision: "1",
+      });
+      expect((await runRemap([sourceOnly], ["--apply"])).stdout)
+        .toContain("mutations=0 noops=1");
 
       sourceOnly.review_note = "";
       await expect(runRemap([sourceOnly])).rejects.toMatchObject({
@@ -705,6 +781,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       expect(firstRows[0]?.runner_up_score).not.toBe("");
       expect(firstRows[0]?.candidate_score_margin).not.toBe("");
       expect(firstRows[0]?.current_match_method).toBe("source_only");
+      expect(firstRows[0]?.current_remap_revision).toBe("0");
       expect(firstRows[0]?.source_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
       expect(firstRows[0]?.source_snapshot_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
       expect(firstRows[0]?.target_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
@@ -745,7 +822,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
         tested_product_upc: top.tested_product_upc,
         tested_package_size: top.tested_package_size,
         source_fingerprint: top.source_fingerprint,
+        source_snapshot_fingerprint: top.source_snapshot_fingerprint,
         expected_current_state_fingerprint: top.current_state_fingerprint,
+        desired_remap_revision: String(BigInt(top.current_remap_revision) + 1n),
         food_id: top.candidate_id,
         supplement_id: "",
         target_fingerprint: top.target_fingerprint,
@@ -773,6 +852,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
       const options = JSON.parse(reviewRows[0]?.candidate_options_json ?? "[]") as unknown[];
       expect(options).toHaveLength(5);
       expect(reviewRows[0]?.source_fingerprint).toBe(top.source_fingerprint);
+      expect(reviewRows[0]?.source_snapshot_fingerprint)
+        .toBe(top.source_snapshot_fingerprint);
+      expect(reviewRows[0]?.desired_remap_revision).toBe("1");
       expect(reviewRows[0]?.target_fingerprint).toBe(top.target_fingerprint);
       expect((await stat(reviewPath)).mode & 0o777).toBe(0o600);
 
@@ -809,6 +891,97 @@ describe.runIf(Boolean(testDatabaseUrl))(
       });
     }
 
+    function portableDatabaseUrl(portableSchema: string): string {
+      const databaseUrl = new URL(scopedDatabaseUrl);
+      databaseUrl.searchParams.set(
+        "options",
+        `-csearch_path=${portableSchema},${schemaName},public -cstatement_timeout=2000`,
+      );
+      return databaseUrl.toString();
+    }
+
+    async function portableState(portableSchema: string, sourceId: string): Promise<{
+      current_state_fingerprint: string;
+      food_id: string | null;
+      match_method: string;
+      remap_revision: string;
+    }> {
+      const result = await client.query<{
+        current_state_fingerprint: string;
+        food_id: string | null;
+        match_method: string;
+        remap_revision: string;
+      }>(`
+        WITH source_group AS (
+          SELECT
+            source_key,
+            tested_source_product_id,
+            MIN(food_id) AS food_id,
+            MIN(supplement_id) AS supplement_id,
+            MIN(match_method) AS match_method,
+            MIN(remap_revision) AS remap_revision,
+            md5(jsonb_build_object(
+              'version', 'product-test-remap-preimage-fingerprint-v3',
+              'foodId', NULL::text,
+              'supplementId', NULL::text,
+              'matchMethod', 'source_only',
+              'targetFingerprint', NULL::text,
+              'observationRevisions', jsonb_agg(
+                jsonb_build_array(
+                  source_result_id,
+                  contaminant_key,
+                  0,
+                  md5((
+                    to_jsonb(product_tests)
+                      - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+                  )::text)
+                )
+                ORDER BY source_result_id, contaminant_key
+              )
+            )::text) AS source_snapshot_fingerprint
+          FROM ${portableSchema}.product_tests
+          WHERE source_key = 'catalog' AND tested_source_product_id = $1
+          GROUP BY source_key, tested_source_product_id
+        ),
+        source_with_target AS (
+          SELECT
+            source_group.*,
+            CASE WHEN current_food.id IS NOT NULL THEN md5(jsonb_build_object(
+              'version', 'product-test-target-fingerprint-v1',
+              'kind', 'food',
+              'id', current_food.id,
+              'canonicalKey', current_food.canonical_key,
+              'dataOrigin', current_food.data_origin,
+              'dataOriginId', current_food.data_origin_id,
+              'name', current_food.name,
+              'brand', current_food.brand,
+              'upc', current_food.upc,
+              'offMarket', current_food.off_market
+            )::text) END AS current_target_fingerprint
+          FROM source_group
+          LEFT JOIN ${portableSchema}.foods current_food
+            ON current_food.id = source_group.food_id
+        )
+        SELECT
+          food_id,
+          match_method,
+          remap_revision::text,
+          md5(jsonb_build_object(
+            'version', 'product-test-remap-preimage-fingerprint-v4',
+            'foodId', food_id,
+            'supplementId', supplement_id,
+            'matchMethod', match_method,
+            'targetFingerprint', current_target_fingerprint,
+            'remapRevision', remap_revision,
+            'sourceSnapshotFingerprint', source_snapshot_fingerprint
+          )::text) AS current_state_fingerprint
+        FROM source_with_target
+      `, [sourceId]);
+      const row = result.rows[0];
+      if (!row) throw new Error("missing portable-state fixture");
+      return row;
+    }
+
     async function runCandidateExport(outputPath: string): Promise<void> {
       await execFileAsync(
         "bash",
@@ -833,10 +1006,13 @@ describe.runIf(Boolean(testDatabaseUrl))(
       sourceId: string;
       sourceIdNamespace?: string;
       targetFoodId?: string;
+      desiredRemapRevision?: string;
     }): Promise<RemapRow> {
       const source = await client.query<{
+        current_remap_revision: string;
         current_state_fingerprint: string;
         source_fingerprint: string;
+        source_snapshot_fingerprint: string;
         tested_product_brand: string | null;
         tested_product_name: string | null;
         tested_package_size: string | null;
@@ -854,18 +1030,26 @@ describe.runIf(Boolean(testDatabaseUrl))(
             MIN(food_id) AS food_id,
             MIN(supplement_id) AS supplement_id,
             MIN(match_method) AS match_method,
-            jsonb_agg(
-              jsonb_build_array(
-                source_result_id,
-                contaminant_key,
-                remap_revision,
-                md5((
-                  to_jsonb(product_tests)
-                    - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
-                )::text)
+            MIN(remap_revision) AS current_remap_revision,
+            md5(jsonb_build_object(
+              'version', 'product-test-remap-preimage-fingerprint-v3',
+              'foodId', NULL::text,
+              'supplementId', NULL::text,
+              'matchMethod', 'source_only',
+              'targetFingerprint', NULL::text,
+              'observationRevisions', jsonb_agg(
+                jsonb_build_array(
+                  source_result_id,
+                  contaminant_key,
+                  0,
+                  md5((
+                    to_jsonb(product_tests)
+                      - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+                  )::text)
+                )
+                ORDER BY source_result_id, contaminant_key
               )
-              ORDER BY source_result_id, contaminant_key
-            ) AS observation_revisions
+            )::text) AS source_snapshot_fingerprint
           FROM ${schemaName}.product_tests
           WHERE source_key = 'catalog' AND tested_source_product_id = $1
           GROUP BY source_key, tested_source_product_id
@@ -896,6 +1080,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
           tested_product_brand,
           tested_product_upc,
           tested_package_size,
+          current_remap_revision,
+          source_snapshot_fingerprint,
           md5(jsonb_build_object(
             'version', 'product-test-source-fingerprint-v2',
             'sourceKey', source_key,
@@ -907,12 +1093,13 @@ describe.runIf(Boolean(testDatabaseUrl))(
             'testedPackageSize', tested_package_size
           )::text) AS source_fingerprint,
           md5(jsonb_build_object(
-            'version', 'product-test-remap-preimage-fingerprint-v3',
+            'version', 'product-test-remap-preimage-fingerprint-v4',
             'foodId', food_id,
             'supplementId', supplement_id,
             'matchMethod', match_method,
             'targetFingerprint', current_target_fingerprint,
-            'observationRevisions', observation_revisions
+            'remapRevision', current_remap_revision,
+            'sourceSnapshotFingerprint', source_snapshot_fingerprint
           )::text) AS current_state_fingerprint
         FROM source_with_target
       `, [input.sourceId]);
@@ -948,7 +1135,10 @@ describe.runIf(Boolean(testDatabaseUrl))(
         tested_product_upc: sourceRow.tested_product_upc ?? "",
         tested_package_size: sourceRow.tested_package_size ?? "",
         source_fingerprint: sourceRow.source_fingerprint,
+        source_snapshot_fingerprint: sourceRow.source_snapshot_fingerprint,
         expected_current_state_fingerprint: sourceRow.current_state_fingerprint,
+        desired_remap_revision: input.desiredRemapRevision
+          ?? String(BigInt(sourceRow.current_remap_revision) + 1n),
         food_id: input.targetFoodId ?? "",
         supplement_id: "",
         target_fingerprint: targetFingerprint,
@@ -962,13 +1152,19 @@ describe.runIf(Boolean(testDatabaseUrl))(
       food_id: string | null;
       imported_at: string;
       match_method: string;
+      remap_revision: string;
     }> {
       const result = await client.query<{
         food_id: string | null;
         imported_at: Date;
         match_method: string;
+        remap_revision: string;
       }>(`
-        SELECT food_id, match_method, MIN(imported_at) AS imported_at
+        SELECT
+          food_id,
+          match_method,
+          MIN(imported_at) AS imported_at,
+          MIN(remap_revision)::text AS remap_revision
         FROM ${schemaName}.product_tests
         WHERE source_key = 'catalog' AND tested_source_product_id = $1
         GROUP BY food_id, match_method
@@ -979,6 +1175,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
         food_id: row.food_id,
         imported_at: row.imported_at.toISOString(),
         match_method: row.match_method,
+        remap_revision: row.remap_revision,
       };
     }
 

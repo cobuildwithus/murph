@@ -17,7 +17,9 @@ CREATE TEMP TABLE product_test_remaps_import (
   tested_product_upc TEXT,
   tested_package_size TEXT,
   source_fingerprint TEXT NOT NULL,
+  source_snapshot_fingerprint TEXT NOT NULL,
   expected_current_state_fingerprint TEXT NOT NULL,
+  desired_remap_revision BIGINT NOT NULL,
   food_id TEXT,
   supplement_id TEXT,
   target_fingerprint TEXT,
@@ -100,9 +102,25 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM product_test_remaps_import remaps
+    WHERE remaps.source_snapshot_fingerprint !~ '^[0-9a-f]{32}$'
+  ) THEN
+    RAISE EXCEPTION 'product test remap row has missing or malformed source snapshot fingerprint';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
     WHERE remaps.expected_current_state_fingerprint !~ '^[0-9a-f]{32}$'
   ) THEN
     RAISE EXCEPTION 'product test remap row has missing or malformed expected current-state fingerprint';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE remaps.desired_remap_revision <= 0
+  ) THEN
+    RAISE EXCEPTION 'product test remap row requires a positive desired remap revision';
   END IF;
 
   IF EXISTS (
@@ -160,6 +178,7 @@ SELECT
   MIN(tests.food_id) AS food_id,
   MIN(tests.supplement_id) AS supplement_id,
   MIN(tests.match_method) AS match_method,
+  MIN(tests.remap_revision) AS remap_revision,
   COUNT(*) AS product_test_rows,
   COUNT(DISTINCT jsonb_build_array(
     tests.tested_product_name,
@@ -173,18 +192,26 @@ SELECT
     tests.supplement_id,
     tests.match_method
   )) AS current_target_variants,
-  jsonb_agg(
-    jsonb_build_array(
-      tests.source_result_id,
-      tests.contaminant_key,
-      tests.remap_revision,
-      md5((
-        to_jsonb(tests)
-          - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
-      )::text)
+  COUNT(DISTINCT tests.remap_revision) AS remap_revision_variants,
+  md5(jsonb_build_object(
+    'version', 'product-test-remap-preimage-fingerprint-v3',
+    'foodId', NULL::text,
+    'supplementId', NULL::text,
+    'matchMethod', 'source_only',
+    'targetFingerprint', NULL::text,
+    'observationRevisions', jsonb_agg(
+      jsonb_build_array(
+        tests.source_result_id,
+        tests.contaminant_key,
+        0,
+        md5((
+          to_jsonb(tests)
+            - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
+        )::text)
+      )
+      ORDER BY tests.source_result_id, tests.contaminant_key
     )
-    ORDER BY tests.source_result_id, tests.contaminant_key
-  ) AS observation_revisions,
+  )::text) AS source_snapshot_fingerprint,
   md5(jsonb_build_object(
     'version', 'product-test-source-fingerprint-v2',
     'sourceKey', tests.source_key,
@@ -317,19 +344,21 @@ WITH current_state_targets AS (
 SELECT
   current_state_targets.*,
   md5(jsonb_build_object(
-    'version', 'product-test-link-state-fingerprint-v1',
-    'foodId', current_state_targets.food_id,
-    'supplementId', current_state_targets.supplement_id,
-    'matchMethod', current_state_targets.match_method,
-    'targetFingerprint', current_state_targets.current_target_fingerprint
-  )::text) AS current_link_state_fingerprint,
-  md5(jsonb_build_object(
-    'version', 'product-test-remap-preimage-fingerprint-v3',
+    'version', 'product-test-decision-state-fingerprint-v2',
     'foodId', current_state_targets.food_id,
     'supplementId', current_state_targets.supplement_id,
     'matchMethod', current_state_targets.match_method,
     'targetFingerprint', current_state_targets.current_target_fingerprint,
-    'observationRevisions', current_state_targets.observation_revisions
+    'remapRevision', current_state_targets.remap_revision
+  )::text) AS current_decision_state_fingerprint,
+  md5(jsonb_build_object(
+    'version', 'product-test-remap-preimage-fingerprint-v4',
+    'foodId', current_state_targets.food_id,
+    'supplementId', current_state_targets.supplement_id,
+    'matchMethod', current_state_targets.match_method,
+    'targetFingerprint', current_state_targets.current_target_fingerprint,
+    'remapRevision', current_state_targets.remap_revision,
+    'sourceSnapshotFingerprint', current_state_targets.source_snapshot_fingerprint
   )::text) AS current_state_fingerprint
 FROM current_state_targets;
 
@@ -352,8 +381,9 @@ BEGIN
     WHERE
       source_products.source_identity_variants <> 1
       OR source_products.current_target_variants <> 1
+      OR source_products.remap_revision_variants <> 1
   ) THEN
-    RAISE EXCEPTION 'product test source rows have inconsistent identity or current target state';
+    RAISE EXCEPTION 'product test source rows have inconsistent identity, target, or remap revision state';
   END IF;
 
   IF EXISTS (
@@ -381,6 +411,17 @@ BEGIN
     WHERE remaps.source_fingerprint <> source_products.source_fingerprint
   ) THEN
     RAISE EXCEPTION 'product test remap source fingerprint is stale';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    JOIN product_test_remap_sources_current source_products
+      ON source_products.source_key = remaps.source_key
+      AND source_products.tested_source_product_id = remaps.tested_source_product_id
+    WHERE remaps.source_snapshot_fingerprint <> source_products.source_snapshot_fingerprint
+  ) THEN
+    RAISE EXCEPTION 'product test remap source snapshot fingerprint is stale';
   END IF;
 
   IF EXISTS (
@@ -481,59 +522,81 @@ BEGIN
     RAISE EXCEPTION 'exact_source_id proof does not match one namespaced target canonical group';
   END IF;
 
-  IF EXISTS (
-    SELECT 1
-    FROM product_test_remaps_import remaps
-    JOIN product_test_remap_current_states source_products
-      ON source_products.source_key = remaps.source_key
-      AND source_products.tested_source_product_id = remaps.tested_source_product_id
-    WHERE NOT (
-      source_products.current_state_fingerprint = remaps.expected_current_state_fingerprint
-      OR source_products.current_link_state_fingerprint = md5(jsonb_build_object(
-        'version', 'product-test-link-state-fingerprint-v1',
-        'foodId', NULLIF(remaps.food_id, ''),
-        'supplementId', NULLIF(remaps.supplement_id, ''),
-        'matchMethod', remaps.match_method,
-        'targetFingerprint', remaps.target_fingerprint
-      )::text)
-    )
-  ) THEN
-    RAISE EXCEPTION 'product test remap compare-and-set conflict with unexpected current link state';
-  END IF;
 END $$;
 
 CREATE TEMP TABLE product_test_remap_plan ON COMMIT DROP AS
 SELECT
   decisions.*,
-  decisions.current_link_state_fingerprint = decisions.desired_state_fingerprint AS is_noop
+  decisions.current_decision_state_fingerprint = decisions.desired_state_fingerprint
+    AS is_noop
 FROM (
   SELECT
     remaps.source_key,
     remaps.tested_source_product_id,
     remaps.source_fingerprint,
+    remaps.source_snapshot_fingerprint,
     remaps.expected_current_state_fingerprint,
     source_products.current_state_fingerprint,
-    source_products.current_link_state_fingerprint,
+    source_products.current_decision_state_fingerprint,
     source_products.product_test_rows,
     source_products.food_id AS before_food_id,
     source_products.supplement_id AS before_supplement_id,
     source_products.match_method AS before_match_method,
+    source_products.remap_revision AS before_remap_revision,
     NULLIF(remaps.food_id, '') AS after_food_id,
     NULLIF(remaps.supplement_id, '') AS after_supplement_id,
     remaps.match_method AS after_match_method,
+    remaps.desired_remap_revision AS after_remap_revision,
     remaps.target_fingerprint,
+    (
+      source_products.food_id IS NOT DISTINCT FROM NULLIF(remaps.food_id, '')
+      AND source_products.supplement_id IS NOT DISTINCT FROM NULLIF(remaps.supplement_id, '')
+      AND source_products.match_method = remaps.match_method
+      AND source_products.current_target_fingerprint IS NOT DISTINCT FROM remaps.target_fingerprint
+    ) AS same_link_state,
+    (
+      source_products.food_id IS NULL
+      AND source_products.supplement_id IS NULL
+      AND source_products.match_method = 'source_only'
+      AND source_products.remap_revision = 0
+    ) AS is_pristine,
     md5(jsonb_build_object(
-      'version', 'product-test-link-state-fingerprint-v1',
+      'version', 'product-test-decision-state-fingerprint-v2',
       'foodId', NULLIF(remaps.food_id, ''),
       'supplementId', NULLIF(remaps.supplement_id, ''),
       'matchMethod', remaps.match_method,
-      'targetFingerprint', remaps.target_fingerprint
+      'targetFingerprint', remaps.target_fingerprint,
+      'remapRevision', remaps.desired_remap_revision
     )::text) AS desired_state_fingerprint
   FROM product_test_remaps_import remaps
   JOIN product_test_remap_current_states source_products
     ON source_products.source_key = remaps.source_key
     AND source_products.tested_source_product_id = remaps.tested_source_product_id
 ) decisions;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remap_plan plan
+    WHERE
+      NOT (
+        plan.current_state_fingerprint = plan.expected_current_state_fingerprint
+        OR plan.is_noop
+        OR (
+          plan.same_link_state
+          AND plan.before_remap_revision < plan.after_remap_revision
+        )
+        OR plan.is_pristine
+      )
+      OR (
+        NOT plan.is_noop
+        AND plan.before_remap_revision >= plan.after_remap_revision
+      )
+  ) THEN
+    RAISE EXCEPTION 'product test remap compare-and-set conflict with unexpected current decision state or non-monotonic generation';
+  END IF;
+END $$;
 
 CREATE TEMP TABLE product_test_remap_mutation_rows ON COMMIT DROP AS
 SELECT
@@ -543,6 +606,7 @@ SELECT
   tests.tested_source_product_id,
   tests.tested_package_size,
   plan.source_fingerprint,
+  plan.source_snapshot_fingerprint,
   plan.expected_current_state_fingerprint,
   plan.current_state_fingerprint,
   plan.desired_state_fingerprint,
@@ -553,6 +617,7 @@ SELECT
   plan.after_food_id,
   plan.after_supplement_id,
   plan.after_match_method,
+  plan.after_remap_revision,
   plan.target_fingerprint
 FROM product_tests tests
 JOIN product_test_remap_plan plan
@@ -575,7 +640,7 @@ BEGIN
     food_id = plan.after_food_id,
     supplement_id = plan.after_supplement_id,
     match_method = plan.after_match_method,
-    remap_revision = plan.before_remap_revision + 1
+    remap_revision = plan.after_remap_revision
   FROM product_test_remap_mutation_rows plan
   WHERE
     tests.source_key = plan.source_key
@@ -592,7 +657,7 @@ BEGIN
   END IF;
 END $$;
 
-\copy (SELECT source_key, source_result_id, contaminant_key, tested_source_product_id, tested_package_size, source_fingerprint, expected_current_state_fingerprint, current_state_fingerprint, desired_state_fingerprint, before_food_id, before_supplement_id, before_match_method, before_remap_revision, after_food_id, after_supplement_id, after_match_method, before_remap_revision + 1 AS after_remap_revision, target_fingerprint FROM product_test_remap_mutation_rows ORDER BY source_key, source_result_id, contaminant_key) TO __MANIFEST_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true)
+\copy (SELECT source_key, source_result_id, contaminant_key, tested_source_product_id, tested_package_size, source_fingerprint, source_snapshot_fingerprint, expected_current_state_fingerprint, current_state_fingerprint, desired_state_fingerprint, before_food_id, before_supplement_id, before_match_method, before_remap_revision, after_food_id, after_supplement_id, after_match_method, after_remap_revision, target_fingerprint FROM product_test_remap_mutation_rows ORDER BY source_key, source_result_id, contaminant_key) TO __MANIFEST_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true)
 \endif
 
 SELECT format(

@@ -797,7 +797,7 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("import-product-test-remaps.sh");
     expect(readme).toContain("Committed remaps are portable reviewed decisions");
     expect(readme).toContain("an intervening contradictory remap invalidates");
-    expect(readme).toContain("already present remains a zero-write");
+    expect(readme).toContain("desired link and revision are already present remains a");
     expect(readme).toContain("Supplement Label Imports");
     expect(readme).toContain("apps/web/sql/supplements/import.sh");
     expect(readme).toContain("apps/web/sql/supplements/import-dailymed.sh");
@@ -1483,6 +1483,11 @@ describe("product test contaminant schema", () => {
       expect(testedProductName).not.toHaveLength(0);
       expect(record.tested_product_brand).toBe("");
       expect(record.tested_product_upc).toBe("");
+      expect(record.source_snapshot_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
+      expect(record.expected_current_state_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
+      expect(record.expected_current_state_fingerprint)
+        .not.toBe(record.source_snapshot_fingerprint);
+      expect(record.desired_remap_revision).toBe("1");
       expect(identities.has(testedSourceProductId)).toBe(false);
       identities.add(testedSourceProductId);
 
@@ -1642,6 +1647,11 @@ describe("product test contaminant schema", () => {
       expect(testedSourceProductId).not.toHaveLength(0);
       expect(record.tested_product_name ?? "").not.toHaveLength(0);
       expect(record.review_note ?? "").not.toHaveLength(0);
+      expect(record.source_snapshot_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
+      expect(record.expected_current_state_fingerprint).toMatch(/^[0-9a-f]{32}$/u);
+      expect(record.expected_current_state_fingerprint)
+        .not.toBe(record.source_snapshot_fingerprint);
+      expect(record.desired_remap_revision).toBe("1");
 
       const identity = `${sourceKey}:${testedSourceProductId}`;
       expect(identities.has(identity)).toBe(false);

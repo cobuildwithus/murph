@@ -219,22 +219,28 @@ the source import repairs affected rows back to `source_only`, and this remap
 import fails until the reviewed TSV is regenerated or manually re-reviewed.
 
 Committed remaps are portable reviewed decisions, not database-instance
-commands. A mutating decision fingerprints the source-owned observation fields
-and the current `remap_revision`; it never fingerprints operational
-`imported_at` timestamps. Every imported observation starts at revision zero,
-and an actual reviewed link mutation increments its revision in the same
-transaction. This preserves all required outcomes with the existing
+commands. Each artifact carries a portable source-observation snapshot, its
+expected current decision state, and an absolute positive
+`desired_remap_revision`. It never fingerprints operational `imported_at`
+timestamps. Revision zero means genuinely unreviewed `source_only` state;
+applying a reviewed decision assigns its exact artifact-owned revision to every
+covered observation instead of incrementing database-local history. Later
+source observations that inherit a reviewed group decision inherit that same
+revision. This preserves all required outcomes with the existing
 `product_tests` owner:
 
 - the same committed artifact can bootstrap independently imported equivalent
-  databases even when their import timestamps differ;
+  databases even when their import timestamps or operation ordering differ;
+- the latest artifact can bootstrap source-proven revision-zero rows directly,
+  while an older or same-generation contradictory decision fails closed;
 - a source-observation change or an intervening contradictory remap invalidates
   an obsolete mutating artifact;
-- an artifact whose desired link state is already present remains a zero-write
-  replay.
+- an artifact whose desired link and revision are already present remains a
+  zero-write replay.
 
-Do not add a separate remap history table or service. Source content plus the
-row-owned monotonic revision is the complete mutation preimage.
+Do not add a separate remap history table or service. The committed decision
+plus its source snapshot and row-owned absolute revision are the complete
+mutation preimage.
 
 Import reviewed remaps with:
 

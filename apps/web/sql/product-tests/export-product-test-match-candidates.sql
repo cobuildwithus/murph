@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 COPY (
-WITH source_products AS MATERIALIZED (
+WITH source_product_snapshots AS MATERIALIZED (
   SELECT
     tests.source_key,
     tests.tested_source_product_id,
@@ -15,17 +15,18 @@ WITH source_products AS MATERIALIZED (
     MIN(tests.food_id) AS current_food_id,
     MIN(tests.supplement_id) AS current_supplement_id,
     MIN(tests.match_method) AS current_match_method,
+    MIN(tests.remap_revision) AS current_remap_revision,
     md5(jsonb_build_object(
       'version', 'product-test-remap-preimage-fingerprint-v3',
-      'foodId', MIN(tests.food_id),
-      'supplementId', MIN(tests.supplement_id),
-      'matchMethod', MIN(tests.match_method),
-      'targetFingerprint', NULL,
+      'foodId', NULL::text,
+      'supplementId', NULL::text,
+      'matchMethod', 'source_only',
+      'targetFingerprint', NULL::text,
       'observationRevisions', jsonb_agg(
         jsonb_build_array(
           tests.source_result_id,
           tests.contaminant_key,
-          tests.remap_revision,
+          0,
           md5((
             to_jsonb(tests)
               - ARRAY['food_id', 'supplement_id', 'match_method', 'remap_revision', 'imported_at']
@@ -33,7 +34,7 @@ WITH source_products AS MATERIALIZED (
         )
         ORDER BY tests.source_result_id, tests.contaminant_key
       )
-    )::text) AS current_state_fingerprint,
+    )::text) AS source_snapshot_fingerprint,
     md5(jsonb_build_object(
       'version', 'product-test-source-fingerprint-v2',
       'sourceKey', tests.source_key,
@@ -43,16 +44,7 @@ WITH source_products AS MATERIALIZED (
       'testedProductUpc', MIN(tests.tested_product_upc),
       'testedProductUpcRaw', MIN(tests.tested_product_upc_raw),
       'testedPackageSize', MIN(tests.tested_package_size)
-    )::text) AS source_fingerprint,
-    md5(jsonb_build_object(
-      'version', 'product-test-source-snapshot-v1',
-      'sourceKey', tests.source_key,
-      'testedSourceProductId', tests.tested_source_product_id,
-      'observations', jsonb_agg(
-        jsonb_build_array(tests.source_result_id, tests.contaminant_key)
-        ORDER BY tests.source_result_id, tests.contaminant_key
-      )
-    )::text) AS source_snapshot_fingerprint
+    )::text) AS source_fingerprint
   FROM product_tests tests
   WHERE
     tests.tested_source_product_id IS NOT NULL
@@ -64,6 +56,21 @@ WITH source_products AS MATERIALIZED (
       AND tests.food_id IS NULL
       AND tests.supplement_id IS NULL
     )
+    AND COUNT(DISTINCT tests.remap_revision) = 1
+),
+source_products AS MATERIALIZED (
+  SELECT
+    source_product_snapshots.*,
+    md5(jsonb_build_object(
+      'version', 'product-test-remap-preimage-fingerprint-v4',
+      'foodId', current_food_id,
+      'supplementId', current_supplement_id,
+      'matchMethod', current_match_method,
+      'targetFingerprint', NULL::text,
+      'remapRevision', current_remap_revision,
+      'sourceSnapshotFingerprint', source_snapshot_fingerprint
+    )::text) AS current_state_fingerprint
+  FROM source_product_snapshots
 ),
 source_queries AS MATERIALIZED (
   SELECT
@@ -125,6 +132,7 @@ ranked_candidates AS (
     source_queries.current_food_id,
     source_queries.current_supplement_id,
     source_queries.current_match_method,
+    source_queries.current_remap_revision,
     source_queries.current_state_fingerprint,
     candidates.candidate_kind,
     candidates.candidate_id,
@@ -403,6 +411,7 @@ SELECT
   current_food_id,
   current_supplement_id,
   current_match_method,
+  current_remap_revision,
   current_state_fingerprint,
   candidate_rank,
   candidate_kind,
