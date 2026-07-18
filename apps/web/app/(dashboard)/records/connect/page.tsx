@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ArrowLeftIcon } from "lucide-react";
 
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -7,8 +9,8 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { RecordsConnectClient } from "./records-connect-client";
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Connect Epic | Murph",
-  description: "Choose an Epic organization for a one-time medical records import.",
+  title: "Connect medical records | Murph",
+  description: "Connect a patient portal and copy your available medical records into Murph.",
 });
 
 export default async function RecordsConnectPage() {
@@ -16,11 +18,20 @@ export default async function RecordsConnectPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-8">
-      <PageHeader
-        eyebrow="Medical records"
-        title="Connect Epic"
-        description="Choose your Epic organization, then sign in on its website. Murph never receives your patient portal password."
-      />
+      <div className="space-y-6">
+        <Link
+          href="/records"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+        >
+          <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
+          Medical records
+        </Link>
+        <PageHeader
+          eyebrow="Medical records"
+          title="Connect medical records"
+          description="Find the hospital or clinic where you get care. You will sign in to its patient portal, then Murph will copy the available records once."
+        />
+      </div>
       <RecordsConnectClient authenticated={Boolean(auth.authenticatedMember)} />
     </div>
   );
