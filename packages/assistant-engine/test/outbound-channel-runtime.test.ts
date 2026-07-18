@@ -201,7 +201,8 @@ describe('outbound channel runtime', () => {
 
     const result = await deliverAssistantMessage({
       message: '  hello there  ',
-      replyToMessageId: 'reply-1',
+      nativeReplyRequested: true,
+      replyToMessageId: '42',
       target: '  participant-2  ',
       vault: 'vault-alpha',
     })
@@ -210,7 +211,8 @@ describe('outbound channel runtime', () => {
       expect.objectContaining({
         explicitTarget: 'participant-2',
         message: 'hello there',
-        replyToMessageId: 'reply-1',
+        nativeReplyRequested: true,
+        replyToMessageId: '42',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: 'vault-alpha',
@@ -738,7 +740,8 @@ describe('outbound channel runtime', () => {
     const result = await deliverAssistantMessageOverBinding({
       idempotencyKey: 'idem-1',
       message: 'hello binding',
-      replyToMessageId: 'reply-over-binding',
+      nativeReplyRequested: true,
+      replyToMessageId: '43',
       session: {
         binding: {
           actorId: 'actor-1',
@@ -777,7 +780,8 @@ describe('outbound channel runtime', () => {
         identityId: 'identity-1',
         media: [],
         message: 'hello binding',
-        replyToMessageId: 'reply-over-binding',
+        nativeReplyRequested: true,
+        replyToMessageId: '43',
         subject: null,
         threadIsDirect: true,
       },

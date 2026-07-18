@@ -1438,6 +1438,12 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('Offer it as a menu the user picks from')
     expect(raw).toContain('### 7. Mark the first launch')
     expect(compact).toContain(
+      'The launch close is not a movement-instruction turn.',
+    )
+    expect(compact).toContain(
+      'do not attach exercise-catalog images, cards, or carousels',
+    )
+    expect(compact).toContain(
       'one original 15–20 second standalone launch song',
     )
     expect(compact).toContain(
@@ -1630,13 +1636,22 @@ describe('assistant skill assets', () => {
       'Decide likely familiarity per movement from the current conversation and durable context.',
     )
     expect(compactCatalog).toContain(
-      'Strong familiarity signals include stated training experience, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
+      'Strong familiarity signals include stated experience in the relevant training modality, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
     )
     expect(compactCatalog).toContain(
-      'Treat stated novice status, a first workout plan, uncertain language, or no clear familiarity signal as likely unfamiliar.',
+      'Let explicit modality experience cover common movements in that modality even when the user has not named them or used technical language',
     )
     expect(compactCatalog).toContain(
-      'Familiarity is per movement: an experienced trainee can still be new to an uncommon variation.',
+      'regular calisthenics, for example, is a familiarity signal for ordinary push-up and pull-up variations.',
+    )
+    expect(compactCatalog).toContain(
+      'Treat stated novice status, expressed uncertainty about the movement, or no relevant experience signal as likely unfamiliar.',
+    )
+    expect(compactCatalog).toContain(
+      'A first plan with Murph is not itself novice evidence.',
+    )
+    expect(compactCatalog).toContain(
+      'Familiarity is still per movement: an experienced trainee can be new to an uncommon variation.',
     )
     expect(compactCatalog).toContain(
       'Do not ask a separate experience question only to decide whether to include media.',
@@ -1645,10 +1660,16 @@ describe('assistant skill assets', () => {
       'normally two to four and rarely more than five',
     )
     expect(compactCatalog).toContain(
-      'If any prescribed movement is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+      'Exercise media belongs only in a response that is actually teaching or cueing a movement',
     )
     expect(compactCatalog).toContain(
-      'If the user clearly demonstrates relevant training fluency and every prescribed movement is common or already familiar, omit exercise images unless the user asks for them.',
+      'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
+    )
+    expect(compactCatalog).toContain(
+      'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+    )
+    expect(compactCatalog).toContain(
+      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
     )
     expect(compactCatalog).toContain(
       'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',

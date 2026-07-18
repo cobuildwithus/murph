@@ -199,7 +199,8 @@ export async function executeCodexAssistantTurnAttempt(
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
-    allowMessageReactions: input.allowMessageReactions ?? false,
+    authorizeAcceptedMessageTarget:
+      input.authorizeAcceptedMessageTarget ?? null,
     approvalPolicy,
     developerInstructions,
     dynamicTools: input.dynamicTools,
@@ -392,11 +393,15 @@ export async function executeCodexAssistantTurnAttempt(
       response: result.finalMessage,
       transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      targetInputId: result.targetInputId,
       reactions: result.reactions,
       precedingResponseSegments: result.precedingAgentMessageSegments.map((segment) => ({
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
         media: segment.media,
         response: segment.response,
+        ...(segment.targetInputId
+          ? { targetInputId: segment.targetInputId }
+          : {}),
       })),
       responseMedia: result.responseMedia,
       stderr: result.stderr,
@@ -437,9 +442,13 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
       : null
   const conversationContextPresent = conversationContextPrompt !== null
   const dynamicTools = input.input.dynamicTools
-  const reactionDynamicToolAvailable = dynamicTools.some(
-    (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
-  )
+  const messageTargetDynamicToolsAvailable =
+    dynamicTools.some(
+      (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
+    ) &&
+    dynamicTools.some(
+      (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
+    )
 
   try {
     onTraceEvent({
@@ -457,9 +466,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         conversationHistoryBytes: byteLength(conversationHistoryPrompt),
         dynamicToolCount: dynamicTools.length,
         developerInstructionsPresent: developerInstructions !== null,
-        messageReactionsAvailable:
-          input.input.allowMessageReactions === true,
-        reactionDynamicToolAvailable,
+        messageTargetDynamicToolsAvailable,
         voiceMemoGenerationAvailable: input.input.voiceMemoDeliveryChannel != null,
         conversationHistoryCount,
         conversationHistoryPresent: conversationHistoryCount > 0,

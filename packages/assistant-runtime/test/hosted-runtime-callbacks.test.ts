@@ -997,6 +997,7 @@ describe("hosted runtime callbacks", () => {
         intentId: "intent_reply",
         media: [],
         message: "hello from hosted",
+        nativeReplyRequested: true,
         replyToMessageId: "linq_message_1",
         sessionId: "session_1",
         threadId: "thread_1",
@@ -1019,6 +1020,11 @@ describe("hosted runtime callbacks", () => {
       false,
       false,
     ]);
+    expect(sideEffects[0]?.payload).toMatchObject({
+      nativeReplyRequested: true,
+      replyToMessageId: "linq_message_1",
+    });
+    expect(sideEffects[1]?.payload).not.toHaveProperty("nativeReplyRequested");
   });
 
   it("trusts the persisted transport idempotency flag for Linq effects", async () => {
@@ -7935,6 +7941,8 @@ describe("hosted runtime callbacks", () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
+      nativeReplyRequested: true,
+      replyToMessageId: "linq_message_1",
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
@@ -7948,6 +7956,8 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
         message: "hello from hosted",
+        nativeReplyRequested: true,
+        replyToMessageId: "linq_message_1",
         target: "linq_chat_123",
         targetKind: "thread",
       });
@@ -7980,6 +7990,13 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nativeReplyRequested: true,
+        replyToMessageId: "linq_message_1",
+      }),
+      expect.any(Object),
+    );
   });
 
   it.each(["reaction", "voice"] as const)(

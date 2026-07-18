@@ -527,8 +527,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
     // overage, this PR's exact 1,929B merged-base overage, and the same final
     // 233B integration, less the same 179B ownership reduction, plus the same
-    // 230B provenance correction, its original 96,000B noise band, and the
-    // same 250,000B operational headroom because the closure contains the
+    // 230B provenance correction, shared message targeting's exact 38,978B
+    // local-macOS boot-critical overage, its original 96,000B noise band, and
+    // the same 250,000B operational headroom because the closure contains the
     // entry chunk.
     // The static-closure baseline later advanced 24,408B to 7,121,190B on the
     // 2026-07-16 mainline prompt integration, which landed without moving this

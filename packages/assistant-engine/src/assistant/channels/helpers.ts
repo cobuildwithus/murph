@@ -99,6 +99,7 @@ export function createAssistantChannelAdapter(
         identityId: normalizeOptionalText(input.identityId),
         media,
         message: input.message,
+        ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
         subject: normalizeOptionalText(input.subject),
         threadIsDirect: typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
