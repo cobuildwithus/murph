@@ -11,6 +11,7 @@ import {
   toLocalDayKey,
 } from '@murphai/contracts'
 import { loadVault, readPreferencesDocument } from '@murphai/core'
+import { SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV } from '@murphai/hosted-execution/env'
 import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
@@ -816,6 +817,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantCliContract: actualAssistantCliContract,
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
+      // A scheduled notification turn runs unattended: mark its CLI subprocess
+      // environment so the vault-cli authority guards reject automation/device
+      // lifecycle mutation (directly or via `batch`) regardless of hosted vs
+      // local runtime, while task-owned canonical reads/writes stay available.
+      ...(scheduledNotificationTurn
+        ? { [SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV]: '1' }
+        : {}),
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,

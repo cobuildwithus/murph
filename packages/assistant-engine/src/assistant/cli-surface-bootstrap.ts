@@ -68,6 +68,7 @@ const assistantCliSurfaceRetiredCommandNames = new Set([
 const assistantCliSurfaceHostedUnavailableCommandNames = new Set([
   'automation edit',
   'automation import-json',
+  'automation reconcile-support-series',
   'automation save',
   'automation set-status',
   'device account disconnect',
@@ -78,6 +79,12 @@ const assistantCliSurfaceHostedUnavailableCommandNames = new Set([
   'device daemon start',
   'device daemon status',
   'device daemon stop',
+])
+// Advertised only to attended turns: a scheduled notification turn's runtime
+// rejects the generic `batch` multiplexer, so it must not appear in that turn's
+// CLI contract even on the local runtime.
+const assistantCliSurfaceScheduledUnavailableCommandNames = new Set([
+  'batch',
 ])
 
 let cachedPrebuiltAssistantCliSurfaceContractPromise:
@@ -151,34 +158,38 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
   // local runtime where hosted stripping does not apply. Reuse the existing
   // hosted-unavailable command set instead of adding a new authority owner, so
   // the advertised surface matches the scheduled-turn authority in
-  // docs/contracts/00-invariants.md.
-  const omitHostedUnavailableCommands =
-    (input.hostedRuntime ?? false) || (input.scheduledNotificationTurn ?? false)
+  // docs/contracts/00-invariants.md. The generic `batch` multiplexer is also
+  // withheld from scheduled turns, whose runtime rejects it.
+  const scheduledNotificationTurn = input.scheduledNotificationTurn ?? false
+  const omissions: AssistantCliSurfaceOmissions = {
+    omitHostedUnavailableCommands:
+      (input.hostedRuntime ?? false) || scheduledNotificationTurn,
+    omitScheduledUnavailableCommands: scheduledNotificationTurn,
+  }
 
   const contract = input.contract
     .split('\n')
-    .flatMap((line) => scopeAssistantCliSurfaceContractLine(
-      line,
-      omitHostedUnavailableCommands,
-    ))
+    .flatMap((line) => scopeAssistantCliSurfaceContractLine(line, omissions))
     .join('\n')
     .trim()
 
   return contract || null
 }
 
+interface AssistantCliSurfaceOmissions {
+  omitHostedUnavailableCommands: boolean
+  omitScheduledUnavailableCommands: boolean
+}
+
 function scopeAssistantCliSurfaceContractLine(
   line: string,
-  omitHostedUnavailableCommands: boolean,
+  omissions: AssistantCliSurfaceOmissions,
 ): string[] {
   const normalizedLine = line.trim()
   const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
   if (
     commandMatch !== null
-    && shouldOmitAssistantCliSurfaceCommand(
-      commandMatch[1],
-      omitHostedUnavailableCommands,
-    )
+    && shouldOmitAssistantCliSurfaceCommand(commandMatch[1], omissions)
   ) {
     return []
   }
@@ -196,10 +207,7 @@ function scopeAssistantCliSurfaceContractLine(
   const retainedLeaves = leaves.filter((leaf) => {
     const leafName = leaf.slice(1, -1)
     const commandName = family === 'root' ? leafName : `${family} ${leafName}`
-    return !shouldOmitAssistantCliSurfaceCommand(
-      commandName,
-      omitHostedUnavailableCommands,
-    )
+    return !shouldOmitAssistantCliSurfaceCommand(commandName, omissions)
   })
   if (retainedLeaves.length === leaves.length) {
     return [line]
@@ -213,11 +221,13 @@ function scopeAssistantCliSurfaceContractLine(
 
 function shouldOmitAssistantCliSurfaceCommand(
   commandName: string,
-  omitHostedUnavailableCommands: boolean,
+  omissions: AssistantCliSurfaceOmissions,
 ): boolean {
   return assistantCliSurfaceRetiredCommandNames.has(commandName)
-    || (omitHostedUnavailableCommands
+    || (omissions.omitHostedUnavailableCommands
       && assistantCliSurfaceHostedUnavailableCommandNames.has(commandName))
+    || (omissions.omitScheduledUnavailableCommands
+      && assistantCliSurfaceScheduledUnavailableCommandNames.has(commandName))
 }
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(

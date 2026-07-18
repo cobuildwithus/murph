@@ -6,6 +6,7 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
+import { isScheduledNotificationTurnProcessEnv } from '@murphai/hosted-execution/env'
 
 const batchCommandOptionSchema = z.string().min(1)
 
@@ -44,6 +45,17 @@ export function registerBatchCommands(cli: Cli.Cli) {
     }),
     output: batchRunResultSchema,
     async run({ options }) {
+      // A scheduled (unattended) notification turn must not be handed a generic
+      // command multiplexer: batch re-dispatches arbitrary nested argv through
+      // the real CLI action, which would otherwise reach past the per-command
+      // automation/device lifecycle-mutation guards. Scheduled canonical writes
+      // run as individual commands instead.
+      if (isScheduledNotificationTurnProcessEnv(process.env)) {
+        throw new Error(
+          'Scheduled notification turns cannot run vault-cli batch; run individual canonical commands instead.',
+        )
+      }
+
       const commands: BatchCommandResult[] = []
 
       for (const [index, command] of options.command.entries()) {

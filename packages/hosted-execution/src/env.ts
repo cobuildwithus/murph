@@ -23,6 +23,20 @@ export function isHostedRuntimeProcessEnv(env: EnvSource): boolean {
   return env[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === "1";
 }
 
+// Marker projected into the CLI subprocess environment for a scheduled
+// (unattended) notification turn. It is the runtime authority boundary that
+// keeps a scheduled turn from mutating automation/device lifecycle state
+// directly or through a wrapper such as `vault-cli batch`, independent of
+// hosted vs local execution. See docs/contracts/00-invariants.md.
+export const SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV =
+  "MURPH_SCHEDULED_NOTIFICATION_TURN_PROCESS";
+
+export function isScheduledNotificationTurnProcessEnv(
+  env: EnvSource,
+): boolean {
+  return env[SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV]?.trim() === "1";
+}
+
 export function normalizeHostedExecutionBaseUrl(
   value: string | null | undefined,
   options?: HostedExecutionBaseUrlNormalizationOptions,

@@ -1,6 +1,9 @@
 import { Cli, z } from "incur";
 
-import { isHostedRuntimeProcessEnv } from "@murphai/hosted-execution/env";
+import {
+  isHostedRuntimeProcessEnv,
+  isScheduledNotificationTurnProcessEnv,
+} from "@murphai/hosted-execution/env";
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
@@ -302,14 +305,19 @@ function buildAutomationRouteFromOptions(
 }
 
 function assertAutomationCliMutationAllowed(): void {
-  if (!isHostedRuntimeProcessEnv(process.env)) {
-    return;
+  if (isHostedRuntimeProcessEnv(process.env)) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Hosted automation mutations are available only through Murph's root hosted automation tool.",
+    );
   }
 
-  throw new VaultCliError(
-    "invalid_option",
-    "Hosted automation mutations are available only through Murph's root hosted automation tool.",
-  );
+  if (isScheduledNotificationTurnProcessEnv(process.env)) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Scheduled notification turns cannot mutate automation lifecycle. Only an authenticated interactive turn may create, edit, pause, archive, reroute, or reconcile automations.",
+    );
+  }
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {

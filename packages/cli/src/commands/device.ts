@@ -16,7 +16,18 @@ import {
   normalizeDeviceSyncConnectTargetKey,
   normalizeDeviceSyncProviderKey,
 } from '@murphai/operator-config/device-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { isScheduledNotificationTurnProcessEnv } from '@murphai/hosted-execution/env'
 import type { DeviceSyncServices } from '../device-services.js'
+
+function assertDeviceCliMutationAllowed(): void {
+  if (isScheduledNotificationTurnProcessEnv(process.env)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Scheduled notification turns cannot mutate device connections. Only an authenticated interactive turn may connect, disconnect, reconcile, or control the device sync daemon.',
+    )
+  }
+}
 
 const providerNameSchema = deviceSyncProviderKeySchema
   .describe('Live device-sync provider key such as junction, whoop, or oura.')
@@ -143,6 +154,7 @@ export function registerDeviceCommands(
     }),
     output: deviceConnectResultSchema,
     async run({ args, options }) {
+      assertDeviceCliMutationAllowed()
       return services.connect({
         vault: options.vault,
         provider: normalizeConnectTargetName(args.provider),
@@ -205,6 +217,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceAccountReconcileResultSchema,
     async run({ args, options }) {
+      assertDeviceCliMutationAllowed()
       return services.reconcileAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
@@ -222,6 +235,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceAccountDisconnectResultSchema,
     async run({ args, options }) {
+      assertDeviceCliMutationAllowed()
       return services.disconnectAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
@@ -256,6 +270,7 @@ export function registerDeviceCommands(
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStartResultSchema,
     async run({ options }) {
+      assertDeviceCliMutationAllowed()
       return await services.daemonStart({
         vault: options.vault,
         baseUrl: options.baseUrl,
@@ -270,6 +285,7 @@ export function registerDeviceCommands(
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStopResultSchema,
     async run({ options }) {
+      assertDeviceCliMutationAllowed()
       return await services.daemonStop({
         vault: options.vault,
         baseUrl: options.baseUrl,

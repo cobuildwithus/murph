@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
+import { SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV } from '@murphai/hosted-execution/env'
 import { runMurphCliAction } from '../src/cli-entry.ts'
 
 async function runCli(argv: string[]): Promise<string> {
@@ -434,6 +435,37 @@ test('batch rejects child MCP server mode', async () => {
       /cannot run MCP server mode/u,
     )
   } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch is unavailable to scheduled notification turns', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-scheduled-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    // On the local runtime a scheduled notification turn carries this marker.
+    // The whole batch multiplexer must fail closed so a nested automation
+    // lifecycle mutation cannot reach the CLI action through the wrapper.
+    vi.stubEnv(SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV, '1')
+    await assert.rejects(
+      runCli([
+        'batch',
+        '--vault',
+        vault,
+        '--command',
+        '["automation","reconcile-support-series","system:support-series:example"]',
+        '--format',
+        'json',
+      ]),
+    )
+  } finally {
+    vi.unstubAllEnvs()
     await rm(parent, {
       recursive: true,
       force: true,
