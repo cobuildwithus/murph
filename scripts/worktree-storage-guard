@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+set -euo pipefail
+original_args=("$@")
+original_arg_count=$#
+
+usage() {
+  printf 'Usage: %s [--reserve-worktree] [--target-path <path>]\n' "$(basename "$0")" >&2
+  exit 2
+}
+
+reserve=0
+target_path=''
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reserve-worktree)
+      reserve=1
+      shift
+      ;;
+    --target-path)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      target_path="$2"
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+max_regular="${MURPH_WORKTREE_MAX_LIVE:-40}"
+min_free_gib="${MURPH_WORKTREE_MIN_FREE_GIB:-20}"
+min_free_percent="${MURPH_WORKTREE_MIN_FREE_PERCENT:-15}"
+
+for value in "$max_regular" "$min_free_gib" "$min_free_percent"; do
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    printf 'worktree storage guard: limits must be non-negative integers\n' >&2
+    exit 2
+  fi
+done
+if (( max_regular < 1 || min_free_percent > 100 )); then
+  printf 'worktree storage guard: invalid worktree or free-space limit\n' >&2
+  exit 2
+fi
+
+common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
+state_file="$state_dir/regular-worktree-ceiling"
+authorization_initialized="$state_dir/authorization-initialized"
+lock_file="$state_dir/lock"
+if [[ -n "${MURPH_WORKTREE_MAX_LIVE+x}" && -z "${MURPH_WORKTREE_GUARD_STATE_DIR+x}" ]]; then
+  printf 'worktree storage guard: a custom maximum requires isolated state\n' >&2
+  exit 2
+fi
+mkdir -p "$state_dir"
+
+if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
+  if command -v flock >/dev/null 2>&1; then
+    if (( original_arg_count > 0 )); then
+      exec flock -w 5 "$lock_file" env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" \
+        "${original_args[@]}"
+    else
+      exec flock -w 5 "$lock_file" env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+    fi
+  elif command -v lockf >/dev/null 2>&1; then
+    if (( original_arg_count > 0 )); then
+      exec lockf -t 5 "$lock_file" env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" \
+        "${original_args[@]}"
+    else
+      exec lockf -t 5 "$lock_file" env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+    fi
+  else
+    printf 'worktree storage guard: flock or lockf is required for serialization\n' >&2
+    exit 1
+  fi
+fi
+
+regular_count=0
+data_count=0
+unauthorized_count=0
+admin_dirs=()
+disk_paths=("$repo_root")
+record_path=''
+record_locked=''
+
+count_record() {
+  local gitdir_line gitdir_value admin_dir
+  [[ -n "$record_path" && -d "$record_path" ]] || return 0
+  if [[ -d "$record_path/.git" ]]; then
+    return 0
+  fi
+  [[ -f "$record_path/.git" ]] || return 0
+  IFS= read -r gitdir_line <"$record_path/.git" || return 0
+  [[ "$gitdir_line" == 'gitdir: '* ]] || return 0
+  gitdir_value="${gitdir_line#gitdir: }"
+  if [[ "$gitdir_value" == /* ]]; then
+    admin_dir="$gitdir_value"
+  else
+    admin_dir="$record_path/$gitdir_value"
+  fi
+  admin_dir="$(cd "$admin_dir" 2>/dev/null && pwd -P)" || return 0
+  case "$admin_dir" in
+    "$common_dir"/worktrees/*)
+      admin_dirs+=("$admin_dir")
+      disk_paths+=("$record_path")
+      if [[ -f "$authorization_initialized" && ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
+        unauthorized_count=$((unauthorized_count + 1))
+      fi
+      ;;
+    *) return 0 ;;
+  esac
+  if [[ "$record_locked" == 'data/research:'* ]]; then
+    data_count=$((data_count + 1))
+  else
+    regular_count=$((regular_count + 1))
+  fi
+}
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  if [[ -z "$line" ]]; then
+    count_record
+    record_path=''
+    record_locked=''
+    continue
+  fi
+  case "$line" in
+    worktree\ *) record_path="${line#worktree }" ;;
+    locked\ *) record_locked="${line#locked }" ;;
+    locked) record_locked='locked' ;;
+  esac
+done < <(git -C "$repo_root" worktree list --porcelain)
+count_record
+
+if (( unauthorized_count > 0 )); then
+  printf 'worktree storage guard: %d worktree(s) bypassed scripts/create-worktree\n' \
+    "$unauthorized_count" >&2
+  exit 1
+fi
+
+if [[ ! -f "$authorization_initialized" ]]; then
+  if (( ${#admin_dirs[@]} > 0 )); then
+    for admin_dir in "${admin_dirs[@]}"; do
+      : >"$admin_dir/murph-storage-guard-authorized"
+    done
+  fi
+  : >"$authorization_initialized"
+fi
+
+if [[ -n "$target_path" ]]; then
+  if [[ "$target_path" != /* ]]; then
+    target_path="$repo_root/$target_path"
+  fi
+  target_probe="$target_path"
+  while [[ ! -e "$target_probe" ]]; do
+    parent_probe="$(dirname "$target_probe")"
+    [[ "$parent_probe" != "$target_probe" ]] || break
+    target_probe="$parent_probe"
+  done
+  [[ -e "$target_probe" ]] || {
+    printf 'worktree storage guard: target filesystem could not be resolved\n' >&2
+    exit 1
+  }
+  disk_paths+=("$target_probe")
+fi
+
+df_output="$(df -Pk "${disk_paths[@]}" 2>/dev/null)" || {
+  printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+  exit 1
+}
+minimum_kib=$((min_free_gib * 1024 * 1024))
+available_percent=101
+disk_rows=0
+disk_floor_failed=0
+while read -r disk_kib available_kib; do
+  [[ -n "$disk_kib" && -n "$available_kib" ]] || continue
+  if [[ ! "$disk_kib" =~ ^[0-9]+$ || ! "$available_kib" =~ ^[0-9]+$ || "$disk_kib" == 0 ]]; then
+    printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+    exit 1
+  fi
+  disk_rows=$((disk_rows + 1))
+  row_percent=$((available_kib * 100 / disk_kib))
+  (( row_percent < available_percent )) && available_percent="$row_percent"
+  if (( available_kib < minimum_kib || row_percent < min_free_percent )); then
+    disk_floor_failed=1
+  fi
+done < <(awk '
+  NR > 1 {
+    for (field = 1; field <= NF; field++) {
+      if ($field ~ /^[0-9]+%$/ && field >= 4) {
+        print $(field - 3), $(field - 1)
+        break
+      }
+    }
+  }
+' <<<"$df_output")
+if (( disk_rows == 0 )); then
+  printf 'worktree storage guard: could not read filesystem capacity\n' >&2
+  exit 1
+fi
+if (( disk_floor_failed == 1 )); then
+  printf 'worktree storage guard: a worktree filesystem has only %d%% free; require at least %d GiB and %d%% free\n' \
+    "$available_percent" "$min_free_gib" "$min_free_percent" >&2
+  exit 1
+fi
+
+if [[ -f "$state_file" ]]; then
+  ceiling="$(tr -d '[:space:]' <"$state_file")"
+  if [[ ! "$ceiling" =~ ^[0-9]+$ || "$ceiling" -lt "$max_regular" ]]; then
+    printf 'worktree storage guard: invalid local ceiling state\n' >&2
+    exit 1
+  fi
+else
+  ceiling="$regular_count"
+  (( ceiling < max_regular )) && ceiling="$max_regular"
+fi
+
+if (( regular_count > ceiling )); then
+  printf 'worktree storage guard: %d regular worktrees exceeds the ratcheted ceiling of %d\n' \
+    "$regular_count" "$ceiling" >&2
+  exit 1
+fi
+
+ratcheted="$regular_count"
+(( ratcheted < max_regular )) && ratcheted="$max_regular"
+(( ratcheted > ceiling )) && ratcheted="$ceiling"
+
+prospective="$regular_count"
+(( reserve == 1 )) && prospective=$((prospective + 1))
+if (( prospective > ratcheted )); then
+  printf 'worktree storage guard: new worktree would exceed the ratcheted ceiling of %d (regular=%d, data=%d)\n' \
+    "$ratcheted" "$regular_count" "$data_count" >&2
+  exit 1
+fi
+
+tmp_state="$state_file.tmp.$$"
+printf '%d\n' "$ratcheted" >"$tmp_state"
+mv "$tmp_state" "$state_file"
+
+printf 'worktree storage guard: regular=%d data=%d ceiling=%d free=%d%%\n' \
+  "$regular_count" "$data_count" "$ratcheted" "$available_percent"

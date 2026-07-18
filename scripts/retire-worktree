@@ -3,11 +3,13 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: retire-worktree [--dry-run] <target-worktree>
+Usage: retire-worktree [--dry-run] [--inactive-no-pr] <target-worktree>
 
 Retires one clean, inactive task worktree after its exact PR head is confirmed
 merged or closed, or its HEAD is already contained in origin/main. Run this
 command from a different checkout of the same repo. The task branch is preserved.
+Use --inactive-no-pr only when the current user explicitly authorizes retiring
+clean inactive branches that have no open PR; all other safety gates still apply.
 EOF
   exit 2
 }
@@ -18,10 +20,15 @@ refuse() {
 }
 
 dry_run=false
-if [[ "${1:-}" == "--dry-run" ]]; then
-  dry_run=true
+allow_inactive_no_pr=false
+while [[ "${1:-}" == --* ]]; do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --inactive-no-pr) allow_inactive_no_pr=true ;;
+    *) usage ;;
+  esac
   shift
-fi
+done
 
 if [[ $# -ne 1 ]]; then
   usage
@@ -145,18 +152,73 @@ verify_no_active_task_reference() {
     "$target_worktree/agent-docs/exec-plans/active"
   )
   local branch_name="${target_branch_ref#refs/heads/}"
-  local grep_status
+  local inspection_status
+
+  command -v node >/dev/null 2>&1 || refuse 'Node.js is unavailable'
 
   for active_dir in "${active_dirs[@]}"; do
     [[ -d "$active_dir" ]] || refuse 'active-plan registry is missing'
-    if grep -R -F -q --exclude='README.md' \
-      -e "$branch_name" -e "$target_label" "$active_dir" 2>/dev/null; then
-      refuse 'target is still referenced by active task coordination'
+    if ACTIVE_DIR="$active_dir" TARGET_BRANCH="$branch_name" TARGET_LABEL="$target_label" \
+      node <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const activeDir = process.env.ACTIVE_DIR;
+const branch = process.env.TARGET_BRANCH ?? '';
+const label = process.env.TARGET_LABEL ?? '';
+if (!activeDir || !branch || !label) process.exit(12);
+
+const normalize = (value) => value
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+const needles = new Set([
+  normalize(branch),
+  normalize(branch.split('/').at(-1) ?? ''),
+  normalize(label),
+  normalize(label.replace(/^murph[-_]/i, '')),
+]);
+for (const needle of [...needles]) {
+  if (needle.length < 8) needles.delete(needle);
+}
+if (needles.size === 0) process.exit(12);
+
+const pending = [activeDir];
+while (pending.length > 0) {
+  const current = pending.pop();
+  let entries;
+  try {
+    entries = fs.readdirSync(current, { withFileTypes: true });
+  } catch {
+    process.exit(12);
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(current, entry.name);
+    if (entry.isDirectory()) {
+      pending.push(entryPath);
+      continue;
+    }
+    if (!entry.isFile() || entry.name === 'README.md') continue;
+    let contents;
+    try {
+      contents = normalize(fs.readFileSync(entryPath, 'utf8'));
+    } catch {
+      process.exit(12);
+    }
+    if ([...needles].some((needle) => contents.includes(needle))) process.exit(10);
+  }
+}
+NODE
+    then
+      inspection_status=0
     else
-      grep_status=$?
+      inspection_status=$?
     fi
-    [[ "$grep_status" -eq 1 ]] \
-      || refuse 'active task coordination could not be inspected'
+    case "$inspection_status" in
+      0) ;;
+      10) refuse 'target is still referenced by active task coordination' ;;
+      *) refuse 'active task coordination could not be inspected' ;;
+    esac
   done
 }
 
@@ -171,7 +233,8 @@ verify_terminal_history() {
     --json headRefName,headRefOid,state,mergedAt,closedAt 2>/dev/null)" \
     || refuse 'GitHub PR state could not be read'
 
-  if PR_JSON="$pr_json" TARGET_BRANCH="$branch_name" TARGET_HEAD="$target_head" node <<'NODE'
+  if PR_JSON="$pr_json" TARGET_BRANCH="$branch_name" TARGET_HEAD="$target_head" \
+    ALLOW_INACTIVE_NO_PR="$allow_inactive_no_pr" node <<'NODE'
 let pullRequests;
 try {
   pullRequests = JSON.parse(process.env.PR_JSON ?? '[]');
@@ -180,6 +243,7 @@ try {
 }
 const branch = process.env.TARGET_BRANCH;
 const head = process.env.TARGET_HEAD;
+const allowInactiveNoPr = process.env.ALLOW_INACTIVE_NO_PR === 'true';
 
 if (!Array.isArray(pullRequests) || !branch || !head) process.exit(12);
 
@@ -197,7 +261,7 @@ const exactTerminal = branchPullRequests.some((pullRequest) => {
   return false;
 });
 
-process.exit(exactTerminal ? 0 : 11);
+process.exit(exactTerminal || allowInactiveNoPr ? 0 : 11);
 NODE
   then
     return
