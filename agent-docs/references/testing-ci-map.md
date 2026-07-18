@@ -180,17 +180,25 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   consumed authorization remaining approved in member-facing presentation while
   replay reads fail closed, and approval-link retry wakes taking precedence over
   a later parked fallback.
-
-- Generated-delivery compatibility is covered across the shared exact-ref
-  predicate, persisted assistant media schema, hosted side-effect codec,
-  retry-only file reader, assistant runtime checkpoint planning, and portable
-  package boundary. Phase-one tests must prove initial file preparation still
-  rejects the hidden path, all other hidden refs remain closed, active runtime
-  files enter encrypted checkpoints, `.runtime/**` stays out of portable ZIPs,
-  and portable-eligible ordinary `exports/assistant-deliveries/**` files remain
-  in both. Archive-file exclusions must remain global rather than gaining
-  path-specific ownership semantics. Phase two may enable writers only after an
-  immediate deploy proves the phase-one runner fingerprint has converged.
+- Generated-delivery lifecycle coverage spans the shared exact-ref predicate,
+  persisted assistant media schema, hosted side-effect codec, initial and retry
+  file readers, runtime-file permission adoption, quiescent residue cleanup,
+  encrypted checkpoint planning, and the portable-package boundary. Tests prove
+  only `.runtime/operations/assistant/generated-deliveries/<filename>` is
+  accepted, runtime parents/files tighten to `0700`/`0600`, ordinary vault refs
+  keep their modes, and every other hidden, nested, unsafe, symlink, or special
+  ref fails closed. Exact awaiting-approval, pending, sending, retryable, and
+  confirmation-pending descriptors retain their bytes; terminal, changed, and
+  orphaned direct files are absent from the archive only after the complete flat
+  inventory and outbox state are trusted. Untrusted inventory or invalid entries
+  retain everything. Active runtime files enter encrypted checkpoints,
+  `.runtime/**` stays out of portable ZIPs, and portable-eligible ordinary
+  `exports/assistant-deliveries/**` files remain ordinary vault data. Archive
+  exclusions stay global rather than granting that generic path ownership. The
+  hosted approval-resume E2E creates and requests the runtime file in one provider
+  turn, checkpoints it, destroys the container, approves, restores, and proves
+  one attachment delivery with no duplicate or mailbox lag. The phase-one
+  reader-compatible release remains the rollback floor after producer activation.
 
 ## Current Gaps
 

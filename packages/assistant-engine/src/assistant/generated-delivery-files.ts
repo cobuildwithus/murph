@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 
 import {
@@ -33,4 +34,43 @@ export function resolveSupportedAssistantVaultFileContentType(
 ): string | null {
   const extension = path.posix.extname(filename).toLowerCase()
   return ASSISTANT_VAULT_FILE_CONTENT_TYPES.get(extension) ?? null
+}
+
+// The model chooses a friendly staging name; the runtime owns the persisted
+// identity. A stable per-tool-call basename lets an exact call re-delivery
+// recover the same owned bytes, while distinct calls remain collision-free
+// even when they reuse the same friendly name.
+export function buildAssistantGeneratedDeliveryOwnedRef(input: {
+  displayFilename: string
+  ref: string
+  sessionId: string
+  toolCallId: string
+  turnId: string
+}): string {
+  const extension = path.posix.extname(input.displayFilename).toLowerCase()
+  const stem = path.posix
+    .basename(
+      input.displayFilename,
+      path.posix.extname(input.displayFilename),
+    )
+    .replace(/[^A-Za-z0-9._-]+/gu, '-')
+    .replace(/^[.-]+/u, '')
+    .slice(0, 64)
+  const ownedId = createHash('sha256')
+    .update(JSON.stringify([
+      'murph.assistant-generated-delivery-owned-ref.v1',
+      input.sessionId,
+      input.turnId,
+      input.toolCallId,
+      input.ref,
+    ]))
+    .digest('hex')
+  const ownedFilename = `${stem.length > 0 ? `${stem}-` : ''}${ownedId}${extension}`
+  const ownedRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${ownedFilename}`
+  if (!isAssistantGeneratedDeliveryRef(ownedRef)) {
+    throw new Error(
+      'The generated delivery owned ref failed flat-shape validation.',
+    )
+  }
+  return ownedRef
 }

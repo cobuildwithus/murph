@@ -165,19 +165,31 @@ landing; record the chosen posture here so the decision is reviewable.
   incomplete, or unexpected entries are retained and counted.
 
 - The repo-owned portable ZIP omits explicit directory entries and continues to
-  exclude `.runtime/**`, including rebuildable projections. This changes only
-  download packaging, not live vault state or the separate hosted tar snapshot
-  classifier.
+  exclude all `.runtime/**`, including rebuildable projections and flat
+  assistant delivery residue under
+  `.runtime/operations/assistant/generated-deliveries/<filename>`. That residue
+  remains included in encrypted hosted checkpoints. This changes only download
+  packaging, not live vault state or the separate hosted tar snapshot classifier.
 
-- Flat assistant delivery residue under
-  `.runtime/operations/assistant/generated-deliveries/<filename>` is therefore
-  excluded from portable ZIPs but included in encrypted hosted checkpoints.
-  Files under the previously proposed `exports/assistant-deliveries/**` prefix
-  remain ordinary checkpointed vault data and receive no path-specific
-  portable-package exclusion. Existing global archive-file exclusions still
-  apply there as they do everywhere else. Phase one adds no production writer
-  or cleanup lifecycle; writer activation must add bounded file-count and
-  terminal-cleanup proof before it can produce this runtime residue.
+- One generated send may create one direct regular file with no sidecars in that
+  exact runtime directory only when the same assistant turn establishes the
+  delivery obligation and calls `send_vault_file`. Runtime adoption tightens
+  parent directories to `0700` and the exact file to `0600`. Ref,
+  filename/content type, size, and SHA-256 must match an awaiting-approval,
+  pending, sending, retryable, or confirmation-pending outbox descriptor for the
+  file to survive quiescent pre-checkpoint cleanup. Cleanup validates the
+  complete direct inventory and outbox state before removing any terminal,
+  changed, or orphaned regular file; an untrusted inventory, nested entry,
+  unsafe name, symlink, special entry, or unreadable path retains everything.
+  Steady state is therefore one staged file per exact active descriptor and zero
+  terminal, changed, or unclaimed staged files.
+
+- Files under the previously proposed `exports/assistant-deliveries/**` prefix
+  remain ordinary checkpointed vault data and receive no deletion or
+  path-specific portable-package authority. Existing global archive-file
+  exclusions still apply there as they do everywhere else. The phase-one
+  reader-compatible release is the rollback floor while any active/retained
+  outbox or committed checkpoint can contain the runtime ref.
 
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
   (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,

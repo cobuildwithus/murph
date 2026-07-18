@@ -745,22 +745,74 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
-
 Generated-delivery staging uses an expand-then-produce rollout. The first
-Cloudflare release adds persisted-outbox, hosted-side-effect, retry-read, and
+Cloudflare release added persisted-outbox, hosted-side-effect, retry-read, and
 encrypted-checkpoint compatibility for the exact flat ref
-`.runtime/operations/assistant/generated-deliveries/<filename>`, while initial
-`send_vault_file` preparation continues to reject it so that release cannot
-mint state an older runner would quarantine. Deploy that release with immediate
-container rollout and prove the exact runner fingerprint has converged before a
-later release enables writer guidance or cleanup. Once a producer can persist
-the hidden ref, the compatibility release is the rollback floor while any
-active or retained outbox record or committed checkpoint can contain it.
-Portable support bundles continue to omit all `.runtime/**`; the generic
-`exports/assistant-deliveries/**` path remains ordinary checkpointed vault data
-and receives no path-specific portable-package exclusion. Existing global
-file-type exclusions still apply regardless of directory.
+`.runtime/operations/assistant/generated-deliveries/<filename>` while keeping the
+writer closed. Only after that release reaches 100% traffic and the exact runner
+fingerprint converges may the producer release let initial `send_vault_file`
+preparation accept this ref.
 
+The producer uses the runtime path only when the same assistant turn creates a
+file for an already-established delivery obligation and calls `send_vault_file`.
+It never moves or copies an existing, canonical, or prepare-now/maybe-later file
+into staging. Generated-file sends join the existing stateful dynamic-tool chain,
+so overlapping calls execute in request order and a later call cannot race file
+adoption or approval against an earlier response-media update. Before the initial
+descriptor is persisted, the runtime-state owner tightens the exact path's parent
+directories to `0700`, rejects symlinks, non-regular files, and multiply-linked
+inodes, tightens the file to `0600`, and revalidates it before the assistant
+hashes or reads it. Ordinary vault-file refs are not chmodded.
+
+The owned physical ref is derived deterministically from
+`sha256([sessionId, turnId, toolCallId, ref])`, so two distinct tool calls that
+reuse one friendly staging name receive distinct owned refs (no cross-send
+overwrite), and an exact re-delivery of the same tool call re-derives and
+idempotently re-adopts the same owned bytes. A generated send without the
+provider's semantic tool-call id fails before adoption; the process-local JSON-RPC
+request id is not a substitute. Adoption uses an atomic no-clobber hard link,
+verifies the captured inode, removes the friendly source name, and then carries
+that identity through tightening the single-link target to `0600`. The verified
+target handle stays open across source unlink and chmod, so destination
+delete/recreate and inode reuse cannot substitute different bytes. A safe existing
+deterministic target is treated as the idempotent prior result, and an interrupted
+same-inode two-link transfer is completed before normal adoption; source or
+destination swaps and validation failures fail closed. Accepted limitation: this
+identity is attempt-scoped. If `send_vault_file` fails after the staging file is
+moved to its owned ref but before the outbox intent is persisted (approval-HTTP
+failure or process death),
+the model's in-turn recovery is a new provider call with a new `toolCallId` (the
+App Server mints a fresh call id per Responses request), which derives a different
+owned ref; the earlier owned file has no active descriptor and is pruned as
+unclaimed at the next quiescent checkpoint. The exposed data is a freshly
+generated, regenerable one-time artifact only — no stored user/vault data, no
+already-persisted outbox intent, and the persisted awaiting-approval retry path
+is unaffected. A retry-stable logical send identity that survives a replacement
+provider call would require a durable send fact or an explicit identical-send
+coalescing decision that no currently available input provides; this is
+intentionally deferred rather than solved with a registry, sidecar, scan-based
+recovery, or reconciliation loop.
+
+Idle snapshot publication already waits for foreground and background assistant
+work to become quiescent. At that boundary, cleanup validates the complete direct
+staging inventory and outbox state before deleting anything. Exact files remain
+when their filename/content type, size, and SHA-256 match an awaiting-approval,
+pending, sending, retryable, or delivery-confirmation-pending descriptor.
+Terminal, changed, or orphaned direct regular files are removed before archive
+planning; an orphan staging hardlink may remove only its runtime-owned link,
+leaving the ordinary linked file unchanged, while an active multiply-linked file
+fails closed. Nested directories, unsafe names, symlinks, special entries, or
+malformed/untrusted live outbox inventory retain the entire staging set. A
+malformed live record is quarantined on that pass; quarantine is terminal
+operational evidence, so a later clean live-inventory pass may prune its orphan.
+Cleanup emits aggregate counts and bytes only.
+
+Once a producer can persist the hidden ref, the phase-one compatibility release
+is the rollback floor while any active or retained outbox record or committed
+checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
+generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
+vault data and receives no deletion or path-specific packaging authority.
+Existing global file-type exclusions still apply regardless of directory.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
