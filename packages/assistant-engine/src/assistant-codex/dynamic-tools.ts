@@ -106,6 +106,9 @@ import type {
   AssistantProgressDelivery,
   AssistantTurnProductFeedbackRecorder,
 } from '../assistant/turn-progress.js'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../assistant/generated-delivery-files.js'
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -816,7 +819,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -826,7 +829,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Normalized vault-relative path, for example documents/report.pdf. Hidden paths, traversal, absolute paths, and unsupported file types are rejected.',
+          `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
       },
     },
     required: ['ref'],
@@ -1751,6 +1754,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-vault-file'
       ref: string
+      toolCallId?: string
     }
   | {
       kind: 'invalid-send-vault-file-arguments'
@@ -2038,6 +2042,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name: {
@@ -2511,7 +2516,12 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = await sendVaultFile(input.request.ref)
+        const result = input.request.toolCallId === undefined
+          ? await sendVaultFile(input.request.ref)
+          : await sendVaultFile(
+              input.request.ref,
+              input.request.toolCallId,
+            )
         switch (result.status) {
           case 'pending':
             return {

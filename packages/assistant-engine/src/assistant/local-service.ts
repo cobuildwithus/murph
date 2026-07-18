@@ -747,7 +747,10 @@ export async function sendAssistantMessageLocal(
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
-                    sendVaultFile: async (ref: string) => {
+                    sendVaultFile: async (
+                      ref: string,
+                      toolCallId?: string | null,
+                    ) => {
                       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
                         input: currentInput,
                         session: currentSession,
@@ -788,6 +791,7 @@ export async function sendAssistantMessageLocal(
                         sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
                         threadIsDirect: deliveryFields.threadIsDirect,
+                        toolCallId: toolCallId ?? null,
                         turnId: currentUserTurn.turnId,
                         turnTrigger: currentInput.turnTrigger ?? null,
                         vault: currentInput.vault,
