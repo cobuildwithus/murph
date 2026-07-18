@@ -286,6 +286,7 @@ async function sendHostedProviderLinqMessageDirect(
     idempotencyKey: request.idempotencyKey ?? null,
     media: request.media ?? null,
     message: request.message,
+    ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
     replyToMessageId: request.replyToMessageId ?? null,
     target: request.target,
     ...(request.targetKind === null || request.targetKind === undefined
@@ -400,6 +401,7 @@ function canRecoverHostedProviderLinqDirectThread(
 ): boolean {
   return (
     request.homeRouteFallbackAllowed === true
+    && request.nativeReplyRequested !== true
     && !request.media?.some((media) => media.kind === "vault_file")
   );
 }

@@ -973,6 +973,7 @@ describe('channel helper seams', () => {
         identityId: null,
         media,
         message: '  Listen to this  ',
+        nativeReplyRequested: true,
         replyToMessageId: 'reply-text',
       },
       {
@@ -988,6 +989,7 @@ describe('channel helper seams', () => {
       homeRouteFallbackAllowed: false,
       idempotencyKey: 'idem-text-first',
       message: 'Listen to this',
+      nativeReplyRequested: true,
       replyToMessageId: 'reply-text',
       target: 'thread-linq-voice',
       targetKind: 'thread',
@@ -1056,6 +1058,37 @@ describe('channel helper seams', () => {
       target: 'stale-home-thread',
       targetKind: 'thread',
     })
+  })
+
+  it('rejects a marked Linq voice-memo-only reply before either send effect', async () => {
+    const sendLinq = vi.fn()
+    const sendLinqVoiceMemo = vi.fn()
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: '+15550000001',
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-marked-voice-only',
+          identityId: null,
+          media: [createVoiceMemoMedia()],
+          message: '   ',
+          nativeReplyRequested: true,
+          replyToMessageId: 'selected-message-1',
+          threadIsDirect: true,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_NATIVE_REPLY_TEXT_REQUIRED',
+    })
+
+    expect(sendLinq).not.toHaveBeenCalled()
+    expect(sendLinqVoiceMemo).not.toHaveBeenCalled()
   })
 
   it('sends Linq voice memos to the concrete target returned by accepted text', async () => {

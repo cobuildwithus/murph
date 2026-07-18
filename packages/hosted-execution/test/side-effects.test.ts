@@ -168,6 +168,28 @@ describe("hosted assistant delivery contracts", () => {
     }
   });
 
+  it("preserves the true-only native-reply marker and rejects false", () => {
+    const markedPayload = createHostedAssistantDeliveryPayload({
+      channel: "linq",
+      nativeReplyRequested: true,
+      replyToMessageId: "selected-message-1",
+    });
+    const markedEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-marked",
+      effectId: "intent-marked",
+      payload: markedPayload,
+    });
+
+    expect(markedEffect.payload).toEqual(markedPayload);
+    expect(() => parseHostedAssistantDeliverySideEffect({
+      ...markedEffect,
+      payload: {
+        ...markedPayload,
+        nativeReplyRequested: false,
+      },
+    })).toThrow(/nativeReplyRequested must be true when present/);
+  });
+
   it("parses Telegram assistant-delivery voice memo media via the speech generation transport", () => {
     const payload = createHostedAssistantDeliveryPayload({
       media: [{

@@ -634,21 +634,27 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
   })
 
-  it('advertises and executes react_to_message as a reaction patch', async () => {
+  it('co-gates message-target tools and executes reactions through the authorizer', async () => {
+    const messageRef = `ain_${'a'.repeat(32)}`
     expect(listMurphDynamicToolNames()).toContain('murph.react_to_message')
+    expect(listMurphDynamicToolNames()).toContain('murph.select_reply_target')
     expect(resolveMurphDynamicTools({
     }).map((tool) => `${tool.namespace}.${tool.name}`))
       .not.toContain('murph.react_to_message')
     expect(resolveMurphDynamicTools({
-      allowMessageReactions: true,
+      messageTargetingAvailable: true,
     }).map((tool) => `${tool.namespace}.${tool.name}`))
-      .toContain('murph.react_to_message')
+      .toEqual(expect.arrayContaining([
+        'murph.react_to_message',
+        'murph.select_reply_target',
+      ]))
 
     const request = readMurphDynamicToolRequest({
       id: 23,
       method: 'item/tool/call',
       params: {
         arguments: {
+          message_ref: messageRef,
           reaction: 'thumbs_up',
         },
         namespace: 'murph',
@@ -658,10 +664,16 @@ describe('murph.generate_image dynamic tool execution', () => {
 
     expect(request).toEqual({
       kind: 'react-to-message',
+      messageRef,
       reaction: 'thumbs_up',
     })
 
+    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
+      targetInputId: messageRef,
+    }))
     const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 2,
       env: {},
       fetchImpl: vi.fn<typeof fetch>(),
       nextUsageOrdinal: () => 1,
@@ -672,6 +684,7 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(result).toEqual({
       reactionPatch: {
         reaction: 'thumbs_up',
+        targetInputId: messageRef,
       },
       rpcResult: {
         success: true,
@@ -683,6 +696,90 @@ describe('murph.generate_image dynamic tool execution', () => {
         ],
       },
     })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: 'reaction',
+      deliveryContextOrdinal: 2,
+      messageRef,
+    })
+  })
+
+  it('selects a reply target through the same authorizer', async () => {
+    const messageRef = `ain_${'b'.repeat(32)}`
+    const request = readMurphDynamicToolRequest({
+      id: 25,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          message_ref: messageRef,
+        },
+        namespace: 'murph',
+        tool: 'select_reply_target',
+      },
+    })
+
+    expect(request).toEqual({
+      kind: 'select-reply-target',
+      messageRef,
+    })
+
+    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
+      targetInputId: messageRef,
+    }))
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 3,
+      env: {},
+      fetchImpl: vi.fn<typeof fetch>(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: request!,
+    })
+
+    expect(result).toEqual({
+      replyTargetPatch: {
+        targetInputId: messageRef,
+      },
+      rpcResult: {
+        success: true,
+        contentItems: [
+          {
+            type: 'inputText',
+            text: 'selection recorded',
+          },
+        ],
+      },
+    })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: 'native-reply',
+      deliveryContextOrdinal: 3,
+      messageRef,
+    })
+  })
+
+  it('does not disguise an unexpected target-authority failure as an unavailable ref', async () => {
+    const messageRef = `ain_${'c'.repeat(32)}`
+    const request = readMurphDynamicToolRequest({
+      id: 26,
+      method: 'item/tool/call',
+      params: {
+        arguments: { message_ref: messageRef },
+        namespace: 'murph',
+        tool: 'select_reply_target',
+      },
+    })
+    const authorityFailure = new Error('target authority storage failed')
+
+    await expect(executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: async () => {
+        throw authorityFailure
+      },
+      deliveryContextOrdinal: 3,
+      env: {},
+      fetchImpl: vi.fn<typeof fetch>(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: request!,
+    })).rejects.toBe(authorityFailure)
   })
 
   it('returns a value-free validation digest for invalid reaction arguments', () => {

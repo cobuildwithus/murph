@@ -2,6 +2,36 @@
 
 Last verified: 2026-07-17
 
+## Accepted-Message Targeting
+
+Exact-message replies and reactions share one accepted-message targeting
+primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
+`Message ref` beside eligible accepted Linq iMessage input or Telegram input
+with a valid numeric provider message target. Linq SMS, RCS, and unknown
+service types expose no ref. One resolver binds that ref to the current
+delivery-context ordinal, reloads the stored event, rechecks route,
+conversation, audience, group-actor, provider-target, and action-specific
+capability authority, and returns only the accepted input id. Provider message
+ids stay inside the local delivery boundary. Both targeting tools are
+invocation-scoped root tools: the resident App Server may expose them to the
+active root turn, but descendant or foreign resident threads fail before the
+accepted-message resolver runs.
+
+`murph.select_reply_target` annotates a normal response segment;
+`murph.react_to_message` keeps the existing reaction effect and outbox
+operation. The delivery owner re-resolves the selected input immediately before
+each effect and clones its reply context instead of mutating shared input. Every
+`---` bubble from one response segment inherits the same selected target.
+
+Intentional replies persist a true-only `nativeReplyRequested` marker on each
+normal message intent. The marker participates in strict parsing, persistence,
+fingerprints, equality, and dedupe. It distinguishes an explicit native reply
+from the contextual `replyToMessageId` already carried by automatic Linq
+replies, so unmarked automatic model replies remain flat. Existing explicit or
+manual low-level provider reply calls keep their prior behavior. This adds no
+provider-id map, database projection, service, API, queue, or feature flag. The
+full contract lives in `agent-docs/product-specs/shared-message-targeting.md`.
+
 ## Hosted Group Self-Awareness
 
 `apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.

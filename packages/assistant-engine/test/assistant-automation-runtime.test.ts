@@ -10619,11 +10619,13 @@ describe('assistant auto-reply runtime', () => {
       onFinishWithoutReplyAccepted?: (event: {
         acceptedInputIds: readonly string[]
         deliveryContextOrdinal: number
+        messageReactionPending: boolean
       }) => Promise<void>
     }) => {
       await input.onFinishWithoutReplyAccepted?.({
         acceptedInputIds: [initialInput.event.inputId],
         deliveryContextOrdinal: 0,
+        messageReactionPending: false,
       })
       const admitted = await input.activeTurnInput?.({
         sessionId: 'session-1',
@@ -10748,11 +10750,13 @@ describe('assistant auto-reply runtime', () => {
       onFinishWithoutReplyAccepted?: (event: {
         acceptedInputIds: readonly string[]
         deliveryContextOrdinal: number
+        messageReactionPending: boolean
       }) => Promise<void>
     }) => {
       await input.onFinishWithoutReplyAccepted?.({
         acceptedInputIds: [initialInput.event.inputId],
         deliveryContextOrdinal: 0,
+        messageReactionPending: false,
       })
       const admitted = await input.activeTurnInput?.({
         sessionId: 'session-1',
@@ -10872,13 +10876,13 @@ describe('assistant auto-reply runtime', () => {
       onFinishWithoutReplyAccepted?: (event: {
         acceptedInputIds: readonly string[]
         deliveryContextOrdinal: number
-        messageReactionsAvailable?: boolean | null
+        messageReactionPending: boolean
       }) => Promise<void>
     }) => {
       await input.onFinishWithoutReplyAccepted?.({
         acceptedInputIds: [telegramInput.event.inputId],
         deliveryContextOrdinal: 0,
-        messageReactionsAvailable: true,
+        messageReactionPending: true,
       })
       expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
         .not.toHaveBeenCalled()
@@ -10939,6 +10943,89 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('retries reaction-only no-reply work when stale target authority prevents an intent', async () => {
+    const telegramInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_stale_reaction_target',
+      inputId: 'ain_stale_reaction_target_00000000001',
+      occurredAt: '2026-04-08T00:11:30.000Z',
+      receivedAt: '2026-04-08T00:11:31.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '78',
+        threadId: 'safe_telegram_thread_stale_reaction',
+      },
+      source: 'telegram',
+      text: 'reaction-only input whose selected target became stale',
+    })
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      onFinishWithoutReplyAccepted?: (event: {
+        acceptedInputIds: readonly string[]
+        deliveryContextOrdinal: number
+        messageReactionPending: boolean
+      }) => Promise<void>
+    }) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [telegramInput.event.inputId],
+        deliveryContextOrdinal: 0,
+        messageReactionPending: true,
+      })
+      expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+        .not.toHaveBeenCalled()
+      return {
+        delivery: null,
+        deliveryDeferred: false,
+        deliveryError: {
+          code: 'ASSISTANT_DELIVERY_FAILED',
+          message: 'The selected message is not available for this action.',
+        },
+        deliveryIntentId: null,
+        response: '',
+        responseDisposition: 'none' as const,
+        session: {
+          sessionId: 'session-stale-reaction-target',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(telegramInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'immediate',
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      currentTurnDeliveryIntentIds: [],
+      failed: 1,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 0,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
+  })
+
   it('consumes reaction-only no-reply inputs when the committed reaction intent terminally fails', async () => {
     const telegramInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_reaction_only_failed',
@@ -10957,13 +11044,13 @@ describe('assistant auto-reply runtime', () => {
       onFinishWithoutReplyAccepted?: (event: {
         acceptedInputIds: readonly string[]
         deliveryContextOrdinal: number
-        messageReactionsAvailable?: boolean | null
+        messageReactionPending: boolean
       }) => Promise<void>
     }) => {
       await input.onFinishWithoutReplyAccepted?.({
         acceptedInputIds: [telegramInput.event.inputId],
         deliveryContextOrdinal: 0,
-        messageReactionsAvailable: true,
+        messageReactionPending: true,
       })
       expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
         .not.toHaveBeenCalled()

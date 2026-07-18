@@ -37,6 +37,9 @@ import {
   normalizeCodexResumeState,
   type CodexResumeState,
 } from './assistant/codex-resume-state.js'
+import {
+  looksLikePrivateAssistantRoutePlaceholder,
+} from './assistant/current-delivery-route.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -852,6 +855,7 @@ export const assistantOutboxIntentSchema = z
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
     replyToMessageId: z.string().min(1).nullable().default(null),
+    nativeReplyRequested: z.literal(true).optional(),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
     automationAuthority: assistantOutboxAutomationAuthoritySchema
@@ -878,6 +882,51 @@ export const assistantOutboxIntentSchema = z
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()
+  .superRefine((intent, context) => {
+    if (intent.nativeReplyRequested !== true) {
+      return
+    }
+
+    if (intent.operation !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies must use a normal message intent.',
+        path: ['nativeReplyRequested'],
+      })
+    }
+
+    const replyToMessageId = intent.replyToMessageId?.trim() ?? ''
+    if (!replyToMessageId) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a target message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+
+    if (looksLikePrivateAssistantRoutePlaceholder(replyToMessageId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a provider message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+
+    const channel = intent.channel?.trim().toLowerCase() ?? ''
+    if (channel !== 'linq' && channel !== 'telegram') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a supported message channel.',
+        path: ['channel'],
+      })
+    } else if (channel === 'telegram' && !/^\d+$/u.test(replyToMessageId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant Telegram native replies require a numeric target message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+  })
 
 export const assistantDiagnosticEventSchema = z
   .object({

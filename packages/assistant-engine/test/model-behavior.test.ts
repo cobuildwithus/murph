@@ -1220,7 +1220,20 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).toContain('Message reactions:')
     expect(prompt).toContain('Use reactions sparingly')
     expect(prompt).toContain(
-      'A reaction is a public stance toward the exact current inbound message',
+      'Message refs label accepted messages visible now',
+    )
+    expect(prompt).toContain(
+      '`murph.select_reply_target` annotates the eventual response, including every `---` bubble',
+    )
+    expect(prompt).toContain(
+      '`murph.react_to_message` reacts independently',
+    )
+    expect(prompt).toContain('never invent or force one')
+    expect(prompt).toContain(
+      'With a message ref you can react to that exact accepted message, not only the newest one',
+    )
+    expect(prompt).toContain(
+      'A reaction is a public stance toward the exact message it lands on',
     )
     expect(prompt).toContain(
       'mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣"',
@@ -1232,7 +1245,7 @@ describe('assistant user-facing wording guidance', () => {
       'A bare or mostly laughter reply usually points back to an earlier turn',
     )
     expect(prompt).toContain(
-      'prefer no reaction over laugh-reacting to it as a proxy for the earlier joke',
+      'Do not laugh-react to it as a proxy',
     )
     expect(prompt).toContain(
       'Laughter can also signal affiliation, politeness, tension relief, disbelief, embarrassment, or topic closure',
@@ -1241,13 +1254,13 @@ describe('assistant user-facing wording guidance', () => {
       'A reaction can stand alone only when it fully satisfies the turn',
     )
     expect(prompt).toContain(
-      'if no text reply should be sent after reacting, also use `finish_without_reply`',
+      'also use `finish_without_reply`',
     )
     expect(prompt).toContain(
       'Use `heart` for genuine warmth, affection, pride, or strong celebration',
     )
     expect(prompt).toContain(
-      'Use `laugh` only for a clearly shared joke or comic moment in the current message',
+      'Use `laugh` only for a clearly shared joke or comic moment in the targeted message',
     )
     expect(prompt).toContain(
       'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',

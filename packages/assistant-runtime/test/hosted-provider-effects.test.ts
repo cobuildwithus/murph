@@ -637,6 +637,71 @@ describe("hosted provider effects", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps a marked native reply on the original Linq chat and never recreates it", async () => {
+    const fetchImplementation = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-chat/messages")) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "must-not-create",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(null, { status: 500 });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      message: "selected reply",
+      nativeReplyRequested: true,
+      replyToMessageId: "selected-message-1",
+      target: "stale-chat",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({
+        status: 404,
+      }),
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    const requestBody = JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body));
+    expect(requestBody).toMatchObject({
+      message: {
+        reply_to: {
+          message_id: "selected-message-1",
+        },
+      },
+    });
+  });
+
   it("does not recover unclassified Linq thread send 404 responses", async () => {
     const fetchMock = vi.fn(async (
       input: RequestInfo | URL,

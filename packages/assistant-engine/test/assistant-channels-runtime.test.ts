@@ -1135,6 +1135,40 @@ describe('assistant channels runtime seam', () => {
     await expect(
       sendLinqMessage(
         {
+          message: 'selected reply',
+          nativeReplyRequested: true,
+          replyToMessageId: 'selected-message-1',
+          target: 'chat-1',
+          targetKind: 'thread',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'linq-message-id',
+      target: 'chat-1',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenLastCalledWith(
+      {
+        chatId: 'chat-1',
+        idempotencyKey: null,
+        message: 'selected reply',
+        nativeReplyRequested: true,
+        replyToMessageId: 'selected-message-1',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: undefined,
+      },
+    )
+    await expect(
+      sendLinqMessage(
+        {
           fromPhoneNumber: '+15550000',
           idempotencyKey: 'idem-created',
           message: 'welcome',
@@ -1166,6 +1200,26 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+    await expect(
+      sendLinqMessage(
+        {
+          fromPhoneNumber: '+15550000',
+          message: 'cannot recreate this reply',
+          nativeReplyRequested: true,
+          replyToMessageId: 'selected-message-1',
+          target: '+15550001',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_NATIVE_REPLY_CHAT_REQUIRED',
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledTimes(1)
     await expect(
       sendLinqMessage(
         {
@@ -1878,6 +1932,57 @@ describe('assistant channels runtime seam', () => {
       env: process.env,
       fetchImplementation: undefined,
     })
+  })
+
+  it('does not recreate a missing Linq chat for a marked native reply', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: '+15550001',
+          bindingDelivery: createAssistantBindingDelivery('thread', 'missing-chat'),
+          explicitTarget: null,
+          idempotencyKey: 'selected-reply',
+          identityId: null,
+          message: 'reply to the selected message',
+          nativeReplyRequested: true,
+          replyToMessageId: 'selected-message-1',
+        },
+        {},
+      ),
+    ).rejects.toBe(missingChatError)
+
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith(
+      {
+        chatId: 'missing-chat',
+        idempotencyKey: 'selected-reply',
+        message: 'reply to the selected message',
+        nativeReplyRequested: true,
+        replyToMessageId: 'selected-message-1',
+      },
+      {
+        env: process.env,
+        fetchImplementation: undefined,
+      },
+    )
+    expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
   })
 
   it('recovers stale Linq thread sends with the selected sender identity', async () => {
