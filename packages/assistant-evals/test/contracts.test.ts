@@ -4,7 +4,6 @@ import {
   EVAL_SCENARIO_SCHEMA,
   assertJsonValue,
   cloneJsonValue,
-  createEvalScenarioRegistry,
   defineEvalProgram,
   defineEvalScenario,
   defineEvalTarget,
@@ -12,6 +11,7 @@ import {
   freezeJsonValue,
   isEvalProgram,
   normalizeEvalTargetExecution,
+  type EvalScenario,
 } from "../src/index.js";
 
 describe("assistant eval contracts", () => {
@@ -106,34 +106,34 @@ describe("assistant eval contracts", () => {
     ).toThrow("scenario.timeoutMs");
   });
 
-  it("normalizes target observations, metrics, and safe artifact references", () => {
-    const artifactWithLocalDetail = {
-      kind: "episode",
-      path: "cases/welcome/episode.json",
-      mediaType: "application/json",
-      sha256: "a".repeat(64),
-      localAbsolutePath: "/private/eval-transcript.json",
-    };
-    const execution = normalizeEvalTargetExecution({
+  it("normalizes target observations and metrics without retaining local detail", () => {
+    const executionWithLocalDetail = {
       observation: {
         response: "hello",
       },
       metrics: {
         turns: 1,
       },
-      artifacts: [artifactWithLocalDetail],
-    });
+      CODEX_HOME: "/private/provider-home",
+      localAbsolutePath: "/private/eval-transcript.json",
+      providerSessionId: "private-provider-session",
+      providerTrace: "private-provider-trace",
+      rolloutRelativePath: "sessions/private-rollout.jsonl",
+    };
+    const execution = normalizeEvalTargetExecution(executionWithLocalDetail);
 
     expect(Object.isFrozen(execution)).toBe(true);
     expect(execution.metrics).toEqual({ turns: 1 });
-    expect(execution.artifacts).toEqual([
-      {
-        kind: "episode",
-        path: "cases/welcome/episode.json",
-        mediaType: "application/json",
-        sha256: "a".repeat(64),
-      },
-    ]);
+    const serialized = JSON.stringify(execution);
+    for (const forbidden of [
+      "CODEX_HOME",
+      "localAbsolutePath",
+      "providerSessionId",
+      "providerTrace",
+      "rolloutRelativePath",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
 
     expect(() =>
       normalizeEvalTargetExecution({
@@ -141,24 +141,10 @@ describe("assistant eval contracts", () => {
         metrics: { turns: Number.POSITIVE_INFINITY },
       }),
     ).toThrow("must be finite");
-    expect(() =>
-      normalizeEvalTargetExecution({
-        observation: {},
-        artifacts: [{ kind: "episode", path: "../private.json" }],
-      }),
-    ).toThrow("safe POSIX-relative artifact path");
-    expect(() =>
-      normalizeEvalTargetExecution({
-        observation: {},
-        artifacts: [
-          { kind: "episode", path: "cases/episode.json", sha256: "bad" },
-        ],
-      }),
-    ).toThrow("SHA-256");
   });
 
   it("defines stable programs and rejects duplicate or missing targets", () => {
-    const registry = createEvalScenarioRegistry([
+    const scenarios = [
       defineEvalScenario({
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.program",
@@ -170,7 +156,7 @@ describe("assistant eval contracts", () => {
         tags: [],
         input: {},
       }),
-    ]);
+    ];
     const target = defineEvalTarget({
       id: "murph.current",
       description: "Current target.",
@@ -181,7 +167,7 @@ describe("assistant eval contracts", () => {
     const program = defineEvalProgram({
       id: "onboarding",
       description: "  Onboarding program.  ",
-      registry,
+      scenarios,
       targets: [target],
     });
 
@@ -194,7 +180,7 @@ describe("assistant eval contracts", () => {
       defineEvalProgram({
         id: "onboarding-empty",
         description: "Empty.",
-        registry,
+        scenarios,
         targets: [],
       }),
     ).toThrow("requires at least one target");
@@ -202,7 +188,7 @@ describe("assistant eval contracts", () => {
       defineEvalProgram({
         id: "onboarding-duplicate",
         description: "Duplicate.",
-        registry,
+        scenarios,
         targets: [target, target],
       }),
     ).toThrow("duplicate target ids");
@@ -210,7 +196,7 @@ describe("assistant eval contracts", () => {
 
   it("renormalizes structurally composed program inputs at the public boundary", () => {
     const scenarioInput = { message: "before" };
-    const registry = createEvalScenarioRegistry([
+    const scenarios: readonly EvalScenario<{ message: string }>[] = [
       {
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.composed",
@@ -222,7 +208,7 @@ describe("assistant eval contracts", () => {
         tags: [],
         input: scenarioInput,
       },
-    ]);
+    ];
     const target = {
       id: "murph.composed",
       description: "  Composed target.  ",
@@ -233,14 +219,14 @@ describe("assistant eval contracts", () => {
     const program = defineEvalProgram({
       id: "onboarding-composed",
       description: "Composed program.",
-      registry,
+      scenarios,
       targets: [target],
     });
 
     scenarioInput.message = "after";
     target.description = "Changed target.";
 
-    expect(program.registry.require("onboarding.composed")).toMatchObject({
+    expect(program.scenarios[0]).toMatchObject({
       title: "Composed scenario",
       input: { message: "before" },
     });

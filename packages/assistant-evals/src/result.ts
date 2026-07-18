@@ -1,5 +1,4 @@
 import type { JsonValue } from "./json.js";
-import type { EvalArtifactRef } from "./target.js";
 
 export const EVAL_CASE_RESULT_SCHEMA = "murph.eval-case-result.v1" as const;
 export const EVAL_RUN_RESULT_SCHEMA = "murph.eval-run-result.v1" as const;
@@ -32,7 +31,6 @@ export interface CompletedEvalCaseResult<
   readonly status: "completed";
   readonly observation: TObservation;
   readonly metrics: Readonly<Record<string, number>>;
-  readonly artifacts: readonly EvalArtifactRef[];
 }
 
 export interface IncompleteEvalCaseResult extends EvalCaseResultBase {
@@ -51,7 +49,6 @@ export interface EvalRunSelection {
   readonly targetIds: readonly string[];
   readonly risks: readonly string[];
   readonly trials: number;
-  readonly concurrency: number;
   readonly defaultTimeoutMs: number;
 }
 

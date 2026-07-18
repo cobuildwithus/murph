@@ -12,6 +12,7 @@ import {
   type EvalProgram,
 } from "./program.js";
 import type { EvalRunResult } from "./result.js";
+import { selectEvalScenarios } from "./scenario-selection.js";
 import type { EvalScenarioRisk } from "./scenario.js";
 import { runEvalProgram, type EvalRunFilter } from "./runner.js";
 
@@ -29,7 +30,6 @@ export type EvalCliCommand =
       readonly programPath: string;
       readonly filter: EvalRunFilter;
       readonly trials: number;
-      readonly concurrency: number;
       readonly defaultTimeoutMs?: number;
       readonly outputPath?: string;
     };
@@ -79,7 +79,6 @@ export function parseEvalCliArgs(argv: readonly string[]): EvalCliCommand {
     "target",
     "risk",
     "trials",
-    "concurrency",
     "timeout-ms",
     "output",
   ]);
@@ -89,7 +88,6 @@ export function parseEvalCliArgs(argv: readonly string[]): EvalCliCommand {
     programPath,
     filter,
     trials: parsePositiveIntegerOption(options, "trials", 1),
-    concurrency: parsePositiveIntegerOption(options, "concurrency", 1),
     defaultTimeoutMs: parseOptionalPositiveIntegerOption(options, "timeout-ms"),
     outputPath: optionalSingleOption(options, "output"),
   };
@@ -120,7 +118,7 @@ export async function runEvalCli(
   const program = await services.loadProgram(command.programPath);
 
   if (command.kind === "list") {
-    const scenarios = program.registry.select({
+    const scenarios = selectEvalScenarios(program.scenarios, {
       scenarioIds: command.filter.scenarioIds,
       suites: command.filter.suites,
       tags: command.filter.tags,
@@ -141,16 +139,12 @@ export async function runEvalCli(
     program,
     filter: command.filter,
     trials: command.trials,
-    concurrency: command.concurrency,
     ...(command.defaultTimeoutMs === undefined
       ? {}
       : { defaultTimeoutMs: command.defaultTimeoutMs }),
-    onEvent(event) {
-      if (event.type !== "case-completed") {
-        return;
-      }
+    onCaseCompleted(result) {
       services.writeStderr(
-        `[assistant-evals] ${event.result.status} ${event.result.caseId}\n`,
+        `[assistant-evals] ${result.status} ${result.caseId}\n`,
       );
     },
     signal: services.signal,
@@ -369,7 +363,6 @@ function buildHelpText(): string {
     "",
     "Run options:",
     "  --trials <n>      Trials per scenario/target pair (default: 1)",
-    "  --concurrency <n> Maximum concurrent cases (default: 1)",
     "  --timeout-ms <n>  Default per-case timeout",
     "  --output <path>   Run artifact path",
   ].join("\n");

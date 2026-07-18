@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { JsonValue } from "./json.js";
@@ -36,11 +36,4 @@ export async function writeEvalRunArtifact<
   }
 
   return outputPath;
-}
-
-export async function readEvalRunArtifact(
-  artifactPath: string,
-): Promise<unknown> {
-  const raw = await readFile(path.resolve(artifactPath), "utf8");
-  return JSON.parse(raw);
 }

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   EVAL_SCENARIO_SCHEMA,
-  createEvalScenarioRegistry,
   defineEvalProgram,
   defineEvalScenario,
   defineEvalTarget,
@@ -16,7 +15,7 @@ function createProgram(input?: {
 }) {
   let active = 0;
 
-  const registry = createEvalScenarioRegistry([
+  const scenarios = [
     defineEvalScenario({
       schema: EVAL_SCENARIO_SCHEMA,
       id: "onboarding.alpha",
@@ -39,7 +38,7 @@ function createProgram(input?: {
       tags: ["resume"],
       input: { message: "beta" },
     }),
-  ]);
+  ];
 
   const createTarget = (id: string) =>
     defineEvalTarget({
@@ -67,13 +66,13 @@ function createProgram(input?: {
   return defineEvalProgram({
     id: "onboarding",
     description: "Onboarding program.",
-    registry,
+    scenarios,
     targets: [createTarget("murph.base"), createTarget("murph.candidate")],
   });
 }
 
 describe("eval matrix runner", () => {
-  it("runs scenario × target × trial matrices with bounded concurrency and stable output order", async () => {
+  it("runs scenario × target × trial matrices serially in stable order", async () => {
     let maximumActive = 0;
     const program = createProgram({
       onActiveChange(active) {
@@ -84,7 +83,6 @@ describe("eval matrix runner", () => {
     const run = await runEvalProgram({
       program,
       trials: 3,
-      concurrency: 2,
       runId: "eval-test",
     });
 
@@ -95,7 +93,7 @@ describe("eval matrix runner", () => {
       timedOut: 0,
       aborted: 0,
     });
-    expect(maximumActive).toBe(2);
+    expect(maximumActive).toBe(1);
     expect(run.cases.map((result) => result.caseId)).toEqual([
       "onboarding.alpha@1::murph.base::trial-1",
       "onboarding.alpha@1::murph.base::trial-2",
@@ -129,7 +127,7 @@ describe("eval matrix runner", () => {
   });
 
   it("isolates target failures and reports timeouts without dropping later cases", async () => {
-    const registry = createEvalScenarioRegistry([
+    const scenarios = [
       defineEvalScenario({
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.failure",
@@ -142,7 +140,7 @@ describe("eval matrix runner", () => {
         timeoutMs: 10,
         input: { message: "failure" },
       }),
-    ]);
+    ];
 
     const failed = defineEvalTarget({
       id: "murph.failed",
@@ -170,10 +168,9 @@ describe("eval matrix runner", () => {
       program: defineEvalProgram({
         id: "onboarding-failures",
         description: "Failure cases.",
-        registry,
+        scenarios,
         targets: [failed, timedOut],
       }),
-      concurrency: 2,
       runId: "eval-failures",
     });
 
@@ -204,7 +201,7 @@ describe("eval matrix runner", () => {
       },
       defaultTimeoutMs: 2_000,
       runId: "eval-quality",
-      onEvent() {
+      onCaseCompleted() {
         throw new Error("observer failures are non-blocking");
       },
     });
@@ -245,10 +242,10 @@ describe("eval matrix runner", () => {
     });
   });
 
-  it("keeps the worker slot until an aborted target finishes cleanup", async () => {
+  it("waits for timed-out target cleanup before starting the next case", async () => {
     let firstCaseCleanedUp = false;
     let secondCaseObservedCleanup = false;
-    const registry = createEvalScenarioRegistry([
+    const scenarios = [
       defineEvalScenario({
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.cleanup-alpha",
@@ -273,7 +270,7 @@ describe("eval matrix runner", () => {
         timeoutMs: 1_000,
         input: {},
       }),
-    ]);
+    ];
     const target = defineEvalTarget({
       id: "murph.cleanup",
       description: "Delayed cancellation cleanup.",
@@ -296,10 +293,9 @@ describe("eval matrix runner", () => {
       program: defineEvalProgram({
         id: "onboarding-cleanup",
         description: "Cleanup ordering.",
-        registry,
+        scenarios,
         targets: [target],
       }),
-      concurrency: 1,
       runId: "eval-cleanup",
     });
 
@@ -339,12 +335,11 @@ describe("eval matrix runner", () => {
       program: defineEvalProgram({
         id: "onboarding-abort-cleanup",
         description: "Active abort cleanup.",
-        registry: baseProgram.registry,
+        scenarios: baseProgram.scenarios,
         targets: [target],
       }),
       filter: { scenarioIds: ["onboarding.alpha"] },
       trials: 2,
-      concurrency: 1,
       signal: controller.signal,
       runId: "eval-abort-cleanup",
     });
@@ -369,7 +364,7 @@ describe("eval matrix runner", () => {
   });
 
   it("does not persist raw target failure details", async () => {
-    const registry = createEvalScenarioRegistry([
+    const scenarios = [
       defineEvalScenario({
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.private-error",
@@ -381,7 +376,7 @@ describe("eval matrix runner", () => {
         tags: [],
         input: {},
       }),
-    ]);
+    ];
     const target = defineEvalTarget({
       id: "murph.private-error",
       description: "Throws private details.",
@@ -394,7 +389,7 @@ describe("eval matrix runner", () => {
       program: defineEvalProgram({
         id: "onboarding-private-error",
         description: "Private error handling.",
-        registry,
+        scenarios,
         targets: [target],
       }),
       runId: "eval-private-error",
@@ -416,9 +411,6 @@ describe("eval matrix runner", () => {
     await expect(
       runEvalProgram({ program, trials: 0, runId: "invalid-trials" }),
     ).rejects.toThrow("trials must be an integer");
-    await expect(
-      runEvalProgram({ program, concurrency: 65, runId: "invalid-workers" }),
-    ).rejects.toThrow("concurrency must be an integer");
     await expect(
       runEvalProgram({ program, runId: "Invalid Run" }),
     ).rejects.toThrow("runId must use lowercase");

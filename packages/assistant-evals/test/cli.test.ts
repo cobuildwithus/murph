@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   EVAL_SCENARIO_SCHEMA,
-  createEvalScenarioRegistry,
   defineEvalProgram,
   defineEvalScenario,
   defineEvalTarget,
@@ -48,8 +47,6 @@ describe("assistant eval CLI", () => {
         "murph.current",
         "--trials",
         "3",
-        "--concurrency",
-        "2",
       ]),
     ).toEqual({
       kind: "run",
@@ -62,7 +59,6 @@ describe("assistant eval CLI", () => {
         risks: [],
       },
       trials: 3,
-      concurrency: 2,
       defaultTimeoutMs: undefined,
       outputPath: undefined,
     });
@@ -121,8 +117,6 @@ describe("assistant eval CLI", () => {
           "onboarding-full",
           "--trials",
           "2",
-          "--concurrency",
-          "2",
           "--output",
           "custom/run.json",
         ],
@@ -154,7 +148,7 @@ describe("assistant eval CLI", () => {
     const program = defineEvalProgram({
       id: "onboarding-failed",
       description: "Failed onboarding.",
-      registry: baseProgram.registry,
+      scenarios: baseProgram.scenarios,
       targets: [failedTarget],
     });
     const writes: string[] = [];
@@ -231,16 +225,10 @@ describe("assistant eval CLI", () => {
   tags: [],
   input: {}
 };
-const registry = {
-  scenarios: [scenario],
-  get(id) { return id === scenario.id ? scenario : undefined; },
-  require(id) { const value = this.get(id); if (!value) throw new Error(id); return value; },
-  select() { return this.scenarios; }
-};
 export default {
   id: "loaded",
   description: "Loaded program.",
-  registry,
+  scenarios: [scenario],
   targets: [{
     id: "murph.loaded",
     description: "Loaded target.",
@@ -266,8 +254,8 @@ export default {
         "run",
         "--program",
         "program.ts",
-        "--unknown",
-        "value",
+        "--concurrency",
+        "2",
       ]),
     ).toThrow("Unknown eval option");
 
@@ -304,7 +292,7 @@ export default {
 });
 
 function createProgram() {
-  const registry = createEvalScenarioRegistry([
+  const scenarios = [
     defineEvalScenario({
       schema: EVAL_SCENARIO_SCHEMA,
       id: "onboarding.welcome",
@@ -327,7 +315,7 @@ function createProgram() {
       tags: ["resume"],
       input: { message: "continue" },
     }),
-  ]);
+  ];
   const target = defineEvalTarget({
     id: "murph.current",
     description: "Current target.",
@@ -344,7 +332,7 @@ function createProgram() {
   return defineEvalProgram({
     id: "onboarding",
     description: "Onboarding.",
-    registry,
+    scenarios,
     targets: [target],
   });
 }

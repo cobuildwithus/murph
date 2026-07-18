@@ -17,11 +17,14 @@ type OnboardingStatus = "completed" | "open";
 
 type OnboardingRuntime = {
   readonly initializeVault: typeof import("@murphai/core").initializeVault;
+  readonly listGoals: typeof import("@murphai/core").listGoals;
+  readonly listHistoryEvents: typeof import("@murphai/core").listHistoryEvents;
   readonly readMemoryDocument: typeof import("@murphai/core").readMemoryDocument;
   readonly readAssistantOnboardingState: typeof import("@murphai/assistant-engine/assistant-state").readAssistantOnboardingState;
   readonly redactAssistantStateString: typeof import("@murphai/assistant-engine/assistant-runtime").redactAssistantStateString;
   readonly sendAssistantMessage: typeof import("@murphai/assistant-engine/assistant-service").sendAssistantMessage;
   readonly stopWarmCodexAppServer: typeof import("@murphai/assistant-engine/assistant-codex").stopWarmCodexAppServer;
+  readonly waitForWarmCodexBackgroundWork: typeof import("@murphai/assistant-engine/assistant-codex").waitForWarmCodexBackgroundWork;
   readonly VAULT_LAYOUT: typeof import("@murphai/core").VAULT_LAYOUT;
   readonly walkVaultFiles: typeof import("@murphai/core").walkVaultFiles;
 };
@@ -39,6 +42,9 @@ type OnboardingScenarioExpectation = JsonObject & {
   readonly completionReason: "user_answered" | "user_declined" | null;
   readonly maximumEffects: JsonObject & Partial<Record<EffectKind, number>>;
   readonly minimumEffects: JsonObject & Partial<Record<EffectKind, number>>;
+  readonly requiredClinicalAssertionGroups?: readonly (readonly string[])[];
+  readonly requiredGoalMatches?: readonly (readonly (readonly string[])[])[];
+  readonly requirePregnancyNotApplicable?: boolean;
   readonly status: OnboardingStatus;
 };
 
@@ -67,8 +73,8 @@ type TranscriptTurn = JsonObject & {
 };
 
 type DeterministicCheck = JsonObject & {
-  readonly actual: string | number | null;
-  readonly expected: string | number | null;
+  readonly actual: boolean | string | number | null;
+  readonly expected: boolean | string | number | null;
   readonly id: string;
   readonly passed: boolean;
 };
@@ -145,6 +151,9 @@ export const onboardingScenarios: readonly EvalScenario<OnboardingScenarioInput>
         minimumEffects: {
           goals: 1,
         },
+        requiredGoalMatches: [
+          [["strong", "strength"], ["hik", "carry", "grocer"]],
+        ],
       },
     }),
     defineOnboardingScenario({
@@ -276,13 +285,26 @@ export const onboardingScenarios: readonly EvalScenario<OnboardingScenarioInput>
       expected: {
         ...commonOpenExpectation,
         maximumEffects: {
+          allergies: 0,
           automations: 1,
+          conditions: 0,
           experiments: 0,
+          protocols: 0,
           regimens: 0,
         },
         minimumEffects: {
           goals: 1,
         },
+        requiredClinicalAssertionGroups: [
+          ["no_known_medications"],
+          ["no_known_conditions"],
+          ["no_known_allergies"],
+        ],
+        requirePregnancyNotApplicable: true,
+        requiredGoalMatches: [
+          [["strong", "strength"], ["hik"]],
+          [["afternoon"], ["energy"]],
+        ],
       },
       timeoutMs: 30 * 60 * 1_000,
     }),
@@ -338,10 +360,17 @@ export const currentMurphOnboardingTarget = defineEvalTarget<
         });
       }
 
+      await runtime.waitForWarmCodexBackgroundWork({ signal });
       const finalState = await captureOnboardingState(vault, runtime);
+      const canonicalEvidence = await captureCanonicalExpectationEvidence(
+        vault,
+        scenario.input.expected,
+        runtime,
+      );
       const deterministicChecks = buildDeterministicChecks(
         scenario.input.expected,
         finalState,
+        canonicalEvidence,
       );
 
       return {
@@ -478,6 +507,7 @@ async function captureEffects(
 function buildDeterministicChecks(
   expected: OnboardingScenarioExpectation,
   actual: OnboardingStateSnapshot,
+  canonicalEvidence: CanonicalExpectationEvidence,
 ): readonly DeterministicCheck[] {
   const checks: DeterministicCheck[] = [
     {
@@ -520,7 +550,123 @@ function buildDeterministicChecks(
     });
   }
 
+  if (expected.requiredGoalMatches !== undefined) {
+    checks.push({
+      actual: canonicalEvidence.goalTermsMatched,
+      expected: true,
+      id: "required-goal-context",
+      passed: canonicalEvidence.goalTermsMatched === true,
+    });
+  }
+
+  if (requiresClinicalEvidence(expected)) {
+    checks.push({
+      actual: canonicalEvidence.clinicalAssertionsMatched,
+      expected: true,
+      id: "required-clinical-assertions",
+      passed: canonicalEvidence.clinicalAssertionsMatched === true,
+    });
+  }
+
   return Object.freeze(checks);
+}
+
+type CanonicalExpectationEvidence = {
+  readonly clinicalAssertionsMatched: boolean | null;
+  readonly goalTermsMatched: boolean | null;
+};
+
+async function captureCanonicalExpectationEvidence(
+  vault: string,
+  expected: OnboardingScenarioExpectation,
+  runtime: OnboardingRuntime,
+): Promise<CanonicalExpectationEvidence> {
+  const [goals, historyEvents] = await Promise.all([
+    expected.requiredGoalMatches === undefined
+      ? []
+      : runtime.listGoals(vault),
+    !requiresClinicalEvidence(expected)
+      ? []
+      : runtime.listHistoryEvents({
+          vaultRoot: vault,
+          kinds: ["clinical_assertion"],
+          limit: 50,
+          order: "asc",
+        }),
+  ]);
+
+  return evaluateCanonicalExpectationEvidence({
+    clinicalAssertions: historyEvents.flatMap((event) =>
+      event.kind === "clinical_assertion"
+        ? [{ assertion: event.assertion, domain: event.domain ?? null }]
+        : [],
+    ),
+    goalTitles: goals.map((goal) => goal.entity.title),
+    requirePregnancyNotApplicable:
+      expected.requirePregnancyNotApplicable === true,
+    requiredClinicalAssertionGroups:
+      expected.requiredClinicalAssertionGroups,
+    requiredGoalMatches: expected.requiredGoalMatches,
+  });
+}
+
+export function evaluateCanonicalExpectationEvidence(input: {
+  readonly clinicalAssertions: readonly {
+    readonly assertion: string;
+    readonly domain: string | null;
+  }[];
+  readonly goalTitles: readonly string[];
+  readonly requirePregnancyNotApplicable?: boolean;
+  readonly requiredClinicalAssertionGroups?: readonly (readonly string[])[];
+  readonly requiredGoalMatches?: readonly (readonly (readonly string[])[])[];
+}): CanonicalExpectationEvidence {
+  const goalTitles = input.goalTitles.map((title) =>
+    title.toLocaleLowerCase("en-US"),
+  );
+  const assertions = new Set(
+    input.clinicalAssertions.map((assertion) => assertion.assertion),
+  );
+  const pregnancyNotApplicable = input.clinicalAssertions.some(
+    (assertion) =>
+      assertion.assertion === "not_pregnant" ||
+      (assertion.assertion === "not_applicable" &&
+        assertion.domain === "pregnancy"),
+  );
+  const requiresClinicalEvidence =
+    input.requiredClinicalAssertionGroups !== undefined ||
+    input.requirePregnancyNotApplicable === true;
+
+  return {
+    clinicalAssertionsMatched:
+      !requiresClinicalEvidence
+        ? null
+        : (input.requiredClinicalAssertionGroups ?? []).every((group) =>
+            group.some((assertion) => assertions.has(assertion)),
+          ) &&
+          (input.requirePregnancyNotApplicable !== true ||
+            pregnancyNotApplicable),
+    goalTermsMatched:
+      input.requiredGoalMatches === undefined
+        ? null
+        : input.requiredGoalMatches.every((requiredMatch) =>
+            goalTitles.some((title) =>
+              requiredMatch.every((group) =>
+                group.some((term) =>
+                  title.includes(term.toLocaleLowerCase("en-US")),
+                ),
+              ),
+            ),
+          ),
+  };
+}
+
+function requiresClinicalEvidence(
+  expected: OnboardingScenarioExpectation,
+): boolean {
+  return (
+    expected.requiredClinicalAssertionGroups !== undefined ||
+    expected.requirePregnancyNotApplicable === true
+  );
 }
 
 function isEffectKind(value: string): value is EffectKind {
@@ -560,11 +706,14 @@ async function loadOnboardingRuntime(): Promise<OnboardingRuntime> {
 
   return {
     initializeVault: core.initializeVault,
+    listGoals: core.listGoals,
+    listHistoryEvents: core.listHistoryEvents,
     readMemoryDocument: core.readMemoryDocument,
     readAssistantOnboardingState: state.readAssistantOnboardingState,
     redactAssistantStateString: assistantRuntime.redactAssistantStateString,
     sendAssistantMessage: service.sendAssistantMessage,
     stopWarmCodexAppServer: codex.stopWarmCodexAppServer,
+    waitForWarmCodexBackgroundWork: codex.waitForWarmCodexBackgroundWork,
     VAULT_LAYOUT: core.VAULT_LAYOUT,
     walkVaultFiles: core.walkVaultFiles,
   };

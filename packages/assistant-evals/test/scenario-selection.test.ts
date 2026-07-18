@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   EVAL_SCENARIO_SCHEMA,
-  createEvalScenarioRegistry,
   defineEvalScenario,
+  normalizeEvalScenarios,
+  selectEvalScenarios,
 } from "../src/index.js";
 
 function createScenario(input: {
@@ -27,9 +28,9 @@ function createScenario(input: {
   });
 }
 
-describe("eval scenario registry", () => {
-  it("stores many scenarios in stable id order and composes filters", () => {
-    const registry = createEvalScenarioRegistry([
+describe("eval scenario selection", () => {
+  it("normalizes scenarios in stable id order and composes filters", () => {
+    const scenarios = normalizeEvalScenarios([
       createScenario({
         id: "onboarding.resume",
         suites: ["onboarding-full"],
@@ -48,35 +49,36 @@ describe("eval scenario registry", () => {
       }),
     ]);
 
-    expect(registry.scenarios.map((scenario) => scenario.id)).toEqual([
+    expect(scenarios.map((scenario) => scenario.id)).toEqual([
       "onboarding.consent",
       "onboarding.resume",
       "onboarding.welcome",
     ]);
     expect(
-      registry
-        .select({ suites: ["onboarding-smoke"] })
-        .map((scenario) => scenario.id),
+      selectEvalScenarios(scenarios, { suites: ["onboarding-smoke"] }).map(
+        (scenario) => scenario.id,
+      ),
     ).toEqual(["onboarding.consent", "onboarding.welcome"]);
     expect(
-      registry
-        .select({ tags: ["entry", "welcome"] })
-        .map((scenario) => scenario.id),
+      selectEvalScenarios(scenarios, { tags: ["entry", "welcome"] }).map(
+        (scenario) => scenario.id,
+      ),
     ).toEqual(["onboarding.welcome"]);
     expect(
-      registry
-        .select({ risks: ["critical"] })
-        .map((scenario) => scenario.id),
+      selectEvalScenarios(scenarios, { risks: ["critical"] }).map(
+        (scenario) => scenario.id,
+      ),
     ).toEqual([
       "onboarding.consent",
       "onboarding.welcome",
     ]);
     expect(
-      registry
-        .select({
+      selectEvalScenarios(
+        scenarios,
+        {
           scenarioIds: ["onboarding.resume", "onboarding.welcome"],
-        })
-        .map((scenario) => scenario.id),
+        },
+      ).map((scenario) => scenario.id),
     ).toEqual(["onboarding.resume", "onboarding.welcome"]);
   });
 
@@ -87,13 +89,15 @@ describe("eval scenario registry", () => {
       tags: [],
     });
 
-    expect(() => createEvalScenarioRegistry([scenario, scenario])).toThrow(
-      "Duplicate eval scenario id",
+    expect(() => normalizeEvalScenarios([scenario, scenario])).toThrow(
+      "duplicate scenario ids",
     );
 
-    const registry = createEvalScenarioRegistry([scenario]);
+    const scenarios = normalizeEvalScenarios([scenario]);
     expect(() =>
-      registry.select({ scenarioIds: ["onboarding.missing"] }),
+      selectEvalScenarios(scenarios, {
+        scenarioIds: ["onboarding.missing"],
+      }),
     ).toThrow("Unknown eval scenario id");
   });
 });

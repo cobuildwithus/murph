@@ -6,11 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   EVAL_SCENARIO_SCHEMA,
-  createEvalScenarioRegistry,
   defineEvalProgram,
   defineEvalScenario,
   defineEvalTarget,
-  readEvalRunArtifact,
   runEvalProgram,
   writeEvalRunArtifact,
 } from "../src/index.js";
@@ -30,7 +28,7 @@ describe("eval run artifacts", () => {
     const directory = await mkdtemp(path.join(tmpdir(), "murph-assistant-evals-"));
     cleanupPaths.push(directory);
 
-    const registry = createEvalScenarioRegistry([
+    const scenarios = [
       defineEvalScenario({
         schema: EVAL_SCENARIO_SCHEMA,
         id: "onboarding.one",
@@ -53,7 +51,7 @@ describe("eval run artifacts", () => {
         tags: [],
         input: { value: 2 },
       }),
-    ]);
+    ];
     const target = defineEvalTarget({
       id: "murph.current",
       description: "Current target.",
@@ -69,7 +67,7 @@ describe("eval run artifacts", () => {
       program: defineEvalProgram({
         id: "onboarding",
         description: "Onboarding.",
-        registry,
+        scenarios,
         targets: [target],
       }),
       runId: "artifact-test",
@@ -86,12 +84,6 @@ describe("eval run artifacts", () => {
     };
     expect(rawParsed.runId).toBe("artifact-test");
     expect(rawParsed.cases).toHaveLength(2);
-
-    const parsed = await readEvalRunArtifact(outputPath);
-    expect(parsed).toMatchObject({
-      runId: "artifact-test",
-      summary: { total: 2, completed: 2 },
-    });
 
     const [directoryStats, artifactStats] = await Promise.all([
       stat(path.dirname(outputPath)),

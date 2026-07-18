@@ -10,14 +10,6 @@ import {
 } from "./identifiers.js";
 import type { EvalScenario } from "./scenario.js";
 
-/** Artifact paths are safe POSIX-relative references; the target adapter owns their base directory. */
-export interface EvalArtifactRef {
-  readonly kind: string;
-  readonly path: string;
-  readonly mediaType?: string;
-  readonly sha256?: string;
-}
-
 export interface EvalTargetContext<TInput extends JsonValue = JsonValue> {
   readonly runId: string;
   readonly caseId: string;
@@ -31,7 +23,6 @@ export interface EvalTargetExecution<
 > {
   readonly observation: TObservation;
   readonly metrics?: Readonly<Record<string, number>>;
-  readonly artifacts?: readonly EvalArtifactRef[];
 }
 
 export interface EvalTarget<
@@ -80,12 +71,10 @@ export function normalizeEvalTargetExecution<
     cloneJsonValue(execution.observation, "target observation"),
   );
   const metrics = normalizeMetrics(execution.metrics);
-  const artifacts = normalizeArtifacts(execution.artifacts);
 
   return Object.freeze({
     observation,
     ...(metrics ? { metrics } : {}),
-    ...(artifacts ? { artifacts } : {}),
   });
 }
 
@@ -106,63 +95,4 @@ function normalizeMetrics(
   }
 
   return Object.freeze(normalized);
-}
-
-function assertEvalArtifactPath(value: string, label: string): void {
-  assertNonEmptyString(value, label);
-  const segments = value.split("/");
-  if (
-    value.startsWith("/") ||
-    value.startsWith("\\") ||
-    value.includes("\\") ||
-    value.includes(":") ||
-    segments.some(
-      (segment) => segment.length === 0 || segment === "." || segment === "..",
-    ) ||
-    /[\u0000-\u001f\u007f]/u.test(value)
-  ) {
-    throw new TypeError(
-      `${label} must be a safe POSIX-relative artifact path.`,
-    );
-  }
-}
-
-function normalizeArtifacts(
-  artifacts: readonly EvalArtifactRef[] | undefined,
-): readonly EvalArtifactRef[] | undefined {
-  if (!artifacts) {
-    return undefined;
-  }
-
-  return Object.freeze(
-    artifacts.map((artifact, index) => {
-      assertEvalIdentifier(artifact.kind, `artifact[${index}].kind`);
-      assertEvalArtifactPath(artifact.path, `artifact[${index}].path`);
-      if (artifact.mediaType !== undefined) {
-        assertNonEmptyString(
-          artifact.mediaType,
-          `artifact[${index}].mediaType`,
-        );
-      }
-      if (
-        artifact.sha256 !== undefined &&
-        !/^[0-9a-f]{64}$/u.test(artifact.sha256)
-      ) {
-        throw new TypeError(
-          `artifact[${index}].sha256 must be a lowercase SHA-256 hex digest.`,
-        );
-      }
-
-      return Object.freeze({
-        kind: artifact.kind,
-        path: artifact.path,
-        ...(artifact.mediaType === undefined
-          ? {}
-          : { mediaType: artifact.mediaType }),
-        ...(artifact.sha256 === undefined
-          ? {}
-          : { sha256: artifact.sha256 }),
-      });
-    }),
-  );
 }

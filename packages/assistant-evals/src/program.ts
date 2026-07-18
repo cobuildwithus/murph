@@ -4,10 +4,8 @@ import {
   compareEvalIdentifiers,
 } from "./identifiers.js";
 import type { JsonValue } from "./json.js";
-import {
-  createEvalScenarioRegistry,
-  type EvalScenarioRegistry,
-} from "./registry.js";
+import { normalizeEvalScenarios } from "./scenario-selection.js";
+import type { EvalScenario } from "./scenario.js";
 import { defineEvalTarget, type EvalTarget } from "./target.js";
 
 export interface EvalProgram<
@@ -16,7 +14,7 @@ export interface EvalProgram<
 > {
   readonly id: string;
   readonly description: string;
-  readonly registry: EvalScenarioRegistry<TInput>;
+  readonly scenarios: readonly EvalScenario<TInput>[];
   readonly targets: readonly EvalTarget<TInput, TObservation>[];
 }
 
@@ -33,7 +31,7 @@ export function defineEvalProgram<
     throw new TypeError("An eval program requires at least one target.");
   }
 
-  const registry = createEvalScenarioRegistry(program.registry.scenarios);
+  const scenarios = normalizeEvalScenarios(program.scenarios);
   const sortedTargets = program.targets
     .map((target) => defineEvalTarget(target))
     .sort((left, right) => compareEvalIdentifiers(left.id, right.id));
@@ -45,7 +43,7 @@ export function defineEvalProgram<
   return Object.freeze({
     id: program.id,
     description: program.description.trim(),
-    registry,
+    scenarios,
     targets: Object.freeze(sortedTargets),
   });
 }
@@ -55,16 +53,12 @@ export function isEvalProgram(value: unknown): value is EvalProgram {
     return false;
   }
 
-  const registry = value.registry;
   return (
     typeof value.id === "string" &&
     typeof value.description === "string" &&
+    Array.isArray(value.scenarios) &&
     Array.isArray(value.targets) &&
-    isRecord(registry) &&
-    Array.isArray(registry.scenarios) &&
-    typeof registry.get === "function" &&
-    typeof registry.require === "function" &&
-    typeof registry.select === "function"
+    value.scenarios.length > 0
   );
 }
 

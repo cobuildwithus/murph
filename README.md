@@ -132,7 +132,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/health-commons`    | Workspace-private public Health Commons owner for protocol pages, biomarker pages, sources, generated catalogs, and aggregate outcome summaries. |
 | `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
-| `packages/assistant-evals`   | Workspace-private assistant eval contracts, isolated synthetic onboarding episodes, bounded evidence artifacts, and CLI.                       |
+| `packages/assistant-evals`   | Workspace-private assistant eval contracts, isolated synthetic onboarding episodes, bounded eval-owned run artifacts, and CLI.                 |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
 | `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI.                                                |
 | `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |

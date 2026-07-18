@@ -15,6 +15,32 @@ It does not own onboarding policy, product state, a user-simulator service, a
 second assistant lifecycle, or a model-grader framework. Production packages
 must not import this package.
 
+## Local Codex rollout ownership
+
+Live execution deliberately reuses the maintainer's authenticated ambient
+Codex profile so the eval exercises the unchanged production adapter. Codex
+therefore writes its ordinary non-ephemeral rollout files under the profile's
+`sessions/` tree, outside the temporary vault and the eval run artifact. Those
+files can contain the synthetic prompts plus system, model, reasoning, tool,
+and provider activity. The eval does not include their paths or contents in
+`run.json` or the ReviewGPT grading packet, and it does not delete them.
+
+Codex owns that storage surface. Its location, permissions, and retention
+follow the existing profile and filesystem umask; cold rollouts may be
+compressed but are not expired by this eval. For a metadata-only before/after
+inventory, count matching files without printing their paths:
+
+```bash
+find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f \
+  \( -name 'rollout-*.jsonl' -o -name 'rollout-*.jsonl.zst' \) \
+  -print | wc -l
+```
+
+If an operator chooses to remove one, first resolve the exact synthetic session
+through Codex's normal session surface, then use
+`codex delete --force <EXACT_SESSION_UUID>`. Never glob-delete an ambient Codex
+profile. The eval artifact intentionally omits that UUID.
+
 ## Onboarding suites
 
 List the available scenarios:
@@ -36,17 +62,18 @@ Run the larger suite explicitly:
 pnpm eval:assistant -- run \
   --program packages/assistant-evals/programs/onboarding.program.ts \
   --suite onboarding-full \
-  --target murph.current \
-  --concurrency 1
+  --target murph.current
 ```
 
-The live target creates a mode-`0700` temporary synthetic vault for each case,
-binds the provider working directory and `VAULT` environment to that vault,
-runs every scripted turn through `sendAssistantMessage`, records only bounded
-user-facing transcript and canonical state counts, stops the exact warm Codex
-process it started, and removes the vault before the case settles. Keep this
-target at concurrency 1 because the production assistant process is shared
-inside one Node process.
+The live target creates a mode-`0700` temporary case root containing one
+synthetic vault, binds the provider working directory and `VAULT` environment
+to that vault, and runs every scripted turn through `sendAssistantMessage`.
+After the final root turn, it waits for the production background-work boundary
+before recording bounded user-facing transcript, canonical counts, and
+semantic booleans. It then stops the exact warm Codex process it started and
+removes the case root. A failed background-work boundary fails the case while
+the same stop-and-remove cleanup still runs. The runner is serial because the
+production assistant process is shared inside one Node process.
 
 The CLI writes an atomic mode-`0600` snapshot to the ignored path:
 
@@ -85,8 +112,7 @@ separate from the required ReviewGPT pull-request gate.
 ## Generic CLI
 
 Programs default-export `defineEvalProgram(...)`. The runner executes the
-stable cross-product of selected scenarios, targets, and trials; results remain
-ordered even when a non-live program opts into bounded concurrency.
+stable cross-product of selected scenarios, targets, and trials in order.
 
 ```bash
 pnpm eval:assistant -- list --program <module> [filters]
@@ -95,4 +121,4 @@ pnpm eval:assistant -- run --program <module> [filters] [options]
 
 Targets must honor their `AbortSignal` and settle only after all case-owned
 resources are released. On timeout or cancellation the runner waits for that
-settlement before it frees the worker slot or finalizes the run artifact.
+settlement before it starts another case or finalizes the run artifact.

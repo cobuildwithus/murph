@@ -7,6 +7,7 @@ import {
 } from "./identifiers.js";
 import type { JsonValue } from "./json.js";
 import type { EvalProgram } from "./program.js";
+import { selectEvalScenarios } from "./scenario-selection.js";
 import type { EvalScenario, EvalScenarioRisk } from "./scenario.js";
 import {
   EVAL_CASE_RESULT_SCHEMA,
@@ -24,7 +25,6 @@ import {
 
 const DEFAULT_CASE_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_TRIALS = 100;
-const MAX_CONCURRENCY = 64;
 
 export interface EvalRunFilter {
   readonly scenarioIds?: readonly string[];
@@ -34,30 +34,6 @@ export interface EvalRunFilter {
   readonly risks?: readonly EvalScenarioRisk[];
 }
 
-export type EvalRunEvent<TObservation extends JsonValue = JsonValue> =
-  | {
-      readonly type: "run-started";
-      readonly runId: string;
-      readonly caseCount: number;
-    }
-  | {
-      readonly type: "case-started";
-      readonly runId: string;
-      readonly caseId: string;
-      readonly scenarioId: string;
-      readonly targetId: string;
-      readonly trial: number;
-    }
-  | {
-      readonly type: "case-completed";
-      readonly runId: string;
-      readonly result: EvalCaseResult<TObservation>;
-    }
-  | {
-      readonly type: "run-completed";
-      readonly run: EvalRunResult<TObservation>;
-    };
-
 export interface RunEvalProgramOptions<
   TInput extends JsonValue,
   TObservation extends JsonValue,
@@ -65,19 +41,17 @@ export interface RunEvalProgramOptions<
   readonly program: EvalProgram<TInput, TObservation>;
   readonly filter?: EvalRunFilter;
   readonly trials?: number;
-  readonly concurrency?: number;
   readonly defaultTimeoutMs?: number;
   readonly runId?: string;
   readonly signal?: AbortSignal;
   readonly now?: () => Date;
-  readonly onEvent?: (event: EvalRunEvent<TObservation>) => void;
+  readonly onCaseCompleted?: (result: EvalCaseResult<TObservation>) => void;
 }
 
 interface EvalCaseTask<
   TInput extends JsonValue,
   TObservation extends JsonValue,
 > {
-  readonly index: number;
   readonly caseId: string;
   readonly scenario: EvalScenario<TInput>;
   readonly target: EvalTarget<TInput, TObservation>;
@@ -91,10 +65,8 @@ export async function runEvalProgram<
   options: RunEvalProgramOptions<TInput, TObservation>,
 ): Promise<EvalRunResult<TObservation>> {
   const trials = options.trials ?? 1;
-  const concurrency = options.concurrency ?? 1;
   const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_CASE_TIMEOUT_MS;
   assertPositiveInteger(trials, "trials", MAX_TRIALS);
-  assertPositiveInteger(concurrency, "concurrency", MAX_CONCURRENCY);
   assertPositiveInteger(
     defaultTimeoutMs,
     "defaultTimeoutMs",
@@ -104,71 +76,34 @@ export async function runEvalProgram<
   const now = options.now ?? (() => new Date());
   const runId = options.runId ?? createEvalRunId(now());
   assertEvalIdentifier(runId, "runId");
-  const scenarios = selectScenarios(options.program, options.filter);
+  const scenarios = selectEvalScenarios(options.program.scenarios, {
+    scenarioIds: options.filter?.scenarioIds,
+    suites: options.filter?.suites,
+    tags: options.filter?.tags,
+    risks: options.filter?.risks,
+  });
   const targets = selectTargets(options.program, options.filter);
-  const tasks = createTasks({ runId, scenarios, targets, trials });
+  const tasks = createTasks({ scenarios, targets, trials });
 
   if (tasks.length === 0) {
     throw new Error("The eval selection did not produce any cases.");
   }
 
   const started = now();
-  emitEvent(options.onEvent, {
-    type: "run-started",
-    runId,
-    caseCount: tasks.length,
-  });
+  const results: EvalCaseResult<TObservation>[] = [];
+  for (const task of tasks) {
+    const result = await runCase({
+      runId,
+      task,
+      defaultTimeoutMs,
+      parentSignal: options.signal,
+      now,
+    });
+    results.push(result);
+    notifyCaseCompleted(options.onCaseCompleted, result);
+  }
 
-  const results: Array<EvalCaseResult<TObservation> | undefined> =
-    new Array(tasks.length);
-  let nextTaskIndex = 0;
-
-  const workerCount = Math.min(concurrency, tasks.length);
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const taskIndex = nextTaskIndex;
-      nextTaskIndex += 1;
-      const task = tasks[taskIndex];
-      if (!task) {
-        return;
-      }
-
-      emitEvent(options.onEvent, {
-        type: "case-started",
-        runId,
-        caseId: task.caseId,
-        scenarioId: task.scenario.id,
-        targetId: task.target.id,
-        trial: task.trial,
-      });
-
-      const result = await runCase({
-        runId,
-        task,
-        defaultTimeoutMs,
-        parentSignal: options.signal,
-        now,
-      });
-      results[task.index] = result;
-
-      emitEvent(options.onEvent, {
-        type: "case-completed",
-        runId,
-        result,
-      });
-    }
-  });
-
-  await Promise.all(workers);
-
-  const cases = Object.freeze(
-    results.map((result, index) => {
-      if (!result) {
-        throw new Error(`Eval runner did not produce result ${index}.`);
-      }
-      return result;
-    }),
-  );
+  const cases = Object.freeze(results);
   const completed = now();
   const run = Object.freeze({
     schema: EVAL_RUN_RESULT_SCHEMA,
@@ -184,34 +119,13 @@ export async function runEvalProgram<
       targetIds: Object.freeze(targets.map((target) => target.id)),
       risks: Object.freeze([...(options.filter?.risks ?? [])]),
       trials,
-      concurrency,
       defaultTimeoutMs,
     }),
     summary: summarizeCases(cases),
     cases,
   }) satisfies EvalRunResult<TObservation>;
 
-  emitEvent(options.onEvent, {
-    type: "run-completed",
-    run,
-  });
-
   return run;
-}
-
-function selectScenarios<
-  TInput extends JsonValue,
-  TObservation extends JsonValue,
->(
-  program: EvalProgram<TInput, TObservation>,
-  filter: EvalRunFilter | undefined,
-): readonly EvalScenario<TInput>[] {
-  return program.registry.select({
-    scenarioIds: filter?.scenarioIds,
-    suites: filter?.suites,
-    tags: filter?.tags,
-    risks: filter?.risks,
-  });
 }
 
 function selectTargets<
@@ -253,7 +167,6 @@ function createTasks<
   TInput extends JsonValue,
   TObservation extends JsonValue,
 >(input: {
-  readonly runId: string;
   readonly scenarios: readonly EvalScenario<TInput>[];
   readonly targets: readonly EvalTarget<TInput, TObservation>[];
   readonly trials: number;
@@ -264,7 +177,6 @@ function createTasks<
     for (const target of input.targets) {
       for (let trial = 1; trial <= input.trials; trial += 1) {
         tasks.push({
-          index: tasks.length,
           caseId: `${scenario.id}@${scenario.version}::${target.id}::trial-${trial}`,
           scenario,
           target,
@@ -330,7 +242,7 @@ async function runCase<
       const onAbort = () => {
         rejectInterrupted(
           "aborted",
-          normalizeAbortReason(parentSignal.reason),
+          new Error("Eval run aborted."),
         );
       };
       parentSignal.addEventListener("abort", onAbort, { once: true });
@@ -353,8 +265,8 @@ async function runCase<
       execution = await Promise.race([executionPromise, interrupt]);
     } catch (error) {
       if (interruptStatus !== null) {
-        // A timeout is not cleanup. Keep the worker slot until the target has
-        // honored cancellation and released every case-owned resource.
+        // A timeout is not cleanup. Do not begin another case until the target
+        // has honored cancellation and released every case-owned resource.
         await executionPromise.catch(() => undefined);
       }
       throw error;
@@ -376,7 +288,6 @@ async function runCase<
       status: "completed",
       observation: normalized.observation,
       metrics: normalized.metrics ?? Object.freeze({}),
-      artifacts: normalized.artifacts ?? Object.freeze([]),
     });
   } catch (error) {
     if (interruptStatus !== null) {
@@ -491,11 +402,6 @@ function readErrorCode(error: Error): string | null {
     : null;
 }
 
-function normalizeAbortReason(reason: unknown): Error {
-  void reason;
-  return new Error("Eval run aborted.");
-}
-
 function elapsedMilliseconds(started: Date, completed: Date): number {
   return Math.max(0, completed.getTime() - started.getTime());
 }
@@ -505,16 +411,16 @@ function createEvalRunId(now: Date): string {
   return `eval-${timestamp}-${randomUUID().slice(0, 8)}`;
 }
 
-function emitEvent<TObservation extends JsonValue>(
-  listener: ((event: EvalRunEvent<TObservation>) => void) | undefined,
-  event: EvalRunEvent<TObservation>,
+function notifyCaseCompleted<TObservation extends JsonValue>(
+  listener: ((result: EvalCaseResult<TObservation>) => void) | undefined,
+  result: EvalCaseResult<TObservation>,
 ): void {
   if (!listener) {
     return;
   }
 
   try {
-    listener(event);
+    listener(result);
   } catch {
     // Progress reporting is observational and must not change eval outcomes.
   }
