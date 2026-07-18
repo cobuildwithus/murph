@@ -1739,10 +1739,14 @@ export function parseHostedRuntimeNewsletterToolRequest(
       new Set(["action", "groupId"]),
       "Hosted runtime newsletter tool prepare request",
     );
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-    };
+    // Transitional reader compatibility: older runner bundles sent groupId.
+    // Validate and discard it; callback authentication remains the sole group
+    // selector. Remove this reader only after every rollback-eligible runner
+    // omits the field.
+    if (Object.prototype.hasOwnProperty.call(record, "groupId")) {
+      requireString(record.groupId, "Hosted runtime newsletter tool groupId");
+    }
+    return { action };
   }
   if (action === "send") {
     assertAllowedObjectKeys(
@@ -1750,6 +1754,9 @@ export function parseHostedRuntimeNewsletterToolRequest(
       new Set(["action", "groupId", "subject", "html", "text"]),
       "Hosted runtime newsletter tool send request",
     );
+    if (Object.prototype.hasOwnProperty.call(record, "groupId")) {
+      requireString(record.groupId, "Hosted runtime newsletter tool groupId");
+    }
     const subject = requireString(record.subject, "Hosted runtime newsletter tool subject");
     const html = requireString(record.html, "Hosted runtime newsletter tool html");
     const text = readOptionalNullableString(
@@ -1773,7 +1780,6 @@ export function parseHostedRuntimeNewsletterToolRequest(
     }
     return {
       action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
       html,
       subject,
       text,

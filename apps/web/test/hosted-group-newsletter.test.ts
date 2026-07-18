@@ -77,7 +77,6 @@ describe("hosted group newsletter participants", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     const recipients = await readHostedGroupNewsletterEmailRecipients({
@@ -109,6 +108,11 @@ describe("hosted group newsletter participants", () => {
       ],
       status: "ok",
     });
+    expect(prisma.hostedGroup.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { runtimeMemberId: "group_runtime_member" },
+      }),
+    );
     expect(recipients).toEqual({
       recipients: [
         {

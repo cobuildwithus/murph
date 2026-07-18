@@ -204,6 +204,7 @@ export async function executeCodexAssistantTurnAttempt(
     approvalPolicy,
     developerInstructions,
     dynamicTools: input.dynamicTools,
+    ephemeral: input.ephemeral ?? undefined,
     environments: input.environments ?? undefined,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
@@ -251,6 +252,8 @@ export async function executeCodexAssistantTurnAttempt(
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+    permissions: input.permissions ?? undefined,
+    processLifetime: input.processLifetime,
     progressDelivery: input.progressDelivery ?? undefined,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
@@ -258,8 +261,15 @@ export async function executeCodexAssistantTurnAttempt(
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
-    sandbox: providerConfig.policy.sandbox ?? undefined,
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? undefined,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+    scheduledExecution: input.scheduledExecution ?? false,
+    scheduledTaskAuthority: input.scheduledTaskAuthority ?? null,
+    sandbox: input.permissions
+      ? undefined
+      : providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    threadConfig: input.threadConfig ?? undefined,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
     workingDirectory: input.workingDirectory,

@@ -25,6 +25,7 @@ const runtimeMocks = vi.hoisted(() => ({
 }))
 
 const stateMocks = vi.hoisted(() => ({
+  readAssistantOnboardingResumeContext: vi.fn(),
   resolveAssistantStatePaths: vi.fn(),
   withAssistantRuntimeWriteLock: vi.fn(),
 }))
@@ -81,6 +82,9 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', () => {
 })
 
 vi.mock('@murphai/assistant-engine/assistant-state', () => ({
+  ASSISTANT_ONBOARDING_RESUME_CONTEXT_DEFAULT_LIMIT: 3,
+  readAssistantOnboardingResumeContext:
+    stateMocks.readAssistantOnboardingResumeContext,
   resolveAssistantStatePaths: stateMocks.resolveAssistantStatePaths,
   withAssistantRuntimeWriteLock: stateMocks.withAssistantRuntimeWriteLock,
 }))

@@ -1,5 +1,6 @@
 import * as z from 'zod'
 import type {
+  AssistantOutboxIntent,
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -24,7 +25,6 @@ import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn-runner.js'
-import { normalizeCodexEvent } from '../assistant-codex-events.js'
 import {
   readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
@@ -37,8 +37,6 @@ import {
 import {
   applyAssistantSessionCodexResumeStateAction,
   persistAssistantTurnAndSession,
-  resolveAssistantProviderResumeStateAction,
-  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -89,6 +87,8 @@ import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './shared.js'
+import { resolveAssistantScheduledTaskAuthority } from './scheduled-task-authority.js'
+import { buildAssistantGroupChallengeDispatchCommit } from './group-challenge-dispatch.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -112,10 +112,11 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
 ])
 
 const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
-  Omit<AssistantCodexTurnThreadScopeProfile, 'nativeResumePolicy'>
+  AssistantCodexTurnThreadScopeProfile
 > = {
+  nativeResumePolicy: 'disabled',
   promptProfile: 'notification-decision',
-  threadScope: 'session-thread',
+  threadScope: 'isolated-thread',
   toolProfile: 'notification-turn',
 }
 
@@ -127,11 +128,6 @@ const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
-
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -140,6 +136,9 @@ export type AssistantNotificationTurnPolicy = {
   kind: 'maintenance-exact-skip'
   privateSummary: string
 }
+
+const ASSISTANT_GROUP_NEWSLETTER_NO_RECIPIENTS_NOTICE =
+  'No one in this group is eligible to receive the newsletter email yet. Add an email in Murph Settings: https://www.withmurph.ai/settings?addEmail=true'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -161,16 +160,27 @@ export interface AssistantNotificationCommitContext {
   response: string | null
 }
 
-export interface AssistantNotificationPostTurnDeliveryExpectations {
-  newsletterSendResult?: Extract<
-    HostedRuntimeNewsletterToolResponse,
-    { action: 'send' }
-  >['result'] | null
-}
+type AssistantNotificationNewsletterSendObservation = Extract<
+  HostedRuntimeNewsletterToolResponse,
+  { action: 'send' }
+>['result']
 
-type AssistantNotificationNewsletterSendResult = NonNullable<
-  AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
->
+type AssistantNotificationNewsletterSendResult =
+  | {
+      status: Exclude<
+        AssistantNotificationNewsletterSendObservation['status'],
+        'unavailable'
+      >
+    }
+  | {
+      status: 'unavailable'
+      unavailableReason: string
+    }
+
+export interface AssistantNotificationPostTurnDeliveryExpectations {
+  newsletterDeliveryIntent?: { intentId: string } | null
+  newsletterSendResult?: AssistantNotificationNewsletterSendResult | null
+}
 
 export interface AssistantNotificationInput
   extends AssistantSessionResolutionFields,
@@ -192,8 +202,8 @@ export interface AssistantNotificationInput
       | 'operatorAuthority'
       | 'outboxAutomationAuthority'
       | 'assistantTargetOverride'
-      | 'scheduledAutomationAuthority'
       | 'scheduledOccurrenceAt'
+      | 'scheduledTaskAuthority'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -206,6 +216,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  preparedResponseMedia?: readonly AssistantResponseMedia[] | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
 }
@@ -249,12 +260,23 @@ export async function sendAssistantNotificationLocal(
       )
       let newsletterSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
-        | null = input.scheduledAutomationAuthority
+        | null = resolveAssistantScheduledTaskAuthority(
+          input.scheduledTaskAuthority,
+        ).kind === 'group_newsletter'
           ? {
               status: 'unavailable',
               unavailableReason: 'newsletter_send_not_observed',
             }
           : null
+      const readNewsletterSendResult = ():
+        AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult'] |
+        null => newsletterSendResult
+      let newsletterDeliveryIntent:
+        AssistantNotificationPostTurnDeliveryExpectations['newsletterDeliveryIntent'] =
+          null
+      const readNewsletterDeliveryIntent = ():
+        AssistantNotificationPostTurnDeliveryExpectations['newsletterDeliveryIntent'] =>
+          newsletterDeliveryIntent
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -275,12 +297,18 @@ export async function sendAssistantNotificationLocal(
       const withPostTurnDeliveryExpectations = (
         result: AssistantNotificationResult,
       ): AssistantNotificationResult =>
-        newsletterSendResult
+        readNewsletterSendResult()
           ? {
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
-                newsletterSendResult,
+                ...(readNewsletterDeliveryIntent()
+                  ? {
+                      newsletterDeliveryIntent:
+                        readNewsletterDeliveryIntent(),
+                    }
+                  : {}),
+                newsletterSendResult: readNewsletterSendResult(),
               },
             }
           : result
@@ -335,15 +363,10 @@ export async function sendAssistantNotificationLocal(
 
       const turnId = createAssistantTurnId()
       const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
-      const hostedDeviceTool =
-        !isAssistantNotificationMaintenanceExactSkip(input) &&
-        conversationScope === 'direct'
-          ? executionContext?.hosted?.deviceTool ?? null
-          : null
       const hostedToolContext =
-        hostedNewsletterTool || hostedDeviceTool
+        hostedNewsletterTool
           ? createAssistantHostedToolContext({
-              deviceTool: hostedDeviceTool,
+              deviceTool: null,
               newsletterTool: hostedNewsletterTool,
               messageInput,
               newsletterOutbox: {
@@ -355,6 +378,9 @@ export async function sendAssistantNotificationLocal(
                   current: newsletterSendResult ?? null,
                   next: result.result,
                 })
+              },
+              recordNewsletterDeliveryIntent: (intent) => {
+                newsletterDeliveryIntent = intent
               },
               session: resolved.session,
             })
@@ -403,17 +429,9 @@ export async function sendAssistantNotificationLocal(
           hostedToolContext,
         })
         if (providerOutcome.kind === 'failed_terminal') {
-          const nonReplayableProviderWork =
-            resolveAssistantNotificationProviderNonReplayableWork({
-              input,
-              rawEvents: providerOutcome.rawEvents ?? [],
-            })
           const failedSession =
             await applyAssistantSessionCodexResumeStateAction({
-              action: resolveAssistantProviderResumeStateAction({
-                codexThreadId: providerOutcome.codexThreadId,
-                threadScope: notificationTurnProfile.threadScope,
-              }),
+              action: 'preserve-existing',
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
               codexRolloutRelativePath:
@@ -457,24 +475,13 @@ export async function sendAssistantNotificationLocal(
                 route: providerOutcome.route,
                 session: failedSession,
               }),
-              assistantNotificationProviderNonReplayableWork:
-                nonReplayableProviderWork,
             },
           )
         }
 
         const providerResult = providerOutcome.providerTurn
-        const nonReplayableProviderWork =
-          resolveAssistantNotificationProviderNonReplayableWork({
-            input,
-            rawEvents: providerResult.rawEvents ?? [],
-          })
         const selectedRoute = providerResult.route
-        const providerResumeStateAction =
-          resolveAssistantNotificationProviderResumeStateAction({
-            input,
-            providerResult,
-          })
+        const providerResumeStateAction = 'preserve-existing' as const
         await recordAssistantUsageEvent({
           executionContext,
           providerResult,
@@ -494,8 +501,6 @@ export async function sendAssistantNotificationLocal(
             route: selectedRoute,
             session: providerResult.session,
           }),
-          assistantNotificationProviderNonReplayableWork:
-            nonReplayableProviderWork,
         }
         let decision: AssistantNotificationDecision
         try {
@@ -526,8 +531,28 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
+        if (isAssistantNotificationGroupNewsletterToolOnly(input)) {
+          try {
+            assertAssistantGroupNewsletterNotificationDecision(decision)
+          } catch (error) {
+            throw annotateAssistantNotificationError(
+              error,
+              providerValidationErrorDetails,
+            )
+          }
+          if (readNewsletterSendResult()?.status === 'no_recipients') {
+            decision = {
+              kind: 'send_message',
+              privateSummary: 'No eligible group newsletter email recipients.',
+              text: ASSISTANT_GROUP_NEWSLETTER_NO_RECIPIENTS_NOTICE,
+            }
+          }
+        }
+
         if (decision.kind === 'skip') {
-          assertAssistantNotificationSkipAllowed(responsePolicy)
+          if (!isAssistantNotificationGroupNewsletterToolOnly(input)) {
+            assertAssistantNotificationSkipAllowed(responsePolicy)
+          }
           await runAssistantNotificationBeforeCommit(input, {
             decision,
             deliveryOutcome: null,
@@ -552,6 +577,12 @@ export async function sendAssistantNotificationLocal(
         }
 
         const responseText = normalizeRequiredText(decision.text, 'notification response')
+        const groupChallengeDispatch = buildAssistantGroupChallengeDispatchCommit({
+          authority: messageInput.scheduledTaskAuthority,
+          occurrenceAt: messageInput.scheduledOccurrenceAt,
+          outboxAutomationAuthority: messageInput.outboxAutomationAuthority,
+          privateSummary: decision.privateSummary,
+        })
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -593,8 +624,12 @@ export async function sendAssistantNotificationLocal(
           const deliveryOutcome = await deliverAssistantNotificationMessage({
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
+            groupChallengeDispatch,
             input: messageInput,
-            media: providerResult.responseMedia ?? [],
+            media: [
+              ...(input.preparedResponseMedia ?? []),
+              ...(providerResult.responseMedia ?? []),
+            ],
             message: responseText,
             session: savedSession,
             sharedPlan,
@@ -657,8 +692,12 @@ export async function sendAssistantNotificationLocal(
         const deliveryOutcome = await deliverAssistantNotificationMessage({
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
+          groupChallengeDispatch,
           input: messageInput,
-          media: providerResult.responseMedia ?? [],
+          media: [
+            ...(input.preparedResponseMedia ?? []),
+            ...(providerResult.responseMedia ?? []),
+          ],
           message: responseText,
           session: providerResult.session,
           sharedPlan,
@@ -784,6 +823,12 @@ async function sendAssistantExactTextNotificationLocal(input: {
     privateSummary: 'Sent required exact notification text.',
     text: responseText,
   }
+  const groupChallengeDispatch = buildAssistantGroupChallengeDispatchCommit({
+    authority: input.messageInput.scheduledTaskAuthority,
+    occurrenceAt: input.messageInput.scheduledOccurrenceAt,
+    outboxAutomationAuthority: input.messageInput.outboxAutomationAuthority,
+    privateSummary: exactTextDecision.privateSummary,
+  })
   await runAssistantNotificationBeforeDelivery(input.input, {
     decision: exactTextDecision,
     deliveryOutcome: null,
@@ -812,8 +857,9 @@ async function sendAssistantExactTextNotificationLocal(input: {
   const deliveryOutcome = await deliverAssistantNotificationMessage({
     dedupeToken: input.input.deliveryDedupeToken ?? null,
     decisionSubject: null,
+    groupChallengeDispatch,
     input: input.messageInput,
-    media: [],
+    media: [...(input.input.preparedResponseMedia ?? [])],
     message: responseText,
     session: input.session,
     sharedPlan: input.sharedPlan,
@@ -929,12 +975,17 @@ async function sendAssistantExactTextNotificationLocal(input: {
 
 function resolveAssistantNotificationNewsletterSendResult(input: {
   current: AssistantNotificationNewsletterSendResult | null
-  next: AssistantNotificationNewsletterSendResult
+  next: AssistantNotificationNewsletterSendObservation
 }): AssistantNotificationNewsletterSendResult {
   if (input.current && input.current.status !== 'unavailable') {
     return input.current
   }
-  return input.next
+  return input.next.status === 'unavailable'
+    ? {
+        status: 'unavailable',
+        unavailableReason: input.next.unavailableReason,
+      }
+    : { status: input.next.status }
 }
 
 async function runAssistantNotificationBeforeDelivery(
@@ -1194,8 +1245,6 @@ function buildAssistantNotificationMessageInput(
   // drift apart across separate conditional spreads.
   const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
     ? {
-        codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : {}
@@ -1242,8 +1291,8 @@ function buildAssistantNotificationMessageInput(
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
-    scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+    scheduledTaskAuthority: input.scheduledTaskAuthority ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
@@ -1261,6 +1310,7 @@ function buildAssistantNotificationMessageInput(
 async function deliverAssistantNotificationMessage(input: {
   dedupeToken: string | null
   decisionSubject: string | null
+  groupChallengeDispatch: AssistantOutboxIntent['groupChallengeDispatch']
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -1300,6 +1350,7 @@ async function deliverAssistantNotificationMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    groupChallengeDispatch: input.groupChallengeDispatch,
     turnId: input.turnId,
     message: input.message,
     dedupeToken: input.dedupeToken,
@@ -1359,19 +1410,6 @@ function resolveAssistantNotificationTurnProfile(
     : ASSISTANT_NOTIFICATION_TURN_PROFILE
 }
 
-function resolveAssistantNotificationProviderResumeStateAction(input: {
-  input: AssistantNotificationInput
-  providerResult: { codexThreadId?: string | null }
-}): AssistantProviderResumeStateAction {
-  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
-    return 'preserve-existing'
-  }
-
-  return normalizeNullableString(input.providerResult.codexThreadId)
-    ? 'persist-from-provider-turn'
-    : 'preserve-existing'
-}
-
 function createAssistantMaintenanceNotificationResolvedSession(input: {
   boundaryDefaultTarget:
     Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
@@ -1422,39 +1460,23 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
-// Only maintenance turns consume this signal (to decide whether a failed run
-// already performed non-replayable memory writes); it is derived from the
-// committed provider events rather than trusted from provider metadata.
-function resolveAssistantNotificationProviderNonReplayableWork(input: {
-  input: AssistantNotificationInput
-  rawEvents: readonly unknown[]
-}): boolean {
-  return isAssistantNotificationMaintenanceExactSkip(input.input) &&
-    assistantMaintenanceRawEventsIncludeMemoryMutation(input.rawEvents)
+function isAssistantNotificationGroupNewsletterToolOnly(
+  input: AssistantNotificationInput,
+): boolean {
+  return resolveAssistantScheduledTaskAuthority(
+    input.scheduledTaskAuthority,
+  ).kind === 'group_newsletter'
 }
 
-function assistantMaintenanceRawEventsIncludeMemoryMutation(
-  rawEvents: readonly unknown[],
-): boolean {
-  return rawEvents.some((rawEvent) => {
-    const event = normalizeCodexEvent(rawEvent)
-    return (
-      event.kind === 'status_item' &&
-      event.itemType === 'command.execution' &&
-      event.itemState === 'completed' &&
-      event.exitCode === 0 &&
-      isAssistantMaintenanceMemoryMutationCommand(event.commandLabel)
-    )
-  })
-}
-
-function isAssistantMaintenanceMemoryMutationCommand(
-  commandLabel: string | null,
-): boolean {
-  const normalized = normalizeNullableString(commandLabel)
-  return (
-    normalized !== null &&
-    /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+function assertAssistantGroupNewsletterNotificationDecision(
+  decision: AssistantNotificationDecision,
+): void {
+  if (decision.kind === 'skip') {
+    return
+  }
+  throw new VaultCliError(
+    'ASSISTANT_NOTIFICATION_GROUP_NEWSLETTER_DECISION_INVALID',
+    'Assistant group newsletter turns must return a skip decision after using the newsletter tool.',
   )
 }
 

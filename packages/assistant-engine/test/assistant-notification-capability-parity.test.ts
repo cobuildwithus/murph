@@ -6,7 +6,6 @@ import {
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
-import { buildAssistantSkillFileRef } from '../src/assistant-skill-assets.js'
 
 const baseNotificationInput: AssistantNotificationDecisionSystemPromptInput = {
   assistantCliContract: 'Notification CLI contract.',
@@ -69,6 +68,33 @@ describe('assistant scheduled-turn capability parity', () => {
     expect(notificationLayers.dynamicTurnContextPrompt).toContain(
       'Notification execution rules:',
     )
+    expect(notificationLayers.stableRouteCapabilityPrompt).toContain(
+      'Scheduled vault reads:',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).toContain(
+      'Native shell, filesystem, subprocess, and CLI execution are unavailable',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).toContain(
+      'Use only `murph.scheduled_read`',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).toContain(
+      'purpose-specific typed Murph tools',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).not.toContain(
+      'this privileged local route',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).not.toContain(
+      'Python is available',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).not.toContain(
+      'vault-cli batch',
+    )
+    expect(notificationLayers.stableRouteCapabilityPrompt).not.toContain(
+      'Notification CLI contract.',
+    )
+    expect(notificationLayers.prompt).not.toContain(
+      'Canonical task-owned reads and writes required by the automation',
+    )
   })
 
   it('routes every scheduled group challenge through all three owning skills', () => {
@@ -78,9 +104,12 @@ describe('assistant scheduled-turn capability parity', () => {
       conversationScope: 'group',
     })
 
-    expect(layers.prompt).toContain(buildAssistantSkillFileRef('group-chat'))
-    expect(layers.prompt).toContain(buildAssistantSkillFileRef('group-challenge'))
-    expect(layers.prompt).toContain(buildAssistantSkillFileRef('groupchat-comedy'))
+    expect(layers.prompt).toContain(
+      'registered `group-chat`, `group-challenge`, and `groupchat-comedy` skills',
+    )
+    expect(layers.prompt).toContain(
+      '`murph.scheduled_read` action `skill_get`',
+    )
     expect(layers.prompt).toContain(
       'Assistant personality preferences for this group room:',
     )
@@ -89,10 +118,25 @@ describe('assistant scheduled-turn capability parity', () => {
       'a scheduled challenge run is challenge lifecycle work, not generic notification copy',
     )
     expect(layers.prompt).toContain(
-      'Do not flatten a skill-required comic, voice memo, song, or image into a generic text standings recap',
+      'Do not flatten a skill-required medium into a generic text standings recap',
     )
     expect(layers.prompt).toContain(
       'Generated response media is delivered with `send_message`',
+    )
+    expect(layers.prompt).toContain(
+      'For a group-challenge `send_message`, `privateSummary` is required',
+    )
+    expect(layers.prompt).toContain(
+      'Keep it nonempty and within 50,000 characters; the parent validates that bound before queueing.',
+    )
+    expect(layers.prompt).toContain(
+      'Never put refs, IDs, paths, or URLs in it.',
+    )
+    expect(layers.prompt).toContain(
+      'only after terminal `sent` does the effect owner commit one `Delivered dispatch` section',
+    )
+    expect(layers.prompt).toContain(
+      'it archives the challenge page, removes the exact pointer, then archives the exact automation revision',
     )
     expect(layers.prompt).not.toContain('PRIVATE_CONTEXT_MUST_NOT_APPEAR')
   })
@@ -106,6 +150,15 @@ describe('assistant scheduled-turn capability parity', () => {
     expect(layers.stableRouteCapabilityPrompt).toBe('')
     expect(layers.threadContextPrompt).toBe('')
     expect(layers.prompt).toContain('Maintenance execution rules:')
+    expect(layers.prompt).toContain('The only write surface is `murph.maintenance_memory`')
+    expect(layers.prompt).toContain(
+      'Native shell, filesystem, subprocess, and CLI execution are unavailable',
+    )
+    expect(layers.prompt).toContain(
+      '`murph.scheduled_read` with `action: "memory_show"`',
+    )
+    expect(layers.prompt).not.toContain('vault-cli memory upsert')
+    expect(layers.prompt).not.toContain('vault-cli memory update')
     expect(layers.prompt).not.toContain('Murph skill router:')
     expect(layers.prompt).not.toContain('Notification CLI contract.')
     expect(layers.prompt).not.toContain('Assistant personality preferences')

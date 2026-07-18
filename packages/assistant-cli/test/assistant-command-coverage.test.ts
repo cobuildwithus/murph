@@ -33,6 +33,7 @@ const commandMocks = vi.hoisted(() => ({
   getAssistantStatus: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
   listAssistantSessions: vi.fn(),
+  readAssistantOnboardingResumeContext: vi.fn(),
   readAssistantOnboardingState: vi.fn(),
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
   redactAssistantSessionForDisplay: vi.fn((value) => value),
@@ -109,7 +110,10 @@ vi.mock(
 )
 
 vi.mock('@murphai/assistant-engine/assistant-state', () => ({
+  ASSISTANT_ONBOARDING_RESUME_CONTEXT_DEFAULT_LIMIT: 3,
   completeAssistantOnboarding: commandMocks.completeAssistantOnboarding,
+  readAssistantOnboardingResumeContext:
+    commandMocks.readAssistantOnboardingResumeContext,
   readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
@@ -413,60 +417,11 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
   )
 })
 
-test('assistant onboarding resume-context batches setup reads into one snapshot', async () => {
-  const readMemoryDocument = vi.fn().mockResolvedValue({
-    vault: '/tmp/vault',
-    document: {
-      exists: true,
-      markdown: '',
-      records: [
-        {
-          id: 'mem_name',
-          section: 'identity',
-          sourceLine: 1,
-          text: 'Name is saved.',
-        },
-      ],
-      sourcePath: 'bank/memory.md',
-      updatedAt: '2026-04-23T00:00:00.000Z',
-      frontmatter: {
-        schemaVersion: 'murph.memory.v1',
-        updatedAt: '2026-04-23T00:00:00.000Z',
-      },
-    },
-  })
-  const listGoals = vi.fn().mockResolvedValue({
-    count: 1,
-    items: [{ id: 'goal_sleep', title: 'Sleep better' }],
-  })
-  const listRegimens = vi.fn().mockResolvedValue({
-    count: 0,
-    items: [],
-  })
-  const listSupplements = vi.fn().mockResolvedValue({
-    count: 2,
-    items: [{ id: 'reg_creatine' }, { id: 'reg_magnesium' }],
-  })
-  const listConditions = vi.fn().mockRejectedValue(new Error('boom'))
-  const listAllergies = vi.fn().mockResolvedValue({
-    count: 0,
-    items: [],
-  })
-  const listExperiments = vi.fn().mockResolvedValue({
-    count: 1,
-    items: [{ id: 'exp_walks', status: 'active' }],
-  })
+test('assistant onboarding resume-context delegates one bounded snapshot to the engine owner', async () => {
   const listAccounts = vi.fn().mockResolvedValue({
     accounts: [{ id: 'dev_oura', provider: 'oura', status: 'active' }],
   })
   const services = createUnwiredVaultServices()
-  services.query.readMemoryDocument = readMemoryDocument
-  services.query.listGoals = listGoals
-  services.query.listRegimens = listRegimens
-  services.query.listSupplements = listSupplements
-  services.query.listConditions = listConditions
-  services.query.listAllergies = listAllergies
-  services.query.listExperiments = listExperiments
   const servicesWithDevices = Object.assign(services, {
     devices: {
       listAccounts,
@@ -477,11 +432,51 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   const onboarding = readCommandGroup(assistant.commands, 'onboarding')
   const resumeContext = readCommand(onboarding.commands, 'resume-context')
 
-  commandMocks.readAssistantOnboardingState.mockResolvedValueOnce({
+  const openOnboarding = {
     ...TEST_ONBOARDING_STATE,
     status: 'open',
     completedAt: null,
     completedReason: null,
+  } as const
+  commandMocks.readAssistantOnboardingResumeContext.mockResolvedValueOnce({
+    allergies: { count: 0, items: [], status: 'ok', truncated: false },
+    conditions: { message: 'Read failed.', status: 'error' },
+    deviceAccounts: {
+      count: 1,
+      items: [{ id: 'dev_oura', provider: 'oura', status: 'active' }],
+      status: 'ok',
+      truncated: false,
+    },
+    experiments: {
+      count: 1,
+      items: [{ id: 'exp_walks', status: 'active' }],
+      status: 'ok',
+      truncated: false,
+    },
+    goals: {
+      count: 1,
+      items: [{ id: 'goal_sleep', title: 'Sleep better' }],
+      status: 'ok',
+      truncated: false,
+    },
+    limit: 1,
+    memory: {
+      exists: true,
+      recordCount: 1,
+      records: [{ id: 'mem_name', text: 'Name is saved.' }],
+      status: 'ok',
+      truncated: false,
+      updatedAt: '2026-04-23T00:00:00.000Z',
+    },
+    onboarding: openOnboarding,
+    regimens: { count: 0, items: [], status: 'ok', truncated: false },
+    supplements: {
+      count: 2,
+      items: [{ id: 'reg_creatine' }],
+      status: 'ok',
+      truncated: true,
+    },
+    vault: 'redacted:/tmp/vault',
   })
 
   const result = assistantOnboardingResumeContextResultSchema.parse(
@@ -507,15 +502,14 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   assert.equal(result.conditions.status, 'error')
   assert.equal(result.deviceAccounts.status, 'ok')
   assert.equal(result.deviceAccounts.count, 1)
-  assert.deepEqual(readMemoryDocument.mock.calls[0]?.[0], {
-    requestId: null,
-    vault: '/tmp/vault',
-  })
-  assert.deepEqual(listGoals.mock.calls[0]?.[0], {
-    requestId: null,
-    vault: '/tmp/vault',
-    limit: 1,
-  })
+  const input = commandMocks.readAssistantOnboardingResumeContext.mock.calls[0]?.[0]
+  assert.equal(input.limit, 1)
+  assert.equal(input.requestId, null)
+  assert.equal(input.services, servicesWithDevices)
+  assert.equal(input.vault, '/tmp/vault')
+  assert.deepEqual(await input.readDeviceAccounts(), [
+    { id: 'dev_oura', provider: 'oura', status: 'active' },
+  ])
   assert.deepEqual(listAccounts.mock.calls[0]?.[0], {
     vault: '/tmp/vault',
   })

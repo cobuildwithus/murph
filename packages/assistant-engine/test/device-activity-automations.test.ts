@@ -1739,6 +1739,7 @@ function createDeviceActivityAutomation(input: {
     schemaVersion: 'murph.frontmatter.automation.v1',
     slug: automationId,
     status: 'active',
+    scheduledTask: null,
     summary: null,
     supportKind: null,
     tags: input.tags ?? [],

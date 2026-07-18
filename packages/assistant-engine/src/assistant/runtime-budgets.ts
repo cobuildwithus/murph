@@ -16,6 +16,8 @@ import {
 } from './store/persistence.js'
 import { pruneAssistantTerminalOutboxIntents } from './outbox/store.js'
 import { pruneAssistantCronRunHistory } from './cron/store.js'
+import { readAssistantCronCanonicalRuntimeStore } from './cron/runtime-state.js'
+import { buildGroupNewsletterOccurrenceKeyPrefix } from './newsletter-family.js'
 import {
   clearAssistantRuntimeWriteLock,
   inspectAssistantRuntimeWriteLock,
@@ -159,9 +161,24 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
       }
     },
     async () => {
+      const cronRuntimeStore = await readAssistantCronCanonicalRuntimeStore(
+        input.paths,
+        { reclaimStaleRunningClaims: false },
+      )
       terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
         now: input.now,
         paths: input.paths,
+        protectedDeliveryIdempotencyKeyPrefixes: cronRuntimeStore.jobs.flatMap(
+          (record) =>
+            record.state.pendingOccurrenceAt
+              ? [
+                  buildGroupNewsletterOccurrenceKeyPrefix({
+                    automationId: record.jobId,
+                    occurrenceAt: record.state.pendingOccurrenceAt,
+                  }),
+                ]
+              : [],
+        ),
         vault: input.vault,
       })
       if (terminalOutboxPruned > 0) {

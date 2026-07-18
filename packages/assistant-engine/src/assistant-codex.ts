@@ -18,6 +18,9 @@ import type {
   AssistantResponseMedia,
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  reserveAssistantCronScheduledMediaGeneration,
+} from './assistant/cron/scheduled-media-reservation.js'
 import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
@@ -49,6 +52,7 @@ import {
   buildCodexTurnStartParams,
   mapCodexAppServerApprovalPolicy,
   mapCodexAppServerSandboxMode,
+  MURPH_CODEX_FINAL_CONFIG_OVERRIDES,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
@@ -56,8 +60,11 @@ import {
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
+  claimMaintenanceMemoryMutation,
   executeMurphDynamicToolRequest,
+  claimScheduledMediaGeneration,
   isComputerDynamicToolRequest,
+  isMurphScheduledDynamicTool,
   MURPH_ASSISTANT_STYLE_TOOL,
   type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
@@ -92,8 +99,12 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   resolveCodexChildEnv,
+  withoutCodexModelCatalogConfigOverrides,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
+import {
+  resolveScheduledCodexModelCatalogJson,
+} from './assistant-codex/scheduled-model-catalog.js'
 import {
   buildCodexProcessExitError,
   buildCodexStdinFailureFallback,
@@ -126,6 +137,15 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from './assistant/hosted-tool-context.js'
+import type {
+  AssistantScheduledTaskAuthority,
+} from './assistant/scheduled-task-authority.js'
+import type {
+  AssistantScheduledProductSource,
+} from './assistant-codex/dynamic-tools/scheduled-sources.js'
+import {
+  ASSISTANT_SCHEDULED_TURN_THREAD_CONFIG,
+} from './assistant/scheduled-turn-policy.js'
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './assistant/message-target-selection.js'
@@ -220,6 +240,7 @@ type CodexAppServerProcessInput = {
   codexCommand: string
   env: NodeJS.ProcessEnv
   launchKey: string
+  processWorkingDirectory: string
 }
 
 type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
@@ -234,6 +255,7 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
+  processWorkingDirectory: string
   publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
@@ -455,6 +477,7 @@ export interface CodexAppServerTurnInput {
   profile?: string | null
   permissions?: string | null
   processLifetime?: CodexAppServerProcessLifetime
+  scheduledExecution?: boolean | null
   prompt: string
   images?: readonly CodexAppServerImageInput[] | null
   reasoningEffort?: string | null
@@ -463,6 +486,8 @@ export interface CodexAppServerTurnInput {
   ephemeral?: boolean | null
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   runtimeWorkspaceRoots?: readonly string[] | null
+  scheduledOccurrenceAt?: string | null
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
   threadConfig?: Readonly<Record<string, unknown>> | null
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
@@ -620,6 +645,17 @@ function appendRequiredVaultFileApprovalUrls(
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  assertCodexAppServerScheduledExecution(input)
+  if (input.scheduledExecution === true) {
+    input = {
+      ...input,
+      environments: [],
+      ephemeral: true,
+      processLifetime: 'one-shot',
+      runtimeWorkspaceRoots: undefined,
+      threadConfig: ASSISTANT_SCHEDULED_TURN_THREAD_CONFIG,
+    }
+  }
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const workingDirectory = path.resolve(input.workingDirectory)
@@ -630,46 +666,73 @@ export async function executeCodexAppServerTurn(
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
-  const imagePaths = await materializeCodexImagePaths({
-    images: input.images,
-    tempRoot,
-  })
-  const normalizedInput = {
-    ...input,
-    approvalPolicy,
-    configOverrides: withHostedCodexModelCatalogConfigOverride({
-      configOverrides: input.configOverrides,
-      env: input.env,
-    }),
-    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
-      path.resolve(root),
-    ),
-  }
-  const args = buildCodexAppServerArgs(normalizedInput)
-  const launchKey = buildCodexAppServerLaunchKey({
-    args,
-    codexCommand,
-    env: childEnv,
-    workingDirectory,
-  })
-  const preparedInput: CodexAppServerPreparedTurnInput = {
-    ...normalizedInput,
-    args,
-    codexCommand,
-    env: childEnv,
-    fetchImpl: input.fetchImpl ?? fetch,
-    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
-    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-    imagePaths,
-    launchKey,
-    publicInternetFetch: input.publicInternetFetch ?? null,
-    tempRoot,
-    voiceMemoRuntime: input.voiceMemoRuntime ?? null,
-    workingDirectory,
-  }
-
   let oneShotProcess: CodexAppServerProcess | null = null
   try {
+    const imagePaths = await materializeCodexImagePaths({
+      images: input.images,
+      tempRoot,
+    })
+    const ordinaryConfigOverrides = withHostedCodexModelCatalogConfigOverride({
+      configOverrides: input.configOverrides,
+      env: input.env,
+    })
+    const scheduledModelCatalogJson = input.scheduledExecution === true
+      ? await resolveScheduledCodexModelCatalogJson({
+          abortSignal: input.abortSignal,
+          codexCommand,
+          configOverrides: ordinaryConfigOverrides,
+          env: childEnv,
+          oss: input.oss,
+          profile: input.profile,
+          tempRoot,
+        })
+      : null
+    const normalizedInput = {
+      ...input,
+      approvalPolicy,
+      configOverrides: scheduledModelCatalogJson
+        ? withoutCodexModelCatalogConfigOverrides(ordinaryConfigOverrides)
+        : ordinaryConfigOverrides,
+      runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
+        path.resolve(root),
+      ),
+    }
+    const args = buildCodexAppServerArgs({
+      ...normalizedInput,
+      finalConfigOverrides: input.scheduledExecution === true
+        ? MURPH_CODEX_FINAL_CONFIG_OVERRIDES
+        : undefined,
+      finalModelCatalogJson: scheduledModelCatalogJson,
+    })
+    const threadWorkingDirectory = input.scheduledExecution === true
+      ? tempRoot
+      : workingDirectory
+    const processWorkingDirectory = input.scheduledExecution === true
+      ? tempRoot
+      : tmpdir()
+    const launchKey = buildCodexAppServerLaunchKey({
+      args,
+      codexCommand,
+      env: childEnv,
+      workingDirectory: threadWorkingDirectory,
+    })
+    const preparedInput: CodexAppServerPreparedTurnInput = {
+      ...normalizedInput,
+      args,
+      codexCommand,
+      env: childEnv,
+      fetchImpl: input.fetchImpl ?? fetch,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+      imagePaths,
+      launchKey,
+      publicInternetFetch: input.publicInternetFetch ?? null,
+      processWorkingDirectory,
+      tempRoot,
+      voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      workingDirectory: threadWorkingDirectory,
+    }
+
     if (preparedInput.processLifetime === 'one-shot') {
       oneShotProcess = new CodexAppServerProcess({
         args: preparedInput.args,
@@ -677,6 +740,7 @@ export async function executeCodexAppServerTurn(
         coldStartReason: 'node-process-first-use',
         env: preparedInput.env,
         launchKey: preparedInput.launchKey,
+        processWorkingDirectory: preparedInput.processWorkingDirectory,
       })
       oneShotProcess.reserveTurn()
       return await runCodexAppServerTurnOnProcess(oneShotProcess, preparedInput)
@@ -694,6 +758,34 @@ export async function executeCodexAppServerTurn(
       })
     }
   }
+}
+
+function assertCodexAppServerScheduledExecution(
+  input: CodexAppServerTurnInput,
+): void {
+  if (input.scheduledExecution !== true) {
+    return
+  }
+
+  const invalidFields = [
+    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
+    ...(normalizeNullableString(input.permissions) ? ['permissions'] : []),
+    ...(input.dynamicTools.every(isMurphScheduledDynamicTool)
+      ? []
+      : ['dynamicTools']),
+  ]
+  if (invalidFields.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+    'Scheduled Codex execution accepts only the scheduled dynamic-tool allowlist and cannot resume a thread or use named permissions.',
+    {
+      invalidFields,
+      retryable: false,
+    },
+  )
 }
 
 function assertCodexAppServerPermissionRequest(
@@ -792,7 +884,10 @@ export function buildCodexAppServerArgs(
   input: Pick<
     CodexAppServerTurnInput,
     'approvalPolicy' | 'configOverrides' | 'oss' | 'profile' | 'sandbox'
-  >,
+  > & {
+    finalConfigOverrides?: readonly string[]
+    finalModelCatalogJson?: string | null
+  },
 ): string[] {
   const args: string[] = []
 
@@ -808,6 +903,20 @@ export function buildCodexAppServerArgs(
     args.push('--oss')
   }
 
+  // Murph owns its tool surface. Keep unused Codex-native effect surfaces and
+  // out-of-band notify commands disabled after all caller-provided overrides.
+  for (const override of input.finalConfigOverrides ?? []) {
+    args.push('--config', override)
+  }
+  const finalModelCatalogJson = normalizeNullableString(
+    input.finalModelCatalogJson,
+  )
+  if (finalModelCatalogJson) {
+    args.push(
+      '--config',
+      `model_catalog_json=${JSON.stringify(finalModelCatalogJson)}`,
+    )
+  }
   args.push(CODEX_APP_SERVER_COMMAND)
   return args
 }
@@ -860,7 +969,7 @@ class CodexAppServerProcess {
     // fails with ENOENT on the next thread/start. Threads receive the real
     // workspace via the explicit per-thread `cwd` param instead.
     this.child = spawn(input.codexCommand, [...input.args], {
-      cwd: tmpdir(),
+      cwd: input.processWorkingDirectory,
       detached: useProcessGroup,
       env: input.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1906,6 +2015,7 @@ export async function executeCodexManagedAccountOperation(
     codexCommand,
     env,
     launchKey,
+    processWorkingDirectory: tmpdir(),
   })
 
   let settleAccountUpdate!: () => void
@@ -2724,6 +2834,46 @@ function readCodexBooleanField(
   return typeof fieldValue === 'boolean' ? fieldValue : null
 }
 
+function buildScheduledCodexMcpConfigUnsafeError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_CODEX_SCHEDULED_MCP_CONFIG_UNSAFE',
+    'Scheduled Codex execution cannot start while MCP configuration is enabled or malformed.',
+    {
+      retryable: false,
+    },
+  )
+}
+
+function assertScheduledCodexMcpServersDisabled(result: unknown): void {
+  const config = readCodexRecordField(result, 'config')
+  if (!config) {
+    throw buildScheduledCodexMcpConfigUnsafeError()
+  }
+
+  const nestedAdditional = readCodexRecordField(config, 'additional')
+  if (
+    nestedAdditional &&
+    Object.prototype.hasOwnProperty.call(nestedAdditional, 'mcp_servers')
+  ) {
+    throw buildScheduledCodexMcpConfigUnsafeError()
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(config, 'mcp_servers')) {
+    return
+  }
+
+  const mcpServers = readCodexRecordField(config, 'mcp_servers')
+  if (!mcpServers) {
+    throw buildScheduledCodexMcpConfigUnsafeError()
+  }
+
+  for (const server of Object.values(mcpServers)) {
+    if (readCodexBooleanField(asCodexRecord(server), 'enabled') !== false) {
+      throw buildScheduledCodexMcpConfigUnsafeError()
+    }
+  }
+}
+
 function readCodexDynamicToolKey(message: CodexRpcMessage): string | null {
   const params = readCodexRecordField(message, 'params')
   const namespace = readCodexStringField(params, 'namespace')
@@ -2783,6 +2933,15 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
+  const scheduledMediaGenerationClaimState = {
+    audioGenerationClaimed: false,
+    imageGenerationClaims: 0,
+  }
+  const maintenanceMemoryMutationClaimState = {
+    mutationsClaimed: 0,
+  }
+  const scheduledProductSourcesClaimed = new Set<AssistantScheduledProductSource>()
+  let scheduledResearchScoutBatchClaimed = false
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
   const subagentDroppedUsageThreadIds = new Set<string>()
@@ -3827,6 +3986,43 @@ async function runCodexAppServerTurnOnProcess(
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
             : dynamicToolAbortController.signal,
+          claimScheduledMediaGeneration: ({
+            authority,
+            kind,
+            occurrenceAt,
+          }) => {
+            return claimScheduledMediaGeneration(
+              scheduledMediaGenerationClaimState,
+              kind,
+              async (lane) => input.vaultRoot
+                ? await reserveAssistantCronScheduledMediaGeneration({
+                    authority,
+                    lane,
+                    occurrenceAt,
+                    vault: input.vaultRoot,
+                  })
+                : 'already_reserved',
+            )
+          },
+          claimMaintenanceMemoryMutation: () => {
+            return claimMaintenanceMemoryMutation(
+              maintenanceMemoryMutationClaimState,
+            )
+          },
+          claimScheduledProductSource: (source) => {
+            if (scheduledProductSourcesClaimed.has(source)) {
+              return false
+            }
+            scheduledProductSourcesClaimed.add(source)
+            return true
+          },
+          claimScheduledResearchScoutBatch: () => {
+            if (scheduledResearchScoutBatchClaimed) {
+              return false
+            }
+            scheduledResearchScoutBatchClaimed = true
+            return true
+          },
           codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
           env: input.env,
           fetchImpl: input.fetchImpl,
@@ -3846,9 +4042,13 @@ async function runCodexAppServerTurnOnProcess(
           requireHostedGeneratedImageUploader:
             input.requireHostedGeneratedImageUploader ?? false,
           vaultRoot: input.vaultRoot ?? null,
+          scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+          scheduledTaskAuthority: input.scheduledTaskAuthority ?? null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||
-            dynamicToolRequest.kind === 'generate-song'
+            dynamicToolRequest.kind === 'generate-song' ||
+            dynamicToolRequest.kind === 'generate-scheduled-voice-memo' ||
+            dynamicToolRequest.kind === 'generate-scheduled-song'
               ? input.voiceMemoRuntime ?? null
               : null,
         })
@@ -4557,6 +4757,24 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
+    if (input.scheduledExecution === true) {
+      lifecycleStage = 'scheduled_mcp_config_preflight'
+      try {
+        const configResult = await withCodexRpcTimeout(
+          sendRequest('config/read', {
+            cwd: input.workingDirectory,
+            includeLayers: false,
+          }),
+          CODEX_RPC_DEFAULT_TIMEOUT_MS,
+          'config/read',
+        )
+        assertScheduledCodexMcpServersDisabled(configResult)
+      } catch {
+        throw buildScheduledCodexMcpConfigUnsafeError()
+      }
+      lifecycleStage = 'scheduled_mcp_config_verified'
+    }
+
     const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
@@ -4954,6 +5172,15 @@ function isInvalidDynamicToolRequest(
       | 'invalid-reply-target-arguments'
       | 'invalid-product-feedback-arguments'
       | 'invalid-response-media-arguments'
+      | 'invalid-scheduled-read-arguments'
+      | 'invalid-complete-onboarding-arguments'
+      | 'invalid-generate-scheduled-image-arguments'
+      | 'invalid-generate-scheduled-voice-memo-arguments'
+      | 'invalid-generate-scheduled-song-arguments'
+      | 'invalid-scheduled-knowledge-arguments'
+      | 'invalid-maintenance-memory-arguments'
+      | 'invalid-research-scout-batch-arguments'
+      | 'invalid-product-source-arguments'
   }
 > {
   return (
@@ -4968,7 +5195,16 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments' ||
     request.kind === 'invalid-product-feedback-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
+    request.kind === 'invalid-response-media-arguments' ||
+    request.kind === 'invalid-scheduled-read-arguments' ||
+    request.kind === 'invalid-complete-onboarding-arguments' ||
+    request.kind === 'invalid-generate-scheduled-image-arguments' ||
+    request.kind === 'invalid-generate-scheduled-voice-memo-arguments' ||
+    request.kind === 'invalid-generate-scheduled-song-arguments' ||
+    request.kind === 'invalid-scheduled-knowledge-arguments' ||
+    request.kind === 'invalid-maintenance-memory-arguments' ||
+    request.kind === 'invalid-research-scout-batch-arguments' ||
+    request.kind === 'invalid-product-source-arguments'
   )
 }
 
@@ -4988,6 +5224,15 @@ function isSerializedDynamicToolRequest(
     request.kind === 'submit-product-feedback' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
+    request.kind === 'scheduled-read' ||
+    request.kind === 'complete-onboarding' ||
+    request.kind === 'generate-scheduled-image' ||
+    request.kind === 'generate-scheduled-voice-memo' ||
+    request.kind === 'generate-scheduled-song' ||
+    request.kind === 'scheduled-knowledge' ||
+    request.kind === 'maintenance-memory' ||
+    request.kind === 'research-scout-batch' ||
+    request.kind === 'product-source' ||
     isComputerDynamicToolRequest(request)
 }
 
@@ -4998,10 +5243,30 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
+    request.kind === 'newsletter' ||
+    request.kind === 'invalid-newsletter-arguments' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments'
+    || request.kind === 'scheduled-read'
+    || request.kind === 'invalid-scheduled-read-arguments'
+    || request.kind === 'complete-onboarding'
+    || request.kind === 'invalid-complete-onboarding-arguments'
+    || request.kind === 'generate-scheduled-image'
+    || request.kind === 'invalid-generate-scheduled-image-arguments'
+    || request.kind === 'generate-scheduled-voice-memo'
+    || request.kind === 'invalid-generate-scheduled-voice-memo-arguments'
+    || request.kind === 'generate-scheduled-song'
+    || request.kind === 'invalid-generate-scheduled-song-arguments'
+    || request.kind === 'scheduled-knowledge'
+    || request.kind === 'maintenance-memory'
+    || request.kind === 'research-scout-batch'
+    || request.kind === 'product-source'
+    || request.kind === 'invalid-scheduled-knowledge-arguments'
+    || request.kind === 'invalid-maintenance-memory-arguments'
+    || request.kind === 'invalid-research-scout-batch-arguments'
+    || request.kind === 'invalid-product-source-arguments'
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

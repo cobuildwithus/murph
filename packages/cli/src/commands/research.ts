@@ -1,23 +1,26 @@
 import { Cli, z } from 'incur'
-import { isStrictIsoDate, isStrictIsoDateTime } from '@murphai/contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  inputFileOptionSchema,
-  loadJsonInputObject,
-} from '@murphai/vault-usecases'
-import {
-  fetchExaResearchScoutCandidates,
-  fetchExaResearchScoutBatchCandidates,
   DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
   MAX_RESEARCH_SCOUT_BATCH_LANES,
   MAX_RESEARCH_SCOUT_CANDIDATES,
+  isStrictIsoDate,
+  isStrictIsoDateTime,
   researchScoutBatchPayloadSchema,
   researchScoutBatchResultSchema,
   researchScoutProfileSchema,
   researchScoutResultSchema,
   type ResearchScoutBatchPayload,
   type ResearchScoutProfile,
-} from '../research-scout.js'
+} from '@murphai/contracts'
+import {
+  fetchExaResearchScoutBatchCandidates,
+  fetchExaResearchScoutCandidates,
+} from '@murphai/assistant-engine/research-scout'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  inputFileOptionSchema,
+  loadJsonInputObject,
+} from '@murphai/vault-usecases'
 import {
   createPayloadSchemaResult,
   payloadSchemaResultSchema,

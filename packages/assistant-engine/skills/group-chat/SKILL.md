@@ -232,18 +232,27 @@ into a consent ceremony, but do not wake a silent member up to find that they
 were automatically entered either. `group-challenge` owns the quick roll call
 and pending-name update. Once people are in, use the shared data playfully.
 
-Read it with `vault-cli group shared`. It returns each member (by name once
-their name has landed, otherwise by member id) with the recent records for
-every kind they granted. Add `--kind <kind>` for a single-metric leaderboard,
-for example `--kind steps-days.v0`. It is empty until members have connected
-the relevant data and their runtime has next woken; when it comes back empty,
-say so plainly and never invent figures.
+In an interactive turn, read it with `vault-cli group shared`. It returns each
+member (by name once their name has landed, otherwise by member id) with the
+recent records for every kind they granted. Add `--kind <kind>` for a
+single-metric leaderboard, for example `--kind steps-days.v0`. During an
+authorized scheduled group-challenge run, use `murph.scheduled_read` action
+`group_shared` with no selectors: `{"action":"group_shared"}`. The trusted
+parent supplies the current group vault and the automation's exact immutable
+projection, so never pass a room, route, participant, member, scope, kind, or
+record limit. That scheduled result omits raw member ids; attribute standings
+only by a returned display name. If a display name has not landed, treat
+attribution as unknown and do not score or guess the person. It is empty until
+members have connected the relevant data and their runtime has next woken;
+when it comes back empty, say so plainly and never invent figures.
 
-For a current-versus-previous calendar-week summary, use `vault-cli group
-weekly`. Scheduled work must pass its exact occurrence with `--as-of` so a
-retry cannot drift into a different reporting week. This is the same generic
-group-data primitive used by the email newsletter; recipient eligibility and
-email delivery remain separate newsletter operations.
+For a current-versus-previous calendar-week summary in an interactive turn,
+use `vault-cli group weekly`. A scheduled newsletter uses its purpose-specific
+typed preparation tool, whose parent supplies the exact occurrence so a retry
+cannot drift into a different reporting week. A scheduled challenge uses the
+exact bounded `group_shared` projection above plus its durable page snapshots.
+Never fall back to a shell or CLI in either scheduled path. Recipient
+eligibility and email delivery remain separate newsletter operations.
 
 - Scoreboards, health scores across members, streaks, daily standings, and
   callouts of who is winning are all in-bounds and encouraged when a challenge
@@ -340,7 +349,8 @@ rules using:
 - `instructions`: say this is the group health newsletter, include the
   exact chosen name, chosen tone, and any optional custom note, and explicitly
   require the scheduled run to read and follow
-  `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing, and
+  the exact `group-newsletter` skill through `murph.scheduled_read` with
+  `action="skill_get"` before composing, and
   require every email subject to start with that exact name instead of a generic
   newsletter label. Future notification turns may not read this skill, so keep
   that complete naming rule in the saved instructions

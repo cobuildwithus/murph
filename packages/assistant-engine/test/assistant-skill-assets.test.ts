@@ -830,7 +830,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('After any `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
-    expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
+    expect(raw).toContain('the trusted parent')
+    expect(raw).toContain('owns the fixed group notice and Settings link')
+    expect(raw).not.toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).toContain('### Example 1: close race')
     expect(raw).toContain('### Example 2: opted-in roast')
@@ -861,24 +863,18 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('narrowest matching scope')
     expect(raw).toContain('unsupported instead of')
     expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
-    )
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>',
-    )
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>',
-    )
-    expect(raw).toContain('Never pass selector scopes through `--kind`')
+    expect(raw).toContain('zero-selector\n   `action: "group_shared"`')
+    expect(raw).toContain('automation-bound\n   projection')
+    expect(raw).toContain('`<projection-kind>.activityKind.<alias>`')
+    expect(raw).toContain('Never\n   pass selector scopes through `projectionKind`')
     expect(raw).toContain('`murph.group action="post_join_offer"` with only the challenge\'s share')
     expect(raw).toContain('the group-chat skill\'s Creating a\n   hosted group core set takes precedence')
     expect(raw).toContain('For an existing group, use')
     expect(raw).toMatch(/Existing\s+members like the server-owned message to opt into/)
     expect(raw).toContain('Do not tell the room to join again')
     expect(raw).not.toContain('Mint the join link with `murph.group`')
-    expect(raw).toContain(
-      "under the developer prompt's shared\nautomation action rules",
+    expect(raw.replace(/\s+/gu, ' ')).toContain(
+      "under the developer prompt's shared automation action rules",
     )
   })
 

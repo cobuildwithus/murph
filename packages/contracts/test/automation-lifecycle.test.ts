@@ -102,4 +102,129 @@ describe("automation lifecycle contracts", () => {
       supportKind: "generic_support",
     }).success).toBe(false);
   });
+
+  it("accepts only the canonical group-challenge scheduled task binding", () => {
+    const parsed = automationScaffoldPayloadSchema.parse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    });
+
+    expect(parsed.scheduledTask).toEqual({
+      kind: "group_challenge",
+      knowledgeSlug: "morning-mobility",
+      projectionScopeKey: "steps-days.v0",
+    });
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "capabilities",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "Morning Mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      continuityPolicy: "fresh",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "x".repeat(201),
+      },
+    }).success).toBe(false);
+    expect(() => automationScaffoldPayloadSchema.parse({
+      ...automationPayload(),
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    })).toThrow(/requires a finite activeUntil/u);
+    expect(() => automationScaffoldPayloadSchema.parse({
+      ...automationPayload(),
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: "deviceActivity",
+        after: "2026-07-18T12:00:00.000Z",
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+    })).toThrow(/requires a time-driven schedule/u);
+  });
 });

@@ -15,7 +15,9 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { buildKnowledgeMarkdown } from '../src/knowledge/documents.ts'
 import {
+  appendActiveChallengePageSection,
   appendKnowledgePageSection,
+  archiveKnowledgeChallenge,
   assertKnowledgeSourcePathAllowed,
   getKnowledgePage,
   lintKnowledgePages,
@@ -352,6 +354,205 @@ describe('knowledge service helpers', () => {
     )
     expect(unchanged).toContain('slug: weekly-health-insights: invalid')
     expect(unchanged).not.toContain('Replacement observation.')
+  })
+
+  it('enforces challenge type and active status inside the owning mutation service', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-challenge-preconditions-')
+    await writeKnowledgeTestPage(vaultRoot, {
+      body: 'Ordinary notes.',
+      pageType: 'note',
+      slug: 'ordinary-notes',
+      status: 'active',
+    })
+    await writeKnowledgeTestPage(vaultRoot, {
+      body: 'Paused challenge state.',
+      pageType: 'challenge',
+      slug: 'paused-challenge',
+      status: 'paused',
+    })
+
+    await expect(
+      appendActiveChallengePageSection({
+        body: 'Must not be appended.',
+        heading: 'Prepared dispatch 2026-07-18T13:00:00.000Z',
+        slug: 'ordinary-notes',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'scheduled_challenge_not_active',
+      context: {
+        pageType: 'note',
+        slug: 'ordinary-notes',
+        status: 'active',
+      },
+    })
+    await expect(
+      appendActiveChallengePageSection({
+        body: 'Must not be appended.',
+        heading: 'Prepared dispatch 2026-07-18T13:00:00.000Z',
+        slug: 'paused-challenge',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'scheduled_challenge_not_active',
+      context: {
+        pageType: 'challenge',
+        slug: 'paused-challenge',
+        status: 'paused',
+      },
+    })
+    await expect(
+      archiveKnowledgeChallenge({
+        slug: 'ordinary-notes',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'scheduled_knowledge_not_challenge',
+    })
+    await expect(
+      archiveKnowledgeChallenge({
+        slug: 'paused-challenge',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'scheduled_challenge_not_active',
+    })
+  })
+
+  it('archives the post-dispatch challenge state instead of overwriting it from a stale snapshot', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-challenge-append-then-archive-')
+    await writeKnowledgeTestPage(vaultRoot, {
+      body: 'Initial challenge state.',
+      pageType: 'challenge',
+      slug: 'summer-steps',
+      status: 'active',
+    })
+
+    const blockedPageSave = createBlockingFirstSave(
+      vaultRoot,
+      'derived/knowledge/pages/summer-steps.md',
+    )
+
+    const dispatch = appendActiveChallengePageSection(
+      {
+        body: 'Prepared standings dispatch with [[hydration]].',
+        heading: 'Prepared dispatch 2026-07-18T13:00:00.000Z',
+        position: 'prepend',
+        slug: 'summer-steps',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-07-18T13:00:00.000Z'),
+        saveText: blockedPageSave.saveText,
+      },
+    )
+    await blockedPageSave.started
+
+    let archiveFinished = false
+    const archive = archiveKnowledgeChallenge(
+      {
+        slug: 'summer-steps',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-07-18T13:01:00.000Z'),
+        saveText: blockedPageSave.saveText,
+      },
+    ).then((result) => {
+      archiveFinished = true
+      return result
+    })
+    await sleep(50)
+    expect(archiveFinished).toBe(false)
+
+    blockedPageSave.release()
+    const [, archiveResult] = await Promise.all([dispatch, archive])
+    expect(archiveResult).toMatchObject({
+      result: 'archived',
+      savedAt: '2026-07-18T13:01:00.000Z',
+    })
+
+    const finalPage = (await getKnowledgePage({
+      slug: 'summer-steps',
+      vault: vaultRoot,
+    })).page
+    expect(finalPage.status).toBe('archived')
+    expect(finalPage.body).toContain('Prepared standings dispatch with [[hydration]].')
+    expect(finalPage.relatedSlugs).toContain('hydration')
+  })
+
+  it('rejects a dispatch that entered behind an archive of the same challenge', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-challenge-archive-then-append-')
+    await writeKnowledgeTestPage(vaultRoot, {
+      body: 'Initial challenge state.',
+      pageType: 'challenge',
+      slug: 'summer-steps',
+      status: 'active',
+    })
+
+    const blockedPageSave = createBlockingFirstSave(
+      vaultRoot,
+      'derived/knowledge/pages/summer-steps.md',
+    )
+
+    const archive = archiveKnowledgeChallenge(
+      {
+        slug: 'summer-steps',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-07-18T13:00:00.000Z'),
+        saveText: blockedPageSave.saveText,
+      },
+    )
+    await blockedPageSave.started
+
+    let dispatchFinished = false
+    const dispatch = appendActiveChallengePageSection(
+      {
+        body: 'Must not be appended after archival.',
+        heading: 'Prepared dispatch 2026-07-18T13:01:00.000Z',
+        position: 'prepend',
+        slug: 'summer-steps',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-07-18T13:01:00.000Z'),
+        saveText: blockedPageSave.saveText,
+      },
+    ).then(
+      (result) => {
+        dispatchFinished = true
+        return { error: null, result }
+      },
+      (error: unknown) => {
+        dispatchFinished = true
+        return { error, result: null }
+      },
+    )
+    await sleep(50)
+    expect(dispatchFinished).toBe(false)
+
+    blockedPageSave.release()
+    await expect(archive).resolves.toMatchObject({ result: 'archived' })
+    await expect(dispatch).resolves.toMatchObject({
+      error: {
+        code: 'scheduled_challenge_not_active',
+        context: {
+          pageType: 'challenge',
+          slug: 'summer-steps',
+          status: 'archived',
+        },
+      },
+      result: null,
+    })
+
+    const finalPage = (await getKnowledgePage({
+      slug: 'summer-steps',
+      vault: vaultRoot,
+    })).page
+    expect(finalPage.status).toBe('archived')
+    expect(finalPage.body).not.toContain('Must not be appended after archival.')
   })
 
   it('renders knowledge log fields as single-line text', async () => {
@@ -766,6 +967,34 @@ function createDeferred<T>() {
   }
 }
 
+function createBlockingFirstSave(
+  vaultRoot: string,
+  blockedRelativePath: string,
+) {
+  const started = createDeferred<void>()
+  const release = createDeferred<void>()
+  let shouldBlock = true
+
+  return {
+    release: () => release.resolve(),
+    saveText: async ({
+      relativePath,
+      content,
+    }: {
+      relativePath: string
+      content: string
+    }) => {
+      if (relativePath === blockedRelativePath && shouldBlock) {
+        shouldBlock = false
+        started.resolve()
+        await release.promise
+      }
+      await writeVaultFile(vaultRoot, relativePath, content)
+    },
+    started: started.promise,
+  }
+}
+
 async function createTempDirectory(prefix: string): Promise<string> {
   const directoryPath = await mkdtemp(path.join(tmpdir(), prefix))
   cleanupPaths.push(directoryPath)
@@ -786,6 +1015,33 @@ async function writeKnowledgePage(
   markdown: string,
 ): Promise<void> {
   await writeKnowledgePageAt(vaultRoot, slug, markdown)
+}
+
+async function writeKnowledgeTestPage(
+  vaultRoot: string,
+  input: {
+    body: string
+    pageType: string
+    slug: string
+    status: string
+  },
+): Promise<void> {
+  await writeKnowledgePage(
+    vaultRoot,
+    input.slug,
+    buildKnowledgeMarkdown({
+      body: input.body,
+      compiledAt: '2026-07-18T12:00:00.000Z',
+      librarySlugs: [],
+      pageType: input.pageType,
+      relatedSlugs: [],
+      slug: input.slug,
+      sourcePaths: [],
+      status: input.status,
+      summary: input.body,
+      title: input.slug,
+    }),
+  )
 }
 
 async function writeKnowledgePageAt(

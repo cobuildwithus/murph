@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   type AssistantChannelDelivery,
@@ -251,6 +252,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryTransportIdempotent?: boolean
   emailHtml?: string | null
   explicitTarget?: string | null
+  groupChallengeDispatch?: AssistantOutboxIntent['groupChallengeDispatch']
   identityId?: string | null
   initialState?:
     | { status: 'pending' }
@@ -348,6 +350,7 @@ export async function createAssistantOutboxIntent(
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       assertAssistantOutboxDedupeEffectMatches({
+        groupChallengeDispatch: input.groupChallengeDispatch ?? null,
         intent: existing,
         operation,
         persistedTarget,
@@ -424,6 +427,7 @@ export async function createAssistantOutboxIntent(
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
+      groupChallengeDispatch: input.groupChallengeDispatch ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -1126,6 +1130,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
   explicitTarget?: string | null
+  groupChallengeDispatch?: AssistantOutboxIntent['groupChallengeDispatch']
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -1152,6 +1157,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
+    groupChallengeDispatch: input.groupChallengeDispatch ?? null,
     identityId: input.identityId,
     media: input.media,
     message: input.message,
@@ -1900,10 +1906,20 @@ function assertAssistantOutboxNativeReplyTarget(input: {
 }
 
 function assertAssistantOutboxDedupeEffectMatches(input: {
+  groupChallengeDispatch: AssistantOutboxIntent['groupChallengeDispatch']
   intent: AssistantOutboxIntent
   operation: AssistantOutboxOperation | null
   persistedTarget: AssistantOutboxPersistedTarget
 }): void {
+  if (
+    !isDeepStrictEqual(
+      input.intent.groupChallengeDispatch ?? null,
+      input.groupChallengeDispatch ?? null,
+    )
+  ) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+
   const existingOperationKind = input.intent.operation?.kind ?? null
   const requestedOperationKind = input.operation?.kind ?? null
   if (existingOperationKind !== requestedOperationKind) {

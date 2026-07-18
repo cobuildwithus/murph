@@ -1733,11 +1733,19 @@ describe("parseHostedRuntimeNewsletterTool", () => {
   it("parses prepare and send requests", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
-      groupId: "group_123",
     })).toEqual({
       action: "prepare",
-      groupId: "group_123",
     });
+    expect(parseHostedRuntimeNewsletterToolRequest({
+      action: "prepare",
+      groupId: "legacy_group",
+    })).toEqual({
+      action: "prepare",
+    });
+    expect(() => parseHostedRuntimeNewsletterToolRequest({
+      action: "prepare",
+      groupId: 42,
+    })).toThrow(/groupId/u);
     expect(() => parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
@@ -1746,13 +1754,11 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "send",
-      groupId: "group_123",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
     })).toEqual({
       action: "send",
-      groupId: "group_123",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
@@ -1760,12 +1766,21 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "send",
-      groupId: "group_123",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
     })).toEqual({
       action: "send",
-      groupId: "group_123",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+      text: null,
+    });
+    expect(parseHostedRuntimeNewsletterToolRequest({
+      action: "send",
+      groupId: "legacy_group",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+    })).toEqual({
+      action: "send",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: null,

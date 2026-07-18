@@ -6,10 +6,14 @@ import type {
   AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
+import {
+  assertAssistantScheduledTaskSourceCurrent,
+} from '../scheduled-task-authority.js'
 
 export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   intent: AssistantOutboxIntent
@@ -17,7 +21,9 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
 }): Promise<Error | null> {
   const authority = input.intent.automationAuthority
   if (!authority) {
-    return null
+    return legacyNewsletterIntentRequiresAutomationAuthority(input.intent)
+      ? createAssistantOutboxAutomationAuthorityStaleError()
+      : null
   }
 
   const current = await readAssistantOutboxAuthorizedAutomation({
@@ -45,9 +51,46 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     now: new Date(),
     vault: input.vault,
   })
-  return finalCurrent
-    ? null
-    : createAssistantOutboxAutomationAuthorityStaleError()
+  if (!finalCurrent) {
+    return createAssistantOutboxAutomationAuthorityStaleError()
+  }
+
+  const dispatch = input.intent.groupChallengeDispatch
+  if (!dispatch) {
+    return null
+  }
+
+  try {
+    await assertAssistantScheduledTaskSourceCurrent({
+      authority: {
+        automationId: authority.automationId,
+        expectedUpdatedAt: authority.expectedUpdatedAt,
+        kind: 'group_challenge',
+        projectionScopeKey: dispatch.scheduledTask.projectionScopeKey,
+        slug: dispatch.scheduledTask.knowledgeSlug,
+      },
+      vault: input.vault,
+    })
+    return null
+  } catch (error) {
+    return error instanceof Error
+      ? error
+      : createAssistantOutboxAutomationAuthorityStaleError()
+  }
+}
+
+function legacyNewsletterIntentRequiresAutomationAuthority(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (!intent.newsletterAuthorizationProof) {
+    return false
+  }
+  const serializedTarget = intent.explicitTarget ?? (
+    intent.bindingDelivery?.kind === 'thread'
+      ? intent.bindingDelivery.target
+      : null
+  )
+  return parseHostedEmailThreadTarget(serializedTarget)?.targetKind === 'group'
 }
 
 async function readAssistantOutboxAuthorizedAutomation(input: {

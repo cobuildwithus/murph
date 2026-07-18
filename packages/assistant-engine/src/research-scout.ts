@@ -1,14 +1,11 @@
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
   DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS,
   EXA_RESEARCH_SCOUT_ENDPOINT,
   EXA_RESEARCH_SCOUT_MODE,
   EXA_RESEARCH_SCOUT_PATH,
   EXA_RESEARCH_SCOUT_PROVIDER_NAME,
-  MAX_RESEARCH_SCOUT_BATCH_LANES,
-  MAX_RESEARCH_SCOUT_CANDIDATES,
   buildExaResearchScoutRequest,
   researchScoutBatchInputSchema,
   researchScoutBatchResultSchema,
@@ -20,17 +17,13 @@ import {
   type ResearchScoutResult,
 } from '@murphai/contracts'
 
-export {
-  DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
-  MAX_RESEARCH_SCOUT_BATCH_LANES,
-  MAX_RESEARCH_SCOUT_CANDIDATES,
-  buildExaResearchScoutRequest,
-} from '@murphai/contracts'
-
 export const DEFAULT_EXA_API_BASE_URL = 'https://api.exa.ai'
 export const EXA_API_KEY_ENV = 'EXA_API_KEY'
+const MAX_EXA_RESPONSE_BYTES = 256_000
 
 export interface ExaResearchScoutClientDependencies {
+  abortSignal?: AbortSignal | null
+  beforeRequest?: (() => Promise<void> | void) | null
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
 }
@@ -69,7 +62,13 @@ export async function fetchExaResearchScoutCandidates(
       sentProfileKind: 'tag_profile',
       rawVaultValuesSent: false,
     },
-    response: await fetchExaResearchScoutResponse(input, apiKey, fetchImpl),
+    response: await fetchExaResearchScoutResponse(
+      input,
+      apiKey,
+      fetchImpl,
+      dependencies.beforeRequest ?? null,
+      dependencies.abortSignal ?? null,
+    ),
   } satisfies ResearchScoutResult
 
   return researchScoutResultSchema.parse(result)
@@ -95,12 +94,18 @@ export async function fetchExaResearchScoutBatchCandidates(
   for (const lane of input.lanes) {
     lanes.push({
       label: lane.label,
-      response: await fetchExaResearchScoutResponse({
-        profile: lane.profile,
-        since: input.since,
-        until: input.until,
-        maxCandidates: input.maxCandidatesPerLane,
-      }, apiKey, fetchImpl),
+      response: await fetchExaResearchScoutResponse(
+        {
+          profile: lane.profile,
+          since: input.since,
+          until: input.until,
+          maxCandidates: input.maxCandidatesPerLane,
+        },
+        apiKey,
+        fetchImpl,
+        dependencies.beforeRequest ?? null,
+        dependencies.abortSignal ?? null,
+      ),
     })
   }
 
@@ -124,7 +129,14 @@ async function fetchExaResearchScoutResponse(
   input: ResearchScoutInput,
   apiKey: string,
   fetchImpl: typeof fetch,
+  beforeRequest: (() => Promise<void> | void) | null,
+  abortSignal: AbortSignal | null,
 ): Promise<unknown> {
+  await beforeRequest?.()
+  const deadlineSignal = AbortSignal.timeout(DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS)
+  const signal = abortSignal
+    ? AbortSignal.any([abortSignal, deadlineSignal])
+    : deadlineSignal
   let response: Response
   try {
     response = await fetchImpl(new URL(
@@ -138,7 +150,7 @@ async function fetchExaResearchScoutResponse(
         'x-api-key': apiKey,
       },
       body: JSON.stringify(buildExaResearchScoutRequest(input)),
-      signal: AbortSignal.timeout(DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS),
+      signal,
     })
   } catch (error) {
     throw new VaultCliError(
@@ -154,14 +166,79 @@ async function fetchExaResearchScoutResponse(
     )
   }
 
-  return await response.json()
+  return await readBoundedExaJson(response)
+}
+
+async function readBoundedExaJson(response: Response): Promise<unknown> {
+  const contentLength = response.headers.get('content-length')
+  if (
+    contentLength !== null &&
+    /^\d+$/u.test(contentLength) &&
+    Number(contentLength) > MAX_EXA_RESPONSE_BYTES
+  ) {
+    throw new VaultCliError(
+      'research_exa_request_failed',
+      `Exa research scout response exceeded ${MAX_EXA_RESPONSE_BYTES} bytes.`,
+    )
+  }
+
+  if (response.body === null) {
+    throw new VaultCliError(
+      'research_exa_request_failed',
+      'Exa research scout returned an empty response.',
+    )
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      if (byteLength > MAX_EXA_RESPONSE_BYTES) {
+        try {
+          await reader.cancel()
+        } catch {
+          // The bounded failure below remains authoritative.
+        }
+        throw new VaultCliError(
+          'research_exa_request_failed',
+          `Exa research scout response exceeded ${MAX_EXA_RESPONSE_BYTES} bytes.`,
+        )
+      }
+      chunks.push(value)
+    }
+  } catch (error) {
+    if (error instanceof VaultCliError) throw error
+    throw new VaultCliError(
+      'research_exa_request_failed',
+      `Exa research scout response failed while reading: ${errorMessage(error)}.`,
+    )
+  }
+
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+  } catch {
+    throw new VaultCliError(
+      'research_exa_request_failed',
+      'Exa research scout returned invalid JSON.',
+    )
+  }
 }
 
 async function describeFailedExaResponse(response: Response): Promise<string> {
   const fallback = `HTTP ${response.status}`
 
   try {
-    const payload = (await response.json()) as {
+    const payload = (await readBoundedExaJson(response)) as {
       error?: unknown
       message?: unknown
     }

@@ -111,19 +111,32 @@ describe("hosted group newsletter route", () => {
       },
     });
     expect(mocks.prepareHostedGroupNewsletterParticipants).toHaveBeenCalledWith({
-      groupId: "group_123",
+      runtimeMemberId: "member_runtime",
+    });
+  });
+
+  it("ignores the legacy group selector and derives the group from runtime identity", async () => {
+    const response = await route.POST(buildRequest("prepare", {
+      groupId: "group_other",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prepareHostedGroupNewsletterParticipants).toHaveBeenCalledWith({
       runtimeMemberId: "member_runtime",
     });
   });
 });
 
-function buildRequest(action: string): Request {
+function buildRequest(
+  action: string,
+  extra: Record<string, unknown> = {},
+): Request {
   return new Request(
     "https://web.test/api/internal/hosted-execution/groups/newsletter-tool",
     {
       body: JSON.stringify({
         action,
-        groupId: "group_123",
+        ...extra,
       }),
       headers: { "content-type": "application/json" },
       method: "POST",

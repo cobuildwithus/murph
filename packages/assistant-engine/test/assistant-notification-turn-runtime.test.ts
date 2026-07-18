@@ -2011,7 +2011,11 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeCodexTurnWithRecovery: vi.fn(async (input) => {
+    executeCodexTurnWithRecovery: vi.fn<
+      (
+        input: NotificationTurnProviderInput,
+      ) => Promise<AssistantCodexTurnRecoveryOutcome>
+    >(async (input) => {
       assert.equal(input.input.serviceTier, 'flex')
       assert.equal(input.input.turnTrigger, 'automation-cron')
       assert.equal(input.input.workingDirectory, undefined)
@@ -2121,6 +2125,12 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       hosted: null,
     },
     instructions: 'Decide if the operator should be interrupted.',
+    preparedResponseMedia: [{
+      alt: 'Experiment progress card',
+      kind: 'image',
+      source: 'murph-experiment-progress-card',
+      url: 'https://app.example.test/experiments/progress-card.png',
+    }],
     serviceTier: 'flex',
     vault: '/vaults/skip',
   })
@@ -2144,7 +2154,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     expect.objectContaining({
       assistantTranscriptText: null,
       persistUserPromptToTranscript: false,
-      providerResumeStateAction: 'persist-from-provider-turn',
+      providerResumeStateAction: 'preserve-existing',
     }),
   )
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
@@ -2162,9 +2172,11 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       hosted: null,
     },
     instructions: 'Compose the scheduled group newsletter.',
-    scheduledAutomationAuthority: {
+    scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+    scheduledTaskAuthority: {
       automationId: 'automation_newsletter',
-      occurrenceAt: '2026-07-12T13:00:00.000Z',
+      expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
+      kind: 'group_newsletter',
     },
     serviceTier: 'flex',
     vault: '/vaults/skip',
@@ -2183,16 +2195,99 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         codexConfigOverrides: expect.anything(),
       }),
       profile: expect.objectContaining({
-        threadScope: 'session-thread',
+        nativeResumePolicy: 'disabled',
+        threadScope: 'isolated-thread',
         toolProfile: 'notification-turn',
       }),
     }),
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
-      providerResumeStateAction: 'persist-from-provider-turn',
+      providerResumeStateAction: 'preserve-existing',
     }),
   )
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Copied prepared newsletter facts.',
+        text: 'member_secret had 7000 steps.',
+      }),
+      session: providerSession,
+    }),
+  })
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Compose the scheduled group newsletter.',
+    scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+    scheduledTaskAuthority: {
+      automationId: 'automation_newsletter',
+      expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
+      kind: 'group_newsletter',
+    },
+    vault: '/vaults/skip',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_GROUP_NEWSLETTER_DECISION_INVALID',
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (
+      input: NotificationTurnProviderInput,
+    ): Promise<AssistantCodexTurnRecoveryOutcome> => {
+      input.hostedToolContext?.recordNewsletterSendResult?.({
+        action: 'send',
+        result: {
+          participantCount: 0,
+          skippedNoEmailMemberIds: ['member_private'],
+          status: 'no_recipients',
+        },
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+  )
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    intent: { intentId: 'intent_newsletter_no_recipients' },
+    kind: 'sent',
+    session: providerSession,
+  })
+  const noRecipientsResult = await sendAssistantNotificationLocal({
+    deliveryIdempotencyKey: 'newsletter-no-recipients',
+    executionContext: {
+      hosted: {
+        memberId: 'member_runtime',
+        newsletterTool: {
+          request: vi.fn(),
+        },
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Compose the scheduled group newsletter.',
+    scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+    scheduledTaskAuthority: {
+      automationId: 'automation_newsletter',
+      expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
+      kind: 'group_newsletter',
+    },
+    vault: '/vaults/skip',
+  })
+  expect(noRecipientsResult.decision).toEqual({
+    kind: 'send_message',
+    privateSummary: 'No eligible group newsletter email recipients.',
+    text: 'No one in this group is eligible to receive the newsletter email yet. Add an email in Murph Settings: https://www.withmurph.ai/settings?addEmail=true',
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: expect.stringContaining('https://www.withmurph.ai/settings?addEmail=true'),
+  }))
+  expect(JSON.stringify(noRecipientsResult)).not.toContain('member_private')
 
   vi.clearAllMocks()
 
@@ -2225,10 +2320,6 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-        ],
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
         ),
@@ -2282,11 +2373,6 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     kind: 'succeeded',
     providerTurn: {
       ...createProviderResult({
-        rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory upsert --vault "$VAULT" --section context --text "prefers morning summaries"',
-          ),
-        ],
         response: JSON.stringify({
           kind: 'send_message',
           privateSummary: 'Should not send.',
@@ -2317,60 +2403,123 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect((invalidMaintenanceError as Error & {
     details?: Record<string, unknown>
   }).details).toMatchObject({
-    assistantNotificationProviderNonReplayableWork: true,
-    assistantNotificationStage: 'provider',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
-
-  vi.clearAllMocks()
-  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
-    kind: 'succeeded',
-    providerTurn: {
-      ...createProviderResult({
-        rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory show --vault "$VAULT" --format json',
-          ),
-        ],
-        response: JSON.stringify({
-          kind: 'send_message',
-          privateSummary: 'Should not send.',
-          text: 'Visible maintenance message.',
-        }),
-        session: providerSession,
-      }),
-      additionalUsages: [],
-    },
-  })
-
-  let readOnlyMaintenanceError: unknown
-  try {
-    await sendAssistantNotificationLocal({
-      instructions: 'Run overnight memory maintenance.',
-      turnPolicy: {
-        kind: 'maintenance-exact-skip',
-        privateSummary: 'No notification required.',
-      },
-      vault: '/vaults/skip',
-    })
-  } catch (error) {
-    readOnlyMaintenanceError = error
-  }
-  expect(readOnlyMaintenanceError).toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-  })
-  expect((readOnlyMaintenanceError as Error & {
-    details?: Record<string, unknown>
-  }).details).toMatchObject({
-    assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationStage: 'provider',
   })
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
-test('sendAssistantNotificationLocal exposes device authority only to direct non-maintenance turns', async () => {
+test('sendAssistantNotificationLocal reports the accepted newsletter parent intent', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'assistant-newsletter-parent-intent-'))
+  const scheduledAutomationAuthority = {
+    automationId: 'automation_newsletter',
+    expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
+    occurrenceAt: '2026-07-12T13:00:00.000Z',
+  }
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'The group newsletter parent delivery is queued.',
+    }),
+  })
+  const hostedNewsletterRequest = vi.fn(async () => ({
+    action: 'prepare' as const,
+    result: {
+      authorizationProof: 'a'.repeat(64),
+      groupId: 'group_123',
+      missingEmailParticipants: [],
+      participants: [{
+        authorizedShares: [],
+        hasEmail: true,
+        memberId: 'member_one',
+      }],
+      status: 'ok' as const,
+    },
+  }))
+
+  try {
+    const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        const hostedToolContext = providerInput.hostedToolContext
+        if (!hostedToolContext?.newsletterTool) {
+          throw new Error('Expected the hosted newsletter tool context.')
+        }
+
+        const preparation = await hostedToolContext.newsletterTool.request({
+          action: 'prepare',
+          scheduledAutomationAuthority,
+        })
+        expect(preparation).toMatchObject({
+          action: 'prepare',
+          result: { status: 'ok' },
+        })
+
+        const sendResult = await hostedToolContext.newsletterTool.request({
+          action: 'send',
+          html: '<p>Weekly health note</p>',
+          scheduledAutomationAuthority,
+          subject: 'Weekly health note',
+          text: 'Weekly health note',
+        })
+        if (sendResult.action !== 'send') {
+          throw new Error('Expected the newsletter send result.')
+        }
+        hostedToolContext.recordNewsletterSendResult?.(sendResult)
+
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-newsletter-parent-intent',
+    })
+
+    const result = await sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member_runtime',
+          newsletterTool: { request: hostedNewsletterRequest },
+          userEnvKeys: [],
+        },
+      },
+      instructions: 'Compose the scheduled group newsletter.',
+      scheduledOccurrenceAt: scheduledAutomationAuthority.occurrenceAt,
+      scheduledTaskAuthority: {
+        automationId: scheduledAutomationAuthority.automationId,
+        expectedUpdatedAt: scheduledAutomationAuthority.expectedUpdatedAt,
+        kind: 'group_newsletter',
+      },
+      vault,
+    })
+    const { listAssistantOutboxIntents } = await import(
+      '../src/assistant/outbox.ts'
+    )
+    const intents = await listAssistantOutboxIntents(vault)
+
+    expect(intents).toHaveLength(1)
+    expect(result.postTurnDeliveryExpectations).toEqual({
+      newsletterDeliveryIntent: {
+        intentId: intents[0]?.intentId,
+      },
+      newsletterSendResult: {
+        status: 'accepted',
+      },
+    })
+    expect(intents[0]).toMatchObject({
+      automationAuthority: {
+        automationId: scheduledAutomationAuthority.automationId,
+        expectedUpdatedAt: scheduledAutomationAuthority.expectedUpdatedAt,
+      },
+      status: 'pending',
+    })
+    expect(hostedNewsletterRequest).toHaveBeenCalledWith({ action: 'prepare' })
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal withholds device authority from all unattended turns', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
@@ -2420,7 +2569,7 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
   })
 
   expect(observedHostedToolContexts).toHaveLength(2)
-  expect(observedHostedToolContexts[0]?.deviceTool).toBe(deviceTool)
+  expect(observedHostedToolContexts[0]?.deviceTool).toBeUndefined()
   expect(observedHostedToolContexts[1]).toBeNull()
 })
 
@@ -2532,6 +2681,79 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
   const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
   expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
   expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal binds the trusted challenge occurrence and private run record to the queued intent', async () => {
+  const providerSession = createAssistantSession()
+  const privateSummary = [
+    'Occurrence: 2026-07-19T08:00:00.000Z',
+    'Local date: 2026-07-19',
+    'Medium: image',
+    'Frame: finish-line comic',
+    'Exact text: Summer Steps standings are in.',
+    'Prompt: Draw a playful finish-line comic.',
+    'Standings: shared projection snapshot',
+    'Canon: photo finish',
+    'Confounders: none declared',
+  ].join('\n')
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary,
+      text: 'Summer Steps standings are in.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-challenge-queued-dispatch',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-group-challenge-queued-dispatch',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+
+  await sendAssistantNotificationLocal({
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: { hosted: null },
+    instructions: 'Queue the bound Summer Steps challenge dispatch.',
+    outboxAutomationAuthority: {
+      automationId: 'automation_summer_steps',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-19T08:00:00.000Z',
+    scheduledTaskAuthority: {
+      automationId: 'automation_summer_steps',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'group_challenge',
+      projectionScopeKey: 'steps-days.v0',
+      slug: 'summer-steps',
+    },
+    vault: '/vaults/group-challenge-queued-dispatch',
+  })
+
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    automationAuthority: {
+      automationId: 'automation_summer_steps',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+    },
+    groupChallengeDispatch: {
+      occurrenceAt: '2026-07-19T08:00:00.000Z',
+      preparedBody: privateSummary,
+      scheduledTask: {
+        kind: 'group_challenge',
+        knowledgeSlug: 'summer-steps',
+        projectionScopeKey: 'steps-days.v0',
+      },
+    },
+  }))
 })
 
 test('sendAssistantNotificationLocal rechecks notification authority before outbound delivery', async () => {
@@ -3061,7 +3283,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   })
 })
 
-test('sendAssistantNotificationLocal forwards provider response media to delivery', async () => {
+test('sendAssistantNotificationLocal delivers parent-prepared media before provider media', async () => {
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-notification-media',
@@ -3206,6 +3428,12 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
         hosted: null,
       },
       instructions: 'Deliver this',
+      preparedResponseMedia: [{
+        alt: 'Experiment progress card',
+        kind: 'image',
+        source: 'murph-experiment-progress-card',
+        url: 'https://app.example.test/experiments/progress-card.png',
+      }],
       vault: '/vaults/delivery-throw',
     }),
   ).rejects.toThrow('delivery exploded')
@@ -3213,10 +3441,16 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
     expect.objectContaining({
       media: [
         {
+          alt: 'Experiment progress card',
           kind: 'image',
-          url: 'https://cdn.example.test/notification.png',
+          source: 'murph-experiment-progress-card',
+          url: 'https://app.example.test/experiments/progress-card.png',
+        },
+        {
           alt: 'notification',
+          kind: 'image',
           source: 'notification',
+          url: 'https://cdn.example.test/notification.png',
         },
       ],
       turnId: 'turn-notification-delivery-throw',
@@ -3335,13 +3569,12 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
     assistantNotificationProviderModel: 'gpt-5.6-terra-mini',
-    assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
   })
 })
 
-test('sendAssistantNotificationLocal clears rejected resume state before surfacing a terminal provider failure', async () => {
+test('sendAssistantNotificationLocal preserves attended resume state when an isolated provider turn fails before returning a thread id', async () => {
   const providerError = new Error('provider rejected stale notification resume')
   const providerSession = createAssistantSession({
     resumeState: {
@@ -3390,7 +3623,7 @@ test('sendAssistantNotificationLocal clears rejected resume state before surfaci
   expect(
     mocks.applyAssistantSessionCodexResumeStateAction,
   ).toHaveBeenCalledWith({
-    action: 'clear',
+    action: 'preserve-existing',
     assistantContractFingerprint:
       providerResult.assistantContractFingerprint,
     codexRolloutRelativePath: null,
@@ -3402,7 +3635,7 @@ test('sendAssistantNotificationLocal clears rejected resume state before surfaci
   })
 })
 
-test('sendAssistantNotificationLocal persists accepted resume state before surfacing a terminal provider failure', async () => {
+test('sendAssistantNotificationLocal preserves attended resume state when an isolated provider turn fails after returning a thread id', async () => {
   const providerError = new Error('notification failed after provider start')
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -3447,7 +3680,7 @@ test('sendAssistantNotificationLocal persists accepted resume state before surfa
   expect(
     mocks.applyAssistantSessionCodexResumeStateAction,
   ).toHaveBeenCalledWith({
-    action: 'persist-from-provider-turn',
+    action: 'preserve-existing',
     assistantContractFingerprint:
       providerResult.assistantContractFingerprint,
     codexRolloutRelativePath:
@@ -3947,7 +4180,8 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
+  vi.doMock('../src/assistant/turns.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/assistant/turns.ts')>()),
     createAssistantTurnId: () => input.turnId,
   }))
   vi.doMock('../src/assistant/channel-typing.js', () => ({
@@ -4038,17 +4272,5 @@ function createProviderResult(input?: {
           ? null
           : { ...defaultUsage, ...input.usage },
     workingDirectory: '/tmp/assistant-notification-turn-runtime',
-  }
-}
-
-function createCodexCommandCompletedEvent(command: string): unknown {
-  return {
-    type: 'item.completed',
-    item: {
-      id: `cmd_${Buffer.from(command).toString('hex').slice(0, 12)}`,
-      type: 'command.execution',
-      command,
-      exit_code: 0,
-    },
   }
 }

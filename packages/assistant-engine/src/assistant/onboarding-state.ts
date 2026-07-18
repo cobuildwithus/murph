@@ -15,6 +15,7 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 
@@ -109,31 +110,38 @@ export async function completeAssistantOnboarding(input: {
   reason: AssistantOnboardingCompletionReason
   vault: string
 }): Promise<AssistantOnboardingState> {
-  const completedAt = input.completedAt ?? new Date().toISOString()
-  const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
-  const persisted = buildPersistedAssistantOnboardingState({
-    completedAt,
-    completedReason: input.reason,
-    createdAt: existing.createdAt ?? completedAt,
+  return withAssistantRuntimeWriteLock(input.vault, async () => {
+    const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
+    if (existing.status === 'completed') {
+      return existing
+    }
+    const completedAt = input.completedAt ?? new Date().toISOString()
+    const persisted = buildPersistedAssistantOnboardingState({
+      completedAt,
+      completedReason: input.reason,
+      createdAt: existing.createdAt ?? completedAt,
+    })
+    await writeAssistantOnboardingState(input.vault, persisted)
+    return normalizeAssistantOnboardingState(persisted)
   })
-  await writeAssistantOnboardingState(input.vault, persisted)
-  return normalizeAssistantOnboardingState(persisted)
 }
 
 export async function reopenAssistantOnboarding(input: {
   reopenedAt?: string
   vault: string
 }): Promise<AssistantOnboardingState> {
-  const reopenedAt = input.reopenedAt ?? new Date().toISOString()
-  const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
-  const persisted = buildPersistedAssistantOnboardingState({
-    completedAt: null,
-    completedReason: null,
-    createdAt: existing.createdAt ?? reopenedAt,
-    updatedAt: reopenedAt,
+  return withAssistantRuntimeWriteLock(input.vault, async () => {
+    const reopenedAt = input.reopenedAt ?? new Date().toISOString()
+    const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
+    const persisted = buildPersistedAssistantOnboardingState({
+      completedAt: null,
+      completedReason: null,
+      createdAt: existing.createdAt ?? reopenedAt,
+      updatedAt: reopenedAt,
+    })
+    await writeAssistantOnboardingState(input.vault, persisted)
+    return normalizeAssistantOnboardingState(persisted)
   })
-  await writeAssistantOnboardingState(input.vault, persisted)
-  return normalizeAssistantOnboardingState(persisted)
 }
 
 export async function isAssistantOnboardingOpen(vault: string): Promise<boolean> {

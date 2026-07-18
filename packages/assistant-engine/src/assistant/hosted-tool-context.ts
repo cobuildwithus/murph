@@ -3,7 +3,6 @@ import type {
 } from '@murphai/hosted-execution/return-contact'
 import type {
   HostedRuntimeNewsletterToolResponse,
-  HostedRuntimeNewsletterScheduledAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   AssistantSession,
@@ -96,7 +95,6 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
-  currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -143,6 +141,7 @@ export function createAssistantHostedToolContext(input: {
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
+  recordNewsletterDeliveryIntent?: (intent: { intentId: string }) => void
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -163,13 +162,13 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   const newsletterOutboxTool = input.newsletterTool && input.newsletterOutbox
-    ? createAssistantNewsletterOutboxTool({
-        authority: input.messageInput.scheduledAutomationAuthority ?? null,
-        newsletterTool: input.newsletterTool,
-        sessionId: input.session.sessionId,
-        turnId: input.newsletterOutbox.turnId,
-        vault: input.newsletterOutbox.vault,
-      })
+      ? createAssistantNewsletterOutboxTool({
+          newsletterTool: input.newsletterTool,
+          recordDeliveryIntent: input.recordNewsletterDeliveryIntent,
+          sessionId: input.session.sessionId,
+          turnId: input.newsletterOutbox.turnId,
+          vault: input.newsletterOutbox.vault,
+        })
     : null
   const newsletterTool = newsletterOutboxTool ?? input.newsletterTool ?? null
   const readCurrentUserActionAssistantInputId = () => {
@@ -259,10 +258,6 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
-    },
-    currentScheduledAutomationAuthority: () => {
-      const deliveryContext = readDeliveryContext()
-      return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,

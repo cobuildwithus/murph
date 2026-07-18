@@ -1,9 +1,13 @@
-import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
+import {
+  archiveAutomationIfExactRevision,
+  setScheduledLogStatus,
+} from '@murphai/core'
 import {
   assistantCronJobSchema,
   type AssistantCronJob,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
@@ -21,7 +25,6 @@ import {
   writeAssistantCronStore,
 } from './store.js'
 import {
-  buildCanonicalAutomationUpsertInput,
   listCanonicalAssistantCronRecords,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalAssistantCronJobId,
@@ -31,11 +34,24 @@ import {
   resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
-import { readAssistantOutboxIntent } from '../outbox/store.js'
+import {
+  readAssistantOutboxIntent,
+  snapshotAssistantOutboxIntentsLocal,
+} from '../outbox/store.js'
 import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-policy.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import { commitAssistantGroupChallengeSentDelivery } from './group-challenge-delivery-commit.js'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  classifyNewsletterRecipientFamily,
+  isGroupNewsletterOutboxIntent,
+} from '../newsletter-family.js'
 
 const ASSISTANT_CRON_MISSING_PENDING_DELIVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1000
+const ASSISTANT_CRON_NEWSLETTER_PARTIAL_FAILURE =
+  'ASSISTANT_CRON_NEWSLETTER_PARTIAL_FAILURE'
+const ASSISTANT_CRON_NEWSLETTER_RECIPIENT_RETRYABLE =
+  'ASSISTANT_CRON_NEWSLETTER_RECIPIENT_RETRYABLE'
 
 export interface AssistantCronDeliveryReconciliationResult {
   reconciled: number
@@ -64,20 +80,171 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
   paths?: AssistantStatePaths
   vault: string
 }): Promise<AssistantCronDeliveryReconciliationResult> {
-  const terminal = resolveTerminalAssistantCronDeliveryOutcome(input.intent)
-  if (!terminal) {
+  const resolved = await resolveAssistantCronDeliveryReconciliation(input)
+  if (!resolved) {
     return { reconciled: 0 }
   }
 
   return reconcileAssistantCronTerminalDelivery({
-    intentId: input.intent.intentId,
+    intent: resolved.intent,
+    intentId: resolved.intentId,
     paths: input.paths,
-    terminal,
+    terminal: resolved.terminal,
     vault: input.vault,
   })
 }
 
+async function resolveAssistantCronDeliveryReconciliation(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<{
+  intent: AssistantOutboxIntent
+  intentId: string
+  terminal: TerminalAssistantCronDeliveryOutcome
+} | null> {
+  if (isGroupNewsletterOutboxIntent(input.intent)) {
+    return resolveAssistantCronNewsletterDeliveryReconciliation(input)
+  }
+
+  const terminal = resolveTerminalAssistantCronDeliveryOutcome(input.intent)
+  return terminal
+      ? {
+        intent: input.intent,
+        intentId: input.intent.intentId,
+        terminal,
+      }
+    : null
+}
+
+async function resolveAssistantCronNewsletterDeliveryReconciliation(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<{
+  intent: AssistantOutboxIntent
+  intentId: string
+  terminal: TerminalAssistantCronDeliveryOutcome
+} | null> {
+  const deliveryIdempotencyKey = input.intent.deliveryIdempotencyKey
+  if (!deliveryIdempotencyKey) {
+    return null
+  }
+
+  const family = (await snapshotAssistantOutboxIntentsLocal(input.vault)).filter(
+    (intent) =>
+      intent.deliveryIdempotencyKey === deliveryIdempotencyKey &&
+      intent.turnId === input.intent.turnId &&
+      isGroupNewsletterOutboxIntent(intent),
+  )
+  const parents = family.filter((intent) =>
+    parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId === null,
+  )
+  if (parents.length !== 1) {
+    return null
+  }
+
+  const parent = parents[0]
+  if (!parent) {
+    return null
+  }
+  if (isActiveAssistantCronOutboxIntent(parent)) {
+    return null
+  }
+  if (parent.status === 'failed' || parent.status === 'abandoned') {
+    const terminal = resolveTerminalAssistantCronDeliveryOutcome(parent)
+    return terminal
+      ? {
+          intent: parent,
+          intentId: parent.intentId,
+          terminal,
+        }
+      : null
+  }
+  if (parent.status !== 'sent') {
+    return null
+  }
+
+  const recipientFamily = classifyNewsletterRecipientFamily(family)
+  if (recipientFamily.some((recipient) => recipient.state === 'active')) {
+    return null
+  }
+
+  const recipientIntents = recipientFamily.flatMap((recipient) => recipient.intents)
+  const terminalAt = resolveLatestAssistantCronOutboxTimestamp(
+    recipientIntents,
+    parent.sentAt ?? parent.updatedAt,
+  )
+  if (
+    recipientFamily.length > 0 &&
+    recipientFamily.every((recipient) => recipient.state === 'sent')
+  ) {
+    return {
+      intent: parent,
+      intentId: parent.intentId,
+      terminal: {
+        at: terminalAt,
+        kind: 'sent',
+      },
+    }
+  }
+
+  if (
+    !recipientFamily.some((recipient) => recipient.state === 'non_replayable') &&
+    recipientFamily.some((recipient) => recipient.state === 'safely_replayable')
+  ) {
+    return {
+      intent: parent,
+      intentId: parent.intentId,
+      terminal: {
+        at: terminalAt,
+        failureCode: ASSISTANT_CRON_NEWSLETTER_RECIPIENT_RETRYABLE,
+        failureStatus: 'failed',
+        kind: 'failed',
+        message: 'One or more group newsletter recipients can be retried safely.',
+      },
+    }
+  }
+
+  return {
+    intent: parent,
+    intentId: parent.intentId,
+    terminal: {
+      at: terminalAt,
+      failureCode: ASSISTANT_CRON_NEWSLETTER_PARTIAL_FAILURE,
+      failureStatus: 'failed',
+      kind: 'failed',
+      message: 'One or more group newsletter deliveries did not complete.',
+    },
+  }
+}
+
+function isActiveAssistantCronOutboxIntent(intent: AssistantOutboxIntent): boolean {
+  return (
+    intent.status === 'awaiting_approval' ||
+    intent.status === 'pending' ||
+    intent.status === 'retryable' ||
+    intent.status === 'sending'
+  )
+}
+
+function resolveLatestAssistantCronOutboxTimestamp(
+  intents: readonly AssistantOutboxIntent[],
+  fallback: string,
+): string {
+  let latest = fallback
+  let latestMs = Date.parse(fallback)
+  for (const intent of intents) {
+    const timestamp = intent.sentAt ?? intent.updatedAt
+    const timestampMs = Date.parse(timestamp)
+    if (Number.isFinite(timestampMs) && (!Number.isFinite(latestMs) || timestampMs > latestMs)) {
+      latest = timestamp
+      latestMs = timestampMs
+    }
+  }
+  return latest
+}
+
 async function reconcileAssistantCronTerminalDelivery(input: {
+  intent: AssistantOutboxIntent | null
   intentId: string
   paths?: AssistantStatePaths
   terminal: TerminalAssistantCronDeliveryOutcome
@@ -134,6 +301,32 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       const source = canonicalRecords.find(
         (record) => resolveCanonicalAssistantCronJobId(record) === runtimeState.jobId,
       ) ?? null
+      if (
+        input.terminal.kind === 'sent' &&
+        input.intent?.groupChallengeDispatch
+      ) {
+        if (
+          input.intent.automationAuthority?.automationId !== runtimeState.jobId
+        ) {
+          throw new VaultCliError(
+            'scheduled_challenge_delivery_commit_invalid',
+            'The terminal group-challenge delivery does not match its pending automation.',
+          )
+        }
+        const challengeCommit = await commitAssistantGroupChallengeSentDelivery({
+          expectedAutomationId: runtimeState.jobId,
+          intent: input.intent,
+          pendingOccurrenceAt:
+            runtimeState.state.pendingOccurrenceAt ?? '',
+          vault: input.vault,
+        })
+        if (challengeCommit.closeoutApplied) {
+          reconciled += 1
+          canonicalChanged = true
+          removeAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState.jobId)
+          continue
+        }
+      }
       reconciled += 1
       canonicalChanged = true
       const deliveryConsumesOccurrence =
@@ -147,11 +340,16 @@ async function reconcileAssistantCronTerminalDelivery(input: {
           source,
         })
       ) {
-        await archiveCanonicalAssistantCronSourceAfterDelivery({
+        const archived = await archiveCanonicalAssistantCronSourceAfterDelivery({
           source,
           vault: input.vault,
         })
-        removeAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState.jobId)
+        if (archived) {
+          removeAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState.jobId)
+        }
+        // A concurrent source edit invalidates this exact-revision archive.
+        // Keep the pending runtime record for the repair path to reconcile
+        // against the current canonical source instead of consuming stale state.
         continue
       }
 
@@ -228,6 +426,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
       }
 
       const result = await reconcileAssistantCronTerminalDelivery({
+        intent: null,
         intentId,
         paths,
         terminal: {
@@ -251,9 +450,6 @@ export async function repairPendingAssistantCronDeliveries(input: {
       continue
     }
 
-    if (!resolveTerminalAssistantCronDeliveryOutcome(intent)) {
-      continue
-    }
     const result = await reconcileAssistantCronDeliveryIntent({
       intent,
       paths,
@@ -384,6 +580,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
         ...runningClearedState,
         pendingOccurrenceAt: null,
         retryAfterAt: null,
+        scheduledMediaReservation: null,
         lastSucceededAt: input.terminal.at,
         lastError: null,
         consecutiveFailures: 0,
@@ -427,6 +624,7 @@ function reconcileCanonicalAssistantCronRuntimeAfterDelivery(input: {
       ...runningClearedState,
       pendingOccurrenceAt: null,
       retryAfterAt: null,
+      scheduledMediaReservation: null,
       lastFailedAt: input.terminal.at,
       lastError: input.terminal.message,
       consecutiveFailures: 0,
@@ -440,6 +638,16 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
 ): boolean {
   if (terminal.kind === 'sent') {
     return true
+  }
+
+  if (terminal.failureCode === ASSISTANT_CRON_NEWSLETTER_PARTIAL_FAILURE) {
+    return true
+  }
+
+  if (terminal.failureCode === ASSISTANT_CRON_NEWSLETTER_RECIPIENT_RETRYABLE) {
+    return !(
+      source?.kind === 'automation' && source.status === 'active'
+    )
   }
 
   if (
@@ -528,21 +736,14 @@ function canonicalAssistantCronSourceChangedAfterRuntimeState(input: {
 async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
   source: CanonicalAssistantCronJobRecord
   vault: string
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.source.kind === 'automation') {
-    await upsertAutomation(
-      buildCanonicalAutomationUpsertInput({
-        vault: input.vault,
-        automationId: input.source.automationId,
-        automation: input.source,
-        title: input.source.title,
-        status: 'archived',
-        schedule: input.source.schedule,
-        route: input.source.route,
-        instructions: input.source.instructions,
-      }),
-    )
-    return
+    const result = await archiveAutomationIfExactRevision({
+      expectedUpdatedAt: input.source.updatedAt,
+      lookup: input.source.automationId,
+      vaultRoot: input.vault,
+    })
+    return result.archived
   }
 
   await setScheduledLogStatus({
@@ -550,6 +751,7 @@ async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
     scheduledLogId: input.source.scheduledLogId,
     status: 'archived',
   })
+  return true
 }
 
 function omitPendingDeliveryIntentId<T extends { pendingDeliveryIntentId?: string | null }>(

@@ -529,6 +529,7 @@ function createAutomationSource(
     },
     slug: 'invalid-email-reminder',
     status: 'paused',
+    scheduledTask: null,
     summary: null,
     tags: ['assistant', 'scheduled'],
     timeZone: null,

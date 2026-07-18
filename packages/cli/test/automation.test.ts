@@ -9,10 +9,7 @@ import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
-import {
-  HOSTED_RUNTIME_PROCESS_ENV,
-  SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV,
-} from "@murphai/hosted-execution/env";
+import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
 import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
@@ -157,6 +154,7 @@ test("automation record schema accepts the canonical automation shape", () => {
       participantId: null,
       threadId: null,
     },
+    scheduledTask: null,
     assistantTargetOverride: null,
     supportKind: null,
     continuityPolicy: "preserve",
@@ -192,6 +190,7 @@ test("automation record schema rejects recurring schedules with timeZone", () =>
       participantId: null,
       threadId: null,
     },
+    scheduledTask: null,
     continuityPolicy: "preserve",
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
@@ -220,6 +219,7 @@ test("automation record schema rejects invalid slugs", () => {
       participantId: null,
       threadId: null,
     },
+    scheduledTask: null,
     continuityPolicy: "preserve",
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
@@ -641,134 +641,6 @@ test("hosted automation CLI mutations fail closed while reads stay available", a
     ]);
     assert.equal(shown.envelope.ok, true);
     assert.equal(listed.envelope.ok, true);
-  } finally {
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("scheduled notification automation CLI mutations fail closed on the local runtime while reads stay available", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-scheduled-turn-",
-  );
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-
-    const seeded = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Existing reminder",
-      "--slug",
-      "existing-reminder",
-      "--status",
-      "paused",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "dailyLocal",
-      "--schedule-local-time",
-      "08:30",
-      "--channel",
-      "telegram",
-      "--delivery-target",
-      "telegram_thread_real",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(seeded.envelope.ok, true);
-
-    // Local runtime (no hosted marker), scheduled notification turn.
-    vi.stubEnv(SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV, "1");
-    const mutations = [
-      [
-        "automation",
-        "save",
-        "Blocked reminder",
-        "--instructions",
-        "Send the reminder.",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "edit",
-        "existing-reminder",
-        "--summary",
-        "Blocked edit",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "set-status",
-        "existing-reminder",
-        "--status",
-        "active",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "import-json",
-        "--input",
-        `@${path.join(parentRoot, "not-read.json")}`,
-        "--vault",
-        vaultRoot,
-      ],
-      // The mutator the round-1 fix missed: it archives the whole support
-      // series when --desired-automation-id is omitted. It shares the same
-      // guard, so the scheduled marker rejects it before any mutation.
-      [
-        "automation",
-        "reconcile-support-series",
-        "system:support-series:example",
-        "--vault",
-        vaultRoot,
-      ],
-    ] as const;
-
-    for (const args of mutations) {
-      const result = await runInProcessJsonCli(cli, [...args]);
-      assert.equal(result.exitCode, 1);
-      assert.equal(result.envelope.ok, false);
-      if (!result.envelope.ok) {
-        assert.match(
-          result.envelope.error.message ?? "",
-          /Scheduled notification turns cannot mutate automation lifecycle/u,
-        );
-      }
-    }
-
-    // Task-owned reads remain available so scheduled turns can still ground the
-    // decision in current automation state.
-    const shown = await runInProcessJsonCli(cli, [
-      "automation",
-      "show",
-      "existing-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    const listed = await runInProcessJsonCli(cli, [
-      "automation",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(listed.envelope.ok, true);
-
-    // The seeded reminder is untouched: no mutation reached canonical state.
-    if (shown.envelope.ok) {
-      assert.equal(
-        (shown.envelope.data as { automation: { status: string } | null })
-          .automation?.status,
-        "paused",
-      );
-    }
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }
@@ -1533,6 +1405,7 @@ test("automation commands round-trip save, import-json, show, and list through t
 
     const importedPayload = {
       ...payload,
+      activeUntil: "2026-08-01T23:00:00.000Z",
       title: "Weekly planning",
       slug: "weekly-planning",
       schedule: {
@@ -1545,6 +1418,12 @@ test("automation commands round-trip save, import-json, show, and list through t
         identityId: "weekly-planning-sender",
         participantId: null,
         threadId: null,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_challenge" as const,
+        knowledgeSlug: "challenge-morning-mobility",
+        projectionScopeKey: "activity-minutes-days.v1.activityKind.running",
       },
     };
     await writeFile(payloadPath, `${JSON.stringify(importedPayload, null, 2)}\n`, "utf8");
@@ -1573,6 +1452,35 @@ test("automation commands round-trip save, import-json, show, and list through t
 
     assert.equal(importedData.created, true);
     assert.equal(importedData.lookupId, importedPayload.slug);
+
+    const importedShown = await runInProcessJsonCli<{
+      automation: {
+        route: { threadIsDirect?: boolean | null };
+        scheduledTask: {
+          kind: "group_challenge";
+          knowledgeSlug: string;
+          projectionScopeKey: string;
+        } | null;
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      importedPayload.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importedShown.exitCode, null);
+    assert.equal(importedShown.envelope.ok, true);
+    assert.deepEqual(importedShown.envelope.data?.automation?.scheduledTask, {
+      kind: "group_challenge",
+      knowledgeSlug: "challenge-morning-mobility",
+      projectionScopeKey: "activity-minutes-days.v1.activityKind.running",
+    });
+    assert.equal(
+      importedShown.envelope.data?.automation?.route.threadIsDirect,
+      false,
+    );
 
     const shown = await runInProcessJsonCli<{
       automation: {
@@ -1697,6 +1605,11 @@ test("automation commands round-trip save, import-json, show, and list through t
       };
       items: Array<{
         automationId: string;
+        scheduledTask: {
+          kind: "group_challenge";
+          knowledgeSlug: string;
+          projectionScopeKey: string;
+        } | null;
         slug: string;
       }>;
       vault: string;
@@ -1723,6 +1636,8 @@ test("automation commands round-trip save, import-json, show, and list through t
       importedPayload.slug,
     ]);
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+    assert.equal(listedData.items[0]?.scheduledTask, null);
+    assert.deepEqual(listedData.items[1]?.scheduledTask, importedPayload.scheduledTask);
     assert.equal("instructions" in (listedData.items[0] ?? {}), false);
     assert.equal("markdown" in (listedData.items[0] ?? {}), false);
   } finally {

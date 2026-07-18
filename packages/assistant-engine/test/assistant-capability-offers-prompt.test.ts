@@ -128,8 +128,10 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain('`murph.newsletter`')
-    expect(section).toContain('`prepare` returns authorized current-week facts')
-    expect(section).toContain('compose only from `result.members`')
+    expect(section).toContain(
+      '`prepare` returns the only authorized current-week member facts',
+    )
+    expect(section).toContain('compose only from those facts')
     expect(section).not.toContain('`vault-cli group weekly')
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')

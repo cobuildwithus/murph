@@ -39,6 +39,7 @@ import type {
 import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
+import type { AssistantScheduledTaskAuthority } from '../scheduled-task-authority.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -121,6 +122,7 @@ export interface AssistantProviderTurn {
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  ephemeral?: boolean | null
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -137,8 +139,14 @@ export interface AssistantProviderTurn {
   providerRequestOrdinal?: number | null
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
+  permissions?: string | null
+  processLifetime?: 'one-shot' | 'warm'
   publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
+  runtimeWorkspaceRoots?: readonly string[] | null
+  scheduledOccurrenceAt?: string | null
+  scheduledExecution?: boolean | null
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
@@ -146,6 +154,7 @@ export interface AssistantProviderTurn {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  threadConfig?: Readonly<Record<string, unknown>> | null
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null

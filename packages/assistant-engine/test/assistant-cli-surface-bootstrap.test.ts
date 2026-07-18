@@ -468,60 +468,6 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
   )
 })
 
-test('scopeAssistantCliSurfaceContractForAssistant strips lifecycle mutators for scheduled notification turns on the local runtime', async () => {
-  const {
-    scopeAssistantCliSurfaceContractForAssistant,
-  } = await import('../src/assistant/cli-surface-bootstrap.ts')
-  const contract = [
-    'Murph CLI Contract:',
-    '- `automation save`: Save an automation.',
-    '- `automation show`: Read an automation.',
-    '- `batch`: Run multiple bounded commands.',
-    '- `device connect`: Connect a provider.',
-    '- `device provider list`: List supported providers.',
-    '- `knowledge append-section`: Append to a challenge page.',
-    'Command index:',
-    '- `automation`: `edit`, `import-json`, `list`, `reconcile-support-series`, `save`, `scaffold`, `set-status`, `show`.',
-    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `daemon start`, `daemon status`, `daemon stop`, `provider list`.',
-    '- `knowledge`: `append-section`, `show`.',
-  ].join('\n')
-
-  // A scheduled notification turn is unattended: automation-lifecycle (including
-  // `reconcile-support-series`) and device/account mutation commands, plus the
-  // generic `batch` multiplexer, must be stripped from the advertised surface
-  // even on the local runtime (where hosted stripping does not apply), while
-  // task-owned canonical reads/writes stay available for challenge-page and
-  // standings work. This keeps the advertised surface aligned with the runtime
-  // scheduled-turn authority in docs/contracts/00-invariants.md.
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      hostedRuntime: false,
-      scheduledNotificationTurn: true,
-    }),
-    [
-      'Murph CLI Contract:',
-      '- `automation show`: Read an automation.',
-      '- `device provider list`: List supported providers.',
-      '- `knowledge append-section`: Append to a challenge page.',
-      'Command index:',
-      '- `automation`: `list`, `scaffold`, `show`.',
-      '- `device`: `provider list`.',
-      '- `knowledge`: `append-section`, `show`.',
-    ].join('\n'),
-  )
-  // Interactive local turns are unchanged: they still receive the full surface,
-  // including `batch` and `automation reconcile-support-series`.
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      hostedRuntime: false,
-      scheduledNotificationTurn: false,
-    }),
-    contract,
-  )
-})
-
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

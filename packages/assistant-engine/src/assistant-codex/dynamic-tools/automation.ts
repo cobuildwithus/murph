@@ -5,6 +5,7 @@ import {
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
   automationScheduleSchema,
+  automationScheduledTaskSchema,
   automationStatusValues,
   automationSupportKindValues,
 } from '@murphai/contracts'
@@ -43,6 +44,7 @@ const saveAutomationArgumentsSchema = z.object({
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema,
   schedule: automationScheduleSchema,
+  scheduledTask: automationScheduledTaskSchema.optional(),
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
   summary: automationSummarySchema.nullable().optional(),
@@ -109,7 +111,7 @@ export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save binds delivery to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save binds delivery to this conversation and accepts no route fields. Only when creating an active group-challenge dispatch in its current non-direct group conversation, save may include scheduledTask { kind: "group_challenge", knowledgeSlug, projectionScopeKey } for the exact active challenge page and one selectable group projection, together with a finite activeUntil; this binding and its route are immutable. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -143,6 +145,7 @@ export function readAutomationDynamicToolRequest(input: {
       'lookup',
       'retargetToCurrentConversation',
       'schedule',
+      'scheduledTask',
       'slug',
       'status',
       'summary',

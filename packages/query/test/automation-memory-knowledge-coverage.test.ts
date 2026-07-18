@@ -67,6 +67,7 @@ describe("automation helpers", () => {
         "title: Daily summary",
         "status: paused",
         "summary: Daily summary prompt.",
+        "activeUntil: 2026-07-20T23:00:00.000-04:00",
         "schedule:",
         "  kind: dailyLocal",
         "  localTime: 08:30",
@@ -77,7 +78,12 @@ describe("automation helpers", () => {
         "  identityId: null",
         "  participantId: null",
         "  threadId: null",
-        "continuityPolicy: fresh",
+        "  threadIsDirect: false",
+        "scheduledTask:",
+        "  kind: group_challenge",
+        "  knowledgeSlug: morning-mobility",
+        "  projectionScopeKey: steps-days.v0",
+        "continuityPolicy: preserve",
         "tags:",
         "  - nightly",
         "  - nightly",
@@ -170,7 +176,8 @@ describe("automation helpers", () => {
       status: "active",
     });
     expect(records[1]).toMatchObject({
-      continuityPolicy: "fresh",
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      continuityPolicy: "preserve",
       route: {
         channel: "email",
         deliveryTarget: "123",
@@ -178,6 +185,11 @@ describe("automation helpers", () => {
       schedule: {
         kind: "dailyLocal",
         localTime: "08:30",
+      },
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "steps-days.v0",
       },
       status: "paused",
     });
@@ -203,6 +215,91 @@ describe("automation helpers", () => {
       automationId: "auto_daily_summary",
       slug: "daily-summary",
     });
+  });
+
+  it("rejects an evergreen group-challenge scheduled task", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeAutomationDocument(
+      vaultRoot,
+      "evergreen-challenge",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_evergreen_challenge",
+        "slug: evergreen-challenge",
+        "title: Evergreen challenge",
+        "status: active",
+        "schedule:",
+        "  kind: dailyLocal",
+        "  localTime: 08:30",
+        "route:",
+        "  channel: linq",
+        "  deliveryTarget: group-chat",
+        "  identityId: identity",
+        "  participantId: null",
+        "  threadId: group-chat",
+        "  threadIsDirect: false",
+        "scheduledTask:",
+        "  kind: group_challenge",
+        "  knowledgeSlug: morning-mobility",
+        "  projectionScopeKey: steps-days.v0",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-07-18T12:00:00.000Z",
+        "updatedAt: 2026-07-18T12:00:00.000Z",
+        "---",
+        "",
+        "Send the prepared challenge dispatch.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(vaultRoot)).rejects.toThrow(
+      /requires a finite activeUntil/u,
+    );
+  });
+
+  it("rejects a device-triggered group-challenge scheduled task", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeAutomationDocument(
+      vaultRoot,
+      "device-challenge",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_device_challenge",
+        "slug: device-challenge",
+        "title: Device challenge",
+        "status: active",
+        "activeUntil: 2026-07-20T23:00:00.000-04:00",
+        "schedule:",
+        "  kind: deviceActivity",
+        "  after: 2026-07-18T12:00:00.000Z",
+        "route:",
+        "  channel: linq",
+        "  deliveryTarget: group-chat",
+        "  identityId: identity",
+        "  participantId: null",
+        "  threadId: group-chat",
+        "  threadIsDirect: false",
+        "scheduledTask:",
+        "  kind: group_challenge",
+        "  knowledgeSlug: morning-mobility",
+        "  projectionScopeKey: steps-days.v0",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-07-18T12:00:00.000Z",
+        "updatedAt: 2026-07-18T12:00:00.000Z",
+        "---",
+        "",
+        "Send the prepared challenge dispatch.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(vaultRoot)).rejects.toThrow(
+      /requires a time-driven schedule/u,
+    );
   });
 
   it("loads device activity automation schedules with open activity kinds", async () => {

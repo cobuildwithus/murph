@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,
+  automationScheduledTaskSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
@@ -343,6 +344,18 @@ export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
     expectedUpdatedAt: isoTimestampSchema,
+  })
+  .strict()
+
+export const ASSISTANT_GROUP_CHALLENGE_PREPARED_BODY_MAX_LENGTH = 50_000
+
+export const assistantGroupChallengeDispatchCommitSchema = z
+  .object({
+    occurrenceAt: isoTimestampSchema,
+    preparedBody: z.string().trim().min(1).max(
+      ASSISTANT_GROUP_CHALLENGE_PREPARED_BODY_MAX_LENGTH,
+    ),
+    scheduledTask: automationScheduledTaskSchema,
   })
   .strict()
 
@@ -861,6 +874,9 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
+    groupChallengeDispatch: assistantGroupChallengeDispatchCommitSchema
+      .nullable()
+      .optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -883,6 +899,23 @@ export const assistantOutboxIntentSchema = z
   })
   .strict()
   .superRefine((intent, context) => {
+    if (intent.groupChallengeDispatch != null) {
+      if (!intent.automationAuthority) {
+        context.addIssue({
+          code: 'custom',
+          message: 'A group-challenge dispatch commit requires automation authority.',
+          path: ['automationAuthority'],
+        })
+      }
+      if (intent.operation !== null) {
+        context.addIssue({
+          code: 'custom',
+          message: 'A group-challenge dispatch commit must accompany a normal message.',
+          path: ['groupChallengeDispatch'],
+        })
+      }
+    }
+
     if (intent.nativeReplyRequested !== true) {
       return
     }

@@ -31,6 +31,11 @@ stay off weight, appearance, and health conditions.
 Choose the narrowest Vault Share projection scope that matches the agreed
 score. Use daily aggregate records only; never ask for routes, raw workouts,
 provider traces, or private 1:1 data for a group challenge.
+The automation binding stores its exact canonical scope key: a fixed scope
+uses the kind itself, while a selector scope uses
+`<projection-kind>.activityKind.<alias>` (for example,
+`activity-minutes-days.v1.activityKind.running`). Never use `group-email.v0`
+as a challenge scope.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -100,54 +105,80 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
   --page-type challenge --status active --body <markdown>
 ```
 
-The page carries these sections, kept current:
+At creation, the page body must contain exactly one H2 section for each safe
+heading listed below. Keep each section current in place; do not create a
+second H2 with the same heading, because scheduled reads fail closed when the
+safe page structure is ambiguous.
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
   settled any dispute about it.
-- **Roster & intros** — each member's name, member id, participation state
-  (`in`, `pending`, `declined`, or `withdrawn`), their intro or fun fact
-  (verbatim), and the capture refs for their photos.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
-- **Sent log** — exactly one prepared-dispatch entry per scheduled occurrence,
-  keyed by occurrence instant and local date: medium, creative frame, one-line
-  summary, the saved vault image ref of every generated image, and the full
-  script or lyrics of any voice memo or song. This is rotation and replay
-  state, not proof that the provider or handset received the dispatch.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
   short sliding window, so yesterday's standings are only in this page).
 - **Confounders & protected notes** — declared confounders and who is having
   a rough stretch and is off-limits for jokes right now.
 
+The interactive page may also carry one **Roster & intros** H2 containing each
+member's name, member id, participation state (`in`, `pending`, `declined`, or
+`withdrawn`), verbatim intro or fun fact, and approved photo capture refs.
+Terminal delivery history uses one parent-committed `Delivered dispatch
+<occurrenceAt>` H2 per scheduled occurrence that reached `sent`: the model's
+complete private run record plus locator-free accepted-delivery evidence. It
+is not proof that a handset was viewed. Scheduled challenge context excludes
+Roster & intros, all Delivered dispatch sections, and every raw ref, ID, path,
+or URL.
+
 **Write in the same turn.** Your context can end at any moment without
 warning, and anything that exists only in the chat scrollback is something
-tomorrow's referee never learned. So durable facts go onto the page with
-`vault-cli knowledge append-section` in the turn they happen — a ruling, a
-new stake, fresh canon, a commissioned bit, a declared confounder, a
-protected-status change, a pinned photo, a prepared dispatch — not batched
-for later. The daily dispatch writes its occurrence-keyed prepared entry
-before returning; the engine and outbox, not the model-authored page, own
-whether delivery was accepted or received. Between dispatches, append as
-things land. If it isn't on the page, it didn't happen.
+tomorrow's referee never learned. During an interactive turn, durable facts
+go onto the page with `vault-cli knowledge append-section` in the turn they
+happen — a ruling, a new stake, fresh canon, a commissioned bit, a declared
+confounder, a protected-status change, or a pinned photo — not batched for
+later. A scheduled turn has no native shell or CLI execution
+environment and performs no page, memory, or lifecycle writes. It uses only
+parent-supplied context and explicitly offered typed read or generation tools,
+then returns the complete run record in `privateSummary`. The parent binds
+trusted task
+authority and the exact occurrence to the queued outbox intent. Only after
+that intent reaches terminal `sent` does the effect owner commit the
+occurrence's `Delivered dispatch` section. Between dispatches, interactive
+turns append durable facts as they land. If it isn't on the page, it didn't
+happen.
 
-Read the page with `vault-cli knowledge show <slug>` before composing any
-challenge message. Also save one pointer so a fresh session finds the page:
+Before composing any challenge message, read the page. In an interactive turn,
+use `vault-cli knowledge show <slug>`. In a scheduled turn, call
+`murph.scheduled_read` with `action: "group_challenge_context"`; the parent
+binds the exact page, so do not supply a slug or use a shell, CLI, path, or
+broader page scan. This scheduled projection deliberately omits prior
+`Delivered dispatch` sections and raw storage or media locators; do not try to
+recover or infer either from another surface.
+Also save one pointer so a fresh session finds the page:
 
 ```
 vault-cli memory upsert "active challenge: <slug>; read that knowledge page \
   before any challenge action" --section Context --format json
 ```
 
-Record the returned memory id on the challenge page; close-out forgets it
-with `vault-cli memory forget <memory-id>`.
+Record the returned memory id on the challenge page. Interactive close-out
+forgets it with `vault-cli memory forget <memory-id>`. A scheduled model never
+changes this pointer. After a final occurrence reaches terminal `sent`, the
+effect owner archives the still-current challenge page first, performs
+exact-match pointer cleanup, and then archives the exact active automation
+revision. The archived page is the fail-closed effect gate if cleanup is
+interrupted; an independently archived automation never authorizes page or
+pointer cleanup.
 
-If the pointer is missing or its slug does not resolve, do not conclude
-there is no challenge: run `vault-cli knowledge list --page-type challenge
---status active` and check for a live challenge page before treating the
-group as challenge-free, and re-save the pointer once found. A lost pointer
-loses a reminder; it must never lose the challenge.
+If the pointer is missing or its slug does not resolve, do not conclude there
+is no challenge. In an interactive turn, run `vault-cli knowledge list
+--page-type challenge --status active`, check for a live challenge page, and
+re-save the pointer once found. A scheduled turn instead calls
+`murph.scheduled_read` with `action: "group_challenge_context"` for the exact
+page bound by its automation and leaves discovery and pointer repair to a later
+interactive turn or the parent effect owner; it never scans unrelated pages or
+writes memory. A lost pointer loses a reminder; it must never lose the challenge.
 
 ## Kickoff
 
@@ -228,31 +259,42 @@ loses a reminder; it must never lose the challenge.
 
 ## The daily loop
 
-During interactive setup only, create one daily dispatch automation under the developer prompt's shared
-automation action rules with a `dailyLocal` schedule and
-`continuityPolicy: preserve`. Do this once the confirmed roster is recorded
+During interactive setup only, create one daily dispatch automation under the
+developer prompt's shared automation action rules with a `dailyLocal` schedule
+and `continuityPolicy: preserve`. Set a finite `activeUntil` after the final
+scheduled close-out occurrence and its retry window but before the next daily
+occurrence; a challenge automation is never evergreen. Use the create-only
+`murph.automation` save and set
+`scheduledTask: { kind: "group_challenge", knowledgeSlug: "<exact challenge-page slug>", projectionScopeKey: "<the exact agreed challenge projection scope key>" }`.
+Never infer this durable task identity from instructions or tags, and never
+patch or migrate it after creation. Do this once the
+confirmed roster is recorded
 and every confirmed participant has been asked once for a one-line intro or fun
 fact plus an optional photo; asking and recording the response or absence is
 mandatory, the photo itself is always optional, and missing or declined photos
 never block the challenge after the one light follow-up above. Keep the
 automation's instructions compact: label it as a group-challenge dispatch, name
 the exact challenge-page slug, require each run to read `group-chat`,
-`group-challenge`, and `groupchat-comedy`, state that rich media is welcome only
-within the recorded consent and privacy rules, and name the challenge page's
-sent log as the rotation source. The automation prompt is a pointer into this
+`group-challenge`, and `groupchat-comedy`, and state that rich media is welcome
+only within the recorded consent and privacy rules. The automation prompt is a pointer into this
 skill and durable page, not a copied lifecycle. A scheduled occurrence never
 creates, edits, reschedules, or archives an automation; it enters directly at
 the numbered run steps below.
 Each run:
 
-1. Read the challenge page.
+1. Read the challenge page. On a scheduled run, call
+   `murph.scheduled_read` with `action: "group_challenge_context"`; the parent
+   binds the exact challenge page and accepts no slug selector.
 2. Read fresh standings with the same scope shape used for the challenge
-   share: fixed projections use `vault-cli group shared --kind steps-days.v0`;
-   selector activity projections use exact scopes such as
-   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`,
-   `vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>`,
-   or `vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>`.
-   Never pass selector scopes through `--kind`.
+   share. On a scheduled run, call `murph.scheduled_read` with zero-selector
+   `action: "group_shared"`. The parent returns only the automation-bound
+   projection for the current group roster; do not supply a member, scope,
+   kind, or record limit.
+   The trusted parent binds the current group vault; never pass a room, route,
+   participant, or member id. In an interactive turn, the equivalent fixed
+   projection is `vault-cli group shared --kind steps-days.v0`, while selector
+   projections use `vault-cli group shared --scope <exact-scope-key>`. Never
+   pass selector scopes through `projectionKind` or interactive `--kind`.
    Never reuse remembered numbers — wrong scores turn jokes into noise. If
    the data is empty or missing for a member, say so plainly; never invent
    figures. Score only the people recorded as in; shared data does not add a
@@ -262,29 +304,53 @@ Each run:
    ruling, press conference, poem, and similar devices are creative frames,
    not different media; changing the frame while sending another plain-text
    standings bubble does not count as rotation. Derive the medium from the
-   prepared-dispatch entries already on the page: choose the
-   least-recently-used medium that is currently available, never use the same
-   medium twice in a row, and across a five-to-seven-day challenge use every
-   available medium before repeating one. "Available" means the current channel
-   and tool support it and the required likeness/photo consent exists; an
-   unavailable medium is simply skipped in that selection, not tracked as a
-   plan. A voice memo or song cannot share a turn with other media, so the
-   day's medium is a real choice.
-4. For images, follow the Comics rules below. Pass the pinned capture paths
-   of everyone appearing (plus your character sheet ref when you appear) as
-   `referenceImageRefs`, and record the saved vault ref that
-   `generate_image` returns in the sent log. Members ask for replays: an
-   image replay means a new `generate_image` call passing the saved ref as
-   the reference; an audio replay means regenerating from the full script
-   or lyrics saved in the sent log (`music-generation` owns song prompt
-   craft). Nothing sent is recoverable except through what the page saved.
-5. Before returning, append exactly one prepared-dispatch entry for the
-   engine-supplied occurrence key: the chosen medium and frame, what was
-   prepared, standings snapshot, saved media refs or full audio script, new
-   canon, and new confounders. When retry evidence names the same occurrence
-   and its entry already exists, reuse that medium and replay material; do not
-   append a duplicate occurrence. Never label the entry delivered from
-   model-side evidence — delivery status belongs to the engine and outbox.
+   safe rotation cues in the parent-supplied context when present: choose the
+   least-recently-used currently available medium, never use the same medium
+   twice in a row, and across a five-to-seven-day challenge use every available
+   medium before repeating one. Prior `Delivered dispatch` sections are not in
+   scheduled context, so never claim to have read them or scan for them. When
+   no safe rotation cue is supplied, choose the medium that best fits the
+   current grounded material without claiming a rotation guarantee.
+   "Available" means the current channel and tool support it and the required
+   likeness/photo consent exists; an unavailable medium is simply skipped in
+   that selection, not tracked as a plan. A voice memo or song cannot share a
+   turn with other media, so the day's medium is a real choice. One scheduled
+   dispatch may generate up to four ordered images for one comic, or exactly
+   one voice memo or song; it never mixes image and audio generation.
+4. For images, follow the Comics rules below. In an interactive turn, pass
+   approved pinned capture paths as `referenceImageRefs` to `generate_image`.
+   In a scheduled turn, use only `murph.generate_scheduled_image`; it
+   accepts no refs, URLs, paths, IDs, or selectors, so participant likeness is
+   unavailable and the comic must use non-identifying archetypes, names, and
+   speech bubbles instead. The parent owns any generated response media
+   attached to the outbox intent. Never copy a tool result's ref, ID, path, or
+   URL into scheduled output or `privateSummary`.
+5. For a scheduled voice memo, use only
+   `murph.generate_scheduled_voice_memo`; it accepts the exact text to speak
+   and the trusted runtime fixes Murph's configured voice. For a scheduled
+   song, read `music-generation`, then use only
+   `murph.generate_scheduled_song` with its bounded prompt, duration, and
+   instrumental choice. Preserve the complete spoken script or song prompt
+   and lyrics in `privateSummary`, but never include the tool's locator. If the
+   matching tool is unavailable, treat that medium as unavailable rather than
+   substituting another generation path.
+6. Before returning a scheduled `send_message`, provide a complete required
+   `privateSummary` for this run: the occurrence instant and local date; chosen
+   medium and creative frame; the exact text body and every complete image
+   prompt, spoken script, song prompt, or lyrics used; the standings snapshot;
+   and new canon and confounders. Keep this nonempty record within 50,000
+   characters; the parent validates the bound before queueing. Never include
+   refs, IDs, paths, or URLs. The scheduled model does not append, update,
+   forget, or archive anything. The parent attaches trusted task authority and
+   the exact occurrence to the queued outbox intent, then the effect owner
+   commits one `Delivered dispatch` section only after terminal `sent`. A
+   skipped, failed, or merely queued occurrence produces no delivered section.
+
+On a scheduled run, never pass or inspect capture refs saved on the page or the
+character-sheet ref. `murph.generate_scheduled_image` generates without
+references and therefore cannot preserve participant or Murph likeness. If
+that exact tool is unavailable, treat image as unavailable under the rotation
+rule; do not bypass the boundary or imply that a likeness was used.
 
 Between dispatches, the normal `group-chat` decision ladder applies. Answer
 rules questions with a real ruling plus a canon callback; take positions
@@ -306,16 +372,17 @@ loophole; a suspiciously perfect score gets an integrity-review scene.
 Construction:
 
 - **One image per panel, square.** A wide multi-panel strip renders as an
-  illegible ribbon on a phone — never generate one. Each panel is its own
-  `generate_image` call; all panels attach in order to the single dispatch
-  message, where each renders as its own image. Three or four panels is a
-  full strip.
+  illegible ribbon on a phone — never generate one. Each interactive panel is
+  its own `generate_image` call; each scheduled panel is its own
+  `murph.generate_scheduled_image` call. All panels attach in order to the
+  single dispatch message, where each renders as its own image. Three or four
+  panels is a full strip and the scheduled tool boundary permits at most four.
 - **Style, in every prompt:** warm hand-drawn newspaper-comic style — thick
   ink outlines, cream paper background, flat soft colors, one warm amber
   accent, sparse hand-drawn backgrounds. Not realistic, not 3D, no
   photorealism, no cinematic lighting. A hand-lettered title plate in the
   top-left names the panel ("1. THE LOOPHOLE").
-- **People:** cartoon caricatures drawn from the pinned intro photos passed
+- **People (interactive):** cartoon caricatures drawn from the pinned intro photos passed
   as `referenceImageRefs` — say "cartoon caricature of the person in image
   N, NOT photorealistic", where N is the ref's position in the
   `referenceImageRefs` array you pass (self-render included), and describe
@@ -325,6 +392,9 @@ Construction:
   never the body — no exaggerating weight, body shape, or appearance. A
   member who declined a photo appears by name and speech bubble, not
   likeness, and never holds up the kickoff comic.
+- **People (scheduled):** no reference images are available. Use simple,
+  non-identifying comic archetypes, member names only when the page permits,
+  and speech bubbles; never claim a participant or Murph likeness was used.
 - **Text in panels:** at most one or two short speech bubbles per panel, and
   end every prompt with "Spell all visible text exactly as written." If text
   garbles, shorten the bubbles before changing anything else.
@@ -355,14 +425,22 @@ when they recover.
 
 ## Close-out
 
-1. Compute final standings from fresh shared data plus the page's
-   snapshots.
+1. Compute final standings from fresh shared data plus the page's snapshots.
+   On a scheduled close-out, use the same exact bounded
+   `murph.scheduled_read` `group_shared` projection call as the daily loop;
+   never reuse remembered numbers or fall back to CLI.
 2. Declare the winner with a stakes callback, and settle only safe, opted-in
    stakes within the `groupchat-comedy` hard limits.
 3. Produce one closing artifact — a comic or recap built from the pinned
    photos and the challenge's canon.
-4. Flip the page to `--status archived` and forget the pointer with
-   `vault-cli memory forget <memory-id>` (the id recorded at kickoff).
+4. In an interactive turn, forget the recorded pointer with `vault-cli memory
+   forget <memory-id>` and then archive the page with the normal `vault-cli
+   knowledge` write. A scheduled model only composes the closing dispatch
+   and its complete `privateSummary`; it never writes memory or changes page or
+   automation lifecycle. After the final dispatch reaches terminal `sent`, the
+   effect owner verifies the current task binding, archives the challenge page
+   first, removes the exact pointer, and then archives the exact automation
+   revision.
 5. Results belong to the members. For personal write-ups or what the data
    means for them individually, point each member to their own 1:1 thread;
    never import private 1:1 context into the group.

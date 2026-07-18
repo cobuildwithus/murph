@@ -63,6 +63,7 @@ import {
 import {
   MURPH_DYNAMIC_TOOLS,
   resolveMurphDynamicTools,
+  resolveMurphScheduledDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
@@ -1847,6 +1848,60 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
+  it('forwards scheduled execution policy through the provider adapter', async () => {
+    const scheduledTaskAuthority = {
+      automationId: 'automation_group_challenge',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'group_challenge' as const,
+      projectionScopeKey: 'steps-days.v0',
+      slug: 'summer-steps',
+    }
+    const dynamicTools = resolveMurphScheduledDynamicTools({
+      deliveryToolsAvailable: true,
+      taskAuthority: scheduledTaskAuthority,
+    })
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-scheduled-policy',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-scheduled-policy',
+      turnId: 'turn-scheduled-policy',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        dynamicTools,
+        prompt: 'Run the scheduled challenge.',
+        resume: null,
+        runtimeWorkspaceRoots: null,
+        scheduledExecution: true,
+        scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+        scheduledTaskAuthority,
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      dynamicTools,
+      runtimeWorkspaceRoots: undefined,
+      scheduledExecution: true,
+      scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+      scheduledTaskAuthority,
+    })
+    expect(appServerInput?.permissions).toBeUndefined()
+    expect(appServerInput?.resumeSessionId).toBeUndefined()
+  })
+
   it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
@@ -2499,7 +2554,7 @@ describe('Codex assistant registry helpers', () => {
     ).toBe(false)
   })
 
-  it('appends turn-local memory isolation after provider overrides', async () => {
+  it('passes caller overrides to the shared Codex process', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed turn-local override.',
       precedingAgentMessageSegments: [],

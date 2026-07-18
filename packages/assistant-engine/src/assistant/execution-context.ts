@@ -9,6 +9,7 @@ import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationSchedule,
+  AutomationScheduledTask,
   AutomationStatus,
   AutomationSupportKind,
 } from '@murphai/contracts'
@@ -143,6 +144,7 @@ export type AssistantHostedAutomationToolRequest =
       continuityPolicy?: AutomationContinuityPolicy
       instructions: string
       schedule: AutomationSchedule
+      scheduledTask?: AutomationScheduledTask
       slug?: string
       status?: AutomationStatus
       summary?: string | null

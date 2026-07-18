@@ -98,6 +98,10 @@
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
+    },
+    "./research-scout": {
+      "types": "./dist/research-scout.d.ts",
+      "default": "./dist/research-scout.js"
     }
   },
   "files": [

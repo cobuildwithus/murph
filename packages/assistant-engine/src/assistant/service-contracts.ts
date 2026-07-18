@@ -45,11 +45,9 @@ import type {
 import type {
   CodexThreadIdentity,
 } from './codex-thread-route.js'
-import type {
-  HostedRuntimeNewsletterScheduledAuthority,
-} from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
+import type { AssistantScheduledTaskAuthority } from './scheduled-task-authority.js'
 
 export interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -157,10 +155,11 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.
   scheduledOccurrenceAt?: string | null
+  // Exact ephemeral authority selected by the cron parent. Never model-authored.
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
   // Per-turn provider processing tier; never part of session/route identity.
   serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean

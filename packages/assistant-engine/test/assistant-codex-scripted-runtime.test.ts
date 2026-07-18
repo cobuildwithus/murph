@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,15 @@ import {
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import {
+  resolveMurphScheduledDynamicTools,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  ASSISTANT_SCHEDULED_TURN_THREAD_CONFIG,
+} from '../src/assistant/scheduled-turn-policy.ts'
+import {
+  resolveScheduledCodexModelCatalogJson,
+} from '../src/assistant-codex/scheduled-model-catalog.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
@@ -31,6 +40,18 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
+const SCHEDULED_TOOL_GRAPH_MODELS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+] as const
+const SCHEDULED_TOOL_GRAPH_AUTHORITY = {
+  automationId: 'automation_group_challenge',
+  expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+  kind: 'group_challenge',
+  projectionScopeKey: 'steps-days.v0',
+  slug: 'summer-steps',
+} as const
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
@@ -50,6 +71,7 @@ interface ScriptedStub {
   close(): Promise<void>
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
+  requestBodiesSinceBaseline(): string[]
   requestCountSinceBaseline(): number
   requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
 }
@@ -58,6 +80,28 @@ interface ScriptedProviderRequestSummary {
   model: string | null
   serviceTier: string | null
 }
+
+const EXPECTED_SCHEDULED_MURPH_TOOL_NAMES = [
+  'generate_scheduled_image',
+  'scheduled_read',
+] as const
+
+const FORBIDDEN_SCHEDULED_PROVIDER_TOOL_NAMES = [
+  'apply_patch',
+  'computer',
+  'exec_command',
+  'image_generation',
+  'list_mcp_resource_templates',
+  'list_mcp_resources',
+  'read_mcp_resource',
+  'request_permissions',
+  'shell_command',
+  'spawn_agent',
+  'view_image',
+  'web.run',
+  'web_search',
+  'write_stdin',
+] as const
 
 const codexCommand = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -124,6 +168,387 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('isolates exact scheduled tool graphs without replacing the attended warm process', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      { text: 'ATTENDED_TOOL_GRAPH_BEFORE_OK' },
+      ...SCHEDULED_TOOL_GRAPH_MODELS.map(() => ({
+        text: 'SCHEDULED_TOOL_GRAPH_OK',
+      })),
+      { text: 'ATTENDED_TOOL_GRAPH_AFTER_OK' },
+    )
+    const providerStartEvents: Array<
+      Parameters<
+        NonNullable<CodexAppServerTurnInput['onProviderRequestStarted']>
+      >[0]
+    > = []
+    const stableInput = {
+      ...scenario.turnInput,
+      onProviderRequestStarted: (
+        event: Parameters<
+          NonNullable<CodexAppServerTurnInput['onProviderRequestStarted']>
+        >[0],
+      ) => {
+        providerStartEvents.push(event)
+      },
+    }
+
+    const attendedBefore = await executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'Reply exactly ATTENDED_TOOL_GRAPH_BEFORE_OK.',
+    })
+    const attendedProcessIds = await readCodexAppServerProcessIds()
+    expect(attendedProcessIds.length).toBeGreaterThan(0)
+    const threadIds = [attendedBefore.threadId]
+    const scheduledDynamicTools = resolveMurphScheduledDynamicTools({
+      deliveryToolsAvailable: true,
+      taskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+    })
+    expect(ASSISTANT_SCHEDULED_TURN_THREAD_CONFIG).toMatchObject({
+      'features.current_time_reminder.enabled': false,
+      'features.deferred_executor': false,
+      'features.token_budget.enabled': false,
+    })
+    await writeFile(
+      path.join(stableInput.codexHome, 'config.toml'),
+      [
+        buildScriptedCodexConfigToml(scenario.stub.baseUrl),
+        '[features]',
+        'code_mode_only = true',
+        'deferred_executor = true',
+        'multi_agent = true',
+        'multi_agent_v2 = true',
+        '',
+        '[features.code_mode]',
+        'enabled = true',
+        '',
+        '[features.token_budget]',
+        'enabled = true',
+        '',
+        '[features.current_time_reminder]',
+        'enabled = true',
+        'sleep_tool = true',
+        '',
+      ].join('\n'),
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    )
+    for (const model of SCHEDULED_TOOL_GRAPH_MODELS) {
+      const scheduled = await executeCodexAppServerTurn({
+        ...stableInput,
+        dynamicTools: scheduledDynamicTools,
+        model,
+        prompt: 'Reply exactly SCHEDULED_TOOL_GRAPH_OK.',
+        scheduledExecution: true,
+        scheduledTaskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+      })
+      expect(scheduled.finalMessage).toBe('SCHEDULED_TOOL_GRAPH_OK')
+      expect(await readCodexAppServerProcessIds()).toEqual(attendedProcessIds)
+      threadIds.push(scheduled.threadId)
+    }
+
+    const attendedAfter = await executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'Reply exactly ATTENDED_TOOL_GRAPH_AFTER_OK.',
+    })
+
+    expect(attendedBefore.finalMessage).toBe('ATTENDED_TOOL_GRAPH_BEFORE_OK')
+    expect(attendedAfter.finalMessage).toBe('ATTENDED_TOOL_GRAPH_AFTER_OK')
+    expect(await readCodexAppServerProcessIds()).toEqual(attendedProcessIds)
+    threadIds.push(attendedAfter.threadId)
+    expect(new Set(threadIds).size).toBe(threadIds.length)
+    expect(providerStartEvents).toHaveLength(threadIds.length)
+    for (const event of providerStartEvents.slice(1, -1)) {
+      expect(event).toEqual(expect.objectContaining({
+        codexAppServerInitializeMs: expect.any(Number),
+        codexAppServerSpawnReadyMs: expect.any(Number),
+      }))
+      expect(event).not.toHaveProperty('codexAppServerWarmReuseMs')
+    }
+    expect(providerStartEvents[providerStartEvents.length - 1]).toEqual(
+      expect.objectContaining({
+        codexAppServerWarmReuseMs: expect.any(Number),
+      }),
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(threadIds.length)
+    expect(
+      scenario.stub.requestSummariesSinceBaseline().map((request) => request.model),
+    ).toEqual([
+      SCRIPTED_MODEL,
+      ...SCHEDULED_TOOL_GRAPH_MODELS,
+      SCRIPTED_MODEL,
+    ])
+
+    const requestBodies = scenario.stub.requestBodiesSinceBaseline()
+    expect(requestBodies).toHaveLength(threadIds.length)
+    const attendedBeforeGraph = readResponsesToolGraph(requestBodies[0] ?? '')
+    const attendedAfterGraph = readResponsesToolGraph(
+      requestBodies[requestBodies.length - 1] ?? '',
+    )
+
+    for (const [modelIndex, model] of SCHEDULED_TOOL_GRAPH_MODELS.entries()) {
+      const scheduledGraph = readResponsesToolGraph(
+        requestBodies[modelIndex + 1] ?? '',
+      )
+      // Pinned Codex always registers its session-only plan utility. It owns
+      // no filesystem, process, network, MCP, or Murph product effect.
+      expect(
+        scheduledGraph.map((tool) => tool.name).sort(),
+        `${model} scheduled top-level tool graph`,
+      ).toEqual(['murph', 'update_plan'])
+      const murphNamespace = scheduledGraph.find(
+        (tool) => tool.name === 'murph' && tool.type === 'namespace',
+      )
+      expect(
+        murphNamespace?.children.map((tool) => tool.name).sort(),
+        `${model} scheduled murph namespace`,
+      ).toEqual([...EXPECTED_SCHEDULED_MURPH_TOOL_NAMES].sort())
+
+      const advertisedNames = listAdvertisedToolNames(scheduledGraph)
+      for (const forbiddenName of FORBIDDEN_SCHEDULED_PROVIDER_TOOL_NAMES) {
+        expect(
+          advertisedNames,
+          `${model} must not advertise ${forbiddenName}`,
+        ).not.toContain(forbiddenName)
+      }
+      expect(
+        advertisedNames.some((name) =>
+          name.startsWith('connected_apps_') ||
+          name.startsWith('memory_') ||
+          name.startsWith('mcp__') ||
+          name.startsWith('plugin_')
+        ),
+        `${model} scheduled extension namespaces`,
+      ).toBe(false)
+    }
+
+    for (const attendedGraph of [attendedBeforeGraph, attendedAfterGraph]) {
+      const attendedExec = attendedGraph.find((tool) => tool.name === 'exec')
+      expect(readCodeModeNestedToolNames(attendedExec?.description ?? '')).toEqual(
+        expect.arrayContaining([
+          'apply_patch',
+          'exec_command',
+          'view_image',
+        ]),
+      )
+    }
+  })
+
+  it('rejects enabled MCP config before a scheduled thread can start', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const sentinelScript = path.join(
+      scenario.turnInput.codexHome,
+      'scheduled-mcp-sentinel.mjs',
+    )
+    const sentinelMarker = path.join(
+      scenario.turnInput.codexHome,
+      'scheduled-mcp-sentinel-started',
+    )
+    await writeFile(
+      sentinelScript,
+      [
+        "import { writeFileSync } from 'node:fs'",
+        "writeFileSync(process.argv[2], 'started\\n')",
+        'process.stdin.resume()',
+        '',
+      ].join('\n'),
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    )
+    await writeFile(
+      path.join(scenario.turnInput.codexHome, 'config.toml'),
+      [
+        buildScriptedCodexConfigToml(scenario.stub.baseUrl),
+        '[mcp_servers.scheduled_escape_sentinel]',
+        `command = ${JSON.stringify(process.execPath)}`,
+        `args = [${[
+          sentinelScript,
+          sentinelMarker,
+        ].map((value) => JSON.stringify(value)).join(', ')}]`,
+        '',
+      ].join('\n'),
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    )
+    const processIdsBefore = await readCodexAppServerProcessIds()
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: resolveMurphScheduledDynamicTools({
+          deliveryToolsAvailable: true,
+          taskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+        }),
+        prompt: 'This scheduled turn must never start.',
+        scheduledExecution: true,
+        scheduledTaskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_SCHEDULED_MCP_CONFIG_UNSAFE',
+      message:
+        'Scheduled Codex execution cannot start while MCP configuration is enabled or malformed.',
+    })
+
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+    expect(await readCodexAppServerProcessIds()).toEqual(processIdsBefore)
+    await expect(access(sentinelMarker)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('preserves explicit caller catalog metadata while restricting selectors', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const codexHome = await mkdtemp(
+      path.join(tmpdir(), 'murph-codex-catalog-home-'),
+    )
+    temporaryPaths.push(codexHome)
+    const tempRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-codex-catalog-workspace-'),
+    )
+    temporaryPaths.push(tempRoot)
+    const sourceCatalogPath = await writeOpenAiFlexModelCatalogJson({
+      codexCommand,
+      directory: codexHome,
+    })
+    const sourceCatalog = readRecord(
+      JSON.parse(await readFile(sourceCatalogPath, 'utf8')),
+    )
+    const sourceModels = Array.isArray(sourceCatalog?.models)
+      ? sourceCatalog.models.map(readRecord)
+      : []
+    const sourceModel = sourceModels.find(
+      (model) => model?.slug === SCRIPTED_MODEL,
+    )
+    expect(sourceModel).toBeDefined()
+    if (!sourceModel) {
+      throw new Error('explicit catalog fixture model is missing')
+    }
+    sourceModel.context_window = 371_111
+    sourceModel.display_name = 'Scheduled catalog metadata sentinel'
+    await writeFile(sourceCatalogPath, `${JSON.stringify(sourceCatalog)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+
+    const scheduledCatalogPath = await resolveScheduledCodexModelCatalogJson({
+      codexCommand,
+      configOverrides: [
+        `model_catalog_json=${JSON.stringify(sourceCatalogPath)}`,
+      ],
+      env: {
+        CODEX_HOME: codexHome,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        TMPDIR: process.env.TMPDIR,
+      },
+      tempRoot,
+    })
+    const scheduledCatalog = readRecord(
+      JSON.parse(await readFile(scheduledCatalogPath, 'utf8')),
+    )
+    const scheduledModels = Array.isArray(scheduledCatalog?.models)
+      ? scheduledCatalog.models.map(readRecord)
+      : []
+    const scheduledModel = scheduledModels.find(
+      (model) => model?.slug === SCRIPTED_MODEL,
+    )
+
+    expect(scheduledModel).toMatchObject({
+      context_window: 371_111,
+      display_name: 'Scheduled catalog metadata sentinel',
+      multi_agent_version: 'disabled',
+      slug: SCRIPTED_MODEL,
+      tool_mode: 'direct',
+    })
+  })
+
+  it('rejects unadvertised native and collaboration calls before handler dispatch', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const dynamicTools = resolveMurphScheduledDynamicTools({
+      deliveryToolsAvailable: true,
+      taskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+    })
+    const cases = [
+      {
+        model: 'gpt-5.6-terra',
+        calls: [
+          { name: 'followup_task', namespace: 'collaboration' },
+          { name: 'interrupt_agent', namespace: 'collaboration' },
+          { name: 'list_agents', namespace: 'collaboration' },
+          { name: 'send_message', namespace: 'collaboration' },
+          { name: 'spawn_agent', namespace: 'collaboration' },
+          { name: 'wait_agent', namespace: 'collaboration' },
+          { name: 'apply_patch', namespace: undefined },
+          { name: 'exec_command', namespace: undefined },
+          { name: 'request_permissions', namespace: undefined },
+          { name: 'shell_command', namespace: undefined },
+          { name: 'view_image', namespace: undefined },
+          { name: 'write_stdin', namespace: undefined },
+        ],
+      },
+      {
+        model: 'gpt-5.6-luna',
+        calls: [
+          { name: 'close_agent', namespace: 'multi_agent_v1' },
+          { name: 'resume_agent', namespace: 'multi_agent_v1' },
+          { name: 'send_input', namespace: 'multi_agent_v1' },
+          { name: 'spawn_agent', namespace: 'multi_agent_v1' },
+          { name: 'wait_agent', namespace: 'multi_agent_v1' },
+        ],
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      scenario.stub.markRequestBaseline()
+      scenario.stub.queue(
+        ...testCase.calls.map((call) => ({
+          functionCall: {
+            arguments: {},
+            name: call.name,
+            ...(call.namespace ? { namespace: call.namespace } : {}),
+          },
+        })),
+        { text: 'UNADVERTISED_TOOL_REJECTED_OK' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools,
+        model: testCase.model,
+        prompt: 'Reply exactly UNADVERTISED_TOOL_REJECTED_OK.',
+        scheduledExecution: true,
+        scheduledTaskAuthority: SCHEDULED_TOOL_GRAPH_AUTHORITY,
+      })
+
+      expect(result.finalMessage).toBe('UNADVERTISED_TOOL_REJECTED_OK')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        testCase.calls.length + 1,
+      )
+      const requestBodies = scenario.stub.requestBodiesSinceBaseline()
+      expect(requestBodies).toHaveLength(testCase.calls.length + 1)
+      for (const [callIndex, call] of testCase.calls.entries()) {
+        const flattenedToolName = `${call.namespace ?? ''}${call.name}`
+        expect(
+          requestBodies[callIndex + 1],
+          `${testCase.model} must not dispatch ${flattenedToolName}`,
+        ).toContain(`unsupported call: ${flattenedToolName}`)
+      }
+    }
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {
@@ -761,10 +1186,12 @@ function buildScriptedCodexConfigToml(baseUrl: string): string {
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   const queuedResponses: ScriptedResponse[] = []
+  const requestBodies: string[] = []
   const requestSummaries: ScriptedProviderRequestSummary[] = []
   let responseSequence = 0
   let responsesRequestCount = 0
   let requestBaseline = 0
+  let requestBodyBaseline = 0
   let requestSummaryBaseline = 0
 
   const server: Server = createServer(async (request, response) => {
@@ -781,6 +1208,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
         : Buffer.from(chunk).toString('utf8')
     }
     responsesRequestCount += 1
+    requestBodies.push(requestBody)
     requestSummaries.push(readScriptedProviderRequestSummary(requestBody))
     const scripted = queuedResponses.shift()
     if (!scripted) {
@@ -849,15 +1277,89 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     },
     markRequestBaseline: () => {
       requestBaseline = responsesRequestCount
+      requestBodyBaseline = requestBodies.length
       requestSummaryBaseline = requestSummaries.length
     },
     queue: (...responses) => {
       queuedResponses.push(...responses)
     },
+    requestBodiesSinceBaseline: () => requestBodies.slice(requestBodyBaseline),
     requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
     requestSummariesSinceBaseline: () =>
       requestSummaries.slice(requestSummaryBaseline),
   }
+}
+
+interface ResponsesToolGraphNode {
+  children: ResponsesToolGraphNode[]
+  description: string | null
+  name: string
+  type: string
+}
+
+function readResponsesToolGraph(requestBody: string): ResponsesToolGraphNode[] {
+  const request = readRecord(JSON.parse(requestBody))
+  if (!request) {
+    throw new Error('Expected a Responses request object.')
+  }
+
+  const candidateToolLists: unknown[][] = []
+  if (Array.isArray(request.tools)) {
+    candidateToolLists.push(request.tools)
+  }
+  if (Array.isArray(request.input)) {
+    for (const inputItem of request.input) {
+      const item = readRecord(inputItem)
+      if (item?.type === 'additional_tools' && Array.isArray(item.tools)) {
+        candidateToolLists.push(item.tools)
+      }
+    }
+  }
+
+  const tools = new Map<string, ResponsesToolGraphNode>()
+  for (const value of candidateToolLists.flat()) {
+    const tool = readResponsesToolGraphNode(value)
+    if (tool) {
+      tools.set(`${tool.type}:${tool.name}`, tool)
+    }
+  }
+  return [...tools.values()]
+}
+
+function readResponsesToolGraphNode(value: unknown): ResponsesToolGraphNode | null {
+  const tool = readRecord(value)
+  const type = readString(tool?.type)
+  const name = readString(tool?.name) ?? type
+  if (!tool || !type || !name) {
+    return null
+  }
+
+  return {
+    children: Array.isArray(tool.tools)
+      ? tool.tools
+          .map(readResponsesToolGraphNode)
+          .filter((child): child is ResponsesToolGraphNode => child !== null)
+      : [],
+    description: readString(tool.description),
+    name,
+    type,
+  }
+}
+
+function readCodeModeNestedToolNames(description: string): string[] {
+  return [...description.matchAll(/^### `([^`]+)`/gmu)]
+    .map((match) => match[1])
+    .filter((name): name is string => typeof name === 'string')
+}
+
+function listAdvertisedToolNames(toolGraph: readonly ResponsesToolGraphNode[]): string[] {
+  return toolGraph.flatMap((tool) => [
+    tool.name,
+    ...tool.children.flatMap((child) => [
+      child.name,
+      ...child.children.map((grandchild) => grandchild.name),
+    ]),
+  ])
 }
 
 function readScriptedProviderRequestSummary(
@@ -942,6 +1444,47 @@ function writeScriptedSseEvent(
 ): void {
   response.write(`event: ${event}\n`)
   response.write(`data: ${JSON.stringify(payload)}\n\n`)
+}
+
+async function readCodexAppServerProcessIds(): Promise<number[]> {
+  const { stdout } = await execFileAsync(
+    'ps',
+    ['-axo', 'pid=,ppid=,command='],
+    {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  )
+  const rows = stdout.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line)
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return []
+    }
+    return [{
+      command: match[3],
+      parentPid: Number.parseInt(match[2], 10),
+      pid: Number.parseInt(match[1], 10),
+    }]
+  })
+  const descendantPids = new Set([process.pid])
+  let previousSize = -1
+  while (previousSize !== descendantPids.size) {
+    previousSize = descendantPids.size
+    for (const row of rows) {
+      if (descendantPids.has(row.parentPid)) {
+        descendantPids.add(row.pid)
+      }
+    }
+  }
+
+  return rows
+    .filter((row) =>
+      descendantPids.has(row.pid) &&
+      row.command.includes('app-server') &&
+      row.command.includes('codex')
+    )
+    .map((row) => row.pid)
+    .sort((left, right) => left - right)
 }
 
 async function delay(milliseconds: number): Promise<void> {

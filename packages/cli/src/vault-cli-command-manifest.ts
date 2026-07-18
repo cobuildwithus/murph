@@ -125,7 +125,7 @@ import {
   foodLabelSearchResultSchema,
 } from './food-labels.js'
 import { registerResearchCommands } from './commands/research.js'
-import { researchScoutResultSchema } from './research-scout.js'
+import { researchScoutResultSchema } from '@murphai/contracts'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'

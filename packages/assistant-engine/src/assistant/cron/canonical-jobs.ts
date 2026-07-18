@@ -44,6 +44,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   createdAt: string
   instructions: string
   route: AutomationQueryRecord['route']
+  scheduledTask: AutomationQueryRecord['scheduledTask']
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride']
   schedule: AssistantCronSchedule
   slug: string
@@ -327,6 +328,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
     | 'activeUntil'
     | 'assistantTargetOverride'
     | 'continuityPolicy'
+    | 'scheduledTask'
     | 'slug'
     | 'summary'
     | 'tags'
@@ -353,6 +355,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
     summary: input.summary ?? input.automation?.summary ?? undefined,
     schedule: input.schedule,
     route: input.route,
+    scheduledTask: input.automation?.scheduledTask ?? undefined,
     assistantTargetOverride:
       input.assistantTargetOverride === undefined
         ? input.automation?.assistantTargetOverride ?? undefined
@@ -419,6 +422,7 @@ function normalizeCanonicalAssistantCronRecord(
     createdAt: record.createdAt,
     instructions,
     route: record.route,
+    scheduledTask: record.scheduledTask,
     assistantTargetOverride: record.assistantTargetOverride,
     schedule: normalizeAssistantCronPublicSchedule(record.schedule),
     slug: record.slug,

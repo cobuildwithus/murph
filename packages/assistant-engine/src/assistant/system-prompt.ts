@@ -277,13 +277,31 @@ function buildStableRouteCapabilityPrompt(
     return "";
   }
   const scheduledAutomationTurn = input.turnTrigger === "automation-cron";
+  if (scheduledAutomationTurn) {
+    return joinPromptSections(
+      buildAssistantTurnPriorityText(conversationScope),
+      buildAssistantHealthCommonsGuidanceText({ scheduledReadOnly: true }),
+      buildAssistantScheduledVaultReadGuidanceText(conversationScope),
+      buildAssistantSkillRouteHintText({ scheduledReadOnly: true }),
+      buildAssistantExecutionBehaviorText({
+        profile: input.modelBehaviorProfile,
+      }),
+      buildAssistantCronGuidanceText(
+        conversationScope,
+        input.hostedRuntime ?? false,
+        false,
+        input.channel,
+        input.turnTrigger ?? null,
+      ),
+    );
+  }
   return joinPromptSections(
     buildAssistantTurnPriorityText(conversationScope),
-    conversationScope === "direct" && !scheduledAutomationTurn
+    conversationScope === "direct"
       ? buildAssistantNonBlockingDelegationText()
       : null,
-    scheduledAutomationTurn ? null : buildAssistantCapabilityOffersText(),
-    scheduledAutomationTurn ? null : buildAssistantMessageReactionGuidanceText(),
+    buildAssistantCapabilityOffersText(),
+    buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct" && input.assistantHostedLabsAvailable === true
       ? buildAssistantLabsGuidanceText()
@@ -531,7 +549,7 @@ function buildAssistantHostedGroupGuidanceText(
     "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group, `action=\"update_display_name\"` to rename the current hosted group and iMessage group chat title when asked, `action=\"set_chat_avatar\"` when the group asks you to request a current iMessage group avatar update, `action=\"create_join_link\"` when the user asks for a join link, and `action=\"post_join_offer\"` when the current group is adding a sharing permission or people should be able to consent by liking a server-owned offer message. For an existing member, frame this as permission opt-in, not joining or rejoining. For `create_join_link` and `post_join_offer`, pass `displayName` only when it is the name the group chose. For `post_join_offer`, write a short natural `messageTemplate` in your own words, start with \"Like this message\" and say what it does, include `{{share_scope}}` exactly once, and include `{{join_url}}` exactly once as the secondary customize link so members can share more or less. Do not use any other URL, and do not promise a link, offer, avatar change, or rename unless the tool returns success; for provider-side iMessage title and avatar updates, phrase success as requested/sent to the provider rather than already confirmed applied.",
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact and text you to get set up. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. `action=\"post_join_offer\"` sends your templated offer message into the current chat after the server fills the exact share scope and join URL; liking that offer adds only the permission snapshot disclosed in that offer and grants membership only when needed. Existing members keep their membership and other grants unchanged.",
-    "- `murph.newsletter` is scheduled-only. `prepare` returns authorized current-week facts in `result.members`; compose only from `result.members`. Normal context and tools remain available. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses; never send the first edition immediately after setup.",
+    "- `murph.newsletter` is scheduled-only. `prepare` returns the only authorized current-week member facts in `result.members`; compose only from those facts. The scheduled automation instructions and exact group-newsletter skill are the only other task context. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses or member identifiers; never send the first edition immediately after setup.",
     hostedRuntime
       ? hostedAutomationAvailable
         && !(
@@ -1125,7 +1143,13 @@ function buildAssistantMessageReactionGuidanceText(): string {
 - A reaction can stand alone only when it fully satisfies the turn; if no text reply should be sent after reacting, also use \`finish_without_reply\`.`;
 }
 
-function buildAssistantHealthCommonsGuidanceText(): string {
+function buildAssistantHealthCommonsGuidanceText(input: {
+  scheduledReadOnly?: boolean;
+} = {}): string {
+  if (input.scheduledReadOnly === true) {
+    return `Health Commons route surface:
+- Scheduled turns cannot invoke shell or CLI discovery. Use only public Health Commons context supplied by the parent or an exact purpose-specific typed tool exposed for this turn. If neither is available, continue without a lookup and do not claim that no relevant protocol exists.`;
+  }
   return `Health Commons route surface:
 - For protocol discovery, protocol setup, and experiment design, search Health Commons first. Do not require a protocol lookup for an ordinary health answer, task, plan, or habit when no experiment or protocol is being considered. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
@@ -1181,6 +1205,25 @@ User-provided content and vault writes:
 - Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. If a save/import/write fails, say what did not finish and continue with any answer the available evidence supports.`;
 }
 
+function buildAssistantScheduledVaultReadGuidanceText(
+  conversationScope: AssistantConversationScope,
+): string {
+  const scopeLine = conversationScope === "group"
+    ? "- The trusted parent binds `murph.scheduled_read` to this room's current group vault. Read only public references, group-owned state, recent room conversation, and server-approved shared projections. Never read a participant's personal vault, records, memory, settings, accounts, devices, or preferences from the room container."
+    : "- Read only the private member state relevant to this automation's persisted purpose. Use targeted memory or knowledge reads and normalized health queries instead of scanning files or broad history.";
+  const groupSharedLine = conversationScope === "group"
+    ? "- During an authorized group-challenge run, use zero-selector `group_shared` for the one exact projection scope immutably bound to the scheduled task. The parent supplies the current group vault; never pass a room, route, participant, member, scope, or projection id."
+    : null;
+
+  return `Scheduled vault reads:
+- Native shell, filesystem, subprocess, and CLI execution are unavailable. Never invoke or simulate \`vault-cli\`, another executable, a script, or a direct file read. Use only \`murph.scheduled_read\` for bounded canonical vault and bundled-skill reads; the trusted parent supplies its exact active vault.
+${scopeLine}
+- Use \`knowledge_list\`, \`knowledge_get\`, or \`knowledge_search\` for the derived knowledge wiki; \`memory_show\` for saved current-state context; \`record\`, \`recent_records\`, or \`search\` for canonical records; and \`latest\`, \`metric_latest\`, \`metric_trend\`, \`drift\`, or \`sources\` for normalized wearable evidence.
+${groupSharedLine ?? ""}
+- Load each routed bundled skill with \`murph.scheduled_read\` action \`skill_get\` and its registered slug. It can return only that skill's \`SKILL.md\`; do not request paths, assets, or arbitrary files.
+- Inspect only evidence that could change this occurrence's send-or-skip decision, then stop. Required writes and external reads are available only through purpose-specific typed Murph tools supplied to this root turn.`;
+}
+
 function buildAssistantHealthRecordIngestionInvariantText(): string {
   return `Health record ingestion invariant:
 - When a user sends Murph health-relevant unstructured data, especially medical records, lab reports, function-health panels, visit summaries, discharge paperwork, medication lists, imaging reports, screenshots, images, PDFs, CSVs, exports, transcripts, or large pasted text, the source must not end as only a chat summary, casual note, or freeform memory. Before the final answer, put it in one of these explicit states: structured facts saved to the best canonical vault surfaces; durable raw evidence preserved through an existing attachment, document, capture, manifest, or import surface with the remaining parse state clear; or a real blocker is recorded or stated because nothing meaningful can be safely saved.
@@ -1199,10 +1242,18 @@ function buildAssistantVaultFileSendGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantSkillRouteHintText(): string {
+function buildAssistantSkillRouteHintText(
+  input: { scheduledReadOnly?: boolean } = {},
+): string {
+  const loadGuidance = input.scheduledReadOnly
+    ? "- Load specialized skills only with `murph.scheduled_read` action `skill_get` and a registered slug. Route by the persisted automation purpose and read the primary owner; do not collapse it into generic reminder copy. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct registered safety or execution owner. Do not preload skills, request a path or asset, or call a discovery CLI."
+    : "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the current turn's outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.";
+  const exerciseCatalogGuidance = input.scheduledReadOnly
+    ? "- Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark. Before presenting a named movement, let the domain owner choose it. The shared exercise-catalog asset is outside the registered scheduled-read surface; follow the owning skill's safe fallback and do not bypass that boundary with filesystem or CLI access."
+    : "- Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.";
   return [
     "Murph skill router:",
-    "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the current turn's outcome and read the primary owner. On a scheduled automation run, the persisted automation purpose is the outcome to route; do not collapse it into generic reminder copy. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
+    loadGuidance,
     "- Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1214,7 +1265,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Care logistics: appointment-scheduling. Execution/artifacts: computer-use, pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
     "- Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.",
     "- Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.",
-    "- Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.",
+    exerciseCatalogGuidance,
     "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; self-management-experiments owns low-burden chronic trials; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
     "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat. For every challenge kickoff, setup, standings update, scheduled dispatch, ruling, or close-out, also read group-challenge and groupchat-comedy before acting; a scheduled challenge run is challenge lifecycle work, not generic notification copy. Add group-newsletter for newsletter setup or a scheduled edition.",
     "- Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill. Read music-generation before generating any song.",
@@ -1258,8 +1309,9 @@ function buildAssistantGroupToolTruthfulnessText(): string {
 function buildAssistantMaintenanceExecutionGuidanceText(): string {
   return `Maintenance execution rules:
 - You are Murph's private runtime maintenance turn. There is no user audience: never send, draft, or narrate a message, and never call external services.
-- The only vault commands you may run are \`vault-cli memory show\`, \`vault-cli memory upsert\`, and \`vault-cli memory update\`. Do not read or write any other vault, transcript, session, log, health, experiment, or automation state, and do not explore the filesystem.
-- Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory from \`vault-cli memory show\` is for deduplication and update targeting only, never an independent source for new writes.
+- Native shell, filesystem, subprocess, and CLI execution are unavailable. The only read action you may call is \`murph.scheduled_read\` with \`action: "memory_show"\`; use it only to inspect existing memory for deduplication and exact update ids. Do not call any other scheduled-read action or explore any other vault, transcript, session, log, health, experiment, automation, or filesystem state.
+- The only write surface is \`murph.maintenance_memory\`: use \`action: "upsert"\` with \`section\` and \`text\` for a new fact, or \`action: "update"\` with the exact existing \`memoryId\`, \`text\`, and optional \`section\` for a correction. Never attempt a write through the shell, filesystem, CLI, or a subprocess.
+- Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory from \`murph.scheduled_read\` is for deduplication and update targeting only, never an independent source for new writes.
 - Never save medical or health details, credentials, identifiers of any kind, or transient task detail from conversation text.
 
 Structured output contract:
@@ -1279,6 +1331,7 @@ function buildAssistantScheduledTurnCapabilityText(): string {
 - Use the same skill router, reasoning guidance, canonical data surfaces, saved personality and channel style, and available media tools as an interactive Murph turn. The scheduled profile changes initiation, automation-lifecycle authority, optional capability offers, and the final JSON envelope; it does not turn the task into a lesser generic reminder agent.
 - Treat the persisted automation purpose as the current request and load every owning skill before reading data or composing the dispatch.
 - Execute only that persisted purpose. Do not add setup, an adjacent coaching agenda, or a capability offer.
+- Scheduled turns have no native shell or CLI execution environment. Read only from parent-supplied context and explicitly offered typed Murph read or generation tools. Parent-owned post-decision effects are not model tools; return their required evidence through the structured decision instead of trying to perform them. If an owning instruction requires a model tool that is absent or fails, use its stated skip or fallback behavior instead of bypassing the boundary.
 - The structured decision contract is the finalization surface for this turn: return \`skip\` when no message should go out, never call \`finish_without_reply\`, and do not call progress-update, browser, phone, billing, configuration, or conversation-mutation tools unless they are actually present and the owning policy authorizes them.
 - When the automation instructions or an owning skill explicitly marks an image, voice memo, or song welcome and privacy-safe, use the available generation tool before returning. Generated response media is delivered with \`send_message\`; its nonempty \`text\` should be only the brief natural caption that belongs with the artifact. If required media is unavailable or fails, follow the owning skill's fallback and name the limitation in internal run notes rather than pretending a text-only substitute is equivalent.`;
 }
@@ -1294,10 +1347,11 @@ function buildAssistantGroupNotificationDecisionGuidanceText(
     `Group notification execution rules:
 - Execute the persisted room-owned purpose as one bounded, grounded dispatch. For a promised challenge dispatch or scheduled edition, prefer a timely send and skip only for a concrete current reason; for an opportunistic room reminder, default to staying silent.
 - Ground the decision only in the automation, recent room conversation, public sources, group-owned state, and server-approved shared projections. Never read or write a participant's personal records, memory, settings, accounts, devices, or preferences from the room container.
-- When the persisted purpose starts, runs, scores, rules on, or closes a challenge, read and follow ${code(buildAssistantSkillFileRef("group-chat"))}, ${code(buildAssistantSkillFileRef("group-challenge"))}, and ${code(buildAssistantSkillFileRef("groupchat-comedy"))} before acting. Read the active challenge page and sent log before composing. Do not flatten a skill-required comic, voice memo, song, or image into a generic text standings recap; if the chosen medium is a song, also load ${code(buildAssistantSkillFileRef("music-generation"))}.
+- When the persisted purpose starts, runs, scores, rules on, or closes a challenge, load and follow the registered \`group-chat\`, \`group-challenge\`, and \`groupchat-comedy\` skills with \`murph.scheduled_read\` action \`skill_get\` before acting. Read the exact parent-bound safe challenge context with action \`group_challenge_context\` before composing; never supply a page slug. That scheduled projection intentionally excludes prior \`Delivered dispatch\` sections and raw refs, IDs, paths, and URLs, so never claim to have read or recovered them. Read shared group projections only with zero-selector action \`group_shared\`. Do not flatten a skill-required medium into a generic text standings recap; if its exact typed medium capability is absent, follow the owning skill's skip or fallback rule.
 - Before treating a room report as completion, convert its timestamp to the scheduled occurrence timezone and verify that it belongs to this occurrence's relevant local action window. Evidence from another local action window cannot complete this occurrence; unclear attribution is unknown, not complete.
 - For an explicitly authorized accountability check-in, when completion is still unknown after that attribution check, send one neutral outcome question; never state or imply that anyone missed the activity.
 - Scheduled room turns do not own automation lifecycle. Do not create, update, archive, or reroute automations; use the current evidence only to decide whether this occurrence should send or skip.
+- For a group-challenge \`send_message\`, \`privateSummary\` is required and must be the complete private run record: scheduled occurrence instant and local date; chosen medium and creative frame; the exact text body and every complete image prompt, spoken script, song prompt, or lyrics used; standings snapshot; and new canon and confounders. Keep it nonempty and within 50,000 characters; the parent validates that bound before queueing. Never put refs, IDs, paths, or URLs in it. The scheduled model performs no page, memory, delivery-status, or lifecycle writes. The parent binds trusted task authority and the exact occurrence to the queued outbox intent; only after terminal \`sent\` does the effect owner commit one \`Delivered dispatch\` section, and for a final still-current occurrence it archives the challenge page, removes the exact pointer, then archives the exact automation revision.
 - Skip when the room already completed the activity, the reminder was declined or moved, the support window ended, or the message would expose or infer personal health data. The platform delivers the structured output and any response media attached during this turn; do not deliver either yourself.`,
     channelText,
     `Structured output contract:
@@ -1342,7 +1396,7 @@ function buildAssistantNotificationDecisionGuidanceText(
     buildAssistantScheduledTurnCapabilityText(),
     `Notification execution rules:
 - This automation is authorized support. Decide whether its purpose still holds and, if so, return one bounded, grounded dispatch. Prefer a timely send; skip only for a concrete current reason. The user prompt carries the private instructions for this run.
-- You have the same vault read and write tools as an interactive Murph turn for the task's canonical data. Before deciding, ground yourself in what the user has actually done in the relevant local action window — meals, logs, sessions, recent conversation — alongside the experiment, protocol, and progress; read only what could change the decision, then stop. Scheduled turns do not own automation lifecycle: do not create, update, archive, or reroute automations. If current evidence makes a support loop stale, skip this occurrence; only an engine-supplied check-in or review purpose may instead ask one narrow repair question, and it still must not mutate future schedules. For missed-log or weekly-digest checks, \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json\` is the authoritative skip signal; for pre-bed sessions, the session date is the prior local day. For sleep support around midnight, distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target; calendar date alone does not establish that the upcoming action is complete.
+- Use parent-supplied context and \`murph.scheduled_read\` to ground yourself in what the user has actually done in the relevant local action window — meals, logs, sessions, recent conversation — alongside the experiment, protocol, and progress; read only what could change the decision, then stop. Scheduled turns do not own automation lifecycle or general canonical writes. If current evidence makes a support loop stale, skip this occurrence; only an engine-supplied check-in or review purpose may instead ask one narrow repair question, and it still must not mutate future schedules. For missed-log or weekly-digest checks, use the matching authoritative parent-supplied follow-up result; for pre-bed sessions, the session date is the prior local day. For sleep support around midnight, distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target; calendar date alone does not establish that the upcoming action is complete.
 - Send when the check is genuinely actionable. Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing in that action window. The reminder's purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.
 - A good message reflects what the user has already done and asks only for the genuine gap. A first-timer gets a compact walkthrough, said once — or a short nudge if chat already covered it. Someone mid-run gets a brief reminder, not a re-explanation of a plan they know, with the stop rule raised only when newly relevant. Message text embedded in the instructions is context from when it was scheduled, not words to recite — compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore. Vary the approach from recent sends: choose a plain cue, curiosity hook, tiny/fallback version, callback, light question or challenge, or richer media only when the automation marks that modality welcome and privacy-safe. Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages. If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.
 - For behavior-support, routine, habit, or adherence automations, choose \`skip\` or \`send_message\` within the engine-supplied persisted support purpose. Follow the occurrence role embedded in the instructions: normal cue, explicitly authorized accountability check-in, or repair question/proposal. A reminder authorizes a normal cue or skip, never a proactive repair/accountability question. Only a consented check-in or review may ask one narrow repair or decision question. For an accountability check-in, reconcile the relevant conversation and matching canonical or connected data for the action window. Completion or an already reported outcome means skip. Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question. If the plan looks stale but the purpose does not authorize a question, skip instead of widening consent. Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.
@@ -1463,7 +1517,7 @@ function buildAssistantCronGuidanceText(
   if (turnTrigger === "automation-cron") {
     return `Scheduled automation execution:
 - The current automation already exists and is active. Execute only its persisted purpose; do not create, patch, reconcile, pause, reactivate, archive, remove, or reroute this or another automation.
-- Canonical task-owned reads and writes required by the automation's owning skill remain allowed. Automation lifecycle and future schedule changes do not.
+- Read current canonical state only from parent-supplied context and \`murph.scheduled_read\`. Perform required writes or external reads only through the exact typed Murph tool supplied for that purpose; native shell, CLI, and subprocess execution are unavailable.
 - Do not broaden this run into setup, a new recurring loop, or an adjacent offer.`;
   }
   return buildAssistantAvailableAutomationGuidanceText(

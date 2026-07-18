@@ -7,6 +7,7 @@ import type {
   AssistantMessageInput,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
+import type { AssistantScheduledTaskAuthority } from '../scheduled-task-authority.js'
 import {
   compactAutomationAssistantTargetOverride,
 } from './target-override.js'
@@ -17,8 +18,8 @@ export type AssistantAutomationTurnEnvelope = Pick<
   | 'assistantTargetOverride'
   | 'deliveryDispatchMode'
   | 'executionContext'
-  | 'scheduledAutomationAuthority'
   | 'scheduledOccurrenceAt'
+  | 'scheduledTaskAuthority'
   | 'serviceTier'
   | 'turnEnvironment'
   | 'turnTrigger'
@@ -28,8 +29,8 @@ export function buildAssistantAutomationTurnEnvelope(input: {
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
-  scheduledAutomationAuthority?: AssistantMessageInput['scheduledAutomationAuthority']
   scheduledOccurrenceAt?: string | null
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
   serviceTier?: AssistantProviderServiceTier | null
   signal?: AbortSignal
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -44,8 +45,8 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     ...(targetOverride ? { assistantTargetOverride: targetOverride } : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext: input.executionContext,
-    scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+    scheduledTaskAuthority: input.scheduledTaskAuthority ?? { kind: 'none' },
     serviceTier: input.serviceTier ?? null,
     turnEnvironment: input.turnEnvironment ?? null,
     turnTrigger: input.turnTrigger,

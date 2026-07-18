@@ -51,6 +51,11 @@ export interface UpdateMemoryInput {
   text: string;
 }
 
+export interface ForgetMemoryIfExactMatchInput extends ForgetMemoryRecordInput {
+  section: MemorySection;
+  text: string;
+}
+
 export function resolveMemoryDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, memoryDocumentRelativePath).absolutePath;
 }
@@ -224,40 +229,94 @@ export async function forgetMemory(
 }> {
   return await withLockedMemoryDocument(vaultRoot, async () => {
     const snapshot = await readMemoryDocument(vaultRoot);
-    const next = forgetMemoryRecord(snapshot, input);
-    if (next.record === null) {
+    return await persistForgottenMemory(vaultRoot, snapshot, input, "core.forgetMemory");
+  });
+}
+
+export async function forgetMemoryIfExactMatch(
+  vaultRoot: string,
+  input: ForgetMemoryIfExactMatchInput,
+): Promise<{
+  document: MemoryDocumentSnapshot;
+  forgotten: boolean;
+  reason: "mismatch" | "not_found" | null;
+  record: MemoryRecord | null;
+}> {
+  return await withLockedMemoryDocument(vaultRoot, async () => {
+    const snapshot = await readMemoryDocument(vaultRoot);
+    const record = snapshot.records.find((entry) => entry.id === input.recordId) ?? null;
+    if (record === null) {
       return {
         document: snapshot,
-        existed: false,
+        forgotten: false,
+        reason: "not_found" as const,
+        record: null,
+      };
+    }
+    if (record.section !== input.section || record.text !== input.text) {
+      return {
+        document: snapshot,
+        forgotten: false,
+        reason: "mismatch" as const,
         record: null,
       };
     }
 
-    const markdown = renderMemoryDocument({ document: next.document });
-    await writeCanonicalMarkdownDocument({
+    const deleted = await persistForgottenMemory(
       vaultRoot,
-      operationType: "memory_forget",
-      summary: `Forget memory record ${next.record.id}`,
-      target: resolveSingletonMarkdownDocumentTarget({
-        relativePath: memoryDocumentRelativePath,
-        created: !snapshot.exists,
-      }),
-      markdown,
-      audit: {
-        action: "memory_forget",
-        commandName: "core.forgetMemory",
-        summary: `Forgot memory record ${next.record.id}.`,
-        targetIds: [next.record.id],
-      },
-    });
-    const nextSnapshot = await readMemoryDocument(vaultRoot);
-
+      snapshot,
+      { recordId: input.recordId },
+      "core.forgetMemoryIfExactMatch",
+    );
     return {
-      document: nextSnapshot,
-      existed: true,
-      record: next.record,
+      document: deleted.document,
+      forgotten: deleted.existed,
+      reason: null,
+      record: deleted.record,
     };
   });
+}
+
+async function persistForgottenMemory(
+  vaultRoot: string,
+  snapshot: MemoryDocumentSnapshot,
+  input: ForgetMemoryRecordInput,
+  commandName: "core.forgetMemory" | "core.forgetMemoryIfExactMatch",
+): Promise<{
+  document: MemoryDocumentSnapshot;
+  existed: boolean;
+  record: MemoryRecord | null;
+}> {
+  const next = forgetMemoryRecord(snapshot, input);
+  if (next.record === null) {
+    return {
+      document: snapshot,
+      existed: false,
+      record: null,
+    };
+  }
+
+  await writeCanonicalMarkdownDocument({
+    vaultRoot,
+    operationType: "memory_forget",
+    summary: `Forget memory record ${next.record.id}`,
+    target: resolveSingletonMarkdownDocumentTarget({
+      relativePath: memoryDocumentRelativePath,
+      created: !snapshot.exists,
+    }),
+    markdown: renderMemoryDocument({ document: next.document }),
+    audit: {
+      action: "memory_forget",
+      commandName,
+      summary: `Forgot memory record ${next.record.id}.`,
+      targetIds: [next.record.id],
+    },
+  });
+  return {
+    document: await readMemoryDocument(vaultRoot),
+    existed: true,
+    record: next.record,
+  };
 }
 
 export async function buildMemoryCorePromptBlock(vaultRoot: string): Promise<string | null> {

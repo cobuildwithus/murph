@@ -77,6 +77,17 @@ export interface KnowledgeAppendSectionInput {
   sourcePaths?: string[] | null
 }
 
+export interface KnowledgeChallengeArchiveInput {
+  vault: string
+  slug: string
+}
+
+export interface KnowledgeChallengeArchiveResult {
+  page: KnowledgeUpsertResult['page']
+  result: 'already_archived' | 'archived'
+  savedAt: string | null
+}
+
 export interface KnowledgeServiceDependencies {
   now?: () => Date
   readTextFile?: (filePath: string) => Promise<string>
@@ -452,6 +463,103 @@ export async function appendKnowledgePageSection(
         page: toKnowledgeMetadata(page),
         bodyLength: normalizedSectionBody.length,
         savedAt,
+      }
+    },
+  })
+}
+
+export async function appendActiveChallengePageSection(
+  input: KnowledgeAppendSectionInput,
+  dependencies: KnowledgeServiceDependencies = {},
+): Promise<KnowledgeUpsertResult> {
+  const slug = normalizeKnowledgeSlug(input.slug)
+  const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const initialPage = requireUniqueKnowledgePageBySlug(
+    initialGraph.graph,
+    slug,
+    'append',
+  )
+
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vault,
+    resources: knowledgeUpsertResources(slug, initialPage?.relativePath ?? null),
+    run: async () => {
+      const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
+      const currentPage = requireUniqueKnowledgePageBySlug(graph, slug, 'append')
+      assertActiveKnowledgeChallenge(currentPage, slug)
+
+      return await appendKnowledgePageSection(
+        {
+          ...input,
+          slug,
+        },
+        dependencies,
+      )
+    },
+  })
+}
+
+export async function archiveKnowledgeChallenge(
+  input: KnowledgeChallengeArchiveInput,
+  dependencies: KnowledgeServiceDependencies = {},
+): Promise<KnowledgeChallengeArchiveResult> {
+  const slug = normalizeKnowledgeSlug(input.slug)
+  const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const initialPage = requireUniqueKnowledgePageBySlug(
+    initialGraph.graph,
+    slug,
+    'upsert',
+  )
+
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vault,
+    resources: knowledgeUpsertResources(slug, initialPage?.relativePath ?? null),
+    run: async () => {
+      const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
+      const currentPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
+      if (!currentPage) {
+        throw knowledgePageNotFoundError(slug)
+      }
+      if (currentPage.pageType !== 'challenge') {
+        throw new VaultCliError(
+          'scheduled_knowledge_not_challenge',
+          `Derived knowledge page "${slug}" is not a challenge page.`,
+          {
+            pagePath: currentPage.relativePath,
+            slug,
+          },
+        )
+      }
+      if (currentPage.status === 'archived') {
+        return {
+          page: toKnowledgeMetadata(currentPage),
+          result: 'already_archived',
+          savedAt: null,
+        }
+      }
+      if (currentPage.status !== 'active') {
+        throw inactiveKnowledgeChallengeError(currentPage, slug)
+      }
+
+      const archived = await upsertKnowledgePage(
+        {
+          body: currentPage.body,
+          librarySlugs: currentPage.librarySlugs,
+          pageType: currentPage.pageType,
+          relatedSlugs: currentPage.relatedSlugs,
+          slug,
+          sourcePaths: currentPage.sourcePaths,
+          status: 'archived',
+          title: currentPage.title,
+          vault: input.vault,
+        },
+        dependencies,
+      )
+
+      return {
+        page: archived.page,
+        result: 'archived',
+        savedAt: archived.savedAt,
       }
     },
   })
@@ -853,6 +961,42 @@ function normalizeKnowledgeFilters(input: {
     pageType: normalizeKnowledgeTag(input.pageType),
     status: normalizeKnowledgeTag(input.status),
   }
+}
+
+function assertActiveKnowledgeChallenge(
+  page: DerivedKnowledgeNode | null,
+  slug: string,
+): asserts page is DerivedKnowledgeNode {
+  if (!page) {
+    throw knowledgePageNotFoundError(slug)
+  }
+  if (page.pageType !== 'challenge' || page.status !== 'active') {
+    throw inactiveKnowledgeChallengeError(page, slug)
+  }
+}
+
+function knowledgePageNotFoundError(slug: string): VaultCliError {
+  return new VaultCliError(
+    'knowledge_page_not_found',
+    `No derived knowledge page exists for slug "${slug}".`,
+    { slug },
+  )
+}
+
+function inactiveKnowledgeChallengeError(
+  page: DerivedKnowledgeNode,
+  slug: string,
+): VaultCliError {
+  return new VaultCliError(
+    'scheduled_challenge_not_active',
+    `Derived knowledge page "${slug}" is not an active challenge.`,
+    {
+      pagePath: page.relativePath,
+      pageType: page.pageType,
+      slug,
+      status: page.status,
+    },
+  )
 }
 
 function resolveKnowledgeMetadataTag(

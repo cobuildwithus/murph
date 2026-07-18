@@ -8,10 +8,10 @@ Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inb
 
 ## Codex Warmth
 
-Codex app-server turns use one warm process for the full lifetime of a warm Node
-runtime/container. A turn is an RPC into that process rather than a per-turn
-app-server subprocess. Overlapping turns fail busy instead of spawning parallel
-app-server processes.
+Attended Codex app-server turns use one warm process for the full lifetime of a
+warm Node runtime/container. An attended turn is an RPC into that process rather
+than a per-turn app-server subprocess. Overlapping attended turns fail busy
+instead of spawning parallel app-server processes.
 
 Process launch identity contains only process-stable settings such as the
 command, args, stable working directory, Codex home, and sanitized stable env.
@@ -55,11 +55,33 @@ genuine process-level setting changes that Codex cannot accept through thread
 or turn RPC. Abort cleanup applies to the affected turn; routine turn completion
 is not process cleanup.
 
+## Scheduled Turns
+
+Scheduled notification and maintenance turns are a deliberate exception to the
+attended warm-process path. Each occurrence starts a separate one-shot Codex App
+Server in a private temporary directory and stops that exact process before
+removing the directory. The attended process and provider thread remain
+untouched.
+
+The parent resolves the ordinary effective model catalog through the pinned
+Codex CLI, preserves its model metadata, and forces every model to
+`tool_mode: "direct"` and `multi_agent_version: "disabled"`. The thread has no
+native execution environments or selected capability roots, starts from a
+sterile cwd, and keeps inherited optional effect surfaces gated. Shared
+Codex-home instructions may still influence the prompt, but cannot widen this
+tool graph. The pinned
+provider graph is the task-selected `murph` namespace plus the effect-free
+`update_plan` utility. After App Server initialization and before
+`thread/start`, the parent reads effective config and rejects enabled or
+malformed generic MCP configuration. Product reads and effects run through
+parent-owned typed tools against the real vault root; each effect revalidates
+its canonical automation source and has no shell or operator-CLI fallback.
+
 ## Read-only Assistant Ask
 
 `executeReadOnlyAssistantAsk`, exported from
-`@murphai/assistant-engine/assistant-ask`, is the one deliberate exception to
-the warm single-process path. It starts a separate one-shot Codex App Server
+`@murphai/assistant-engine/assistant-ask`, is a separate read-only exception to
+the attended warm-process path. It starts a separate one-shot Codex App Server
 child for a target-owned Assistant Ask, so its provider latency, failure, and
 interruption domain cannot block or poison the resident foreground process. The
 trusted caller supplies the authorized target workspace root plus one untrusted

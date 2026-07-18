@@ -402,6 +402,11 @@ async function executeAssistantCodexAttempt(input: {
       routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
+    const publicInternetFetch = resolveAssistantTurnPublicInternetFetch({
+      hosted: executionPlan.executionContext.hosted,
+      scheduledExecution: attemptPlan.routePlan.scheduledExecution === true,
+      scheduledTaskAuthority: attemptPlan.routePlan.scheduledTaskAuthority ?? null,
+    })
     const voiceMemoDeliveryChannel =
       attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
     const assistantPreferredElevenLabsVoiceId =
@@ -473,15 +478,20 @@ async function executeAssistantCodexAttempt(input: {
             executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),
         progressDelivery: executionPlan.progressDelivery ?? null,
+        permissions: attemptPlan.routePlan.permissions ?? null,
         providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch:
-          executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+        publicInternetFetch,
         requireGeneratedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
         resume: attemptPlan.routePlan.resume,
+        runtimeWorkspaceRoots:
+          attemptPlan.routePlan.runtimeWorkspaceRoots ?? null,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,
+        scheduledOccurrenceAt: attemptPlan.routePlan.scheduledOccurrenceAt,
+        scheduledExecution: attemptPlan.routePlan.scheduledExecution ?? false,
+        scheduledTaskAuthority: attemptPlan.routePlan.scheduledTaskAuthority,
         sessionContext: attemptPlan.routePlan.sessionContext
           ? {
               binding: attemptPlan.session.binding,
@@ -762,6 +772,25 @@ function composeAssistantProviderFlexDeadlineSignal(
 ): AbortSignal {
   const deadline = AbortSignal.timeout(ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS)
   return signal ? AbortSignal.any([signal, deadline]) : deadline
+}
+
+function resolveAssistantTurnPublicInternetFetch(input: {
+  hosted: AssistantCodexTurnExecutionPlan['executionContext']['hosted']
+  scheduledExecution: boolean
+  scheduledTaskAuthority:
+    AssistantCodexAttemptPlan['routePlan']['scheduledTaskAuthority']
+}): typeof fetch | null {
+  if (input.hosted) {
+    return input.hosted.publicInternetFetch ?? null
+  }
+  if (
+    !input.scheduledExecution ||
+    input.scheduledTaskAuthority?.kind !== 'product_notes'
+  ) {
+    return null
+  }
+
+  return (request, init) => fetch(request, init)
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

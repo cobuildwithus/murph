@@ -771,6 +771,9 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
+  const childClosed = new Promise<void>((resolve) => {
+    child.once("close", () => resolve());
+  });
   const childStdin = child.stdin;
   const childStdout = child.stdout;
   const childStderr = child.stderr;
@@ -1001,6 +1004,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     killProcessGroup(child.pid);
     child.kill("SIGKILL");
     rejectPendingRequests(new Error("Codex app-server shell env probe was stopped."));
+    await childClosed;
   }
 }
 

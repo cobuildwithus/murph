@@ -56,6 +56,7 @@ export type VoiceMemoToolRuntime =
   | {
       elevenLabs: VoiceMemoElevenLabsRuntimeConfig
       generateAndUpload(input: {
+        beforeExternalEffect?: (() => Promise<void>) | null
         filenameBase: string
         generation: AssistantVoiceMemoGeneration
         signal?: AbortSignal | null
@@ -71,6 +72,7 @@ const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
+  beforeExternalEffect?: (() => Promise<void>) | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
@@ -119,6 +121,7 @@ export async function executeGenerateVoiceMemoTool(input: {
       text: input.args.text,
       voiceId,
     },
+    beforeExternalEffect: input.beforeExternalEffect ?? null,
     runtime,
     signal: input.abortSignal ?? null,
   })
@@ -127,6 +130,7 @@ export async function executeGenerateVoiceMemoTool(input: {
 export async function executeGenerateSongTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
+  beforeExternalEffect?: (() => Promise<void>) | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
@@ -158,12 +162,14 @@ export async function executeGenerateSongTool(input: {
       outputFormat: assistantVoiceMemoMusicOutputFormat,
       prompt: input.args.prompt,
     },
+    beforeExternalEffect: input.beforeExternalEffect ?? null,
     runtime,
     signal: input.abortSignal ?? null,
   })
 }
 
 async function executeGeneratedVoiceMemo(input: {
+  beforeExternalEffect: (() => Promise<void>) | null
   filenameBase: string
   generation: AssistantVoiceMemoGeneration
   runtime: VoiceMemoToolRuntime
@@ -172,6 +178,7 @@ async function executeGeneratedVoiceMemo(input: {
   const { label, transcript } = describeVoiceMemoGeneration(input.generation)
   const filename = `${input.filenameBase}.mp3`
   if (input.runtime.kind === 'telegram') {
+    await input.beforeExternalEffect?.()
     return {
       responseMedia: [
         {
@@ -192,6 +199,9 @@ async function executeGeneratedVoiceMemo(input: {
   let upload: Awaited<ReturnType<typeof input.runtime.generateAndUpload>>
   try {
     upload = await input.runtime.generateAndUpload({
+      ...(input.beforeExternalEffect
+        ? { beforeExternalEffect: input.beforeExternalEffect }
+        : {}),
       filenameBase: input.filenameBase,
       generation: input.generation,
       signal: input.signal,
@@ -325,6 +335,7 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
 
       let audio: Awaited<ReturnType<typeof generateElevenLabsVoiceMemoAudio>>
       try {
+        await request.beforeExternalEffect?.()
         audio = await generateElevenLabsVoiceMemoAudio({
           apiKey,
           fetchImplementation,
@@ -355,6 +366,7 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
           filename: linqFilename,
         },
         {
+          beforeExternalEffect: request.beforeExternalEffect ?? null,
           env: input.env,
           fetchImplementation,
           publicFetchImplementation: uploadFetchImplementation,

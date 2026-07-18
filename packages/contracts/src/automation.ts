@@ -140,7 +140,10 @@ export function parseAutomationSupportSeriesTag(
 function validateAutomationLifecycleFields(
   value: {
     activeUntil?: string | null;
+    continuityPolicy?: AutomationContinuityPolicy;
+    route?: AutomationRoute;
     schedule: AutomationSchedule;
+    scheduledTask?: AutomationScheduledTask;
     tags?: string[];
   },
   ctx: z.RefinementCtx,
@@ -172,6 +175,15 @@ function validateAutomationLifecycleFields(
       code: z.ZodIssueCode.custom,
       message: "An automation may belong to at most one support series.",
       path: ["tags"],
+    });
+  }
+
+  const scheduledTaskViolation = resolveAutomationScheduledTaskConstraintViolation(value);
+  if (scheduledTaskViolation) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: scheduledTaskViolation.message,
+      path: scheduledTaskViolation.path,
     });
   }
 }
@@ -341,6 +353,20 @@ export const automationAssistantTargetOverrideSchema = z
   })
   .strict();
 
+/**
+ * Immutable identity for the one scheduled product task that currently needs
+ * task-bound authority. This is deliberately not a generic capability list:
+ * the task kind, canonical knowledge owner, and one projection scope are
+ * fixed when the automation is created.
+ */
+export const automationScheduledTaskSchema = z
+  .object({
+    kind: z.literal("group_challenge"),
+    knowledgeSlug: z.string().regex(slugPattern),
+    projectionScopeKey: z.string().min(1).max(200),
+  })
+  .strict();
+
 export const automationFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -354,6 +380,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       activeUntil: automationActiveUntilSchema.optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
+      scheduledTask: automationScheduledTaskSchema.optional(),
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
       supportKind: z.enum(automationSupportKindValues).optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
@@ -381,6 +408,7 @@ export const automationScaffoldPayloadSchema = z
     continuityPolicy: z.enum(automationContinuityPolicyValues).default("preserve"),
     instructions: z.string().min(1),
     route: automationRouteSchema,
+    scheduledTask: automationScheduledTaskSchema.optional(),
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
     supportKind: z.enum(automationSupportKindValues).nullable().optional(),
     schedule: automationScheduleSchema,
@@ -403,12 +431,70 @@ export type AutomationDeviceActivityKind = z.infer<typeof automationDeviceActivi
 export type AutomationTimeSchedule = z.infer<typeof automationTimeScheduleSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationRoute = z.infer<typeof automationRouteSchema>;
+export type AutomationScheduledTask = z.infer<typeof automationScheduledTaskSchema>;
 export type AutomationAssistantTargetOverride = z.infer<
   typeof automationAssistantTargetOverrideSchema
 >;
 export type AutomationFrontmatter = z.infer<typeof automationFrontmatterSchema>;
 export type AutomationMarkdownDocument = z.infer<typeof automationMarkdownDocumentSchema>;
 export type AutomationScaffoldPayload = z.infer<typeof automationScaffoldPayloadSchema>;
+
+export type AutomationScheduledTaskConstraintCode =
+  | "continuity_policy"
+  | "finite_active_until"
+  | "time_driven_schedule"
+  | "non_direct_route";
+
+export interface AutomationScheduledTaskConstraintViolation {
+  code: AutomationScheduledTaskConstraintCode;
+  message: string;
+  path: (string | number)[];
+}
+
+/**
+ * Resolves the first invalid lifecycle field for a task-bound automation.
+ * Storage and runtime owners translate the result into their own error type.
+ */
+export function resolveAutomationScheduledTaskConstraintViolation(input: {
+  activeUntil?: string | null;
+  continuityPolicy?: AutomationContinuityPolicy;
+  route?: Pick<AutomationRoute, "threadIsDirect"> | null;
+  schedule: Pick<AutomationSchedule, "kind">;
+  scheduledTask?: AutomationScheduledTask | null;
+}): AutomationScheduledTaskConstraintViolation | null {
+  if (!input.scheduledTask) {
+    return null;
+  }
+  if (input.continuityPolicy !== "preserve") {
+    return {
+      code: "continuity_policy",
+      message: "A scheduled task must preserve conversation continuity.",
+      path: ["continuityPolicy"],
+    };
+  }
+  if (!input.activeUntil || !Number.isFinite(Date.parse(input.activeUntil))) {
+    return {
+      code: "finite_active_until",
+      message: "A group-challenge scheduled task requires a finite activeUntil.",
+      path: ["activeUntil"],
+    };
+  }
+  if (input.schedule.kind === "deviceActivity") {
+    return {
+      code: "time_driven_schedule",
+      message: "A group-challenge scheduled task requires a time-driven schedule.",
+      path: ["schedule"],
+    };
+  }
+  if (input.route?.threadIsDirect !== false) {
+    return {
+      code: "non_direct_route",
+      message: "A scheduled task requires an explicit non-direct group route.",
+      path: ["route", "threadIsDirect"],
+    };
+  }
+  return null;
+}
 
 // Product-facing aliases. The persisted frontmatter key remains `schedule` for now.
 export const automationTriggerKindValues = automationScheduleKindValues;

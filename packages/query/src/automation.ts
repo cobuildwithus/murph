@@ -10,9 +10,11 @@ import {
   automationDeviceActivitySourceValues,
   automationScheduleAtSchema,
   automationScheduleKindValues,
+  automationScheduledTaskSchema,
   automationStatusValues,
   automationSupportKindValues,
   parseAutomationSupportSeriesTag,
+  resolveAutomationScheduledTaskConstraintViolation,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -21,6 +23,7 @@ import {
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
+  type AutomationScheduledTask,
   type AutomationStatus,
   type AutomationSupportKind,
 } from "@murphai/contracts";
@@ -47,6 +50,7 @@ export type {
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
+  AutomationScheduledTask,
   AutomationStatus,
   AutomationSupportKind,
 };
@@ -62,6 +66,7 @@ export interface AutomationQueryRecord {
   activeUntil: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  scheduledTask: AutomationScheduledTask | null;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
@@ -156,6 +161,19 @@ function normalizeAutomationSupportKind(value: unknown): AutomationSupportKind |
     );
   }
   return value as AutomationSupportKind;
+}
+
+function normalizeAutomationScheduledTask(value: unknown): AutomationScheduledTask | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = automationScheduledTaskSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error("scheduledTask must be a canonical group-challenge task binding.");
+  }
+
+  return parsed.data;
 }
 
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
@@ -473,12 +491,25 @@ function parseAutomationRecord(
   const parsed = parseFrontmatterDocument(markdown);
   const schedule = normalizeAutomationSchedule(attributes.schedule);
   const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
+  const route = normalizeAutomationRoute(attributes.route);
+  const scheduledTask = normalizeAutomationScheduledTask(attributes.scheduledTask);
+  const continuityPolicy = normalizeAutomationContinuityPolicy(attributes.continuityPolicy);
   if (
     activeUntil !== null &&
     schedule.kind === "at" &&
     Date.parse(activeUntil) <= Date.parse(schedule.at)
   ) {
     throw new Error("activeUntil must be after schedule.at for a one-shot automation.");
+  }
+  const scheduledTaskViolation = resolveAutomationScheduledTaskConstraintViolation({
+    activeUntil,
+    continuityPolicy,
+    route,
+    schedule,
+    scheduledTask,
+  });
+  if (scheduledTaskViolation) {
+    throw new Error(scheduledTaskViolation.message);
   }
 
   return {
@@ -491,12 +522,13 @@ function parseAutomationRecord(
     summary: normalizeNullableString(typeof attributes.summary === "string" ? attributes.summary : null),
     activeUntil,
     schedule,
-    route: normalizeAutomationRoute(attributes.route),
+    route,
+    scheduledTask,
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
-    continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
+    continuityPolicy,
     tags: normalizeTags(attributes.tags),
     createdAt: requireStringValue(attributes.createdAt, "createdAt"),
     updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
@@ -558,6 +590,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.continuityPolicy,
       JSON.stringify(record.schedule),
       JSON.stringify(record.route),
+      JSON.stringify(record.scheduledTask),
       record.supportKind,
       JSON.stringify(record.assistantTargetOverride),
       record.tags,

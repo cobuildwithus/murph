@@ -11,7 +11,6 @@ import {
   toLocalDayKey,
 } from '@murphai/contracts'
 import { loadVault, readPreferencesDocument } from '@murphai/core'
-import { SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV } from '@murphai/hosted-execution/env'
 import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
@@ -93,8 +92,13 @@ import {
 import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   resolveMurphDynamicTools,
+  resolveMurphScheduledDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
+import {
+  resolveAssistantScheduledTaskAuthority,
+  type AssistantScheduledTaskAuthority,
+} from '../scheduled-task-authority.js'
 import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
@@ -120,6 +124,11 @@ export interface AssistantRouteTurnPlan {
     binding: AssistantSession['binding']
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
+  permissions?: string | null
+  runtimeWorkspaceRoots?: readonly string[] | null
+  scheduledExecution?: boolean
+  scheduledOccurrenceAt?: string | null
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
   assistantPreferredElevenLabsVoiceId?: string | null
   systemPrompt: string | null
   turnContextPrompt: string | null
@@ -465,10 +474,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const scheduledNotificationTurn =
-    input.profile.promptProfile === 'notification-decision' &&
+    input.profile.promptProfile === 'notification-decision'
+  const scheduledDeliveryTurn =
+    scheduledNotificationTurn &&
     input.profile.toolProfile === 'notification-turn'
+  const scheduledTaskAuthority = scheduledNotificationTurn
+    ? resolveAssistantScheduledTaskAuthority(input.input.scheduledTaskAuthority)
+    : null
+  const groupNewsletterScheduledTurn =
+    scheduledTaskAuthority?.kind === 'group_newsletter'
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread' || outputOnlyTurn
+    !groupNewsletterScheduledTurn &&
+    (
+      input.profile.threadScope === 'session-thread' ||
+      scheduledDeliveryTurn ||
+      outputOnlyTurn
+    )
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -496,14 +517,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const scheduledAssistantPersonalityPreferencesApply =
-    scheduledNotificationTurn &&
+    scheduledDeliveryTurn &&
+    !groupNewsletterScheduledTurn &&
     (privateInteractiveAudience || hostedGroupRuntime)
   const assistantPersonalityPreferencesApply =
     assistantStyleSettingsAvailable ||
     groupAssistantStylePreferencesApply ||
     scheduledAssistantPersonalityPreferencesApply
   const assistantVoicePreferenceApplies =
-    privateInteractiveAudience || hostedGroupRuntime
+    !groupNewsletterScheduledTurn &&
+    (privateInteractiveAudience || hostedGroupRuntime)
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -518,7 +541,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const hostedDynamicContextPrompts = maintenanceTurn || outputOnlyTurn
+  const hostedDynamicContextPrompts =
+    maintenanceTurn || outputOnlyTurn || groupNewsletterScheduledTurn
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
@@ -532,8 +556,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         sharedPlan: input.sharedPlan,
       })
   const shouldPreparePrivateCliBootstrapContext =
-    (input.profile.promptProfile === 'conversation' && privateInteractiveAudience) ||
-    (privateInteractiveAudience && scheduledNotificationTurn)
+    input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
   const unscopedAssistantCliContract = shouldPreparePrivateCliBootstrapContext
     ? await measureRoutePlanningAsync(
@@ -548,10 +571,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
-    scheduledNotificationTurn,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
+  const assistantContextSnapshotPrompt =
+    maintenanceTurn ||
+    groupNewsletterScheduledTurn ||
+    !privateInteractiveAudience
     ? null
     : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -601,7 +626,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
               : null,
             assistantStyleSettingsAvailable,
             assistantToolNameAliases,
-            assistantTone: preferenceContext.assistantTone,
+            assistantTone: groupNewsletterScheduledTurn
+              ? null
+              : preferenceContext.assistantTone,
             channel: resolvedChannel,
             cliAccess: input.sharedPlan.cliAccess,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -638,7 +665,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
               ? preferenceContext.assistantPersonality
               : null,
             assistantStyleSettingsAvailable,
-            assistantTone: preferenceContext.assistantTone,
+            assistantTone: groupNewsletterScheduledTurn
+              ? null
+              : preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -703,9 +732,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = maintenanceTurn || outputOnlyTurn
+  const dynamicTools = outputOnlyTurn
     ? []
-    : resolveMurphDynamicTools({
+    : scheduledNotificationTurn
+      ? resolveMurphScheduledDynamicTools({
+          deliveryToolsAvailable: scheduledDeliveryTurn,
+          newsletterAvailable:
+            groupNewsletterScheduledTurn &&
+            input.hostedToolContext?.newsletterTool != null,
+          taskAuthority: input.input.scheduledTaskAuthority,
+          // Telegram audio is generated lazily by the outbox transport, which
+          // would regenerate on every retry. Scheduled Linq audio materializes
+          // once during this reserved turn and its attachment is reused.
+          voiceMemoGenerationAvailable: voiceMemoDeliveryChannel === 'linq',
+        })
+      : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         messageTargetingAvailable,
@@ -786,6 +827,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     )
   const nativeResumeEnabled =
+    !scheduledNotificationTurn &&
     input.profile.threadScope === 'session-thread'
   const candidateResumeCodexThreadId =
     nativeResumeEnabled &&
@@ -840,18 +882,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   return {
     assistantContractFingerprint,
     assistantCliContract: actualAssistantCliContract,
-    cliEnv: {
-      ...input.sharedPlan.cliAccess.env,
-      // A scheduled notification turn runs unattended: mark its CLI subprocess
-      // environment so the vault-cli authority guards reject automation/device
-      // lifecycle mutation (directly or via `batch`) regardless of hosted vs
-      // local runtime, while task-owned canonical reads/writes stay available.
-      ...(scheduledNotificationTurn
-        ? { [SCHEDULED_NOTIFICATION_TURN_PROCESS_ENV]: '1' }
-        : {}),
-    },
+    cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
+    // Output-only notification turns have no native execution environments.
+    // The scheduled one-shot launch path applies the same boundary to every
+    // scheduled task after this shared planning step.
     environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
@@ -886,12 +922,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !outputOnlyTurn
+      !outputOnlyTurn &&
+      !groupNewsletterScheduledTurn
       ? {
           binding: input.session.binding,
         }
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
+    permissions: undefined,
+    runtimeWorkspaceRoots: undefined,
+    scheduledExecution: scheduledNotificationTurn ? true : undefined,
+    scheduledOccurrenceAt: scheduledNotificationTurn
+      ? input.input.scheduledOccurrenceAt ?? null
+      : null,
+    scheduledTaskAuthority: scheduledNotificationTurn
+      ? scheduledTaskAuthority
+      : null,
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
         ? resolveAssistantVoiceOptionElevenLabsVoiceId(

@@ -130,6 +130,42 @@ Web producer gate to `0` and redeploy Web first, wait at least the full ten-minu
 request lifetime, verify pending Ask work has drained or expired, then roll back
 the consumers. A forward fix is preferred if any imported item remains.
 
+## Scheduled Model Authority Rollout
+
+Scheduled model isolation is an authority boundary inside the existing runner,
+with one additive Web callback-reader compatibility step. It adds no Cloudflare
+binding, secret, database migration, second container, scheduler, or process
+pool. Deploy Web first so the newsletter callback accepts both the legacy
+runner payload containing `groupId` and the new payload without it; the reader
+validates and discards that legacy field, and authenticated runtime identity
+remains the sole group selector. After the Web deployment converges, deploy the
+Cloudflare Worker and runner bundle with `container_rollout=immediate`, then
+require all of these gates for the exact bundle:
+
+1. The real pinned App Server test proves Sol, Terra, and Luna expose only the
+   task-selected `murph` tools plus `update_plan`, rejects direct unadvertised
+   execution and V1/V2 collaboration calls before handler dispatch, tears down
+   each scheduled one-shot process, and preserves the attended warm process
+   before and after it.
+2. The scheduled App Server preflight reads effective config before
+   `thread/start`; a real stdio sentinel proves an enabled user MCP server is
+   rejected without starting its child process.
+3. Managed-container smoke reports the exact new runner-bundle fingerprint.
+4. After convergence, run one personal scheduled reminder, one group scheduled
+   action, and one ordinary attended reply. Confirm the scheduled occurrences
+   delivered only through their typed effects and the attended turn retained
+   its normal tool surface.
+
+The Web compatibility reader is the rollback floor while any deployed or
+rollback-eligible runner can still send `groupId`; remove it only after every
+eligible runner omits that field. The first converged runner bundle that
+enforces this authority boundary is a separate security rollback floor. Do not
+restore an older runner that executes scheduled work through the attended
+full-access process, and do not roll back below a bundle that can read any
+persisted `scheduledTask` binding. Forward-fix on the restricted bundle or
+newer. The separate Web-first scheduled Linq target/directness rollout below
+keeps its existing order and checks.
+
 ## Linq Participant-Context Rollout
 
 The participant-addition hint uses an additive database column, an additive
@@ -562,7 +598,9 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
-The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Attended turns use that catalog in the resident App Server, including hosted MultiAgent V2. The attended App Server stays warm for the container lifetime; ordinary configuration changes take effect through normal container or process replacement.
+
+Each scheduled notification or maintenance occurrence is the deliberate exception. Before launch, the parent resolves the ordinary effective catalog through the pinned Codex CLI in the occurrence's private temporary directory, preserves its model metadata, and forces every model to `tool_mode: "direct"` and `multi_agent_version: "disabled"`. It passes that clone only to a separate one-shot App Server and removes it after exact child teardown. After initialization and before `thread/start`, the parent reads effective config and rejects enabled or malformed generic MCP configuration without changing attended MCP behavior.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. That disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.

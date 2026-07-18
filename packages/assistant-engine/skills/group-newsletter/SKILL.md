@@ -32,19 +32,21 @@ turns may not have read the setup conversation or `group-chat`. Include:
 - that this is the `group-health-newsletter` email automation;
 - the exact chosen newsletter name and tone;
 - any custom note from the group;
-- an instruction to read and follow
-  `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing;
+- an instruction to read and follow the exact `group-newsletter` skill through
+  `murph.scheduled_read` with `action="skill_get"` before composing;
 - an instruction that every subject starts with the exact chosen name, never a
   generic label such as "Weekly Group Health Digest."
 
 ## Compose each edition
 
 1. Use the current scheduled automation instructions so their exact name, tone,
-   and custom note govern this edition. Normal conversation and shell/tool
-   access remain available, but do not use them as alternate health-data sources
-   for the edition.
-2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
-   eligibility, the scheduled `referenceAt`, and `members` containing current-
+   and custom note govern this edition. Read this exact skill with
+   `murph.scheduled_read` using `action="skill_get"` and
+   `slug="group-newsletter"`. Scheduled runs have no shell, CLI, filesystem,
+   committed transcript, saved room personality, or general hosted context.
+   Do not seek alternate context or health-data sources.
+2. Call `murph.newsletter` with `action="prepare"`. This returns aggregate
+   eligible and missing-email counts, the scheduled `referenceAt`, and `members` containing current-
    week facts only for currently eligible email recipients. The trusted runtime
    builds those facts with the generic group weekly reader after filtering the
    landed records by exact current member/scope/share-id grants. Use only `members`.
@@ -73,12 +75,10 @@ backoff; never return `send_message`, a digest, an operational error, or a
 delivery confirmation that would create a second message on the bound group
 channel.
 
-If `participants` contains no participant with `hasEmail === true`, do not send
-an empty edition. Return
-one `send_message` notification decision telling the group that there are no
-eligible email recipients yet and pointing them to
-`https://www.withmurph.ai/settings?addEmail=true`,
-then stop for that run. If participants can receive the email but the featured
+If `eligibleParticipantCount` is zero, do not send
+an empty edition. Return a `skip` notification decision; the trusted parent
+owns the fixed group notice and Settings link for this state. Never write that
+notice yourself. If participants can receive the email but the featured
 set is empty, send a short email without health comparisons. Never mention who
 failed to share, who lacks an email, or who had insufficient data.
 

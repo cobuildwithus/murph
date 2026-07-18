@@ -19,6 +19,15 @@ export interface AssistantCronCanonicalRuntimeNormalizationPolicy {
   runningStaleAfterMs?: number
 }
 
+const assistantCronScheduledMediaReservationSchema = z
+  .object({
+    automationId: z.string().min(1),
+    expectedUpdatedAt: z.string().min(1),
+    lane: z.enum(['audio', 'image']),
+    occurrenceAt: z.string().min(1),
+  })
+  .strict()
+
 const assistantCronCanonicalRuntimeStateSchema = z
   .object({
     activatedAt: z.string().min(1).nullable(),
@@ -30,6 +39,9 @@ const assistantCronCanonicalRuntimeStateSchema = z
     consecutiveFailures: z.number().int().nonnegative(),
     lastError: z.string().nullable(),
     pendingDeliveryIntentId: z.string().min(1).nullable().optional(),
+    scheduledMediaReservation: assistantCronScheduledMediaReservationSchema
+      .nullable()
+      .default(null),
     runningAt: z.string().min(1).nullable(),
     runningClaimId: z.string().min(1).nullable().default(null),
     runningPid: z.number().int().positive().nullable(),
@@ -57,6 +69,10 @@ const assistantCronCanonicalRuntimeStoreSchema = z
 
 export type AssistantCronCanonicalRuntimeState = z.infer<
   typeof assistantCronCanonicalRuntimeStateSchema
+>
+
+export type AssistantCronScheduledMediaReservation = z.infer<
+  typeof assistantCronScheduledMediaReservationSchema
 >
 
 export type AssistantCronCanonicalRuntimeRecord = z.infer<
@@ -161,6 +177,7 @@ export function createAssistantCronCanonicalRuntimeRecord(input: {
       consecutiveFailures: 0,
       lastError: null,
       pendingDeliveryIntentId: null,
+      scheduledMediaReservation: null,
       runningAt: null,
       runningClaimId: null,
       runningPid: null,

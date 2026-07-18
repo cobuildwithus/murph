@@ -17,6 +17,7 @@ import {
 import {
   advanceAutomationDeviceActivityCursor,
   archiveAutomationIfActiveUntilElapsed,
+  archiveAutomationIfExactRevision,
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
@@ -54,6 +55,18 @@ function createAutomationPayload(
     ...scaffoldAutomationPayload(),
     ...overrides,
   };
+}
+
+function stableAutomationArchiveFields(
+  record: Awaited<ReturnType<typeof upsertAutomation>>["record"],
+) {
+  const {
+    markdown: _markdown,
+    status: _status,
+    updatedAt: _updatedAt,
+    ...stable
+  } = record;
+  return stable;
 }
 
 afterEach(async () => {
@@ -345,6 +358,90 @@ describe("markdown document primitives", () => {
         },
       }),
     })).rejects.toThrow(/activeUntil must be after schedule\.at/u);
+  });
+
+  it("archives only an active exact revision and preserves its canonical fields", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      ...createAutomationPayload({
+        activeUntil: "2026-07-20T23:00:00.000Z",
+        assistantTargetOverride: {
+          model: "gpt-test",
+          modelProvider: "test-provider",
+          reasoningEffort: "high",
+        },
+        continuityPolicy: "preserve",
+        route: {
+          channel: "linq",
+          deliverySource: null,
+          deliveryTarget: "group_chat",
+          identityId: "linq_identity",
+          participantId: null,
+          threadId: "group_chat",
+          threadIsDirect: false,
+        },
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        summary: "Exact challenge closeout.",
+        supportKind: "check_in",
+        tags: ["challenge"],
+        title: "Exact challenge dispatch",
+      }),
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "exact-challenge",
+        projectionScopeKey: "steps-days.v0",
+      },
+      vaultRoot,
+    });
+
+    const stale = await archiveAutomationIfExactRevision({
+      expectedUpdatedAt: "2026-07-18T11:59:59.000Z",
+      lookup: created.record.automationId,
+      now: new Date("2026-07-19T12:00:00.000Z"),
+      vaultRoot,
+    });
+    expect(stale).toMatchObject({
+      archived: false,
+      record: { status: "active", updatedAt: created.record.updatedAt },
+    });
+
+    const archived = await archiveAutomationIfExactRevision({
+      expectedUpdatedAt: created.record.updatedAt,
+      lookup: created.record.slug,
+      now: new Date("2026-07-19T12:00:00.000Z"),
+      vaultRoot,
+    });
+    expect(archived.archived).toBe(true);
+    expect(archived.record.status).toBe("archived");
+    expect(archived.record.updatedAt).toBe("2026-07-19T12:00:00.000Z");
+    expect(stableAutomationArchiveFields(archived.record)).toEqual(
+      stableAutomationArchiveFields(created.record),
+    );
+    expect(parseFrontmatterDocument(archived.record.markdown).attributes).toMatchObject({
+      scheduledTask: created.record.scheduledTask,
+      status: "archived",
+      supportKind: "check_in",
+    });
+
+    const repeated = await archiveAutomationIfExactRevision({
+      expectedUpdatedAt: archived.record.updatedAt,
+      lookup: archived.record.automationId,
+      vaultRoot,
+    });
+    expect(repeated).toMatchObject({
+      archived: false,
+      record: { status: "archived" },
+    });
+
+    await expect(archiveAutomationIfExactRevision({
+      expectedUpdatedAt: created.record.updatedAt,
+      lookup: "missing-automation",
+      vaultRoot,
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_MISSING",
+      message: "Automation was not found.",
+    });
   });
 
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
@@ -660,6 +757,142 @@ describe("markdown document primitives", () => {
     expect(patched.record.route).toEqual(created.record.route);
     expect(patched.record.summary).toBe(created.record.summary);
     expect(patched.record.tags).toEqual(created.record.tags);
+  });
+
+  it("keeps a create-only scheduled task and its route immutable", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const payload = createAutomationPayload({
+      continuityPolicy: "preserve",
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "group_chat",
+        identityId: "linq_identity",
+        participantId: null,
+        threadId: "group_chat",
+        threadIsDirect: false,
+      },
+      slug: "morning-mobility-dispatch",
+      title: "Morning mobility dispatch",
+    });
+    const scheduledTask = {
+      kind: "group_challenge",
+      knowledgeSlug: "morning-mobility",
+      projectionScopeKey: "steps-days.v0",
+    } as const;
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...payload,
+      scheduledTask,
+    })).rejects.toThrow(/requires a finite activeUntil/u);
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...payload,
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      schedule: {
+        kind: "deviceActivity",
+        after: "2026-07-18T12:00:00.000Z",
+      },
+      scheduledTask,
+    })).rejects.toThrow(/requires a time-driven schedule/u);
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...payload,
+      activeUntil: "2026-07-20T23:00:00.000-04:00",
+      scheduledTask,
+    });
+
+    expect(created.record.scheduledTask).toEqual(scheduledTask);
+    expect(parseFrontmatterDocument(created.record.markdown).attributes.scheduledTask)
+      .toEqual(created.record.scheduledTask);
+
+    const patched = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      route: { ...created.record.route },
+      title: "Morning mobility group dispatch",
+    });
+    expect(patched.record.scheduledTask).toEqual(created.record.scheduledTask);
+    expect(patched.record.route).toEqual(created.record.route);
+
+    const ordinaryUpsert = await upsertAutomation({
+      vaultRoot,
+      ...payload,
+      automationId: created.record.automationId,
+      instructions: "Send the updated challenge dispatch.",
+      title: patched.record.title,
+    });
+    expect(ordinaryUpsert.record.scheduledTask).toEqual(created.record.scheduledTask);
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...payload,
+      automationId: created.record.automationId,
+      scheduledTask: null,
+      title: patched.record.title,
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
+    });
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...payload,
+      automationId: created.record.automationId,
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "evening-mobility",
+        projectionScopeKey: "steps-days.v0",
+      },
+      title: patched.record.title,
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
+    });
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...payload,
+      automationId: created.record.automationId,
+      scheduledTask: {
+        kind: "group_challenge",
+        knowledgeSlug: "morning-mobility",
+        projectionScopeKey: "sleep-duration-days.v0",
+      },
+      title: patched.record.title,
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
+    });
+    await expect(patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      route: {
+        ...created.record.route,
+        deliveryTarget: "different_group_chat",
+        threadId: "different_group_chat",
+      },
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_SCHEDULED_TASK_ROUTE_IMMUTABLE",
+    });
+
+    const unbound = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        slug: "ordinary-reminder",
+        title: "Ordinary reminder",
+      }),
+    });
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        automationId: unbound.record.automationId,
+        slug: unbound.record.slug,
+        scheduledTask: {
+          kind: "group_challenge",
+          knowledgeSlug: "morning-mobility",
+          projectionScopeKey: "steps-days.v0",
+        },
+        title: unbound.record.title,
+      }),
+    })).rejects.toMatchObject({
+      code: "VAULT_AUTOMATION_SCHEDULED_TASK_CREATE_ONLY",
+    });
   });
 
   it("advances only the device activity cursor and refuses stale matcher expectations", async () => {

@@ -38,6 +38,14 @@ If no welcome or prior onboarding is visible, run one bounded resume check:
 vault-cli assistant onboarding resume-context --format json
 ```
 
+For the managed scheduled onboarding follow-up, native CLI execution is
+unavailable and the trusted parent includes this same compact resume snapshot
+in the automation prompt. Use that engine-supplied snapshot directly. Do not
+attempt targeted CLI reads. If the evidence already satisfies completion or
+an overall decline, call the exact `murph.complete_onboarding` tool supplied to
+that prepared managed turn with `user_answered` or `user_declined`, then return
+skip. Never attempt another background mutation path.
+
 Treat every useful saved fact in the snapshot as known evidence for the open
 health threads and foundation checkpoints. Never re-ask it.
 Missing evidence is unresolved unless the visible conversation shows that the
@@ -703,7 +711,8 @@ specific positive health fact is not required. The checkpoint is required; the
 user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
 or “I don't have it handy” leaves onboarding open.
 
-When every criterion is satisfied, run:
+In an ordinary inbound or interactive turn, when every criterion is satisfied,
+run:
 
 ```text
 vault-cli assistant onboarding complete --reason user_answered
@@ -714,6 +723,10 @@ or further setup as a whole, use `--reason user_declined`, verify completion,
 and do not ask another onboarding question. Do not use `user_declined` for one
 skipped category, and do not require a plan or support loop merely to use
 `user_answered`.
+
+The managed scheduled follow-up never runs this CLI command. It uses only the
+exact `murph.complete_onboarding` tool supplied by the trusted parent after the
+current managed source revision is prepared and validated.
 
 ## Reply and follow-up rules
 

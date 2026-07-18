@@ -74,7 +74,7 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
-  it('keeps automation setup interactive and derives real media rotation from the log', async () => {
+  it('keeps setup interactive and commits only terminal sent scheduled dispatches', async () => {
     const challengeRaw = await readSkill('group-challenge')
     const challenge = challengeRaw.replace(/\s+/gu, ' ')
 
@@ -105,10 +105,8 @@ describe('assistant group challenge buy-in guidance', () => {
     expect(challenge).toContain(
       'Audit, sportsbook, ruling, press conference, poem, and similar devices are creative frames, not different media',
     )
-    // Rotation derives from the actual prepared-dispatch log, not a separately
-    // planned future sequence (no second source of truth to initialize or drift).
     expect(challenge).toContain(
-      'Derive the medium from the prepared-dispatch entries already on the page: choose the least-recently-used medium that is currently available',
+      'safe rotation cues in the parent-supplied context when present',
     )
     expect(challenge).toContain(
       'across a five-to-seven-day challenge use every available medium before repeating one',
@@ -120,16 +118,44 @@ describe('assistant group challenge buy-in guidance', () => {
     expect(challenge).not.toContain('planned medium')
     expect(challenge).not.toContain('planned sequence')
     expect(challenge).toContain(
-      'exactly one prepared-dispatch entry per scheduled occurrence',
+      'Terminal delivery history uses one parent-committed `Delivered dispatch <occurrenceAt>` H2 per scheduled occurrence that reached `sent`',
     )
     expect(challenge).toContain(
-      'This is rotation and replay state, not proof that the provider or handset received the dispatch.',
+      "the model's complete private run record plus locator-free accepted-delivery evidence",
     )
     expect(challenge).toContain(
-      'When retry evidence names the same occurrence and its entry already exists, reuse that medium and replay material',
+      'Scheduled challenge context excludes Roster & intros, all Delivered dispatch sections, and every raw ref, ID, path, or URL.',
     )
     expect(challenge).toContain(
-      'delivery status belongs to the engine and outbox.',
+      'When no safe rotation cue is supplied, choose the medium that best fits the current grounded material without claiming a rotation guarantee',
+    )
+    expect(challenge).toContain(
+      'A scheduled turn has no native shell or CLI execution environment',
+    )
+    expect(challenge).toContain(
+      'performs no page, memory, or lifecycle writes',
+    )
+    expect(challenge).toContain(
+      'returns the complete run record in `privateSummary`',
+    )
+    expect(challenge).toContain(
+      'The parent binds trusted task authority and the exact occurrence to the queued outbox intent.',
+    )
+    expect(challenge).toContain(
+      'Before returning a scheduled `send_message`, provide a complete required `privateSummary` for this run',
+    )
+    expect(challenge).toContain(
+      'the exact text body and every complete image prompt, spoken script, song prompt, or lyrics used',
+    )
+    expect(challenge).toContain(
+      'Keep this nonempty record within 50,000 characters; the parent validates the bound before queueing.',
+    )
+    expect(challenge).toContain(
+      'Never include refs, IDs, paths, or URLs.',
+    )
+    expect(challenge).not.toContain('its complete current `body`')
+    expect(challenge).toContain(
+      'the effect owner verifies the current task binding, archives the challenge page first, removes the exact pointer, and then archives the exact automation revision',
     )
   })
 

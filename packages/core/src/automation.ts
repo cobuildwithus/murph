@@ -11,12 +11,14 @@ import {
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
+  automationScheduledTaskSchema,
   automationStatusValues,
   automationSupportKindValues,
   buildAutomationSupportSeriesTag,
   compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
   parseAutomationSupportSeriesTag,
+  resolveAutomationScheduledTaskConstraintViolation,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -25,6 +27,7 @@ import {
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
+  type AutomationScheduledTask,
   type AutomationScaffoldPayload as ContractAutomationScaffoldPayload,
   type AutomationStatus,
   type AutomationSupportKind,
@@ -60,7 +63,7 @@ import type { FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS = 4_096;
-const automationRegistryResource = canonicalLogicalResource(
+export const AUTOMATION_REGISTRY_RESOURCE = canonicalLogicalResource(
   "bank/automations",
   AUTOMATIONS_DIRECTORY,
 );
@@ -87,6 +90,7 @@ export type {
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
+  AutomationScheduledTask,
   AutomationStatus,
   AutomationSupportKind,
 };
@@ -102,6 +106,7 @@ export interface AutomationRecord {
   activeUntil: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  scheduledTask: AutomationScheduledTask | null;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
@@ -126,10 +131,11 @@ export function resolveAutomationUpsertSlug(input: {
 
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
-export interface UpsertAutomationInput extends AutomationScaffoldPayload {
+export interface UpsertAutomationInput extends Omit<AutomationScaffoldPayload, "scheduledTask"> {
   allowSlugRename?: boolean;
   automationId?: string;
   now?: Date;
+  scheduledTask?: AutomationScheduledTask | null;
   vaultRoot: string;
 }
 
@@ -207,6 +213,16 @@ export interface ArchiveAutomationIfActiveUntilElapsedResult {
   record: AutomationRecord;
 }
 
+export interface ArchiveAutomationIfExactRevisionInput {
+  expectedUpdatedAt: string;
+  lookup: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export type ArchiveAutomationIfExactRevisionResult =
+  ArchiveAutomationIfActiveUntilElapsedResult;
+
 export interface ReconcileAutomationSupportSeriesInput {
   desiredAutomationIds: readonly string[];
   now?: Date;
@@ -280,6 +296,22 @@ function normalizeAutomationSupportKind(
   value: unknown,
 ): AutomationSupportKind | null {
   return optionalEnum(value, automationSupportKindValues, "supportKind") ?? null;
+}
+
+function normalizeAutomationScheduledTask(value: unknown): AutomationScheduledTask | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = automationScheduledTaskSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "scheduledTask must be a canonical group-challenge task binding.",
+    );
+  }
+
+  return parsed.data;
 }
 
 function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
@@ -632,6 +664,59 @@ function assertAutomationSupportSeriesOwnershipPreserved(input: {
   }
 }
 
+function resolveAutomationScheduledTask(input: {
+  existingRecord: AutomationRecord | null;
+  requested: unknown;
+  requestedFieldPresent: boolean;
+}): AutomationScheduledTask | null {
+  const existing = input.existingRecord?.scheduledTask ?? null;
+  if (!input.requestedFieldPresent) {
+    return existing;
+  }
+
+  const requested = normalizeAutomationScheduledTask(input.requested);
+  if (!input.existingRecord) {
+    return requested;
+  }
+
+  if (existing === null) {
+    if (requested === null) {
+      return null;
+    }
+    throw new VaultError(
+      "VAULT_AUTOMATION_SCHEDULED_TASK_CREATE_ONLY",
+      "Automation scheduled-task identity can be assigned only when the automation is created.",
+    );
+  }
+
+  if (
+    requested === null ||
+    existing.kind !== requested.kind ||
+    existing.knowledgeSlug !== requested.knowledgeSlug ||
+    existing.projectionScopeKey !== requested.projectionScopeKey
+  ) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
+      "Automation scheduled-task identity cannot be changed or removed.",
+    );
+  }
+
+  return existing;
+}
+
+function assertAutomationScheduledTaskConstraints(input: {
+  activeUntil: string | null;
+  continuityPolicy: AutomationContinuityPolicy;
+  route: AutomationRoute;
+  schedule: AutomationSchedule;
+  scheduledTask: AutomationScheduledTask | null;
+}): void {
+  const violation = resolveAutomationScheduledTaskConstraintViolation(input);
+  if (violation) {
+    throw new VaultError("VAULT_INVALID_INPUT", violation.message);
+  }
+}
+
 function assertAutomationReconciledArchiveMarkerNotForged(input: {
   existingRecord: AutomationRecord | null;
   requestedTags: readonly string[];
@@ -727,6 +812,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     ...(record.activeUntil === null ? {} : { activeUntil: record.activeUntil }),
     schedule: buildAutomationScheduleFrontmatter(record.schedule),
     route: buildAutomationRouteFrontmatter(record.route),
+    ...(record.scheduledTask === null ? {} : { scheduledTask: record.scheduledTask }),
     ...(record.assistantTargetOverride === null
       ? {}
       : {
@@ -761,7 +847,17 @@ function parseAutomationRecord(
 
   const schedule = normalizeAutomationSchedule(attributes.schedule);
   const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
+  const route = normalizeAutomationRoute(attributes.route);
+  const scheduledTask = normalizeAutomationScheduledTask(attributes.scheduledTask);
+  const continuityPolicy = normalizeAutomationContinuityPolicy(attributes.continuityPolicy);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
+  assertAutomationScheduledTaskConstraints({
+    activeUntil,
+    continuityPolicy,
+    route,
+    schedule,
+    scheduledTask,
+  });
 
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -773,12 +869,13 @@ function parseAutomationRecord(
     summary: normalizeAutomationSummary(attributes.summary),
     activeUntil,
     schedule,
-    route: normalizeAutomationRoute(attributes.route),
+    route,
+    scheduledTask,
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
-    continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
+    continuityPolicy,
     tags: normalizeAutomationTags(attributes.tags),
     createdAt: requireString(attributes.createdAt, "createdAt", 64),
     updatedAt: requireString(attributes.updatedAt, "updatedAt", 64),
@@ -872,6 +969,7 @@ function matchesAutomationText(record: AutomationRecord, text: string | undefine
     record.instructions,
     JSON.stringify(record.schedule),
     JSON.stringify(record.route),
+    JSON.stringify(record.scheduledTask),
     JSON.stringify(record.assistantTargetOverride),
     record.supportKind,
     record.continuityPolicy,
@@ -1060,11 +1158,8 @@ export async function archiveAutomationIfActiveUntilElapsed(
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
 
-    const now = input.now ?? new Date();
+    const now = resolveAutomationArchiveNow(input.now);
     const nowMs = now.getTime();
-    if (!Number.isFinite(nowMs)) {
-      throw new VaultError("VAULT_INVALID_INPUT", "now must be a valid Date.");
-    }
     const activeUntilMs = existingRecord.activeUntil === null
       ? Number.NaN
       : Date.parse(existingRecord.activeUntil);
@@ -1082,28 +1177,89 @@ export async function archiveAutomationIfActiveUntilElapsed(
       };
     }
 
-    const archived = await upsertAutomationWithLatestRegistry({
-      activeUntil: existingRecord.activeUntil,
-      automationId: existingRecord.automationId,
-      assistantTargetOverride: existingRecord.assistantTargetOverride,
-      continuityPolicy: existingRecord.continuityPolicy,
-      instructions: existingRecord.instructions,
+    const archived = await archiveAutomationRecordWithLatestRegistry({
       now,
-      route: existingRecord.route,
-      schedule: existingRecord.schedule,
-      slug: existingRecord.slug,
-      status: "archived",
-      summary: existingRecord.summary,
-      tags: existingRecord.tags,
-      title: existingRecord.title,
+      record: existingRecord,
+      records,
       vaultRoot: input.vaultRoot,
-    }, records);
+    });
 
     return {
       archived: true,
-      record: archived.record,
+      record: archived,
     };
   });
+}
+
+export async function archiveAutomationIfExactRevision(
+  input: ArchiveAutomationIfExactRevisionInput,
+): Promise<ArchiveAutomationIfExactRevisionResult> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+
+    const now = resolveAutomationArchiveNow(input.now);
+    if (
+      existingRecord.status !== "active" ||
+      existingRecord.updatedAt !== input.expectedUpdatedAt
+    ) {
+      return {
+        archived: false,
+        record: existingRecord,
+      };
+    }
+
+    return {
+      archived: true,
+      record: await archiveAutomationRecordWithLatestRegistry({
+        now,
+        record: existingRecord,
+        records,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  });
+}
+
+function resolveAutomationArchiveNow(now: Date | undefined): Date {
+  const resolved = now ?? new Date();
+  if (!Number.isFinite(resolved.getTime())) {
+    throw new VaultError("VAULT_INVALID_INPUT", "now must be a valid Date.");
+  }
+  return resolved;
+}
+
+async function archiveAutomationRecordWithLatestRegistry(input: {
+  now: Date;
+  record: AutomationRecord;
+  records: AutomationRecord[];
+  vaultRoot: string;
+}): Promise<AutomationRecord> {
+  const archived = await upsertAutomationWithLatestRegistry({
+    activeUntil: input.record.activeUntil,
+    automationId: input.record.automationId,
+    assistantTargetOverride: input.record.assistantTargetOverride,
+    continuityPolicy: input.record.continuityPolicy,
+    instructions: input.record.instructions,
+    now: input.now,
+    route: input.record.route,
+    schedule: input.record.schedule,
+    scheduledTask: input.record.scheduledTask,
+    slug: input.record.slug,
+    status: "archived",
+    summary: input.record.summary,
+    supportKind: input.record.supportKind,
+    tags: input.record.tags,
+    title: input.record.title,
+    vaultRoot: input.vaultRoot,
+  }, input.records);
+  return archived.record;
 }
 
 function yieldedAutomationSupportSeriesReconciliationResult(): ReconcileAutomationSupportSeriesResult {
@@ -1566,6 +1722,33 @@ async function upsertAutomationWithLatestRegistry(
     existingRecord,
     nextTags: tags,
   });
+  const scheduledTask = resolveAutomationScheduledTask({
+    existingRecord,
+    requested: input.scheduledTask,
+    requestedFieldPresent: Object.hasOwn(input, "scheduledTask"),
+  });
+  const route = input.route !== undefined
+    ? normalizeAutomationRoute(input.route)
+    : existingRecord?.route ?? scaffoldAutomationPayload().route;
+  if (
+    existingRecord?.scheduledTask &&
+    !automationRoutesEqual(existingRecord.route, route)
+  ) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_SCHEDULED_TASK_ROUTE_IMMUTABLE",
+      "A scheduled-task automation cannot be retargeted to a different route.",
+    );
+  }
+  const continuityPolicy = normalizeAutomationContinuityPolicy(
+    input.continuityPolicy ?? existingRecord?.continuityPolicy,
+  );
+  assertAutomationScheduledTaskConstraints({
+    activeUntil,
+    continuityPolicy,
+    route,
+    schedule,
+    scheduledTask,
+  });
 
   const record: AutomationRecord = {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -1580,10 +1763,8 @@ async function upsertAutomationWithLatestRegistry(
         : normalizeAutomationSummary(input.summary),
     activeUntil,
     schedule,
-    route:
-      input.route !== undefined
-        ? normalizeAutomationRoute(input.route)
-        : existingRecord?.route ?? scaffoldAutomationPayload().route,
+    route,
+    scheduledTask,
     assistantTargetOverride:
       input.assistantTargetOverride === undefined
         ? existingRecord?.assistantTargetOverride ?? null
@@ -1592,8 +1773,7 @@ async function upsertAutomationWithLatestRegistry(
       input.supportKind === undefined
         ? existingRecord?.supportKind ?? null
         : normalizeAutomationSupportKind(input.supportKind),
-    continuityPolicy:
-      normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
+    continuityPolicy,
     tags,
     createdAt,
     updatedAt,
@@ -1632,7 +1812,7 @@ function withAutomationRegistryLock<TResult>(
 ): Promise<TResult> {
   return withCanonicalResourceLocks({
     vaultRoot,
-    resources: [automationRegistryResource],
+    resources: [AUTOMATION_REGISTRY_RESOURCE],
     run,
   });
 }
@@ -1655,6 +1835,7 @@ export function buildAutomationMarkdownPreview(
     activeUntil,
     schedule,
     route: normalizeAutomationRoute(input.route),
+    scheduledTask: normalizeAutomationScheduledTask(input.scheduledTask),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       input.assistantTargetOverride,
     ),
@@ -1667,6 +1848,14 @@ export function buildAutomationMarkdownPreview(
     relativePath: `${AUTOMATIONS_DIRECTORY}/${slug}.md`,
     markdown: "",
   };
+
+  assertAutomationScheduledTaskConstraints({
+    activeUntil: normalized.activeUntil,
+    continuityPolicy: normalized.continuityPolicy,
+    route: normalized.route,
+    schedule: normalized.schedule,
+    scheduledTask: normalized.scheduledTask,
+  });
 
   return buildAutomationMarkdown(normalized);
 }

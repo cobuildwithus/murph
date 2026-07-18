@@ -46,6 +46,7 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import { buildGroupNewsletterOccurrenceKeyPrefix } from '../src/assistant/newsletter-family.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
@@ -66,6 +67,7 @@ import {
 import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
+import { upsertKnowledgePage } from '../src/knowledge.ts'
 import {
   hashAssistantOutboxIdentity,
   hashAssistantOutboxLegacyMediaDedupeIdentity,
@@ -396,6 +398,68 @@ describe('assistant outbox runtime', () => {
         operation: null,
         replyToMessageId: 'linq-message-fallback',
       })
+  })
+
+  it('persists the trusted challenge commit payload and binds it to outbox dedupe identity', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-challenge-commit-',
+    )
+    const authority = {
+      automationId: 'automation_summer_steps',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+    }
+    const groupChallengeDispatch = {
+      occurrenceAt: '2026-07-19T08:00:00.000Z',
+      preparedBody: 'Medium: text\nFrame: finish-line ruling',
+      scheduledTask: {
+        kind: 'group_challenge' as const,
+        knowledgeSlug: 'summer-steps',
+        projectionScopeKey: 'steps-days.v0',
+      },
+    }
+    const common = {
+      automationAuthority: authority,
+      channel: 'linq',
+      dedupeToken: 'stable-group-challenge-occurrence',
+      message: 'Summer Steps standings are in.',
+      sessionId: 'session-group-challenge-commit',
+      threadId: 'group-thread',
+      threadIsDirect: false,
+      turnId: 'turn-group-challenge-commit',
+      vault: vaultRoot,
+    }
+
+    const first = await createAssistantOutboxIntent({
+      ...common,
+      groupChallengeDispatch,
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        automationAuthority: authority,
+        groupChallengeDispatch,
+      })
+    await expect(createAssistantOutboxIntent({
+      ...common,
+      createdAt: '2026-07-19T08:01:00.000Z',
+      groupChallengeDispatch,
+    })).resolves.toMatchObject({ intentId: first.intentId })
+
+    await expect(createAssistantOutboxIntent({
+      ...common,
+      createdAt: '2026-07-19T08:02:00.000Z',
+      groupChallengeDispatch: {
+        ...groupChallengeDispatch,
+        preparedBody: 'Different model-authored run record.',
+      },
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(createAssistantOutboxIntent({
+      ...common,
+      createdAt: '2026-07-19T08:03:00.000Z',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
   })
 
   it('persists answered mailbox item ids and defaults other sends to none', async () => {
@@ -1333,6 +1397,12 @@ describe('assistant outbox runtime', () => {
       pruneAssistantTerminalOutboxIntents({
         now: new Date('2026-04-20T12:00:00.000Z'),
         paths,
+        protectedDeliveryIdempotencyKeyPrefixes: [
+          buildGroupNewsletterOccurrenceKeyPrefix({
+            automationId: cronRecord.jobId,
+            occurrenceAt: '2026-07-12T13:00:00.000Z',
+          }),
+        ],
         vault: vaultRoot,
       }),
     ).resolves.toBe(0)
@@ -2446,6 +2516,113 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.deliveryError).toBeNull()
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    {
+      expectedCode: 'scheduled_challenge_not_active',
+      mode: 'archived-page' as const,
+    },
+    {
+      expectedCode: 'scheduled_task_source_changed',
+      mode: 'mismatched-page' as const,
+    },
+  ])(
+    'blocks a queued group challenge at provider entry for a $mode',
+    async ({ expectedCode, mode }) => {
+      const { vaultRoot } = await createInitializedAssistantVault(
+        `assistant-outbox-group-challenge-${mode}-`,
+      )
+      const scheduledTask = {
+        kind: 'group_challenge' as const,
+        knowledgeSlug: 'summer-steps',
+        projectionScopeKey: 'steps-days.v0',
+      }
+      await upsertKnowledgePage({
+        body: '# Summer Steps\n\nCanonical challenge context.',
+        pageType: 'challenge',
+        slug: scheduledTask.knowledgeSlug,
+        status: 'active',
+        title: 'Summer Steps',
+        vault: vaultRoot,
+      })
+      await upsertKnowledgePage({
+        body: '# Other Challenge\n\nDifferent canonical challenge context.',
+        pageType: 'challenge',
+        slug: 'other-challenge',
+        status: 'active',
+        title: 'Other Challenge',
+        vault: vaultRoot,
+      })
+      const automation = await upsertAutomation({
+        ...scaffoldAutomationPayload(),
+        activeUntil: '2099-07-30T08:00:00.000Z',
+        continuityPolicy: 'preserve',
+        instructions: 'Dispatch the exact bound Summer Steps challenge update.',
+        now: new Date('2026-07-18T12:00:00.000Z'),
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-thread',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-thread',
+          threadIsDirect: false,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '08:00' },
+        scheduledTask,
+        slug: 'summer-steps-dispatch',
+        status: 'active',
+        title: 'Summer Steps dispatch',
+        vaultRoot,
+      })
+      const queued = await deliverAssistantOutboxMessage({
+        automationAuthority: {
+          automationId: automation.record.automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        channel: 'linq',
+        dispatchMode: 'queue-only',
+        explicitTarget: 'group-thread',
+        groupChallengeDispatch: {
+          occurrenceAt: '2026-07-19T08:00:00.000Z',
+          preparedBody: 'Medium: text\nFrame: provider-boundary proof',
+          scheduledTask: mode === 'mismatched-page'
+            ? {
+                ...scheduledTask,
+                knowledgeSlug: 'other-challenge',
+              }
+            : scheduledTask,
+        },
+        message: 'Summer Steps standings are in.',
+        sessionId: `session-group-challenge-${mode}`,
+        threadId: 'group-thread',
+        threadIsDirect: false,
+        turnId: `turn-group-challenge-${mode}`,
+        vault: vaultRoot,
+      })
+
+      if (mode === 'archived-page') {
+        await upsertKnowledgePage({
+          body: '# Summer Steps\n\nCanonical challenge context.',
+          pageType: 'challenge',
+          slug: scheduledTask.knowledgeSlug,
+          status: 'archived',
+          title: 'Summer Steps',
+          vault: vaultRoot,
+        })
+      }
+
+      const dispatched = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: queued.intent.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('failed')
+      expect(dispatched.deliveryError).toMatchObject({ code: expectedCode })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    },
+  )
 
   it.each([
     { label: 'paused', status: 'paused' as const },

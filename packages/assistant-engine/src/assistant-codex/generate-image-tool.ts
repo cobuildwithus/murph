@@ -101,6 +101,7 @@ type ExistingGeneratedImageCapture =
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateImageToolArgs
+  beforeExternalEffect?: (() => Promise<void>) | null
   captureIdempotencyKey?: string | null
   codexHome?: string | null
   env: NodeJS.ProcessEnv
@@ -207,6 +208,7 @@ export async function executeGenerateImageTool(input: {
 
     let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
     try {
+      await input.beforeExternalEffect?.()
       openAiResult = await generateOpenAiImage({
         abortSignal: input.abortSignal ?? null,
         apiKey,
@@ -263,6 +265,7 @@ export async function executeGenerateImageTool(input: {
 
     if (vaultRoot) {
       try {
+        await input.beforeExternalEffect?.()
         savedCapture = await saveGeneratedImageCapture({
           args: input.args,
           bytes: generatedImageBytes,
@@ -318,6 +321,7 @@ export async function executeGenerateImageTool(input: {
   }
 
   try {
+    await input.beforeExternalEffect?.()
     if (input.hostedGeneratedImageUploader) {
       const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
         alt: input.args.alt ?? 'Generated image',

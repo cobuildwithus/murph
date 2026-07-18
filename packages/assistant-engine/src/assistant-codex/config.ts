@@ -67,6 +67,14 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
+export function withoutCodexModelCatalogConfigOverrides(
+  configOverrides?: readonly string[]
+): readonly string[] {
+  return (configOverrides ?? []).filter(
+    (value) => !isCodexModelCatalogJsonConfigOverride(value),
+  )
+}
+
 export function hasHostedCodexModelCatalogFlexTier(input: {
   env?: NodeJS.ProcessEnv
   model?: string | null

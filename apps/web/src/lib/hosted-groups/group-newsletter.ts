@@ -163,7 +163,7 @@ export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEf
 }
 
 export async function prepareHostedGroupNewsletterParticipants(input: {
-  groupId: string;
+  groupId?: string;
   prisma?: ReadClient;
   runtimeMemberId: string;
 }): Promise<HostedGroupNewsletterPreparationResult> {
@@ -291,7 +291,7 @@ export async function readHostedGroupNewsletterEmailRecipients(input: {
 }
 
 async function readHostedGroupNewsletterParticipantEmailFacts(input: {
-  groupId: string;
+  groupId?: string;
   prisma?: ReadClient;
   runtimeMemberId: string;
 }): Promise<
@@ -318,7 +318,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
 
   const group = await prisma.hostedGroup.findFirst({
     where: {
-      id: input.groupId,
+      ...(input.groupId ? { id: input.groupId } : {}),
       runtimeMemberId: input.runtimeMemberId,
     },
     select: {
@@ -382,7 +382,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   const canonicalGroup = await prisma.$transaction(async (tx) =>
     await tx.hostedGroup.findFirst({
       where: {
-        id: input.groupId,
+        ...(input.groupId ? { id: input.groupId } : {}),
         runtimeMemberId: input.runtimeMemberId,
       },
       select: {

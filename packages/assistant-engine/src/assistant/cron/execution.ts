@@ -8,9 +8,6 @@ import {
 import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
-import type {
-  HostedRuntimeNewsletterScheduledAuthority,
-} from '@murphai/hosted-execution/runtime-control'
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
@@ -21,8 +18,11 @@ import {
   type AssistantCronRunRecord,
   type AssistantCronRunOutcome,
   type AssistantCronTrigger,
+  type AssistantOnboardingResumeContextResult,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveExistingManagedDeviceSyncControlPlane } from '@murphai/operator-config/device-daemon'
+import { createDeviceSyncClient } from '@murphai/operator-config/device-sync-client'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   sendAssistantNotificationLocal,
@@ -42,8 +42,12 @@ import {
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
+  prepareOnboardingFollowupScheduledTurn,
+} from '../onboarding-followup-automation.js'
+import {
+  prepareExperimentLifecycleScheduledTurn,
   runExperimentLifecycleDeliveryAuthorityPrecondition,
-  runExperimentLifecycleOutcomePrecondition,
+  type ExperimentLifecycleScheduledContext,
 } from '../experiment-support-automations.js'
 import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
@@ -56,6 +60,13 @@ import type {
   AssistantDeliveryOutcome,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
+import { resolveAssistantMurphProductBaseUrl } from '../system-prompt.js'
+import {
+  ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+  assertAssistantScheduledTaskSourceCurrent,
+  resolveAssistantScheduledTaskAuthorityFromSource,
+  type AssistantScheduledTaskAuthority,
+} from '../scheduled-task-authority.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
@@ -125,7 +136,6 @@ const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
   'Group health newsletter delivery did not complete.'
-const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
 const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
   2 * 60 * 60 * 1000
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
@@ -572,6 +582,9 @@ export async function executeClaimedAssistantCronJob(
     // failure remains retryable even when its next attempt crosses the stale
     // delivery window. Expiry may suppress the outbound, never the owner work.
     let lifecycleSkipReason: string | null = null
+    let preparedExperimentContext: ExperimentLifecycleScheduledContext | null = null
+    let preparedOnboardingContext: AssistantOnboardingResumeContextResult | null = null
+    let preparedScheduledTaskAuthority: AssistantScheduledTaskAuthority | null = null
     if (
       deviceActivityAuthority.error === null &&
       canonicalSourceSkipReason === null &&
@@ -580,15 +593,68 @@ export async function executeClaimedAssistantCronJob(
     ) {
       // Route on the immutable automationId so a user-edited slug cannot
       // silently bypass the precondition.
-      const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
+      const lifecycleResult = await prepareExperimentLifecycleScheduledTurn({
         automationId: input.job.source.automationId,
+        expectedUpdatedAt: input.job.source.updatedAt,
+        productBaseUrl: resolveAssistantMurphProductBaseUrl(
+          input.turnEnvironment?.env ?? process.env,
+        ),
         tags: input.job.source.tags,
         vault: input.vault,
       })
       if (lifecycleResult.kind === 'skip') {
         lifecycleSkipReason = lifecycleResult.reason
+      } else if ('scheduledTaskAuthority' in lifecycleResult) {
+        preparedScheduledTaskAuthority =
+          lifecycleResult.scheduledTaskAuthority
+        preparedExperimentContext = lifecycleResult.promptContext
+      }
+
+      if (lifecycleSkipReason === null) {
+        const onboardingResult = await prepareOnboardingFollowupScheduledTurn({
+          automation: input.job.source,
+          readDeviceAccounts: () =>
+            readAssistantCronOnboardingDeviceAccounts({
+              executionContext: input.executionContext ?? null,
+              signal: yieldCancellation.signal,
+              vault: input.vault,
+            }),
+          vault: input.vault,
+        })
+        if (onboardingResult.kind === 'skip') {
+          lifecycleSkipReason = onboardingResult.reason
+        } else {
+          preparedOnboardingContext =
+            'promptContext' in onboardingResult
+              ? onboardingResult.promptContext
+              : null
+          if ('scheduledTaskAuthority' in onboardingResult) {
+            preparedScheduledTaskAuthority =
+              onboardingResult.scheduledTaskAuthority
+          }
+        }
       }
     }
+
+    const scheduledTaskAuthority = resolveAssistantCronTurnScheduledTaskAuthority({
+      authority:
+        preparedScheduledTaskAuthority ??
+        deviceActivityAuthority.scheduledTaskAuthority ??
+        resolveAssistantCronScheduledTaskAuthority(input.job),
+      job: input.job,
+      occurrenceAt,
+      trigger: input.trigger,
+    })
+    const reservedNewsletterOccurrenceUnauthorized =
+      assistantCronJobUsesReservedNewsletterSlug(input.job) &&
+      scheduledTaskAuthority.kind !== 'group_newsletter'
+    const boundScheduledTaskOccurrenceUnauthorized =
+      assistantCronJobHasScheduledTaskBinding(input.job) &&
+      scheduledTaskAuthority.kind === 'none'
+    const deliveryDispatchMode =
+      scheduledTaskAuthority.kind === 'group_challenge'
+        ? 'queue-only'
+        : input.deliveryDispatchMode
 
     const staleError =
       input.trigger === 'scheduled' &&
@@ -608,6 +674,14 @@ export async function executeClaimedAssistantCronJob(
       outcome = 'skipped_gate'
       reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
+    } else if (reservedNewsletterOccurrenceUnauthorized) {
+      outcome = 'skipped_gate'
+      reason = 'newsletter_authority_unavailable'
+      errorText = 'Group newsletter occurrence did not pass scheduled authority admission.'
+    } else if (boundScheduledTaskOccurrenceUnauthorized) {
+      outcome = 'skipped_gate'
+      reason = 'scheduled_task_authority_unavailable'
+      errorText = 'Bound scheduled task did not pass scheduled authority admission.'
     } else if (staleError) {
       outcome = 'expired'
       reason = 'late_occurrence'
@@ -672,14 +746,10 @@ export async function executeClaimedAssistantCronJob(
           assistantTargetOverride:
             resolveAssistantCronAutomationTargetOverride(input.job) ??
             deviceActivityAuthority.assistantTargetOverride,
-          deliveryDispatchMode: input.deliveryDispatchMode,
+          deliveryDispatchMode,
           executionContext: input.executionContext,
-          scheduledAutomationAuthority: resolveAssistantCronScheduledNewsletterAuthority({
-            job: input.job,
-            occurrenceAt,
-            trigger: input.trigger,
-          }),
           scheduledOccurrenceAt: occurrenceAt,
+          scheduledTaskAuthority,
           serviceTier,
           signal: yieldCancellation.signal,
           turnEnvironment: input.turnEnvironment ?? null,
@@ -700,6 +770,12 @@ export async function executeClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
+          if (scheduledTaskAuthority.kind === 'group_challenge') {
+            await assertAssistantScheduledTaskSourceCurrent({
+              authority: scheduledTaskAuthority,
+              vault: input.vault,
+            })
+          }
           const deliveryRoute = maintenanceJob
             ? resolveAssistantCronNotificationDeliveryRoute(claimedJob.target)
             : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
@@ -711,9 +787,8 @@ export async function executeClaimedAssistantCronJob(
             vault: input.vault,
             ...automationTurn,
             // Replay barrier: once the provider was admitted, a yielded
-            // maintenance turn may already have committed memory writes even
-            // if the completed-command event never reached the buffered raw
-            // events, so the occurrence must be consumed, not retried.
+            // maintenance turn may already have committed memory writes, so
+            // the occurrence must be consumed, not retried.
             ...(maintenanceJob
               ? {
                   onProviderRequestStarted: () => {
@@ -722,6 +797,10 @@ export async function executeClaimedAssistantCronJob(
                 }
               : {}),
             beforeDelivery: async () => {
+              await assertAssistantCronDeviceActivityParentStillAuthorized({
+                job: input.job,
+                vault: input.vault,
+              })
               const authority = await resolveAssistantCronCanonicalSourceAuthority({
                 job: input.job,
                 now: new Date(),
@@ -736,8 +815,18 @@ export async function executeClaimedAssistantCronJob(
                 job: input.job,
                 vault: input.vault,
               })
+              if (scheduledTaskAuthority.kind === 'group_challenge') {
+                await assertAssistantScheduledTaskSourceCurrent({
+                  authority: scheduledTaskAuthority,
+                  vault: input.vault,
+                })
+              }
             },
             beforeCommit: async (context) => {
+              await assertAssistantCronDeviceActivityParentStillAuthorized({
+                job: input.job,
+                vault: input.vault,
+              })
               const authority = await resolveAssistantCronCanonicalSourceAuthority({
                 job: input.job,
                 now: new Date(),
@@ -752,6 +841,12 @@ export async function executeClaimedAssistantCronJob(
                 job: input.job,
                 vault: input.vault,
               })
+              if (scheduledTaskAuthority.kind === 'group_challenge') {
+                await assertAssistantScheduledTaskSourceCurrent({
+                  authority: scheduledTaskAuthority,
+                  vault: input.vault,
+                })
+              }
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -766,7 +861,19 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
             },
-            instructions: buildAssistantCronExecutionInstructions(input.job),
+            instructions: buildAssistantCronExecutionInstructions(
+              input.job,
+              preparedOnboardingContext,
+              preparedExperimentContext,
+            ),
+            preparedResponseMedia: preparedExperimentContext
+              ? [{
+                  alt: 'Experiment progress card',
+                  kind: 'image',
+                  source: 'murph-experiment-progress-card',
+                  url: preparedExperimentContext.progressCard.url,
+                }]
+              : null,
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
               trigger: input.trigger,
@@ -796,7 +903,7 @@ export async function executeClaimedAssistantCronJob(
               deliveryRoute.deliveryTarget ??
               undefined,
             deferCommitUntilDeliveryAccepted:
-              input.deliveryDispatchMode === 'queue-only',
+              deliveryDispatchMode === 'queue-only',
             deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
             deliverySource: claimedJob.target.deliverySource,
             deliveryTarget: deliveryRoute.deliveryTarget,
@@ -830,7 +937,17 @@ export async function executeClaimedAssistantCronJob(
               deliveryOutcome: result.deliveryOutcome ?? null,
               job: input.job,
             })
-          if (result.deliveryOutcome?.kind === 'queued') {
+          const newsletterDeliveryIntent =
+            result.postTurnDeliveryExpectations?.newsletterDeliveryIntent ?? null
+          if (
+            result.postTurnDeliveryExpectations?.newsletterSendResult?.status ===
+              'accepted' &&
+            newsletterDeliveryIntent
+          ) {
+            pendingDeliveryIntentId = newsletterDeliveryIntent.intentId
+            outcome = 'delivery_pending'
+            reason = 'delivery_pending'
+          } else if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
             outcome = 'delivery_pending'
             reason = 'delivery_pending'
@@ -862,15 +979,12 @@ export async function executeClaimedAssistantCronJob(
       isAssistantCronBackgroundMaintenanceYieldError(error) ||
       yieldCancellation.yieldRequested()
     // Provider admission is the single replay barrier for maintenance: any
-    // terminal failure after admission may have committed memory writes even
-    // when the completed-command event was lost, so the occurrence is
-    // consumed. The overlapping evidence window makes a skipped night safe;
-    // a replay after a committed write is not. The raw-event detector stays
-    // only as a defensive signal for pre-admission edge cases.
+    // terminal failure after admission may have committed memory writes, so
+    // the occurrence is consumed. The overlapping evidence window makes a
+    // skipped night safe; a replay after a committed write is not.
     const nonReplayableBackgroundMaintenanceWork =
       maintenanceJob &&
-      (maintenanceProviderStarted ||
-        assistantNotificationErrorHasNonReplayableProviderWork(error))
+      maintenanceProviderStarted
     if (nonReplayableBackgroundMaintenanceWork) {
       errorText = ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR
       errorCode = backgroundMaintenanceYielded
@@ -897,6 +1011,11 @@ export async function executeClaimedAssistantCronJob(
       errorCode = error.code
       outcome = 'skipped_gate'
       reason = `canonical_source_${error.disposition}`
+    } else if (error instanceof AssistantCronDeviceActivityAuthorityInvalidatedError) {
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = 'device_activity_authority_stale'
     } else if (error instanceof AssistantCronLifecycleNotificationInvalidatedError) {
       errorText = error.message
       errorCode = error.code
@@ -1256,7 +1375,14 @@ function resolveAssistantCronOutboxAutomationAuthority(
 
 function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
+  onboardingContext: AssistantOnboardingResumeContextResult | null,
+  experimentContext: ExperimentLifecycleScheduledContext | null,
 ): string {
+  if (
+    resolveAssistantCronScheduledTaskAuthority(job).kind === 'group_newsletter'
+  ) {
+    return job.job.prompt
+  }
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
     !lastFailedAt ||
@@ -1269,10 +1395,68 @@ function buildAssistantCronExecutionInstructions(
           '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
         ].join('\n')
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
+  const onboardingEvidence = onboardingContext
+    ? [
+        'Onboarding resume context (engine-supplied canonical snapshot):',
+        JSON.stringify(onboardingContext),
+        'Use this snapshot and the available recent user messages under the onboarding skill. Do not attempt a shell, CLI, or filesystem read. If visible and saved evidence satisfies answered completion or an overall decline, use only the exact `murph.complete_onboarding` tool supplied to this prepared managed turn, then return skip.',
+      ].join('\n')
+    : null
+  const experimentEvidence = experimentContext
+    ? [
+        'Experiment lifecycle context (engine-supplied canonical snapshot):',
+        JSON.stringify({
+          ...experimentContext,
+          progressCard: {
+            card: experimentContext.progressCard.card,
+            warnings: experimentContext.progressCard.warnings,
+          },
+        }),
+        'Use this exact snapshot under the owning experiment guidance. The trusted parent has already prepared the card and will attach it only if this turn sends. Do not request an experiment selector, lifecycle read, shell, CLI, filesystem read, media tool, or attachment URL. Compose a grounded text review from this snapshot only.',
+      ].join('\n')
+    : null
 
-  return [job.job.prompt, retryEvidence, supportScope]
+  return [
+    job.job.prompt,
+    retryEvidence,
+    supportScope,
+    onboardingEvidence,
+    experimentEvidence,
+  ]
     .filter((section): section is string => section !== null)
     .join('\n\n')
+}
+
+async function readAssistantCronOnboardingDeviceAccounts(input: {
+  executionContext: AssistantExecutionContext | null
+  signal: AbortSignal
+  vault: string
+}): Promise<readonly unknown[]> {
+  input.signal.throwIfAborted()
+  const hostedDeviceTool = input.executionContext?.hosted?.deviceTool ?? null
+  if (hostedDeviceTool) {
+    const result = await hostedDeviceTool.request(
+      { action: 'list_accounts' },
+      { signal: input.signal },
+    )
+    return result.action === 'list_accounts' ? result.accounts : []
+  }
+
+  if (input.executionContext?.hosted) {
+    return []
+  }
+  const controlPlane = await resolveExistingManagedDeviceSyncControlPlane({
+    vault: input.vault,
+  })
+  if (!controlPlane) {
+    return []
+  }
+  input.signal.throwIfAborted()
+  const client = createDeviceSyncClient({
+    baseUrl: controlPlane.baseUrl,
+    controlToken: controlPlane.controlToken,
+  })
+  return (await client.listAccounts()).accounts
 }
 
 function buildAssistantCronSupportScopeInstructions(
@@ -1332,38 +1516,78 @@ function resolveAssistantCronAutomationTargetOverride(
     : null
 }
 
-function resolveAssistantCronScheduledNewsletterAuthority(input: {
+function assistantCronScheduledNewsletterOccurrenceIsAuthorized(input: {
+  authority: AssistantScheduledTaskAuthority
   job: ResolvedAssistantCronJob
   occurrenceAt: string
   trigger: AssistantCronTrigger
-}): HostedRuntimeNewsletterScheduledAuthority | null {
+}): boolean {
   if (
+    input.authority.kind !== 'group_newsletter' ||
     input.trigger !== 'scheduled' ||
     input.job.kind !== 'canonical' ||
     input.job.source.kind !== 'automation' ||
     input.job.source.schedule.kind !== 'cron' ||
-    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+    input.job.source.slug !== ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
   ) {
-    return null
+    return false
   }
 
   const createdAtMs = Date.parse(input.job.source.createdAt)
   const occurrenceAtMs = Date.parse(input.occurrenceAt)
   if (!Number.isFinite(createdAtMs) || !Number.isFinite(occurrenceAtMs)) {
-    return null
+    return false
   }
 
   if (
     occurrenceAtMs <
       createdAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
   ) {
-    return null
+    return false
   }
 
-  return {
-    automationId: input.job.source.automationId,
-    occurrenceAt: input.occurrenceAt,
+  return true
+}
+
+function assistantCronJobUsesReservedNewsletterSlug(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.slug === ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+}
+
+function assistantCronJobHasScheduledTaskBinding(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.scheduledTask !== null &&
+    job.source.scheduledTask !== undefined
+}
+
+export function resolveAssistantCronScheduledTaskAuthority(
+  job: ResolvedAssistantCronJob,
+): AssistantScheduledTaskAuthority {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return { kind: 'none' }
   }
+  return resolveAssistantScheduledTaskAuthorityFromSource(job.source)
+}
+
+function resolveAssistantCronTurnScheduledTaskAuthority(input: {
+  authority: AssistantScheduledTaskAuthority
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  trigger: AssistantCronTrigger
+}): AssistantScheduledTaskAuthority {
+  if (
+    input.authority.kind === 'group_newsletter' &&
+    !assistantCronScheduledNewsletterOccurrenceIsAuthorized(input)
+  ) {
+    return { kind: 'none' }
+  }
+  return input.authority
 }
 
 function resolveAssistantCronPostTurnDeliveryFailure(input: {
@@ -1372,7 +1596,9 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
   result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
   trigger: AssistantCronTrigger
 }): string | null {
-  if (!resolveAssistantCronScheduledNewsletterAuthority({
+  const authority = resolveAssistantCronScheduledTaskAuthority(input.job)
+  if (!assistantCronScheduledNewsletterOccurrenceIsAuthorized({
+    authority,
     job: input.job,
     occurrenceAt: input.occurrenceAt,
     trigger: input.trigger,
@@ -1382,6 +1608,12 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
 
   const newsletterSendResult =
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
+  if (
+    newsletterSendResult?.status === 'accepted' &&
+    input.result.postTurnDeliveryExpectations?.newsletterDeliveryIntent
+  ) {
+    return null
+  }
   return !newsletterSendResult
     || newsletterSendResult.status === 'unavailable'
     || newsletterSendResult.status === 'accepted'
@@ -1717,6 +1949,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
           ...runningClearedState,
           pendingOccurrenceAt: null,
           retryAfterAt: null,
+          scheduledMediaReservation: null,
           lastFailedAt: input.finishedAt,
           lastError: input.run.error,
           consecutiveFailures: 0,
@@ -1732,6 +1965,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
         ...runningClearedState,
         pendingOccurrenceAt: null,
         retryAfterAt: null,
+        scheduledMediaReservation: null,
         lastSucceededAt: input.finishedAt,
         lastError: null,
         consecutiveFailures: 0,
@@ -1793,12 +2027,14 @@ async function resolveDeviceActivityParentAuthority(input: {
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
   error: string | null
   route: AutomationQueryRecord['route'] | null
+  scheduledTaskAuthority: AssistantScheduledTaskAuthority | null
 }> {
   if (input.job.kind !== 'local') {
     return {
       assistantTargetOverride: null,
       error: null,
       route: null,
+      scheduledTaskAuthority: null,
     }
   }
 
@@ -1808,6 +2044,7 @@ async function resolveDeviceActivityParentAuthority(input: {
       assistantTargetOverride: null,
       error: null,
       route: null,
+      scheduledTaskAuthority: null,
     }
   }
 
@@ -1832,6 +2069,7 @@ async function resolveDeviceActivityParentAuthority(input: {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
+      scheduledTaskAuthority: null,
     }
   }
   if (parentAutomation.schedule.kind !== 'deviceActivity') {
@@ -1839,6 +2077,7 @@ async function resolveDeviceActivityParentAuthority(input: {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
+      scheduledTaskAuthority: null,
     }
   }
   const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
@@ -1859,6 +2098,7 @@ async function resolveDeviceActivityParentAuthority(input: {
       assistantTargetOverride: null,
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
+      scheduledTaskAuthority: null,
     }
   }
 
@@ -1866,6 +2106,23 @@ async function resolveDeviceActivityParentAuthority(input: {
     assistantTargetOverride: parentAutomation.assistantTargetOverride,
     error: null,
     route: parentAutomation.route,
+    scheduledTaskAuthority: {
+      automationId: parentAutomation.automationId,
+      expectedUpdatedAt: parentAutomation.updatedAt,
+      kind: 'generic_notification',
+    },
+  }
+}
+
+async function assertAssistantCronDeviceActivityParentStillAuthorized(input: {
+  job: ResolvedAssistantCronJob
+  vault: string
+}): Promise<void> {
+  const authority = await resolveDeviceActivityParentAuthority(input)
+  if (authority.error !== null) {
+    throw new AssistantCronDeviceActivityAuthorityInvalidatedError(
+      authority.error,
+    )
   }
 }
 
@@ -2104,6 +2361,12 @@ class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
       input.reason,
     )
     this.disposition = input.kind
+  }
+}
+
+class AssistantCronDeviceActivityAuthorityInvalidatedError extends VaultCliError {
+  constructor(reason: string) {
+    super('ASSISTANT_CRON_DEVICE_ACTIVITY_AUTHORITY_STALE', reason)
   }
 }
 
@@ -2411,21 +2674,6 @@ function createAssistantCronBackgroundMaintenanceCancellation(input: {
     },
     signal: controller.signal,
   }
-}
-
-function assistantNotificationErrorHasNonReplayableProviderWork(
-  error: unknown,
-): boolean {
-  if (!(error instanceof Error)) {
-    return false
-  }
-
-  const details = Reflect.get(error, 'details')
-  if (typeof details !== 'object' || details === null || Array.isArray(details)) {
-    return false
-  }
-
-  return Reflect.get(details, 'assistantNotificationProviderNonReplayableWork') === true
 }
 
 function assistantCronJobIsPreemptibleBackgroundMaintenance(

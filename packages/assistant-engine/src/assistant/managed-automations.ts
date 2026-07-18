@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   loadVault,
   patchAutomation,
@@ -12,7 +13,6 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
-  MURPH_PRODUCT_ORIGIN,
   parseAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -153,6 +153,8 @@ const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
 ] as const
 const EXPERIMENT_SUPPORT_SERIES_ID_PREFIX = 'experiment-lifecycle:'
 
+// Immutable historical signature used only to recognize and retire the old
+// seeded automation. It is never installed or supplied to a scheduled turn.
 const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
   'This scheduled check helps continue Murph setup.',
   '',
@@ -186,13 +188,12 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled weekly run, decide whether to send a weekly health digest, send a short reconnect prompt, or suppress the run entirely. Assume the user already checks their wearable app daily and has seen their scores. Send only if the digest tells them something about their week they could not get by glancing at that app, and that they will still remember ten seconds after reading it. A recap with no takeaway is worse than no message at all.',
       '',
       'Substance check before composing:',
-      '- When `murph.device` is available, use it with `action: list_accounts` to see which wearable / device accounts exist and their auth status. If it is unavailable, do not infer account or authorization state.',
-      '- Read `vault-cli wearables sources list` to see per-provider freshness, `lastDate`, and `stalenessVsNewestDays`.',
-      "- Skim recent user-logged substance since roughly the last digest: wearables (`vault-cli wearables latest`), and any manual logs the user typically keeps (samples, food, supplements, body, events, knowledge edits). Use the smallest CLI calls needed; do not exhaustively scan the vault.",
+      '- Call `murph.scheduled_read` with `action: "sources"` to see per-provider freshness, `lastDate`, and `stalenessVsNewestDays`.',
+      '- Skim recent user-logged substance since roughly the last digest with bounded `murph.scheduled_read` calls: `latest` for wearables and `recent_records` or `search` for the smallest relevant manual-log families (samples, food, supplements, body, events, or knowledge-linked context). Do not exhaustively scan the vault.',
       '',
       'Branch on what you find:',
       '- Substance present: a week-vs-baseline shift worth knowing, a link between real-life context and a signal (for example two hard yardwork days lining up with a recovery dip), movement in an active experiment, or a scary-looking change that is probably just noise and worth defusing. New data alone is not substance. Produce the concise weekly health digest as described below.',
-      '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more. This branch requires a successful `murph.device` call with `action: connect` for that provider and the `connectUrl` from its result. If the tool is unavailable or the call fails, suppress instead of promising a reconnect path. Otherwise send one short, warm in-chat note acknowledging the gap and inviting the user to reconnect so Murph can keep seeing their data. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
+      '- Wearable connected but not delivering: a source has `status: error` with a reconnect-required error such as `TOKEN_REFRESH_FAILED`, or its sources show no new data for roughly a week or more. Send one short, warm in-chat note acknowledging the gap and inviting the user to reply if they want help reconnecting so Murph can keep seeing their data. The scheduled turn cannot connect or reconcile a device and must not promise or invent a connection link. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
       '- Suppress: If the week was ordinary — numbers inside the user\'s usual ranges, no notable context, no experiment movement — or if there are no connected device accounts, no live wearable, no recent manual logs, and no experiment movement worth mentioning, return `{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}` and suppress the scheduled message. If the reconnect branch applies, it wins over suppression. Skipping an unremarkable week is the expected outcome, not a failure. Do not send a process note or a "quiet week" message.',
       '',
       'Frame the digest as a compass, not a report: what changed, what stayed steady, what was probably noise, the likely real-life context behind the week, at most one thing worth keeping, and at most one thing not worth reacting to.',
@@ -201,7 +202,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Do not duplicate the weekly health insight automation: that one covers durable non-obvious personal findings; the digest covers the narrative of this week.',
       '',
-      'If there is an active experiment with enough data to show movement, attach its progress image with `vault-cli experiment progress-card <slug> --format json` and fold its progress into the digest.',
+      'If there is an active experiment with enough data to show movement, inspect it with bounded `murph.scheduled_read` `recent_records`, `search`, or exact `record` calls and fold its progress into the digest. Do not attempt a CLI progress-card render or imply an attachment exists.',
       '',
       'Do not overstate certainty. If data is missing, say that plainly.',
     ].join('\n'),
@@ -226,8 +227,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled weekly run, find zero or one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas. It is better to send nothing than to force a weak weekly note.',
       '',
       'Before choosing a finding:',
-      '- Read the derived knowledge index.',
-      '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_list"` for the bounded derived knowledge index.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_get"` and `slug: "weekly-health-insights"`. If the page is missing, treat that as no prior weekly health insights.',
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
@@ -272,8 +273,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'If something clears the bar:',
       '- Use the current local date as the section heading: `YYYY-MM-DD`.',
       '- If `weekly-health-insights` already has a `YYYY-MM-DD` section, read it as this run\'s candidate and do not append another section. Send from it only if it still clears the current interestingness bar and is useful enough to repeat now; otherwise return `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}`.',
-      '- Otherwise append one dated section to the single rolling page with the locked append surface, for example: `vault-cli knowledge append-section weekly-health-insights YYYY-MM-DD --title "Weekly health insights" --body <markdown> --source-path <canonical-vault-path>`. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
-      '- If append-section reports that the section already exists, another run created it first: read `weekly-health-insights` and apply the same current interestingness gate before deciding whether to send or return a `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}` decision.',
+      '- Otherwise call `murph.scheduled_knowledge` once with only the finding as `body`. The trusted parent owns the exact `weekly-health-insights` page and derives the occurrence-local date heading and prepend position; do not supply an action, date, timezone, heading, position, slug, or title. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
+      '- If `murph.scheduled_knowledge` reports `status: "reused"`, another run created this occurrence-local-date section first: read `weekly-health-insights` and apply the same current interestingness gate before deciding whether to send or return a `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}` decision.',
       '- Then, only when the finding clears the bar, send one concise note in plain adult language: a clear claim anchored in recognizable context, compact evidence, the simple translation, and a light optional follow-up.',
       '- Use dates for traceability, not as the story: prefer context the user may recognize (for example, "after two hard days in a row") and use exact dates only when they help.',
       '- Name the outcome before contrasting inputs. Prefer "The recovery dip lined up with stacking hard days more than with running by itself" over "running itself is not the problem."',
@@ -311,23 +312,23 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Similar concrete, evidence-backed gaps in sleep, movement, nutrition, or recovery basics.',
       '',
       'Evidence gate. Every claim must survive all three checks before it can be offered:',
-      '- Capability: the metric must be positively captured by a connected, healthy source. When `murph.device` is available, use it with `action: list_accounts`; always read `vault-cli wearables sources list`. If account health cannot be proved without the tool, suppress any candidate that depends on it. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears in this user\'s data before judging it.',
+      '- Capability: the metric must be positively captured by a fresh, healthy source returned by `murph.scheduled_read` action `sources`, and it must actually appear in this user\'s data. If source health or coverage is unclear, suppress any candidate that depends on it. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears before judging it.',
       '- Plausibility: treat exact zeros, sudden cliffs, or values wildly inconsistent with the rest of the data as pipeline or sync bugs, not behavior. If a reading looks broken, suppress; never tell the user they are inactive because a counter reads zero.',
       '- Sufficiency: require a real pattern window, roughly three or more weeks of reasonably continuous coverage for the metric, before calling anything consistent. One bad week is noise.',
       '- Sleep validity: consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own. Require reliable timing/opportunity or disruption evidence plus a meaningful independent signal such as next-day function or the user\'s stated concern. Do not diagnose a sleep disorder from device data.',
       '',
       'Dedupe and pacing:',
-      '- Read `vault-cli knowledge show improvement-opportunities`. If the page is missing, treat that as no prior offers. Use `improvement-opportunities` as the only dedupe ledger; do not create per-week pages.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_get"` and `slug: "improvement-opportunities"`. If the page is missing, treat that as no prior offers. Use `improvement-opportunities` as the only dedupe ledger; do not create per-week pages.',
       '- Never re-offer a domain that already has a section in the ledger unless that section is at least eight weeks old and there is meaningfully new evidence, such as the situation regressing after improvement.',
       '- Skip a domain entirely when an active or recent experiment already covers it, or when recent conversation shows the user is already working on it or has declined it.',
-      '- Read `vault-cli knowledge show weekly-health-insights` as well, and do not send something that repeats a recent weekly insight.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_get"` and `slug: "weekly-health-insights"` as well, and do not send something that repeats a recent weekly insight.',
       '- Offer at most one domain per run: the one with the strongest evidence and the most realistic path to improvement.',
       '',
       'If nothing clears the bar, return `{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}`, suppress the scheduled message, and do not append to the ledger. Do not send a process note, a "nothing this week" message, a setup nag, or a request for better logging.',
       '',
       'If one domain clears every gate:',
-      '- Append one dated section to the rolling ledger before sending, using the locked append surface, for example: `vault-cli knowledge append-section improvement-opportunities YYYY-MM-DD --title "Improvement opportunities" --body <markdown> --source-path <canonical-vault-path>`. The body records the domain, the compact evidence, and that an offer was sent, so future runs can pace themselves. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
-      '- If append-section reports that the section already exists, another run created it first: read the existing section, apply the same evidence gate, and either send from it or return `{"kind":"skip","privateSummary":"Existing improvement opportunity did not clear the current send bar."}`.',
+      '- Before sending, call `murph.scheduled_knowledge` once with only the ledger entry as `body`. The trusted parent owns the exact `improvement-opportunities` page and derives the occurrence-local date heading and prepend position; do not supply an action, date, timezone, heading, position, slug, or title. The body records the domain, the compact evidence, and that an offer was sent, so future runs can pace themselves. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
+      '- If `murph.scheduled_knowledge` reports `status: "reused"`, another run created this occurrence-local-date section first: read the existing section, apply the same evidence gate, and either send from it or return `{"kind":"skip","privateSummary":"Existing improvement opportunity did not clear the current send bar."}`.',
       '- Then send one short, warm note in plain adult language: name the personal pattern with compact evidence (for example, "your sleep window has shifted by more than 90 minutes on most weeknights this month, and you have mentioned feeling wiped out in the mornings"), say in one sentence why it is worth caring about, and ask whether they want to work on it together. Do not use population sleep-stage targets as the rationale.',
       '- Frame it as an invitation, not a verdict or a lecture. Do not prescribe a plan in this message; if the user says yes, the follow-up conversation is where a plan or a small experiment gets designed.',
       '',
@@ -372,17 +373,15 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Do not lead with journal, publisher, study type, or publication date. Lead with the useful point for the user.',
       '',
       'Evidence and retrieval budget:',
-      '- Read the derived knowledge index.',
-      '- Read `vault-cli knowledge show weekly-health-research-scout`. If missing, treat as no prior research scout ledger.',
-      '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
-      '- Before calling external research, name at least one current experiment, plan, metric, symptom, lab, a trend in their own wearable data, live tradeoff, recent change, or clinician question that retrieved research could answer. If none exists, suppress the scheduled message without calling `vault-cli research scout-batch` and do not append to the wiki.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_list"` for the bounded derived knowledge index.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_get"` and `slug: "weekly-health-research-scout"`. If missing, treat as no prior research scout ledger.',
+      '- Before calling external research, name at least one current experiment, plan, metric, symptom, lab, a trend in their own wearable data, live tradeoff, recent change, or clinician question that retrieved research could answer. If none exists, suppress the scheduled message without calling `murph.research_scout_batch` and do not append to the wiki.',
       '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
       '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, precise private identifiers, organizations, locations, events, or raw measurements to external providers.',
       '- Use only broad lowercase non-identifying category tags, such as sleep, metabolic health, glucose, hs-crp, resistance training, creatine, type 2 diabetes, better recovery, or morning light.',
       '- Define 1-4 focused, mechanism-shaped research lanes tied to current questions or experiments. Group related tags into one lane; do not create one lane per tag. Good lane labels include evening light and sleep, late meals and glucose, zone 2 training and resting heart rate, or creatine and recovery.',
-      '- If unsure about the batch file body, run `vault-cli research scout-batch-payload-schema --format json` before the scout call.',
-      '- Use `vault-cli research scout-batch` once. The `--input` body is `{"lanes":[{"label":"sleep","profile":{...}}]}`. Each lane profile uses bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use a generic `tags` field. Example body: `{"lanes":[{"label":"evening light and sleep","profile":{"topics":["sleep"],"behaviors":["evening light"],"activeExperiments":["blue light glasses"]}},{"label":"late meals and glucose","profile":{"topics":["metabolic health"],"biomarkers":["glucose"],"behaviors":["late meals"]}}]}`.',
-      '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and cap `--maxCandidatesPerLane` at 8 for this automation.',
+      '- Call `murph.research_scout_batch` once with `lanes`, `since`, `until`, and `maxCandidatesPerLane`. Each lane has a `label` and `profile`; profile uses only the bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`, not a generic `tags` field. Example lanes: `[{"label":"evening light and sleep","profile":{"topics":["sleep"],"behaviors":["evening light"],"activeExperiments":["blue light glasses"]}},{"label":"late meals and glucose","profile":{"topics":["metabolic health"],"biomarkers":["glucose"],"behaviors":["late meals"]}}]`.',
+      '- Pass publication bounds as `since` and `until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and cap `maxCandidatesPerLane` at 8 for this automation.',
       '- Treat the returned results as a candidate pool only. Review, dedupe, and rank candidates locally against the current vault context and prior research scout ledger, then either send one conversational insight or suppress the run.',
       '- The scout-batch call is the retrieval budget. Make another research/provider/web call only if the batch result is structurally unusable, the payload schema is unclear, or the chosen candidate lacks enough source evidence to summarize safely. Do not search again just to find something sendable or improve phrasing.',
       '- Do not perform an open-ended web browsing loop.',
@@ -421,7 +420,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Explain any technical term in ordinary language before using it.',
       '- Put at most one practical next move in the prose. Prefer keep one variable stable, measure one thing, ignore a metric their own data shows is noisy for them, ask a clinician a better question, or avoid changing the plan based on weak/noisy evidence. Suggest adding behavior only when it passes the burden check.',
       '- Keep the message practical, calm, and non-alarmist.',
-      '- Append one dated section to `weekly-health-research-scout` with source details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
+      '- Call `murph.scheduled_knowledge` once with only a `body` containing source details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed. The trusted parent owns the exact `weekly-health-research-scout` page and derives the occurrence-local date heading and prepend position; do not supply an action, date, timezone, heading, position, slug, or title.',
     ].join('\n'),
   },
   {
@@ -444,12 +443,12 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Goal: every two weeks, send one concise personalized in-chat product note. Each run is one of two kinds, alternating run to run: a changelog note with the 2-3 recently shipped Murph updates this user is most likely to find genuinely interesting, or a feature discovery note with the 2-3 things Murph can already do that this user has not tried and is most likely to value. Fallback is allowed at most once: attempt the initially chosen kind once; you may attempt the other kind once as the fallback; never fall back from a fallback. If both kinds are unavailable, invalid, empty, or below bar, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. A note with no substance is worse than no note.',
       '',
       "Decide this run's kind first:",
-      '- Read `vault-cli knowledge show murph-product-notes`. If the page is missing, treat that as no prior product notes and choose the feature discovery kind.',
+      '- Call `murph.scheduled_read` with `action: "knowledge_get"` and `slug: "murph-product-notes"`. If the page is missing, treat that as no prior product notes and choose the feature discovery kind.',
       '- Otherwise find the most recent dated section and choose the other kind: last recorded changelog means feature discovery now; last recorded feature discovery means changelog now.',
       '- Use `murph-product-notes` as the only ledger for this automation. Do not create per-week pages and do not scan unrelated wiki pages.',
       '',
       'Changelog kind:',
-      `- Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=14&featureLimit=70&improvementLimit=10.`,
+      '- Call `murph.product_source` once with `source: "changelog"`. It fetches the one canonical bounded changelog feed.',
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
       '- If the feed is unavailable, invalid, or empty, do not fabricate updates; fall back to the feature discovery kind.',
       '- Choose 2-3 items using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
@@ -459,7 +458,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Use the canonical title, summary, URL, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user.',
       '',
       'Feature discovery kind:',
-      `- Fetch the canonical JSON catalog once from ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog.`,
+      '- Call `murph.product_source` once with `source: "feature_catalog"`. It fetches the one canonical feature catalog.',
       '- Treat that catalog as the only source of truth for what Murph can do. Do not invent capabilities, availability, or try-it instructions beyond it.',
       '- If the catalog is unavailable or invalid, do not fabricate capabilities; fall back to the changelog kind.',
       "- Drop items the user is already using. Each item's alreadyUsing field says what to check; judge it using only context Murph already has for normal assistance, and do not inspect raw health values solely to personalize suggestions. Judge alreadyUsing only from context already surfaced for ordinary assistance: connected providers and channels, active experiments and automations, group memberships, and recurring request categories. Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used.",
@@ -471,8 +470,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       "- Frame each as something the user can try right now in this chat, weaving the item's tryIt prompt in naturally rather than quoting it mechanically.",
       '',
       'Both kinds:',
-      '- Before sending, append one dated section to the ledger with the locked append surface, for example: `vault-cli knowledge append-section murph-product-notes YYYY-MM-DD --title "Murph product notes" --body <markdown>`. The appended section body must record only this run\'s kind and the chosen item ids; do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
-      '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
+      '- Before sending, call `murph.scheduled_knowledge` once with only a `body` that records this run\'s kind and the chosen item ids. The trusted parent owns the exact `murph-product-notes` page and derives the occurrence-local date heading and prepend position; do not supply an action, date, timezone, heading, position, slug, or title. Do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
+      '- If `murph.scheduled_knowledge` reports `status: "reused"`, another run already recorded this occurrence-local-date note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
       '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
       '- Write a brief, warm note with the selected items and why each may matter for this user. 2-3 short bullets or short paragraphs are enough.',
       '- If the ledger page was missing before this run, open with one short sentence that Murph occasionally shares what is new or useful, then move directly into the items.',
@@ -507,9 +506,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
       '',
-      'Read existing saved context with `vault-cli memory show --format json` first. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
+      'Read existing saved context first with `murph.scheduled_read` and `action: "memory_show"`. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
       'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
-      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
+      'Write durable memory only with `murph.maintenance_memory`: use `action: "upsert"` with `section` and `text` for a new fact, or `action: "update"` with the exact existing `memoryId` plus `text` and optional `section` for a correction. Use it only when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
       'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
       'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
@@ -894,6 +893,18 @@ function shouldSpreadMurphManagedAutomationSchedule(
 ): boolean {
   return seed.schedule.kind === 'cron' &&
     MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
+}
+
+/** Match the persisted schedule shape owned by a managed automation seed. */
+export function matchesMurphManagedAutomationSeedSchedule(
+  schedule: unknown,
+  seed: MurphManagedAutomationSeed,
+): boolean {
+  return shouldSpreadMurphManagedAutomationSchedule(seed)
+    ? typeof schedule === 'object' &&
+      schedule !== null &&
+      Reflect.get(schedule, 'kind') === 'cron'
+    : isDeepStrictEqual(schedule, seed.schedule)
 }
 
 function resolveMurphManagedAutomationCreateSeed(input: {

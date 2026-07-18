@@ -62,6 +62,9 @@ import {
 import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
+import {
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
@@ -180,6 +183,53 @@ describe('assistant Codex turn planning', () => {
     })
   })
 
+  it('plans local managed product notes with only its canonical source tools', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const authority = {
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'product_notes' as const,
+      slug: 'murph-product-notes',
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: null },
+      input: {
+        ...createMessageInput(),
+        scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+        scheduledTaskAuthority: authority,
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-18',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.dynamicTools.map((tool) => tool.name)).toEqual([
+      'scheduled_read',
+      'scheduled_knowledge',
+      'product_source',
+    ])
+    expect(plan.scheduledExecution).toBe(true)
+    expect(plan.scheduledOccurrenceAt).toBe('2026-07-18T13:00:00.000Z')
+    expect(plan.scheduledTaskAuthority).toEqual({
+      ...authority,
+      title: 'Murph product notes',
+    })
+  })
+
   it('plans ask continuations as isolated output-only turns with committed private context', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'CLI bootstrap must stay unavailable.',
@@ -285,7 +335,14 @@ describe('assistant Codex turn planning', () => {
 
     const maintenancePlan = await resolveAssistantRouteTurnPlan({
       executionContext,
-      input: createMessageInput(),
+      input: {
+        ...createMessageInput(),
+        scheduledTaskAuthority: {
+          automationId: 'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX',
+          expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+          kind: 'memory_maintenance',
+        },
+      },
       preferenceContext,
       profile: {
         promptProfile: 'notification-decision',
@@ -297,7 +354,15 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(maintenancePlan.dynamicTools).toEqual([])
+    expect(maintenancePlan.dynamicTools.map((tool) => tool.name)).toEqual([
+      'scheduled_read',
+      'maintenance_memory',
+    ])
+    expect(maintenancePlan.scheduledTaskAuthority).toEqual({
+      automationId: 'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'memory_maintenance',
+    })
     expect(maintenancePlan.systemPrompt).not.toContain('hypertension')
     expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
@@ -337,11 +402,16 @@ describe('assistant Codex turn planning', () => {
     const notificationToolNames = notificationPlan.dynamicTools.map(
       (tool) => tool.name,
     )
-    expect(notificationToolNames).toContain('generate_image')
-    expect(notificationToolNames).toContain('attach_response_media')
+    expect(notificationToolNames).toEqual([])
+    expect(notificationToolNames).not.toContain('automation')
+    expect(notificationToolNames).not.toContain('device')
     expect(notificationToolNames).not.toContain('assistant_style')
-    expect(notificationPlan.assistantCliContract).toBe('bootstrap contract')
-    expect(notificationPlan.systemPrompt).toContain('bootstrap contract')
+    expect(notificationPlan.assistantCliContract).toBeNull()
+    expect(notificationPlan.systemPrompt).not.toContain('bootstrap contract')
+    expect(notificationPlan.environments).toBeUndefined()
+    expect(notificationPlan.scheduledExecution).toBe(true)
+    expect(notificationPlan.scheduledOccurrenceAt).toBeNull()
+    expect(notificationPlan.scheduledTaskAuthority).toEqual({ kind: 'none' })
     expect(notificationPlan.systemPrompt).toContain('Murph skill router:')
     expect(notificationPlan.systemPrompt).toContain('Scheduled automation execution:')
     expect(notificationPlan.systemPrompt).toContain('hypertension')
@@ -352,7 +422,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences for this private conversation',
     )
     expect(notificationPlan.systemPrompt).toContain('Humor 10/10')
-    expect(planningMocks.readAssistantCliSurfaceBootstrapContext).toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(notificationPlan.sessionContext).toEqual({
       binding: expect.anything(),
     })
@@ -361,9 +431,11 @@ describe('assistant Codex turn planning', () => {
       executionContext,
       input: {
         ...createMessageInput(),
-        scheduledAutomationAuthority: {
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        scheduledTaskAuthority: {
           automationId: 'automation_newsletter',
-          occurrenceAt: '2026-07-12T13:00:00.000Z',
+          expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
+          kind: 'group_newsletter',
         },
       },
       preferenceContext,
@@ -383,8 +455,13 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
       '## Compose each edition',
     )
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain('hypertension')
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain('device sync pending')
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain('Humor 10/10')
+    expect(scheduledNewsletterPlan.sessionContext).toBeUndefined()
+    expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBeNull()
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'same vault read and write tools as an interactive Murph turn',
+      'Scheduled turns have no native shell or CLI execution environment.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
       'Scheduled turns do not own automation lifecycle',
@@ -1641,6 +1718,7 @@ describe('assistant Codex turn planning', () => {
     const sharedPlan = createSharedPlan({}, {
       channel: 'linq',
       effectiveThreadIsDirect: false,
+      explicitTarget: 'linq-group-target',
       threadId: 'group-notification-thread',
       threadIsDirect: false,
     })
@@ -1648,6 +1726,16 @@ describe('assistant Codex turn planning', () => {
       input: {
         ...createMessageInput(),
         channel: 'linq',
+        deliverResponse: true,
+        deliveryTarget: 'linq-group-target',
+        scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+        scheduledTaskAuthority: {
+          automationId: 'automation_group_challenge',
+          expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+          kind: 'group_challenge' as const,
+          projectionScopeKey: 'steps-days.v0',
+          slug: 'summer-steps',
+        },
         threadIsDirect: false,
       },
       preferenceContext: {
@@ -1687,6 +1775,44 @@ describe('assistant Codex turn planning', () => {
     expect(hostedPlan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
+    expect(hostedPlan.dynamicTools.map((tool) => tool.name)).toEqual([
+      'scheduled_read',
+      'generate_scheduled_image',
+      'generate_scheduled_voice_memo',
+      'generate_scheduled_song',
+    ])
+    expect(hostedPlan.scheduledOccurrenceAt).toBe(
+      '2026-07-18T13:00:00.000Z',
+    )
+
+    const telegramPlan = await resolveAssistantRouteTurnPlan({
+      ...common,
+      input: {
+        ...common.input,
+        channel: 'telegram',
+        deliveryTarget: 'telegram-group-target',
+      },
+      sharedPlan: createSharedPlan({}, {
+        channel: 'telegram',
+        effectiveThreadIsDirect: false,
+        explicitTarget: 'telegram-group-target',
+        threadId: 'telegram-group-notification-thread',
+        threadIsDirect: false,
+      }),
+      executionContext: {
+        hosted: {
+          memberId: 'member-telegram-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+    })
+    expect(telegramPlan.voiceMemoDeliveryChannel).toBe('telegram')
+    expect(telegramPlan.dynamicTools.map((tool) => tool.name)).toEqual([
+      'scheduled_read',
+      'generate_scheduled_image',
+    ])
 
     const nonHostedPlan = await resolveAssistantRouteTurnPlan({
       ...common,
@@ -2930,7 +3056,7 @@ describe('assistant Codex turn planning', () => {
     expect(switchedPlan.conversationHistoryMessages).toBeUndefined()
   })
 
-  it('does not replay committed transcript messages for notification native resume', async () => {
+  it('never resumes an attended thread for a scheduled notification profile', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -3000,14 +3126,17 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resume?.codexThreadId).toBe('thread-resume')
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { role: 'user', content: 'Prior sensitive context.' },
+        { role: 'assistant', content: 'Prior assistant context.' },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
   })
 
-  it('does not resume or replay transcript messages for isolated notification maintenance turns', async () => {
+  it('replays committed transcript context without native resume for isolated notification turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -3080,7 +3209,10 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume).toBeNull()
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Prior sensitive context.', role: 'user' },
+        { content: 'Prior assistant context.', role: 'assistant' },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

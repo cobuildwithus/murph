@@ -98,6 +98,9 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
 import {
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
+import {
   DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
   DEFAULT_CODEX_REASONING_OPTIONS,
   findCodexCatalogModelOptionIndex,
@@ -654,6 +657,167 @@ describe('Codex model catalog', () => {
         type: 'image',
       },
     ])
+  })
+
+  it('forwards scheduled policy and uses direct public fetch only for local product notes', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const authority = {
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'product_notes' as const,
+      slug: 'murph-product-notes',
+    }
+    const directFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ ok: true }),
+    )
+
+    const runAttempt = async (input: {
+      abortSignal: AbortSignal
+      hosted: AssistantCodexTurnExecutionPlan['executionContext']['hosted']
+      turnId: string
+    }) => {
+      const messageInput = {
+        abortSignal: input.abortSignal,
+        executionContext: { hosted: input.hosted },
+        prompt: 'Prepare the managed product notes.',
+        vault: '/vaults/test',
+      } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
+        activeTurnSteering: null,
+        executionContext: { hosted: input.hosted },
+        input: messageInput,
+        profile: {
+          promptProfile: 'notification-decision',
+          toolProfile: 'notification-turn',
+          threadScope: 'isolated-thread',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-18',
+          currentTimeZone: 'America/New_York',
+        },
+        route,
+        sharedPlan: createSharedPlan(),
+        turnId: input.turnId,
+      } satisfies AssistantCodexTurnExecutionPlan)
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+        attemptCount: 1,
+        route,
+        routePlan: {
+          assistantContractFingerprint:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          assistantCliContract: null,
+          cliEnv: {},
+          developerInstructions: null,
+          dynamicTools: [],
+          diagnosticsPolicy: {
+            environment: input.hosted ? 'hosted' : 'local',
+            privateIssueCaptureEnabled: false,
+            surface: input.hosted ? 'linq' : null,
+          },
+          onboardingGuidanceInjected: false,
+          codexContinuation: {
+            kind: 'explicit-structured-history',
+          } satisfies AssistantCodexContinuation,
+          planningDiagnostics: createRoutePlanningDiagnostics(),
+          promptCacheMetadata: null,
+          resume: null,
+          scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+          scheduledExecution: true,
+          scheduledTaskAuthority: authority,
+          sessionContext: undefined,
+          systemPrompt: null,
+          turnContextPrompt: null,
+          workingDirectory: '/work',
+        } satisfies AssistantRouteTurnPlan,
+        session,
+      } satisfies AssistantCodexAttemptPlan)
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
+        createProviderAttemptResult(),
+      )
+
+      const outcome = await executeCodexTurnWithRecovery({
+        input: messageInput,
+        plan: createSharedPlan(),
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-07-18T13:00:00.000Z',
+        turnId: input.turnId,
+      })
+      expect(outcome.kind).toBe('succeeded')
+      return providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0] as {
+        abortSignal?: AbortSignal
+        dynamicTools?: readonly unknown[]
+        permissions?: string | null
+        publicInternetFetch?: typeof fetch | null
+        resume?: unknown
+        runtimeWorkspaceRoots?: readonly string[] | null
+        scheduledExecution?: boolean
+        scheduledOccurrenceAt?: string | null
+        scheduledTaskAuthority?: unknown
+      }
+    }
+
+    const localAbort = new AbortController()
+    const localProviderInput = await runAttempt({
+      abortSignal: localAbort.signal,
+      hosted: null,
+      turnId: 'turn-local-product-notes',
+    })
+    expect(localProviderInput.abortSignal).toBe(localAbort.signal)
+    expect(localProviderInput).toMatchObject({
+      dynamicTools: [],
+      permissions: null,
+      resume: null,
+      runtimeWorkspaceRoots: null,
+      scheduledExecution: true,
+      scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+      scheduledTaskAuthority: authority,
+    })
+    expect(localProviderInput.publicInternetFetch).toEqual(expect.any(Function))
+    const requestAbort = new AbortController()
+    await localProviderInput.publicInternetFetch?.(
+      new URL('https://withmurph.ai/api/changelog'),
+      {
+        headers: { accept: 'application/json' },
+        method: 'GET',
+        signal: requestAbort.signal,
+      },
+    )
+    expect(directFetch).toHaveBeenCalledTimes(1)
+    const directFetchInit = directFetch.mock.calls[0]?.[1]
+    expect(directFetchInit).toMatchObject({
+      headers: { accept: 'application/json' },
+      method: 'GET',
+    })
+    expect(directFetchInit?.signal).toBe(requestAbort.signal)
+
+    const hostedPublicFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ ok: true }),
+    )
+    const hostedProviderInput = await runAttempt({
+      abortSignal: new AbortController().signal,
+      hosted: {
+        memberId: 'member_synthetic',
+        publicInternetFetch: hostedPublicFetch,
+        userEnvKeys: [],
+      },
+      turnId: 'turn-hosted-product-notes',
+    })
+    expect(hostedProviderInput.publicInternetFetch).toBe(hostedPublicFetch)
+
+    const hostedWithoutPublicFetch = await runAttempt({
+      abortSignal: new AbortController().signal,
+      hosted: {
+        memberId: 'member_synthetic',
+        userEnvKeys: [],
+      },
+      turnId: 'turn-hosted-product-notes-without-public-fetch',
+    })
+    expect(hostedWithoutPublicFetch.publicInternetFetch).toBeNull()
+    expect(directFetch).toHaveBeenCalledTimes(1)
   })
 
   it('forwards voice memo delivery availability for deliverable Linq and Telegram replies', async () => {

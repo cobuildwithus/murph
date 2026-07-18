@@ -1994,7 +1994,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Route by the current turn\'s outcome and read the primary owner.',
     )
-    expect(prompt).toContain(
+    expect(prompt).not.toContain(
       'On a scheduled automation run, the persisted automation purpose is the outcome to route; do not collapse it into generic reminder copy.',
     )
     expect(prompt).toContain(
@@ -2054,19 +2054,16 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
-  it('includes Apple Watch and WHOOP Apple Health relay guidance for direct decisions', () => {
+  it('keeps mutable product guidance behind scheduled typed sources', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({ conversationScope: 'direct' }),
     ).prompt
 
     expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
+      'Required writes and external reads are available only through purpose-specific typed Murph tools supplied to this root turn',
     )
-    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
-    expect(prompt).toContain(
-      'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
-    )
-    expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+    expect(prompt).not.toContain('Apple Watch/iPhone/Apple Health: send')
+    expect(prompt).not.toContain('WHOOP: More > App Settings')
   })
 
   it('requires scheduled messages to identify their subject without thread context', () => {
@@ -2119,13 +2116,10 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain('Scheduled-turn capability:')
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/group-challenge/SKILL.md',
+      'load and follow the registered `group-chat`, `group-challenge`, and `groupchat-comedy` skills with `murph.scheduled_read` action `skill_get`',
     )
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/groupchat-comedy/SKILL.md',
-    )
-    expect(prompt).toContain(
-      'Do not flatten a skill-required comic, voice memo, song, or image into a generic text standings recap',
+      'Do not flatten a skill-required medium into a generic text standings recap',
     )
     expect(prompt).toContain('Scheduled automation execution:')
     expect(prompt).toContain('Scheduled room turns do not own automation lifecycle.')
@@ -2214,21 +2208,25 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('vault-cli automation')
   })
 
-  it('keeps canonical data tools but withholds automation lifecycle authority', () => {
+  it('keeps canonical reads and typed task effects but withholds lifecycle authority', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput(),
     ).prompt
 
     expect(prompt).toContain(
-      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
+      'Scheduled turns have no native shell or CLI execution environment.',
     )
-    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
+    expect(prompt).toContain(
+      'Required writes and external reads are available only through purpose-specific typed Murph tools supplied to this root turn',
+    )
+    expect(prompt).not.toContain('Apple Watch/iPhone/Apple Health: send')
     expect(prompt).not.toContain('named in the Apple Health guidance')
     expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
-    expect(prompt).toContain('do not create, update, archive, or reroute automations')
+    expect(prompt).toContain(
+      'Read only from parent-supplied context and explicitly offered typed Murph read or generation tools.',
+    )
     expect(prompt).not.toContain('vault-cli automation set-status')
-    // The old read-only cage and write-exception-only language are gone.
-    expect(prompt).not.toContain('read-only CLI commands')
+    // The old model-enforced write-exception language is gone.
     expect(prompt).not.toContain('The only write exception')
     expect(prompt).not.toContain('Retrieval budget for session-support automations')
     // Still must not pull in the interactive-chat implicit-logging block.
@@ -2261,9 +2259,9 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).not.toContain('Default to staying silent.')
 
-    // Canonical task capability + ground in the relevant action window.
+    // Canonical task reads + ground in the relevant action window.
     expect(prompt).toContain(
-      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
+      'Scheduled turns have no native shell or CLI execution environment.',
     )
     expect(prompt).toContain(
       'ground yourself in what the user has actually done in the relevant local action window',
@@ -2272,7 +2270,7 @@ describe('assistant notification decision guidance', () => {
     // Retrieval budget as a stopping rule, plus the deterministic skip signal.
     expect(prompt).toContain('read only what could change the decision, then stop')
     expect(prompt).toContain(
-      '`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json` is the authoritative skip signal',
+      'use the matching authoritative parent-supplied follow-up result',
     )
     expect(prompt).toContain(
       'for pre-bed sessions, the session date is the prior local day',

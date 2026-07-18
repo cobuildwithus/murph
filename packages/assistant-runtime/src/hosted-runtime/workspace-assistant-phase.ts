@@ -21,6 +21,10 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
+import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   applyMurphManagedAutomations,
@@ -45,14 +49,17 @@ import {
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   automationRouteSchema,
   buildAutomationSupportSeriesTag,
+  resolveAutomationScheduledTaskConstraintViolation,
   type AutomationRoute,
 } from "@murphai/contracts";
 import {
   patchAutomation,
   reconcileAutomationSupportSeries,
+  resolveAutomationUpsertSlug,
   showAutomation,
   upsertAutomation,
 } from "@murphai/core";
+import { getKnowledgePage } from "@murphai/assistant-engine/knowledge";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -659,6 +666,14 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
+        if (request.scheduledTask) {
+          await assertHostedGroupChallengeScheduledTaskCreate({
+            currentRoute,
+            request,
+            vaultRoot: input.vaultRoot,
+          });
+          context?.signal?.throwIfAborted();
+        }
         assertActiveHostedAutomationRoute({
           route: currentRoute,
           status: request.status ?? "active",
@@ -675,6 +690,9 @@ function createHostedAssistantAutomationTool(input: {
           instructions: request.instructions,
           route: currentRoute,
           schedule: request.schedule,
+          ...(request.scheduledTask === undefined
+            ? {}
+            : { scheduledTask: request.scheduledTask }),
           ...(request.slug ? { slug: request.slug } : {}),
           status: request.status ?? "active",
           ...(request.summary === undefined ? {} : { summary: request.summary }),
@@ -767,6 +785,72 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+async function assertHostedGroupChallengeScheduledTaskCreate(input: {
+  currentRoute: AutomationRoute;
+  request: Extract<
+    Parameters<HostedAssistantAutomationTool["request"]>[0],
+    { action: "save" }
+  >;
+  vaultRoot: string;
+}): Promise<void> {
+  const lifecycleViolation = resolveAutomationScheduledTaskConstraintViolation({
+    activeUntil: input.request.activeUntil,
+    continuityPolicy: input.request.continuityPolicy ?? "preserve",
+    route: input.currentRoute,
+    schedule: input.request.schedule,
+    scheduledTask: input.request.scheduledTask,
+  });
+  if (lifecycleViolation) {
+    const message = lifecycleViolation.code === "continuity_policy"
+      ? "A group-challenge scheduled task must preserve conversation continuity."
+      : lifecycleViolation.code === "non_direct_route"
+        ? "A group-challenge scheduled task requires the current non-direct group route."
+        : lifecycleViolation.message;
+    throw new VaultCliError(
+      "invalid_option",
+      message,
+    );
+  }
+  const projectionScopeKey = input.request.scheduledTask?.projectionScopeKey;
+  if (!HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.some(
+    (scope) => scope.projectionKind !== "group-email.v0"
+      && buildHostedVaultShareProjectionScopeKey(scope) === projectionScopeKey,
+  )) {
+    throw new VaultCliError(
+      "invalid_option",
+      "A group-challenge scheduled task requires one selectable health projection scope.",
+    );
+  }
+
+  const existing = await showAutomation({
+    ...(input.request.automationId
+      ? { automationId: input.request.automationId }
+      : {}),
+    slug: resolveAutomationUpsertSlug({
+      slug: input.request.slug,
+      title: input.request.title,
+    }),
+    vaultRoot: input.vaultRoot,
+  });
+  if (existing) {
+    throw new VaultCliError(
+      "invalid_option",
+      "A scheduled-task binding can be set only while creating a new automation.",
+    );
+  }
+
+  const page = (await getKnowledgePage({
+    slug: input.request.scheduledTask?.knowledgeSlug ?? "",
+    vault: input.vaultRoot,
+  })).page;
+  if (page.pageType !== "challenge" || page.status !== "active") {
+    throw new VaultCliError(
+      "invalid_option",
+      "A group-challenge scheduled task requires the exact active challenge page.",
+    );
+  }
 }
 
 function normalizeHostedAutomationSupportTags(input: {

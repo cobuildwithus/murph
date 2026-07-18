@@ -66,6 +66,7 @@ import {
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnStartParams,
+  MURPH_CODEX_FINAL_CONFIG_OVERRIDES,
   type CodexAppServerInputItem,
 } from '../src/assistant-codex/app-server-requests.ts'
 import {
@@ -115,6 +116,7 @@ const MURPH_DYNAMIC_TOOLS_WITH_STYLE = resolveMurphDynamicTools({
   assistantStyleSettingsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const MURPH_CODEX_APP_SERVER_ARGS = ['app-server']
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -228,7 +230,7 @@ async function runCodexResponseMediaToolTurn(
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual(['app-server'])
+    expect(args).toEqual(MURPH_CODEX_APP_SERVER_ARGS)
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -348,7 +350,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual(['app-server'])
+    expect(args).toEqual(MURPH_CODEX_APP_SERVER_ARGS)
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -529,7 +531,15 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexAppServerArgs({
         approvalPolicy: 'never',
-        configOverrides: ['model="gpt-5"', 'theme="clean"'],
+        configOverrides: [
+          'model="gpt-5"',
+          'theme="clean"',
+          'notify=["unsafe"]',
+          'features.apps=true',
+          'features.code_mode_host=true',
+          'features.plugins=true',
+          'features.remote_plugin=true',
+        ],
         oss: true,
         profile: 'daily',
         sandbox: 'workspace-write',
@@ -539,6 +549,16 @@ describe('assistant codex runtime', () => {
       'model="gpt-5"',
       '--config',
       'theme="clean"',
+      '--config',
+      'notify=["unsafe"]',
+      '--config',
+      'features.apps=true',
+      '--config',
+      'features.code_mode_host=true',
+      '--config',
+      'features.plugins=true',
+      '--config',
+      'features.remote_plugin=true',
       '--profile',
       'daily',
       '--oss',
@@ -546,6 +566,46 @@ describe('assistant codex runtime', () => {
     ])
 
     expect(buildCodexAppServerArgs({})).toEqual(['app-server'])
+    expect(buildCodexAppServerArgs({
+      configOverrides: ['model_catalog_json="/unsafe.json"'],
+      finalConfigOverrides: MURPH_CODEX_FINAL_CONFIG_OVERRIDES,
+      finalModelCatalogJson: '/safe/scheduled.json',
+    })).toEqual([
+      '--config',
+      'model_catalog_json="/unsafe.json"',
+      ...MURPH_CODEX_FINAL_CONFIG_OVERRIDES.flatMap((override) => [
+        '--config',
+        override,
+      ]),
+      '--config',
+      'model_catalog_json="/safe/scheduled.json"',
+      'app-server',
+    ])
+  })
+
+  it('rejects attended authority and interactive tools before scheduled process admission', async () => {
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        dynamicTools: resolveMurphDynamicTools({
+          automationAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        permissions: 'murph-group-read',
+        prompt: 'This scheduled turn must never start.',
+        resumeSessionId: 'attended-thread',
+        scheduledExecution: true,
+        workingDirectory: '/unused/scheduled-workspace',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      context: {
+        invalidFields: ['resumeSessionId', 'permissions', 'dynamicTools'],
+        retryable: false,
+      },
+    })
+
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('builds typed Codex app-server turn steer requests for live turns', () => {
@@ -587,6 +647,13 @@ describe('assistant codex runtime', () => {
     const baseInput = {
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
+      config: {
+        'features.apps': false,
+        'features.code_mode_host': false,
+        'features.plugins': false,
+        'features.remote_plugin': false,
+        notify: [],
+      },
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       excludeResumeTurns: true,
@@ -713,6 +780,7 @@ describe('assistant codex runtime', () => {
       codexThreadId: 'thread-1',
     })
     expect(turnStart).toEqual({
+      approvalPolicy: 'never',
       effort: 'high',
       input: [
         {
@@ -721,6 +789,13 @@ describe('assistant codex runtime', () => {
         },
       ],
       model: 'gpt-5',
+      sandboxPolicy: {
+        excludeSlashTmp: false,
+        excludeTmpdirEnvVar: false,
+        networkAccess: false,
+        type: 'workspaceWrite',
+        writableRoots: [],
+      },
       serviceTier: null,
       threadId: 'thread-1',
     })
@@ -768,15 +843,25 @@ describe('assistant codex runtime', () => {
         sandbox: undefined,
         threadConfig: {
           project_doc_max_bytes: 0,
+          'features.apps': true,
+          'features.code_mode_host': true,
           'features.multi_agent_v2': false,
+          'features.plugins': true,
+          'features.remote_plugin': true,
+          notify: ['unsafe'],
         },
       }),
     ).toEqual({
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
       config: {
-        project_doc_max_bytes: 0,
+        'features.apps': true,
+        'features.code_mode_host': true,
         'features.multi_agent_v2': false,
+        'features.plugins': true,
+        'features.remote_plugin': true,
+        notify: ['unsafe'],
+        project_doc_max_bytes: 0,
       },
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
@@ -787,6 +872,33 @@ describe('assistant codex runtime', () => {
       permissions: 'murph-group-read',
       runtimeWorkspaceRoots: ['/group-vault'],
       serviceName: 'murph',
+    })
+    expect(
+      buildCodexTurnStartParams({
+        imagePaths: [],
+        input: {
+          ...baseInput,
+          ephemeral: true,
+          permissions: 'murph-group-read',
+          runtimeWorkspaceRoots: ['/group-vault'],
+          sandbox: undefined,
+        },
+        codexThreadId: 'thread-permission-resume',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      effort: 'high',
+      input: [
+        {
+          type: 'text',
+          text: 'User message:\nWhat changed?',
+        },
+      ],
+      model: 'gpt-5',
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: ['/group-vault'],
+      serviceTier: null,
+      threadId: 'thread-permission-resume',
     })
     expect(
       buildCodexTurnStartParams({
@@ -934,10 +1046,16 @@ describe('assistant codex runtime', () => {
               threadId,
             },
           })
-          expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
+          expect(asRecord(turnStart.params).approvalPolicy).toBe('never')
           expect(asRecord(turnStart.params).cwd).toBeUndefined()
           expect(asRecord(turnStart.params).modelProvider).toBeUndefined()
-          expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
+          expect(asRecord(turnStart.params).sandboxPolicy).toEqual({
+            excludeSlashTmp: false,
+            excludeTmpdirEnvVar: false,
+            networkAccess: false,
+            type: 'workspaceWrite',
+            writableRoots: [],
+          })
           const inputItems = readTurnStartInputItems(turnStart)
           expect(inputItems[0]).toEqual({
             type: 'text',
@@ -3146,7 +3264,7 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
       spawnedChildren.push(child)
 
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual(MURPH_CODEX_APP_SERVER_ARGS)
       expect(options).toMatchObject({
         cwd: tmpdir(),
         env: {
@@ -6938,7 +7056,9 @@ describe('assistant codex runtime', () => {
     await firstTurnReady.promise
 
     try {
-      vi.useFakeTimers()
+      vi.useFakeTimers({
+        toFake: ['clearTimeout', 'setTimeout'],
+      })
       requireMockChildProcess(spawnedChildren[0] ?? null).stdout.write('not-json\n')
       await waitForProcessKillWithFakeTimers(-25_500, 'SIGTERM')
       await vi.advanceTimersByTimeAsync(6_000)
@@ -8107,7 +8227,7 @@ describe('assistant codex runtime', () => {
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      MURPH_CODEX_APP_SERVER_ARGS,
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -8128,7 +8248,7 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual(MURPH_CODEX_APP_SERVER_ARGS)
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -8197,7 +8317,7 @@ describe('assistant codex runtime', () => {
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      MURPH_CODEX_APP_SERVER_ARGS,
       expect.any(Object),
     )
   })
@@ -8249,7 +8369,7 @@ describe('assistant codex runtime', () => {
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        ['app-server'],
+        MURPH_CODEX_APP_SERVER_ARGS,
         expect.any(Object),
       )
     } finally {
@@ -8302,7 +8422,7 @@ describe('assistant codex runtime', () => {
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['app-server'],
+      MURPH_CODEX_APP_SERVER_ARGS,
       expect.any(Object),
     )
   })
@@ -9520,7 +9640,9 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-warm-stop-fail-1',
     })
 
-    vi.useFakeTimers()
+    vi.useFakeTimers({
+      toFake: ['clearTimeout', 'setTimeout'],
+    })
     try {
       const externalStop = stopWarmCodexAppServer('operator-stop')
       const externalStopError = externalStop.then(
@@ -9826,7 +9948,9 @@ describe('assistant codex runtime', () => {
       const liveTurn = await liveTurnReady.promise
 
       try {
-        vi.useFakeTimers()
+        vi.useFakeTimers({
+          toFake: ['clearTimeout', 'setTimeout'],
+        })
         const interruptPromise = liveInterruptRequested ? liveTurn.interrupt() : null
         if (!liveInterruptRequested) {
           controller.abort()
@@ -11253,7 +11377,7 @@ describe('assistant codex runtime', () => {
     ['workspace-write', 'workspace-write'],
     ['danger-full-access', 'danger-full-access'],
   ] as const)(
-    'uses Codex app-server SandboxMode %s on thread/start and thread/resume context',
+    'uses Codex app-server SandboxMode %s on thread context and resets it at turn/start',
     async (sandbox, expectedSandbox) => {
       const workingDirectory = await createTempDir('assistant-codex-thread-context-')
       const freshSandbox = sandbox === 'read-only' ? 'danger-full-access' : 'read-only'
@@ -11421,10 +11545,13 @@ describe('assistant codex runtime', () => {
           model: index === 0 ? 'gpt-5' : 'gpt-5.1',
           threadId: expectedThreadId,
         })
-        expect(turnParams.approvalPolicy).toBeUndefined()
+        expect(turnParams.approvalPolicy).toBe('never')
         expect(turnParams.cwd).toBeUndefined()
         expect(turnParams.modelProvider).toBeUndefined()
         expect(turnParams.sandbox).toBeUndefined()
+        expect(turnParams.sandboxPolicy).toEqual(
+          codexSandboxPolicyForMode(index === 0 ? freshSandbox : sandbox),
+        )
       }
     },
   )
@@ -12819,6 +12946,14 @@ describe('assistant codex runtime', () => {
                 reaction: 'invalid',
               },
               tool: 'react_to_message',
+            },
+            {
+              arguments: { action: 'prepare' },
+              tool: 'newsletter',
+            },
+            {
+              arguments: { action: 'prepare', groupId: 'forbidden-selector' },
+              tool: 'newsletter',
             },
           ] as const
 
@@ -18297,7 +18432,7 @@ async function waitForRpcMethod(
     if (message) {
       return message
     }
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error(`Expected RPC method ${method} from Murph.`)
@@ -18373,7 +18508,7 @@ async function waitForProcessKillWithFakeTimers(
     ) {
       return
     }
-    await vi.advanceTimersByTimeAsync(1)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error(`Expected process.kill(${pid}, ${signal}) to be called.`)

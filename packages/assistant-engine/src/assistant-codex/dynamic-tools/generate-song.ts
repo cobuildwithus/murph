@@ -67,6 +67,7 @@ export function parseGenerateSongArguments(
 export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
+  beforeExternalEffect?: (() => Promise<void>) | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<DynamicToolResult> {
@@ -74,6 +75,7 @@ export async function executeGenerateSongDynamicTool(input: {
     await executeGenerateSongTool({
       abortSignal: input.abortSignal ?? null,
       args: input.args,
+      beforeExternalEffect: input.beforeExternalEffect ?? null,
       currentResponseMedia: input.currentResponseMedia ?? [],
       runtime: input.voiceMemoRuntime ?? null,
     }),

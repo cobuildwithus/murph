@@ -94,7 +94,14 @@ import type {
 import type {
   AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
+import {
+  assertAssistantScheduledTaskSourceCurrent,
+  resolveAssistantScheduledTaskAuthority,
+  type AssistantScheduledTaskAuthority,
+  type AssistantScheduledTaskSourceCurrentAssertion,
+} from '../assistant/scheduled-task-authority.js'
 import type {
+  AssistantProviderDynamicTool,
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
@@ -190,6 +197,66 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import {
+  executeScheduledKnowledgeDynamicTool,
+  MURPH_SCHEDULED_KNOWLEDGE_TOOL,
+  readScheduledKnowledgeDynamicToolRequest,
+  type ScheduledKnowledgeDynamicToolRequest,
+} from './dynamic-tools/scheduled-knowledge.js'
+export { MURPH_SCHEDULED_KNOWLEDGE_TOOL } from './dynamic-tools/scheduled-knowledge.js'
+import {
+  claimMaintenanceMemoryMutation,
+  executeScheduledMemoryDynamicTool,
+  MAX_MAINTENANCE_MEMORY_MUTATIONS_PER_TURN,
+  MURPH_MAINTENANCE_MEMORY_TOOL,
+  readScheduledMemoryDynamicToolRequest,
+  type ScheduledMemoryDynamicToolRequest,
+} from './dynamic-tools/scheduled-memory.js'
+export {
+  claimMaintenanceMemoryMutation,
+  MAX_MAINTENANCE_MEMORY_MUTATIONS_PER_TURN,
+  MURPH_MAINTENANCE_MEMORY_TOOL,
+} from './dynamic-tools/scheduled-memory.js'
+import {
+  executeScheduledSourceDynamicTool,
+  MURPH_PRODUCT_SOURCE_TOOL,
+  MURPH_RESEARCH_SCOUT_BATCH_TOOL,
+  readScheduledSourceDynamicToolRequest,
+  type AssistantScheduledProductSource,
+  type ScheduledSourceDynamicToolRequest,
+} from './dynamic-tools/scheduled-sources.js'
+export {
+  MURPH_PRODUCT_SOURCE_TOOL,
+  MURPH_RESEARCH_SCOUT_BATCH_TOOL,
+} from './dynamic-tools/scheduled-sources.js'
+import {
+  executeScheduledReadDynamicTool,
+  MURPH_SCHEDULED_READ_TOOL,
+  readScheduledReadDynamicToolRequest,
+  type ScheduledReadDynamicToolRequest,
+} from './dynamic-tools/scheduled-read.js'
+export { MURPH_SCHEDULED_READ_TOOL } from './dynamic-tools/scheduled-read.js'
+import {
+  executeScheduledOnboardingDynamicTool,
+  MURPH_COMPLETE_ONBOARDING_TOOL,
+  readScheduledOnboardingDynamicToolRequest,
+  type ScheduledOnboardingDynamicToolRequest,
+} from './dynamic-tools/scheduled-onboarding.js'
+export { MURPH_COMPLETE_ONBOARDING_TOOL } from './dynamic-tools/scheduled-onboarding.js'
+import {
+  MURPH_GENERATE_SCHEDULED_IMAGE_TOOL,
+  MURPH_GENERATE_SCHEDULED_SONG_TOOL,
+  MURPH_GENERATE_SCHEDULED_VOICE_MEMO_TOOL,
+  readScheduledMediaDynamicToolRequest,
+  type ScheduledMediaGenerationClaimResult,
+  type ScheduledMediaDynamicToolRequest,
+} from './dynamic-tools/scheduled-media.js'
+export {
+  MURPH_GENERATE_SCHEDULED_IMAGE_TOOL,
+  MURPH_GENERATE_SCHEDULED_SONG_TOOL,
+  MURPH_GENERATE_SCHEDULED_VOICE_MEMO_TOOL,
+  claimScheduledMediaGeneration,
+} from './dynamic-tools/scheduled-media.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -774,7 +841,7 @@ export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
   name: 'newsletter',
   description:
-    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and current-week shared facts filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
+    'Prepare or send the scheduled group health newsletter for the sole group bound to this runtime. `prepare` returns recipient eligibility, the occurrence reference, and current-week shared facts filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool accepts no group selector, sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -782,10 +849,6 @@ export const MURPH_NEWSLETTER_TOOL = {
       action: {
         type: 'string',
         enum: ['prepare', 'send'],
-      },
-      groupId: {
-        type: 'string',
-        minLength: 1,
       },
       subject: {
         type: 'string',
@@ -808,7 +871,7 @@ export const MURPH_NEWSLETTER_TOOL = {
         default: null,
       },
     },
-    required: ['action', 'groupId'],
+    required: ['action'],
   },
 } as const
 
@@ -1035,6 +1098,24 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
   },
 } as const
 
+const MURPH_SCHEDULED_ONLY_DYNAMIC_TOOL_CATALOG = [
+  [MURPH_SCHEDULED_READ_TOOL, null],
+  [MURPH_SCHEDULED_KNOWLEDGE_TOOL, null],
+  [MURPH_RESEARCH_SCOUT_BATCH_TOOL, null],
+  [MURPH_PRODUCT_SOURCE_TOOL, null],
+  [MURPH_MAINTENANCE_MEMORY_TOOL, null],
+  [MURPH_COMPLETE_ONBOARDING_TOOL, null],
+  [MURPH_GENERATE_SCHEDULED_IMAGE_TOOL, 'image'],
+  [MURPH_GENERATE_SCHEDULED_VOICE_MEMO_TOOL, 'audio'],
+  [MURPH_GENERATE_SCHEDULED_SONG_TOOL, 'audio'],
+] as const satisfies readonly (readonly [
+  AssistantProviderDynamicTool,
+  'audio' | 'image' | null,
+])[]
+
+const MURPH_SCHEDULED_ONLY_DYNAMIC_TOOLS =
+  MURPH_SCHEDULED_ONLY_DYNAMIC_TOOL_CATALOG.map(([tool]) => tool)
+
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_AUTOMATION_TOOL,
@@ -1059,6 +1140,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_LABS_TOOL,
+  ...MURPH_SCHEDULED_ONLY_DYNAMIC_TOOLS,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -1076,6 +1158,21 @@ export const MURPH_DYNAMIC_TOOLS = [
 ] as const
 
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
+
+const MURPH_SCHEDULED_DYNAMIC_TOOL_ALLOWLIST: ReadonlySet<
+  AssistantProviderDynamicTool
+> = new Set([
+  // Newsletter is the one descriptor shared with the interactive catalog;
+  // exact scheduled authority still gates unattended prepare/send actions.
+  MURPH_NEWSLETTER_TOOL,
+  ...MURPH_SCHEDULED_ONLY_DYNAMIC_TOOLS,
+])
+
+export function isMurphScheduledDynamicTool(
+  tool: AssistantProviderDynamicTool,
+): boolean {
+  return MURPH_SCHEDULED_DYNAMIC_TOOL_ALLOWLIST.has(tool)
+}
 
 export interface MurphDynamicToolAvailability {
   assistantStyleSettingsAvailable?: boolean | null
@@ -1107,6 +1204,7 @@ type AvailabilityPredicate = (
 ) => boolean
 
 const ALWAYS_AVAILABLE: AvailabilityPredicate = () => true
+const NEVER_AVAILABLE: AvailabilityPredicate = () => false
 
 // Two default semantics, kept explicit so each tool's gate is obvious:
 //   defaultOn  → the tool is available unless the caller passes `false`.
@@ -1140,6 +1238,9 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    ...MURPH_SCHEDULED_ONLY_DYNAMIC_TOOLS.map(
+      (tool) => [tool, NEVER_AVAILABLE] as const,
+    ),
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -1158,6 +1259,81 @@ export function resolveMurphDynamicTools(
   return MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+}
+
+export interface MurphScheduledDynamicToolAvailability {
+  deliveryToolsAvailable: boolean
+  newsletterAvailable?: boolean | null
+  taskAuthority: AssistantScheduledTaskAuthority | null | undefined
+  voiceMemoGenerationAvailable?: boolean | null
+}
+
+function resolveScheduledMediaDynamicTools(
+  mediaKind: 'audio' | 'image',
+) {
+  return MURPH_SCHEDULED_ONLY_DYNAMIC_TOOL_CATALOG.flatMap(
+    ([tool, scheduledMediaKind]) =>
+      scheduledMediaKind === mediaKind ? [tool] : [],
+  )
+}
+
+/**
+ * Scheduled turns use an exact allowlist. Keep this separate from the
+ * interactive resolver so a newly default-on interactive tool cannot become
+ * unattended authority by accident.
+ */
+export function resolveMurphScheduledDynamicTools(
+  availability: MurphScheduledDynamicToolAvailability,
+): readonly MurphDynamicTool[] {
+  const taskAuthority = resolveAssistantScheduledTaskAuthority(
+    availability.taskAuthority,
+  )
+  if (taskAuthority.kind === 'none') {
+    return []
+  }
+  const taskTools: readonly MurphDynamicTool[] = (() => {
+    switch (taskAuthority.kind) {
+      case 'generic_notification':
+      case 'group_newsletter':
+        return []
+      case 'managed_knowledge_ledger':
+        return [MURPH_SCHEDULED_KNOWLEDGE_TOOL]
+      case 'research_ledger':
+        return [MURPH_SCHEDULED_KNOWLEDGE_TOOL, MURPH_RESEARCH_SCOUT_BATCH_TOOL]
+      case 'product_notes':
+        return [MURPH_SCHEDULED_KNOWLEDGE_TOOL, MURPH_PRODUCT_SOURCE_TOOL]
+      case 'group_challenge':
+        return [
+          ...(availability.deliveryToolsAvailable
+            ? [
+                ...resolveScheduledMediaDynamicTools('image'),
+                ...(availability.voiceMemoGenerationAvailable === true
+                  ? resolveScheduledMediaDynamicTools('audio')
+                  : []),
+              ]
+            : []),
+        ]
+      case 'memory_maintenance':
+        return [MURPH_MAINTENANCE_MEMORY_TOOL]
+      case 'experiment_lifecycle':
+        return []
+      case 'onboarding_followup':
+        return [MURPH_COMPLETE_ONBOARDING_TOOL]
+    }
+  })()
+
+  if (!availability.deliveryToolsAvailable) {
+    return [MURPH_SCHEDULED_READ_TOOL, ...taskTools]
+  }
+
+  if (
+    availability.newsletterAvailable === true &&
+    taskAuthority.kind === 'group_newsletter'
+  ) {
+    return [MURPH_NEWSLETTER_TOOL, MURPH_SCHEDULED_READ_TOOL, ...taskTools]
+  }
+
+  return [MURPH_SCHEDULED_READ_TOOL, ...taskTools]
 }
 
 export function listMurphDynamicToolNames(): string[] {
@@ -1381,13 +1557,11 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('prepare'),
-      groupId: z.string().trim().min(1),
     })
     .strict(),
   z
     .object({
       action: z.literal('send'),
-      groupId: z.string().trim().min(1),
       html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
       subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
       text: z
@@ -1709,6 +1883,12 @@ export type MurphDynamicToolRequest =
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
   | AssistantStyleDynamicToolRequest
+  | ScheduledKnowledgeDynamicToolRequest
+  | ScheduledMemoryDynamicToolRequest
+  | ScheduledSourceDynamicToolRequest
+  | ScheduledReadDynamicToolRequest
+  | ScheduledOnboardingDynamicToolRequest
+  | ScheduledMediaDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1936,6 +2116,56 @@ export function readMurphDynamicToolRequest(
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
+  }
+
+  const scheduledReadRequest = readScheduledReadDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (scheduledReadRequest) {
+    return scheduledReadRequest
+  }
+
+  const scheduledOnboardingRequest =
+    readScheduledOnboardingDynamicToolRequest({
+      arguments: request.arguments,
+      tool: request.tool,
+    })
+  if (scheduledOnboardingRequest) {
+    return scheduledOnboardingRequest
+  }
+
+  const scheduledMediaRequest = readScheduledMediaDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+    toolCallId: request.toolCallId,
+  })
+  if (scheduledMediaRequest) {
+    return scheduledMediaRequest
+  }
+
+  const scheduledKnowledgeRequest = readScheduledKnowledgeDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (scheduledKnowledgeRequest) {
+    return scheduledKnowledgeRequest
+  }
+
+  const scheduledMemoryRequest = readScheduledMemoryDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (scheduledMemoryRequest) {
+    return scheduledMemoryRequest
+  }
+
+  const scheduledSourceRequest = readScheduledSourceDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (scheduledSourceRequest) {
+    return scheduledSourceRequest
   }
 
   const phoneCallRequest = readPhoneCallDynamicToolRequest({
@@ -2310,7 +2540,7 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(input: {
   toolCallId: string | null
-  scope: 'generate-image' | 'group-avatar'
+  scope: 'generate-image' | 'group-avatar' | 'scheduled-image'
 }): string | null {
   const toolCallId = normalizeNullableString(input.toolCallId)
   return toolCallId
@@ -2331,6 +2561,14 @@ export async function executeMurphDynamicToolRequest(input: {
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   assistantStyleSettingsAvailable?: boolean | null
   abortSignal?: AbortSignal | null
+  claimScheduledMediaGeneration?: ((input: {
+    authority: Extract<AssistantScheduledTaskAuthority, { kind: 'group_challenge' }>
+    kind: 'audio' | 'image'
+    occurrenceAt: string
+  }) => Promise<ScheduledMediaGenerationClaimResult>) | null
+  claimMaintenanceMemoryMutation?: (() => boolean) | null
+  claimScheduledProductSource?: ((source: AssistantScheduledProductSource) => boolean) | null
+  claimScheduledResearchScoutBatch?: (() => boolean) | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
@@ -2346,6 +2584,9 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
+  scheduledOccurrenceAt?: string | null
+  scheduledTaskAuthority?: AssistantScheduledTaskAuthority | null
+  scheduledTaskSourceCurrentAssertion?: AssistantScheduledTaskSourceCurrentAssertion | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
@@ -2356,6 +2597,50 @@ export async function executeMurphDynamicToolRequest(input: {
       false,
       'computer tools are unavailable without hosted computer-use transport',
     )
+  }
+
+  const assertScheduledTaskSourceCurrent: AssistantScheduledTaskSourceCurrentAssertion =
+    (authority) => input.scheduledTaskSourceCurrentAssertion
+      ? input.scheduledTaskSourceCurrentAssertion(authority)
+      : input.vaultRoot
+        ? assertAssistantScheduledTaskSourceCurrent({
+            authority,
+            vault: input.vaultRoot,
+          })
+        : Promise.reject(new Error('Scheduled task source is unavailable.'))
+  const claimScheduledMediaGeneration = async (kind: 'audio' | 'image'): Promise<
+    | 'scheduled_media_unauthorized'
+    | 'scheduled_media_limit_reached'
+    | 'scheduled_media_occurrence_reserved'
+    | null
+  > => {
+    const authority = resolveAssistantScheduledTaskAuthority(
+      input.scheduledTaskAuthority,
+    )
+    const occurrenceAt = normalizeNullableString(input.scheduledOccurrenceAt)
+    const occurrence = occurrenceAt ? new Date(occurrenceAt) : null
+    if (
+      authority.kind !== 'group_challenge' ||
+      !occurrenceAt ||
+      !occurrence ||
+      Number.isNaN(occurrence.getTime()) ||
+      occurrence.toISOString() !== occurrenceAt
+    ) {
+      return 'scheduled_media_unauthorized'
+    }
+    await assertScheduledTaskSourceCurrent(authority)
+    const claim = await input.claimScheduledMediaGeneration?.({
+      authority,
+      kind,
+      occurrenceAt,
+    })
+    if (claim === 'occurrence_reserved') {
+      return 'scheduled_media_occurrence_reserved'
+    }
+    if (claim !== 'claimed') {
+      return 'scheduled_media_limit_reached'
+    }
+    return null
   }
 
   switch (input.request.kind) {
@@ -2369,6 +2654,24 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
       return toolTextResult(false, 'invalid assistant style arguments')
+    case 'invalid-scheduled-knowledge-arguments':
+      return toolTextResult(false, 'invalid scheduled knowledge arguments')
+    case 'invalid-scheduled-read-arguments':
+      return toolTextResult(false, 'invalid scheduled read arguments')
+    case 'invalid-complete-onboarding-arguments':
+      return toolTextResult(false, 'invalid onboarding completion arguments')
+    case 'invalid-generate-scheduled-image-arguments':
+      return toolTextResult(false, 'invalid scheduled image arguments')
+    case 'invalid-generate-scheduled-voice-memo-arguments':
+      return toolTextResult(false, 'invalid scheduled voice memo arguments')
+    case 'invalid-generate-scheduled-song-arguments':
+      return toolTextResult(false, 'invalid scheduled song arguments')
+    case 'invalid-maintenance-memory-arguments':
+      return toolTextResult(false, 'invalid maintenance memory arguments')
+    case 'invalid-research-scout-batch-arguments':
+      return toolTextResult(false, 'invalid research scout batch arguments')
+    case 'invalid-product-source-arguments':
+      return toolTextResult(false, 'invalid product source arguments')
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
@@ -2492,6 +2795,50 @@ export async function executeMurphDynamicToolRequest(input: {
         vaultRoot: input.vaultRoot ?? null,
       })
     }
+    case 'scheduled-knowledge':
+      return await executeScheduledKnowledgeDynamicTool({
+        assertSourceCurrent: assertScheduledTaskSourceCurrent,
+        authority: input.scheduledTaskAuthority ?? null,
+        request: input.request,
+        scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    case 'scheduled-read': {
+      return await executeScheduledReadDynamicTool({
+        assertSourceCurrent: assertScheduledTaskSourceCurrent,
+        authority: input.scheduledTaskAuthority ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    }
+    case 'complete-onboarding':
+      return await executeScheduledOnboardingDynamicTool({
+        authority: input.scheduledTaskAuthority ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    case 'maintenance-memory':
+      return await executeScheduledMemoryDynamicTool({
+        assertSourceCurrent: assertScheduledTaskSourceCurrent,
+        authority: input.scheduledTaskAuthority ?? null,
+        claimMaintenanceMemoryMutation:
+          input.claimMaintenanceMemoryMutation ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    case 'research-scout-batch':
+    case 'product-source':
+      return await executeScheduledSourceDynamicTool({
+        authority: input.scheduledTaskAuthority ?? null,
+        abortSignal: input.abortSignal ?? null,
+        assertSourceCurrent: assertScheduledTaskSourceCurrent,
+        claimProductSource: input.claimScheduledProductSource ?? null,
+        claimResearchScoutBatch: input.claimScheduledResearchScoutBatch ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        publicFetchImpl: input.publicFetchImpl ?? null,
+        request: input.request,
+      })
     case 'send-vault-file': {
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
@@ -2670,8 +3017,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'newsletter':
       return await executeNewsletterTool({
+        assertSourceCurrent: assertScheduledTaskSourceCurrent,
+        authority: input.scheduledTaskAuthority ?? null,
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'finish-without-reply':
@@ -2766,6 +3116,99 @@ export async function executeMurphDynamicToolRequest(input: {
         },
         usageDraft: result.usageDraft ?? null,
       }
+    }
+    case 'generate-scheduled-image': {
+      if (hasNonImageResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, JSON.stringify({
+          code: 'scheduled_media_conflict',
+        }))
+      }
+      const rejectionCode = await claimScheduledMediaGeneration('image')
+      if (rejectionCode) {
+        return toolTextResult(false, JSON.stringify({
+          code: rejectionCode,
+        }))
+      }
+      const result = await executeGenerateImageTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        beforeExternalEffect: () =>
+          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
+            .then(() => undefined),
+        captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
+          scope: 'scheduled-image',
+          toolCallId: readGeneratedImageToolCallId(input.request),
+        }),
+        codexHome: input.codexHome ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        materializeWorkspaceArtifacts: null,
+        providerRequestOrdinal: input.nextUsageOrdinal(),
+        requireHostedGeneratedImageUploader:
+          input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+      return {
+        ...(result.responseMedia && result.responseMedia.length > 0
+          ? {
+              responseMediaPatch: {
+                media: result.responseMedia,
+                op: 'append' as const,
+              },
+            }
+          : {}),
+        rpcResult: {
+          success: result.rpcSuccess,
+          contentItems: [{
+            type: 'inputText',
+            text: JSON.stringify({
+              status: result.rpcSuccess ? 'attached' : 'unavailable',
+            }),
+          }],
+        },
+        usageDraft: result.usageDraft ?? null,
+      }
+    }
+    case 'generate-scheduled-voice-memo': {
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(false, JSON.stringify({
+          code: 'scheduled_media_conflict',
+        }))
+      }
+      const rejectionCode = await claimScheduledMediaGeneration('audio')
+      if (rejectionCode) {
+        return toolTextResult(false, JSON.stringify({ code: rejectionCode }))
+      }
+      return await executeGenerateVoiceMemoDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        beforeExternalEffect: () =>
+          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
+            .then(() => undefined),
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'generate-scheduled-song': {
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(false, JSON.stringify({
+          code: 'scheduled_media_conflict',
+        }))
+      }
+      const rejectionCode = await claimScheduledMediaGeneration('audio')
+      if (rejectionCode) {
+        return toolTextResult(false, JSON.stringify({ code: rejectionCode }))
+      }
+      return await executeGenerateSongDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        beforeExternalEffect: () =>
+          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
+            .then(() => undefined),
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
     }
     case 'generate-voice-memo': {
       return await executeGenerateVoiceMemoDynamicTool({
@@ -2880,6 +3323,12 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
+}
+
+function hasNonImageResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind !== 'image')
 }
 
 function hasVaultFileResponseMedia(
@@ -3410,8 +3859,11 @@ function isAbortError(error: unknown): boolean {
 }
 
 async function executeNewsletterTool(input: {
+  assertSourceCurrent: AssistantScheduledTaskSourceCurrentAssertion
+  authority: AssistantScheduledTaskAuthority | null
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeNewsletterToolRequest
+  scheduledOccurrenceAt: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
@@ -3420,6 +3872,19 @@ async function executeNewsletterTool(input: {
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
+    const currentAuthority = await input.assertSourceCurrent(input.authority)
+    const occurrenceAt = normalizeNullableString(input.scheduledOccurrenceAt)
+    if (
+      currentAuthority.kind !== 'group_newsletter' ||
+      !occurrenceAt ||
+      !Number.isFinite(Date.parse(occurrenceAt))
+    ) {
+      recordNewsletterUnavailable(
+        input.hostedToolContext,
+        'scheduled_automation_required',
+      )
+      return toolTextResult(false, 'newsletter scheduled authority is unavailable')
+    }
     if (
       input.request.action === 'send'
       && input.vaultRoot
@@ -3432,13 +3897,10 @@ async function executeNewsletterTool(input: {
       return groupSharedProjectionUnavailableResult(input.request.action)
     }
 
-    const scheduledAutomationAuthority =
-      input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
-      null
     let newsletterWeeklySource: NewsletterWeeklySource | null = null
     if (input.request.action === 'prepare') {
       newsletterWeeklySource = await readNewsletterWeeklySource({
-        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
+        referenceAt: occurrenceAt,
         vaultRoot: input.vaultRoot,
       })
       if (newsletterWeeklySource === null) {
@@ -3449,9 +3911,21 @@ async function executeNewsletterTool(input: {
         return groupSharedProjectionUnavailableResult(input.request.action)
       }
     }
+    const finalAuthority = await input.assertSourceCurrent(input.authority)
+    if (finalAuthority.kind !== 'group_newsletter') {
+      recordNewsletterUnavailable(
+        input.hostedToolContext,
+        'scheduled_automation_required',
+      )
+      return toolTextResult(false, 'newsletter scheduled authority is unavailable')
+    }
     const request: HostedRuntimeNewsletterToolRequest = {
       ...input.request,
-      scheduledAutomationAuthority,
+      scheduledAutomationAuthority: {
+        automationId: finalAuthority.automationId,
+        expectedUpdatedAt: finalAuthority.expectedUpdatedAt,
+        occurrenceAt,
+      },
     }
     const result = await newsletterTool.request(request)
     if (result.action === 'send') {
@@ -3464,7 +3938,10 @@ async function executeNewsletterTool(input: {
     }
     const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
     if (result.action !== 'prepare' || result.result.status !== 'ok') {
-      return toolTextResult(toolSucceeded, safeToolPayloadText(result))
+      return toolTextResult(
+        toolSucceeded,
+        safeToolPayloadText(sanitizeNewsletterResponseForModel(result)),
+      )
     }
     const skippedNoEmailMemberIds = result.result.participants
       .filter((participant) => !participant.hasEmail)
@@ -3480,7 +3957,7 @@ async function executeNewsletterTool(input: {
         },
       })
     }
-    const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
+    const referenceAt = occurrenceAt
     if (newsletterWeeklySource === null) {
       recordNewsletterUnavailable(
         input.hostedToolContext,
@@ -3497,14 +3974,15 @@ async function executeNewsletterTool(input: {
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
       result: {
-        groupId: result.result.groupId,
-        missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
-          result.result.missingEmailParticipants,
-        ),
-        members,
-        participants: stripNewsletterAuthorizationSnapshot(
-          result.result.participants,
-        ),
+        eligibleParticipantCount: result.result.participants.filter(
+          (participant) => participant.hasEmail,
+        ).length,
+        members: members.map(({ displayName, weeklyStats }) => ({
+          displayName,
+          weeklyStats,
+        })),
+        missingEmailParticipantCount:
+          result.result.missingEmailParticipants.length,
         referenceAt,
         status: 'ok',
       },
@@ -3643,10 +4121,38 @@ function filterNewsletterAuthorizedProjectionStore(input: {
   return { ...input.store, projections }
 }
 
-function stripNewsletterAuthorizationSnapshot(
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
-): Array<Pick<HostedRuntimeNewsletterParticipantSummary, 'hasEmail' | 'memberId'>> {
-  return participants.map(({ hasEmail, memberId }) => ({ hasEmail, memberId }))
+function sanitizeNewsletterResponseForModel(
+  response: HostedRuntimeNewsletterToolResponse,
+): unknown {
+  if (response.action === 'prepare') {
+    return response.result.status === 'unavailable'
+      ? response
+      : {
+          action: 'prepare',
+          result: {
+            eligibleParticipantCount: response.result.participants.filter(
+              (participant) => participant.hasEmail,
+            ).length,
+            missingEmailParticipantCount:
+              response.result.missingEmailParticipants.length,
+            status: 'ok',
+          },
+        }
+  }
+  if (response.result.status === 'unavailable') {
+    return response
+  }
+  const {
+    skippedNoEmailMemberIds,
+    ...safeResult
+  } = response.result
+  return {
+    action: 'send',
+    result: {
+      ...safeResult,
+      skippedNoEmailMemberCount: skippedNoEmailMemberIds.length,
+    },
+  }
 }
 
 function groupSharedProjectionUnavailableResult(
@@ -4613,7 +5119,7 @@ function parseNewsletterArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.newsletter.input',
-        schemaRootKeys: ['action', 'groupId'],
+        schemaRootKeys: ['action', 'html', 'subject', 'text'],
         toolName: 'murph.newsletter',
       }),
     }
@@ -4623,16 +5129,14 @@ function parseNewsletterArguments(
       ok: true,
       request: {
         action: 'prepare',
-        groupId: parsed.data.groupId,
       },
     }
   }
 
   return {
     ok: true,
-    request: {
+      request: {
       action: 'send',
-      groupId: parsed.data.groupId,
       html: parsed.data.html,
       subject: parsed.data.subject,
       ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),

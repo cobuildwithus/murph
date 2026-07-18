@@ -12,11 +12,40 @@ import type {
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
+const MURPH_CODEX_ENFORCED_CONFIG = Object.freeze({
+  'features.apps': false,
+  'features.code_mode_host': false,
+  'features.plugins': false,
+  'features.remote_plugin': false,
+  notify: Object.freeze([]),
+}) satisfies Readonly<Record<string, unknown>>
+
+export const MURPH_CODEX_FINAL_CONFIG_OVERRIDES: readonly string[] = Object.freeze(
+  Object.entries(MURPH_CODEX_ENFORCED_CONFIG).map(
+    ([key, value]) => `${key}=${JSON.stringify(value)}`,
+  ),
+)
 
 type CodexAppServerSandboxMode =
   | 'danger-full-access'
   | 'read-only'
   | 'workspace-write'
+
+type CodexAppServerSandboxPolicy =
+  | {
+      type: 'dangerFullAccess'
+    }
+  | {
+      networkAccess: false
+      type: 'readOnly'
+    }
+  | {
+      excludeSlashTmp: false
+      excludeTmpdirEnvVar: false
+      networkAccess: false
+      type: 'workspaceWrite'
+      writableRoots: []
+    }
 
 export type CodexAppServerInputItem =
   | {
@@ -78,6 +107,13 @@ export function buildCodexThreadContextParams(input: {
       },
     )
   }
+  const scheduledExecution = input.input.scheduledExecution === true
+  const threadConfig = scheduledExecution
+    ? {
+        ...(input.input.threadConfig ?? {}),
+        ...MURPH_CODEX_ENFORCED_CONFIG,
+      }
+    : input.input.threadConfig
 
   return stripUndefinedRpcParams({
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
@@ -99,9 +135,8 @@ export function buildCodexThreadContextParams(input: {
     runtimeWorkspaceRoots: input.input.runtimeWorkspaceRoots
       ? [...input.input.runtimeWorkspaceRoots]
       : undefined,
-    config: input.input.threadConfig
-      ? { ...input.input.threadConfig }
-      : undefined,
+    selectedCapabilityRoots: scheduledExecution ? [] : undefined,
+    config: threadConfig,
     sandbox: permissions
       ? undefined
       : mapCodexAppServerSandboxMode(input.input.sandbox),
@@ -130,7 +165,20 @@ export function buildCodexTurnStartParams(input: {
   }
   codexThreadId: string
 }): Record<string, unknown> {
+  const permissions = normalizeNullableString(input.input.permissions)
+  if (permissions && input.input.sandbox) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
+      {
+        invalidFields: ['permissions', 'sandbox'],
+        retryable: false,
+      },
+    )
+  }
+
   const params = stripUndefinedRpcParams({
+    approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
     effort: normalizeNullableString(input.input.reasoningEffort),
     input: buildCodexAppServerInputItems({
       imagePaths: input.imagePaths,
@@ -140,6 +188,13 @@ export function buildCodexTurnStartParams(input: {
       ? { ...input.input.outputSchema }
       : undefined,
     model: normalizeNullableString(input.input.model),
+    permissions,
+    runtimeWorkspaceRoots: permissions && input.input.runtimeWorkspaceRoots
+      ? [...input.input.runtimeWorkspaceRoots]
+      : undefined,
+    sandboxPolicy: permissions
+      ? undefined
+      : mapCodexAppServerSandboxPolicy(input.input.sandbox),
     threadId: input.codexThreadId,
   })
 
@@ -217,6 +272,32 @@ export function mapCodexAppServerSandboxMode(
       return 'workspace-write'
     case 'danger-full-access':
       return 'danger-full-access'
+    default:
+      return undefined
+  }
+}
+
+export function mapCodexAppServerSandboxPolicy(
+  sandbox: AssistantSandbox | null | undefined,
+): CodexAppServerSandboxPolicy | undefined {
+  switch (sandbox) {
+    case 'read-only':
+      return {
+        networkAccess: false,
+        type: 'readOnly',
+      }
+    case 'workspace-write':
+      return {
+        excludeSlashTmp: false,
+        excludeTmpdirEnvVar: false,
+        networkAccess: false,
+        type: 'workspaceWrite',
+        writableRoots: [],
+      }
+    case 'danger-full-access':
+      return {
+        type: 'dangerFullAccess',
+      }
     default:
       return undefined
   }

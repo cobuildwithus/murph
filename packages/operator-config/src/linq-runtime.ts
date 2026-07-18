@@ -512,6 +512,7 @@ export async function uploadLinqAttachment(
     filename: string
   },
   dependencies: {
+    beforeExternalEffect?: (() => Promise<void>) | null
     env?: NodeJS.ProcessEnv
     fetchImplementation?: LinqFetch
     publicFetchImplementation?: LinqFetch
@@ -519,6 +520,7 @@ export async function uploadLinqAttachment(
   } = {},
 ): Promise<{ attachmentId: string }> {
   const bytes = normalizeLinqAttachmentBytes(input.bytes)
+  await dependencies.beforeExternalEffect?.()
   const upload = await createLinqAttachmentUpload(
     {
       contentType: input.contentType,
@@ -531,6 +533,7 @@ export async function uploadLinqAttachment(
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     },
   )
+  await dependencies.beforeExternalEffect?.()
   await uploadLinqAttachmentBytes(
     {
       bytes,

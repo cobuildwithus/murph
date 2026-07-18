@@ -2746,6 +2746,9 @@ async function persistHostedEmailGroupFanoutIntents(input: {
   } catch (error) {
     throw markHostedDeliveryPreProviderRetryable(error);
   }
+  const parentAutomationAuthority = existingIntents.find((intent) =>
+    intent.intentId === input.assistantDeliveryEffect.effectId
+  )?.automationAuthority ?? null;
   for (const memberId of input.fanoutRecipientMemberIds) {
     if (hasNonReplayableHostedNewsletterRecipientIntent({
       deliveryIdempotencyKey: payload.idempotencyKey,
@@ -2763,6 +2766,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
       await createAssistantOutboxIntent({
         actorId: payload.actorId,
         answeredMailboxItemIds: payload.answeredMailboxItemIds,
+        automationAuthority: parentAutomationAuthority,
         channel: "email",
         dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
         deliveryIdempotencyKey: payload.idempotencyKey,

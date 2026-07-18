@@ -289,13 +289,19 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
               },
             ],
             model: 'gpt-5',
+            approvalPolicy: 'never',
+            sandboxPolicy: {
+              type: 'workspaceWrite',
+              networkAccess: false,
+              excludeSlashTmp: false,
+              excludeTmpdirEnvVar: false,
+              writableRoots: [],
+            },
             serviceTier: null,
             threadId: 'thread-public-1',
           },
         })
-        assert.equal(asRecord(turnStart.params).approvalPolicy, undefined)
         assert.equal(asRecord(turnStart.params).cwd, undefined)
-        assert.equal(asRecord(turnStart.params).sandboxPolicy, undefined)
         const imagePath = assertLocalImagePath(readTurnStartInputItems(turnStart)[1])
         assert.equal(path.extname(imagePath), '.jpg')
         assert.deepEqual(await readFile(imagePath), imageBytes)

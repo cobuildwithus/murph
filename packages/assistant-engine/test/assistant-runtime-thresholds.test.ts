@@ -16,6 +16,7 @@ afterEach(async () => {
   vi.doUnmock('node:fs/promises')
   vi.doUnmock('../src/assistant/automation/runtime-lock.js')
   vi.doUnmock('../src/assistant/diagnostics.js')
+  vi.doUnmock('../src/assistant/cron/runtime-state.js')
   vi.doUnmock('../src/assistant/cron/store.js')
   vi.doUnmock('../src/assistant/outbox/store.js')
   vi.doUnmock('../src/assistant/runtime-cache.js')
@@ -327,6 +328,7 @@ describe('assistant runtime thresholds', () => {
     vi.doMock('../src/assistant/outbox/store.js', () => ({
       pruneAssistantTerminalOutboxIntents: vi.fn(async () => 0),
     }))
+    mockEmptyAssistantCronRuntimeStore()
     vi.doMock('../src/assistant/cron/store.js', () => ({
       pruneAssistantCronRunHistory: vi.fn(async () => ({
         responsesRedacted: 0,
@@ -627,6 +629,7 @@ describe('assistant runtime thresholds', () => {
     vi.doMock('../src/assistant/outbox/store.js', () => ({
       pruneAssistantTerminalOutboxIntents: vi.fn(async () => 3),
     }))
+    mockEmptyAssistantCronRuntimeStore()
     vi.doMock('../src/assistant/cron/store.js', () => ({
       pruneAssistantCronRunHistory: vi.fn(async () => ({
         responsesRedacted: 4,
@@ -961,6 +964,7 @@ function mockRuntimeBudgetDependencies(
   vi.doMock('../src/assistant/outbox/store.js', () => ({
     pruneAssistantTerminalOutboxIntents: vi.fn(async () => 0),
   }))
+  mockEmptyAssistantCronRuntimeStore()
   vi.doMock('../src/assistant/cron/store.js', () => ({
     pruneAssistantCronRunHistory: vi.fn(async () => ({
       responsesRedacted: 0,
@@ -976,4 +980,13 @@ function mockRuntimeBudgetDependencies(
       writeJsonFileAtomic: vi.fn(async () => undefined),
     }
   })
+}
+
+function mockEmptyAssistantCronRuntimeStore(): void {
+  vi.doMock('../src/assistant/cron/runtime-state.js', () => ({
+    readAssistantCronCanonicalRuntimeStore: vi.fn(async () => ({
+      jobs: [],
+      version: 1,
+    })),
+  }))
 }

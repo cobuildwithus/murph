@@ -1574,7 +1574,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
       firstOccurrencePolicy: "after-current-local-day",
       instructions: expect.stringContaining(
-        "vault-cli assistant onboarding resume-context --format json",
+        "registered `murph-onboarding` skill with `murph.scheduled_read` action `skill_get`",
       ),
       route: {
         channel: "linq",
@@ -1609,7 +1609,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
+          "If the onboarding skill says the visible and saved evidence satisfies answered completion or shows an overall decline, call `murph.complete_onboarding` with the matching `user_answered` or `user_declined` reason, then return skip without messaging.",
         state: "overall decline",
       },
       {
@@ -1652,13 +1652,13 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
+      "engine-supplied onboarding resume context",
     );
     expect(seedInput?.instructions).toContain(
       "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
     );
     expect(seedInput?.instructions).toContain(
-      "Whether completion succeeds or fails, return skip without messaging",
+      "The tool is bound to the exact prepared managed-automation revision and revalidates it before the idempotent write",
     );
     expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",

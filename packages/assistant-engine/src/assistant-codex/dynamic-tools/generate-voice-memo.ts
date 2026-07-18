@@ -65,6 +65,7 @@ export function parseGenerateVoiceMemoArguments(
 export async function executeGenerateVoiceMemoDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
+  beforeExternalEffect?: (() => Promise<void>) | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<DynamicToolResult> {
@@ -72,6 +73,7 @@ export async function executeGenerateVoiceMemoDynamicTool(input: {
     await executeGenerateVoiceMemoTool({
       abortSignal: input.abortSignal ?? null,
       args: input.args,
+      beforeExternalEffect: input.beforeExternalEffect ?? null,
       currentResponseMedia: input.currentResponseMedia ?? [],
       runtime: input.voiceMemoRuntime ?? null,
     }),

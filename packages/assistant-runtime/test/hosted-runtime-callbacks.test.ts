@@ -11405,7 +11405,11 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("persists one privacy-blind outbox child per planned group email recipient", async () => {
+  it("persists privacy-blind outbox children with the parent automation authority", async () => {
+    const automationAuthority = {
+      automationId: "automation_newsletter",
+      expectedUpdatedAt: "2026-07-12T12:00:00.000Z",
+    };
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
@@ -11427,6 +11431,17 @@ describe("hosted runtime callbacks", () => {
       threadId: "thread_123",
       threadIsDirect: false,
     });
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      createPendingHostedDeliveryIntent({
+        automationAuthority,
+        channel: "email",
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        explicitTarget: fanoutTarget,
+        intentId: effect.effectId,
+        status: "pending",
+        turnId: "turn_123",
+      }),
+    ]);
     const sendEmail = vi.fn(async () => ({
       fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: fanoutTarget,
@@ -11463,6 +11478,7 @@ describe("hosted runtime callbacks", () => {
     expect(childInputs).toEqual(childInputs.map((child) => expect.objectContaining({
       actorId: "actor_123",
       answeredMailboxItemIds: ["mailbox_123"],
+      automationAuthority,
       channel: "email",
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: false,

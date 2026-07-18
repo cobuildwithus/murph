@@ -32,6 +32,7 @@ type MockAutomationRecord = {
   instructions: string
   route: AutomationRoute
   schedule: AutomationSchedule
+  scheduledTask?: unknown
   relativePath?: string
   slug?: string
   status: 'active' | 'paused' | 'archived'
@@ -44,10 +45,12 @@ type MockAutomationRecord = {
 
 const cronMocks = vi.hoisted(() => ({
   archiveAutomationIfActiveUntilElapsed: vi.fn(),
+  archiveAutomationIfExactRevision: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   buildExperimentFinalResultsSeeds: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
+  getKnowledgePage: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalScheduledLogs: vi.fn(),
   listCanonicalAutomations: vi.fn(),
@@ -61,7 +64,7 @@ const cronMocks = vi.hoisted(() => ({
   readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   runExperimentLifecycleDeliveryAuthorityPrecondition: vi.fn(),
-  runExperimentLifecycleOutcomePrecondition: vi.fn(),
+  prepareExperimentLifecycleScheduledTurn: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
   scheduledLogsByVault: new Map<string, ScheduledLogQueryRecord[]>(),
@@ -70,9 +73,12 @@ const cronMocks = vi.hoisted(() => ({
   withAssistantCronWriteLock: vi.fn(),
 }))
 
-vi.mock('@murphai/core', () => ({
+vi.mock('@murphai/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@murphai/core')>()),
   archiveAutomationIfActiveUntilElapsed:
     cronMocks.archiveAutomationIfActiveUntilElapsed,
+  archiveAutomationIfExactRevision:
+    cronMocks.archiveAutomationIfExactRevision,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   isVaultError: (error: unknown) => Boolean(
     error &&
@@ -91,10 +97,10 @@ vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
   persistDueExperimentOutcomes: cronMocks.persistDueExperimentOutcomes,
   prepareExperimentLifecycleAutomations:
     cronMocks.prepareExperimentLifecycleAutomations,
+  prepareExperimentLifecycleScheduledTurn:
+    cronMocks.prepareExperimentLifecycleScheduledTurn,
   runExperimentLifecycleDeliveryAuthorityPrecondition:
     cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
-  runExperimentLifecycleOutcomePrecondition:
-    cronMocks.runExperimentLifecycleOutcomePrecondition,
 }))
 
 vi.mock('@murphai/query', async (importOriginal) => {
@@ -137,6 +143,11 @@ vi.mock('../src/assistant/bindings.ts', async (importOriginal) => ({
 
 vi.mock('../src/assistant/cron/locking.ts', () => ({
   withAssistantCronWriteLock: cronMocks.withAssistantCronWriteLock,
+}))
+
+vi.mock('../src/knowledge/service.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/knowledge/service.ts')>()),
+  getKnowledgePage: cronMocks.getKnowledgePage,
 }))
 
 vi.mock('@murphai/operator-config/operator-config', () => ({
@@ -193,6 +204,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
 } from '../src/assistant/managed-automations.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
   dispatchAssistantOutboxIntent,
   markAssistantOutboxIntentMirrorTerminalById,
@@ -262,7 +274,7 @@ beforeEach(() => {
   cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
     .mockReset()
     .mockResolvedValue({ kind: 'continue' })
-  cronMocks.runExperimentLifecycleOutcomePrecondition
+  cronMocks.prepareExperimentLifecycleScheduledTurn
     .mockReset()
     .mockResolvedValue({ kind: 'continue' })
 
@@ -279,6 +291,12 @@ beforeEach(() => {
   cronMocks.getAssistantChannelAdapter.mockReset().mockImplementation((channel) =>
     channel ? { channel } : null,
   )
+  cronMocks.getKnowledgePage.mockReset().mockResolvedValue({
+    page: {
+      pageType: 'challenge',
+      status: 'active',
+    },
+  })
   cronMocks.resolveAssistantBindingDelivery
     .mockReset()
     .mockImplementation(
@@ -419,6 +437,36 @@ beforeEach(() => {
         ) ?? null
       )
     })
+  cronMocks.archiveAutomationIfExactRevision
+    .mockReset()
+    .mockImplementation(async (input: {
+      expectedUpdatedAt: string
+      lookup: string
+      now?: Date
+      vaultRoot: string
+    }) => {
+      const records = getVaultAutomationStore(input.vaultRoot)
+      const index = records.findIndex((record) =>
+        record.automationId === input.lookup || record.slug === input.lookup
+      )
+      const existing = records[index]
+      if (!existing) {
+        throw new Error('Automation was not found.')
+      }
+      if (
+        existing.status !== 'active' ||
+        existing.updatedAt !== input.expectedUpdatedAt
+      ) {
+        return { archived: false, record: existing }
+      }
+      const archived: MockAutomationRecord = {
+        ...existing,
+        status: 'archived',
+        updatedAt: (input.now ?? new Date()).toISOString(),
+      }
+      records.splice(index, 1, archived)
+      return { archived: true, record: archived }
+    })
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
       activeUntil?: string | null
@@ -508,6 +556,174 @@ afterEach(async () => {
 })
 
 describe('assistant cron runtime orchestration', () => {
+  it('forces bound group-challenge turns through queue-only delivery and clears terminal media reservations', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T08:00:00.000Z'))
+    const fixture = await createBoundGroupChallengeExecutionFixture({
+      prefix: 'assistant-cron-runtime-group-challenge-media-terminal-',
+      withMediaReservation: true,
+    })
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'No dispatch was useful for this occurrence.',
+      },
+      response: null,
+      session: { sessionId: 'session-group-challenge-terminal' },
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: fixture.claimed,
+      paths: fixture.paths,
+      trigger: 'scheduled',
+      vault: fixture.vaultRoot,
+    })
+
+    expect(result.run.outcome).toBe('no_op')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deferCommitUntilDeliveryAccepted: true,
+        deliveryDispatchMode: 'queue-only',
+        scheduledTaskAuthority: {
+          automationId: fixture.automationId,
+          expectedUpdatedAt: fixture.expectedUpdatedAt,
+          kind: 'group_challenge',
+          projectionScopeKey: 'steps-days.v0',
+          slug: 'summer-steps',
+        },
+      }),
+    )
+    const runtime = await readAssistantCronCanonicalRuntimeStore(fixture.paths)
+    expect(runtime.jobs[0]?.state.scheduledMediaReservation).toBeNull()
+  })
+
+  it('retains a bound group-challenge media reservation across a retryable failure', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T08:00:00.000Z'))
+    const fixture = await createBoundGroupChallengeExecutionFixture({
+      prefix: 'assistant-cron-runtime-group-challenge-media-retry-',
+      withMediaReservation: true,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(
+      new Error('Provider request failed before a durable delivery result.'),
+    )
+
+    const result = await executeClaimedAssistantCronJob({
+      job: fixture.claimed,
+      paths: fixture.paths,
+      trigger: 'scheduled',
+      vault: fixture.vaultRoot,
+    })
+
+    expect(result.run.outcome).toBe('failed')
+    const runtime = await readAssistantCronCanonicalRuntimeStore(fixture.paths)
+    expect(runtime.jobs[0]?.state).toMatchObject({
+      pendingOccurrenceAt: fixture.occurrenceAt,
+      scheduledMediaReservation: fixture.mediaReservation,
+    })
+  })
+
+  it('does not admit the provider after the bound challenge page is archived', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T08:00:00.000Z'))
+    const fixture = await createBoundGroupChallengeExecutionFixture({
+      prefix: 'assistant-cron-runtime-group-challenge-archived-page-',
+      withMediaReservation: false,
+    })
+    cronMocks.getKnowledgePage.mockResolvedValueOnce({
+      page: {
+        pageType: 'challenge',
+        status: 'archived',
+      },
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: fixture.claimed,
+      paths: fixture.paths,
+      trigger: 'scheduled',
+      vault: fixture.vaultRoot,
+    })
+
+    expect(result.run.outcome).toBe('failed')
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the bound challenge page before accepting a queued commit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T08:00:00.000Z'))
+    const fixture = await createBoundGroupChallengeExecutionFixture({
+      prefix: 'assistant-cron-runtime-group-challenge-before-commit-',
+      withMediaReservation: false,
+    })
+    const context = {
+      decision: {
+        kind: 'send_message' as const,
+        privateSummary: 'Prepared the bound challenge dispatch.',
+        text: 'Summer Steps standings are in.',
+      },
+      deliveryOutcome: {
+        error: null,
+        intentId: 'outbox-group-challenge-before-commit',
+        kind: 'queued' as const,
+        session: { sessionId: 'session-group-challenge-before-commit' },
+      },
+      response: 'Summer Steps standings are in.',
+    }
+    let commitAccepted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeCommit?: (value: typeof context) => Promise<void>
+      beforeDelivery?: (value: typeof context) => Promise<void>
+    }) => {
+      await input.beforeDelivery?.(context)
+      cronMocks.getKnowledgePage.mockResolvedValueOnce({
+        page: {
+          pageType: 'challenge',
+          status: 'archived',
+        },
+      })
+      await input.beforeCommit?.(context)
+      commitAccepted = true
+      return {
+        ...context,
+        session: context.deliveryOutcome.session,
+      }
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: fixture.claimed,
+      paths: fixture.paths,
+      trigger: 'scheduled',
+      vault: fixture.vaultRoot,
+    })
+
+    expect(result.run.outcome).toBe('failed')
+    expect(commitAccepted).toBe(false)
+    expect(cronMocks.getKnowledgePage).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects an invalid bound scheduled task before provider execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T08:00:00.000Z'))
+    const fixture = await createBoundGroupChallengeExecutionFixture({
+      prefix: 'assistant-cron-runtime-group-challenge-invalid-authority-',
+      projectionScopeKey: 'unapproved-projection.v0',
+      withMediaReservation: false,
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: fixture.claimed,
+      paths: fixture.paths,
+      trigger: 'scheduled',
+      vault: fixture.vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'scheduled_task_authority_unavailable',
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('preserves explicit private iMessage delivery routes when creating cron jobs', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-')
 
@@ -1281,6 +1497,154 @@ describe('assistant cron runtime orchestration', () => {
         lastSucceededAt: '2026-04-08T09:00:00.000Z',
         nextRunAt: null,
       }),
+    })
+  })
+
+  it('blocks device activity delivery when the parent listener is paused during the provider turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-paused-before-delivery-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-paused-before-delivery'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about the imported run.',
+      relativePath:
+        'bank/automations/device-activity-paused-before-delivery.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity_race',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'device-activity-paused-before-delivery',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity paused before delivery',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_parent_paused_before_delivery',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity paused before delivery',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '2234567890abcdef1234567890abcdef12345678',
+          parentAutomationId,
+          parentAutomationRelativePath:
+            'bank/automations/device-activity-paused-before-delivery.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity_race',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+        threadIsDirect: false,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeDelivery?: (context: {
+        decision: {
+          kind: 'send_message'
+          privateSummary: string
+          text: string
+        }
+        deliveryOutcome: null
+        response: string
+      }) => Promise<void>
+    }) => {
+      parentAutomation.status = 'paused'
+      parentAutomation.updatedAt = '2026-04-08T09:00:01.000Z'
+      await input.beforeDelivery?.({
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Prepared the device activity response.',
+          text: 'How did that run feel?',
+        },
+        deliveryOutcome: null,
+        response: 'How did that run feel?',
+      })
+      deliveryAttempted = true
+      throw new Error('Delivery should have been blocked after the parent paused.')
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-device-activity-parent-race',
+          resolveScheduledLinqRoute: vi.fn().mockResolvedValue({
+            target: 'linq_chat_device_activity_race',
+            threadIsDirect: false,
+          }),
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(deliveryAttempted).toBe(false)
+    await expect(listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'parent listener is no longer authorized',
+          ),
+          outcome: 'skipped_gate',
+          reason: 'device_activity_authority_stale',
+          status: 'skipped',
+        }),
+      ],
     })
   })
 
@@ -2786,7 +3150,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('consumes overnight memory consolidation when yield aborts after provider admission without a completed command event', async () => {
+  it('consumes overnight memory consolidation when yield aborts after provider admission', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2794,9 +3158,9 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
-    // Once the provider request was admitted, memory writes may have
-    // committed even though the completed command event never reached the
-    // buffered raw events. The occurrence must be consumed, never replayed.
+    // Once the provider request was admitted, a typed memory write may have
+    // committed before the turn stopped. The occurrence must be consumed,
+    // never replayed.
     let shouldYield = false
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: {
@@ -2861,9 +3225,8 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
-    // Provider admitted, then the turn dies without a yield and without the
-    // completed memory-command event ever reaching the buffered raw events.
-    // Memory writes may have committed; the occurrence must be consumed.
+    // Provider admitted, then the turn dies without a yield. A typed memory
+    // write may have committed; the occurrence must be consumed.
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: {
         onProviderRequestStarted?: (event: { startedAt: string }) => void
@@ -2915,74 +3278,11 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('consumes overnight memory consolidation when hosted maintenance yields after provider work', async () => {
+  it('retries overnight memory consolidation when the provider fails before admission', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-overnight-memory-yield-provider-work-',
-    )
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    addOvernightMemoryConsolidationAutomation(vaultRoot)
-    let shouldYield = false
-    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
-      async (input: { abortSignal?: AbortSignal }) => {
-        shouldYield = true
-        await vi.advanceTimersByTimeAsync(300)
-        const error = input.abortSignal?.reason instanceof Error
-          ? input.abortSignal.reason
-          : new VaultCliError(
-              'ASSISTANT_TURN_ABORTED',
-              'Assistant turn was aborted.',
-            )
-        Reflect.set(error, 'details', {
-          assistantNotificationProviderNonReplayableWork: true,
-        })
-        throw error
-      },
-    )
-
-    const summary = await processDueAssistantCronJobsLocal({
-      executionContext: {
-        hosted: {
-          memberId: 'member-hosted',
-          userEnvKeys: [],
-        },
-      },
-      limit: 1,
-      shouldYieldBackgroundMaintenance: () => shouldYield,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 0,
-    })
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeRecord = runtimeStore.jobs.find(
-      (record) =>
-        record.jobId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-    )
-    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
-    expect(runtimeRecord?.state.lastSucceededAt).toBe('2026-04-09T03:10:00.300Z')
-    await expect(listAssistantCronRuns({
-      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-      vault: vaultRoot,
-    })).resolves.toMatchObject({
-      runs: [
-        expect.objectContaining({
-          error: expect.stringContaining('occurrence consumed to avoid replay'),
-          status: 'skipped',
-        }),
-      ],
-    })
-  })
-
-  it('consumes overnight memory consolidation when provider work fails after side effects', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-overnight-memory-provider-work-failure-',
+      'assistant-cron-runtime-overnight-memory-pre-admission-failure-',
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
@@ -2990,63 +3290,6 @@ describe('assistant cron runtime orchestration', () => {
       'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
       'Assistant maintenance notification must return the exact configured skip decision.',
     )
-    Reflect.set(error, 'details', {
-      assistantNotificationProviderNonReplayableWork: true,
-    })
-    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
-
-    const summary = await processDueAssistantCronJobsLocal({
-      executionContext: {
-        hosted: {
-          memberId: 'member-hosted',
-          userEnvKeys: [],
-        },
-      },
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 0,
-    })
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeRecord = runtimeStore.jobs.find(
-      (record) =>
-        record.jobId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-    )
-    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
-    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
-    expect(runtimeRecord?.state.lastSucceededAt).toBe('2026-04-09T03:10:00.000Z')
-    await expect(listAssistantCronRuns({
-      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-      vault: vaultRoot,
-    })).resolves.toMatchObject({
-      runs: [
-        expect.objectContaining({
-          error: expect.stringContaining('occurrence consumed to avoid replay'),
-          status: 'skipped',
-        }),
-      ],
-    })
-  })
-
-  it('retries overnight memory consolidation when read-only provider work fails', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-overnight-memory-read-only-failure-',
-    )
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    addOvernightMemoryConsolidationAutomation(vaultRoot)
-    const error = new VaultCliError(
-      'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-      'Assistant maintenance notification must return the exact configured skip decision.',
-    )
-    Reflect.set(error, 'details', {
-      assistantNotificationProviderNonReplayableWork: false,
-    })
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
 
     const summary = await processDueAssistantCronJobsLocal({
@@ -3658,6 +3901,8 @@ describe('assistant cron runtime orchestration', () => {
 
   it('withholds first newsletter send authority until the opt-out window elapses', async () => {
     async function runOccurrence(occurrenceAt: string) {
+      const providerCallCountBefore =
+        cronMocks.sendAssistantMessageLocal.mock.calls.length
       vi.setSystemTime(new Date(occurrenceAt))
       const { vaultRoot } = await createRuntimeContext(
         'assistant-cron-runtime-newsletter-authority-',
@@ -3726,14 +3971,16 @@ describe('assistant cron runtime orchestration', () => {
         trigger: 'scheduled',
         vault: vaultRoot,
       })
-      const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-        | { scheduledAutomationAuthority?: unknown }
-        | undefined
-      if (!input) {
-        throw new Error('Expected scheduled notification input.')
-      }
-      const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      const providerCalled =
+        cronMocks.sendAssistantMessageLocal.mock.calls.length >
+        providerCallCountBefore
+      const input = providerCalled
+        ? cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+            | { scheduledTaskAuthority?: unknown }
+            | undefined
+        : undefined
+      const authority = input?.scheduledTaskAuthority ?? null
+      expect(result.run.outcome).toBe(authority ? 'failed' : 'skipped_gate')
       return authority
     }
 
@@ -3746,7 +3993,8 @@ describe('assistant cron runtime orchestration', () => {
         runOccurrence('2026-07-06T12:00:00.000Z'),
       ).resolves.toEqual({
         automationId: 'automation-newsletter-window',
-        occurrenceAt: '2026-07-06T12:00:00.000Z',
+        expectedUpdatedAt: '2026-07-06T10:00:00.000Z',
+        kind: 'group_newsletter',
       })
     } finally {
       vi.useRealTimers()
@@ -3755,6 +4003,8 @@ describe('assistant cron runtime orchestration', () => {
 
   it('only grants scheduled newsletter send authority for cron schedules', async () => {
     async function runSchedule(schedule: AutomationSchedule) {
+      const providerCallCountBefore =
+        cronMocks.sendAssistantMessageLocal.mock.calls.length
       vi.setSystemTime(new Date('2026-07-06T12:00:00.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         'assistant-cron-runtime-newsletter-schedule-kind-',
@@ -3821,14 +4071,16 @@ describe('assistant cron runtime orchestration', () => {
         trigger: 'scheduled',
         vault: vaultRoot,
       })
-      const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-        | { scheduledAutomationAuthority?: unknown }
-        | undefined
-      if (!input) {
-        throw new Error('Expected scheduled notification input.')
-      }
-      const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      const providerCalled =
+        cronMocks.sendAssistantMessageLocal.mock.calls.length >
+        providerCallCountBefore
+      const input = providerCalled
+        ? cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+            | { scheduledTaskAuthority?: unknown }
+            | undefined
+        : undefined
+      const authority = input?.scheduledTaskAuthority ?? null
+      expect(result.run.outcome).toBe(authority ? 'failed' : 'skipped_gate')
       return authority
     }
 
@@ -3838,7 +4090,8 @@ describe('assistant cron runtime orchestration', () => {
         runSchedule({ kind: 'cron', expression: '0 * * * *' }),
       ).resolves.toEqual({
         automationId: 'automation-newsletter-schedule-kind',
-        occurrenceAt: '2026-07-06T12:00:00.000Z',
+        expectedUpdatedAt: '2026-07-06T10:00:00.000Z',
+        kind: 'group_newsletter',
       })
       await expect(
         runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
@@ -3853,6 +4106,7 @@ describe('assistant cron runtime orchestration', () => {
 
   it.each([
     {
+      expectedOutcome: 'failed' as const,
       label: 'every email recipient fails',
       newsletterSendResult: {
         status: 'unavailable' as const,
@@ -3860,6 +4114,7 @@ describe('assistant cron runtime orchestration', () => {
       },
     },
     {
+      expectedOutcome: 'failed' as const,
       label: 'recipient authorization changes after preparation',
       newsletterSendResult: {
         status: 'unavailable' as const,
@@ -3867,18 +4122,40 @@ describe('assistant cron runtime orchestration', () => {
       },
     },
     {
-      label: 'durable recipient delivery is still pending',
+      expectedOutcome: 'failed' as const,
+      label: 'accepted delivery omits its trusted parent intent',
       newsletterSendResult: {
-        participantCount: 2,
-        skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
       },
     },
     {
+      expectedOutcome: 'failed' as const,
       label: 'the model exits without a newsletter send result',
       newsletterSendResult: null,
     },
-  ])('fails and preserves a scheduled newsletter occurrence when $label', async ({
+    {
+      expectedOutcome: 'delivery_pending' as const,
+      label: 'the trusted parent intent is pending',
+      newsletterDeliveryIntent: {
+        intentId: 'outbox_newsletter_parent_pending',
+      },
+      newsletterSendResult: {
+        status: 'accepted' as const,
+      },
+    },
+    {
+      expectedOutcome: 'delivery_pending' as const,
+      label: 'the trusted parent intent already reached sent',
+      newsletterDeliveryIntent: {
+        intentId: 'outbox_newsletter_parent_sent',
+      },
+      newsletterSendResult: {
+        status: 'accepted' as const,
+      },
+    },
+  ])('handles a scheduled newsletter occurrence when $label', async ({
+    expectedOutcome,
+    newsletterDeliveryIntent,
     newsletterSendResult,
   }) => {
     vi.useFakeTimers()
@@ -3954,7 +4231,12 @@ describe('assistant cron runtime orchestration', () => {
         },
         ...(newsletterSendResult
           ? {
-              postTurnDeliveryExpectations: { newsletterSendResult },
+              postTurnDeliveryExpectations: {
+                ...(newsletterDeliveryIntent
+                  ? { newsletterDeliveryIntent }
+                  : {}),
+                newsletterSendResult,
+              },
             }
           : {}),
         response: 'Newsletter delivery failed.',
@@ -3970,16 +4252,26 @@ describe('assistant cron runtime orchestration', () => {
         vault: vaultRoot,
       })
 
-      expect(result.run.status).toBe('failed')
-      expect(result.run.error).toBe(
-        'Group health newsletter delivery did not complete.',
-      )
+      expect(result.run.outcome).toBe(expectedOutcome)
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
-      expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
-      expect(current?.state.retryAfterAt).toBe('2026-07-12T13:00:30.000Z')
-      expect(current?.state.consecutiveFailures).toBe(1)
-      expect(current?.state.lastFailedAt).toBe('2026-07-12T13:00:00.000Z')
+      if (expectedOutcome === 'delivery_pending') {
+        expect(result.run.error).toBeNull()
+        expect(current?.state.pendingDeliveryIntentId).toBe(
+          newsletterDeliveryIntent?.intentId,
+        )
+        expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
+        expect(current?.state.retryAfterAt).toBeNull()
+        expect(current?.state.consecutiveFailures).toBe(0)
+      } else {
+        expect(result.run.error).toBe(
+          'Group health newsletter delivery did not complete.',
+        )
+        expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
+        expect(current?.state.retryAfterAt).toBe('2026-07-12T13:00:30.000Z')
+        expect(current?.state.consecutiveFailures).toBe(1)
+        expect(current?.state.lastFailedAt).toBe('2026-07-12T13:00:00.000Z')
+      }
     } finally {
       vi.useRealTimers()
     }
@@ -3989,18 +4281,12 @@ describe('assistant cron runtime orchestration', () => {
     {
       label: 'partial newsletter delivery',
       newsletterSendResult: {
-        failedRecipientCount: 1,
-        participantCount: 3,
-        sentRecipientCount: 2,
-        skippedNoEmailMemberIds: [],
         status: 'partial_failure' as const,
       },
     },
     {
       label: 'newsletter with no recipients',
       newsletterSendResult: {
-        participantCount: 0,
-        skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
       },
     },
@@ -4315,7 +4601,7 @@ describe('assistant cron runtime orchestration', () => {
       title: 'Revoked progress consent',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    cronMocks.runExperimentLifecycleOutcomePrecondition.mockResolvedValueOnce({
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
       kind: 'skip',
       reason: 'scheduled summary was not explicitly enabled',
     })
@@ -4325,7 +4611,7 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
 
-    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     expect(findCanonicalAutomation(
       vaultRoot,
@@ -4366,8 +4652,28 @@ describe('assistant cron runtime orchestration', () => {
       title: 'Progress consent revoked during provider',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    cronMocks.runExperimentLifecycleOutcomePrecondition
-      .mockResolvedValueOnce({ kind: 'continue' })
+    cronMocks.prepareExperimentLifecycleScheduledTurn
+      .mockResolvedValueOnce({
+        kind: 'continue',
+        promptContext: {
+          asOf: '2026-04-08',
+          experiment: { title: 'Earlier bedtime' },
+          experimentId: 'exp_progress_revoked_late',
+          phase: 'progress',
+          progress: { completedSessions: 3 },
+          progressCard: {
+            card: { completedSessions: 3 },
+            url: 'https://app.example.test/experiments/progress-card.png',
+            warnings: [],
+          },
+        },
+        scheduledTaskAuthority: {
+          automationId: 'automation-progress-consent-revoked-during-provider',
+          expectedUpdatedAt: '2026-04-08T08:00:00.000Z',
+          kind: 'experiment_lifecycle',
+          phase: 'progress',
+        },
+      })
     cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
       .mockResolvedValueOnce({
         kind: 'skip',
@@ -4385,7 +4691,21 @@ describe('assistant cron runtime orchestration', () => {
           deliveryOutcome: null
           response: string
         }) => Promise<void>
+        instructions: string
+        preparedResponseMedia?: readonly unknown[] | null
       }) => {
+        expect(notificationInput.preparedResponseMedia).toEqual([{
+          alt: 'Experiment progress card',
+          kind: 'image',
+          source: 'murph-experiment-progress-card',
+          url: 'https://app.example.test/experiments/progress-card.png',
+        }])
+        expect(notificationInput.instructions).toContain(
+          'The trusted parent has already prepared the card and will attach it only if this turn sends.',
+        )
+        expect(notificationInput.instructions).not.toContain(
+          'https://app.example.test/experiments/progress-card.png',
+        )
         await notificationInput.beforeDelivery?.({
           decision: {
             kind: 'send_message',
@@ -4405,7 +4725,7 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
 
-    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledOnce()
     expect(
       cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
     ).toHaveBeenCalledOnce()
@@ -4449,7 +4769,7 @@ describe('assistant cron runtime orchestration', () => {
       title: 'Generic support revoked before commit',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    cronMocks.runExperimentLifecycleOutcomePrecondition
+    cronMocks.prepareExperimentLifecycleScheduledTurn
       .mockResolvedValueOnce({ kind: 'continue' })
     cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
       .mockResolvedValueOnce({ kind: 'continue' })
@@ -4505,7 +4825,7 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
 
-    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledOnce()
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledOnce()
     expect(
       cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
     ).toHaveBeenCalledTimes(2)
@@ -4542,7 +4862,7 @@ describe('assistant cron runtime orchestration', () => {
       throw new Error('Expected the final-results automation fixture.')
     }
     automation.tags = [...automation.tags, 'experiment', 'final-results']
-    cronMocks.runExperimentLifecycleOutcomePrecondition
+    cronMocks.prepareExperimentLifecycleScheduledTurn
       .mockRejectedValueOnce(new Error('archive failed'))
       .mockResolvedValueOnce({ kind: 'continue' })
 
@@ -4579,7 +4899,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(
-      cronMocks.runExperimentLifecycleOutcomePrecondition,
+      cronMocks.prepareExperimentLifecycleScheduledTurn,
     ).toHaveBeenCalledTimes(2)
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
@@ -8238,7 +8558,7 @@ describe('assistant cron runtime orchestration', () => {
       vaultRoot,
       'automation-required-final-retry',
     )?.status).toBe('archived')
-    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalledTimes(2)
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledTimes(2)
   })
 
   it.each([
@@ -8643,6 +8963,373 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps a sent newsletter parent pending until every recipient group is sent', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-newsletter-recipient-pending-',
+    )
+    const job = await createCanonicalJob(vaultRoot, 'newsletter-recipient-pending')
+    const parentIntentId = 'outbox_newsletter_parent_recipient_pending'
+    const deliveryIdempotencyKey =
+      `group-newsletter:${job.jobId}:2026-04-08T10:00:00.000Z:group-one`
+    const parent = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: parentIntentId,
+      status: 'sent',
+      turnId: 'turn_newsletter_recipient_pending',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+    const child = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: 'outbox_newsletter_child_recipient_pending',
+      recipientMemberId: 'member-one',
+      status: 'pending',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:01:30.000Z',
+    })
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: parentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, parent)
+    await saveAssistantOutboxIntent(vaultRoot, child)
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: parent,
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 0 })
+    await expect(repairPendingAssistantCronDeliveries({
+      vault: vaultRoot,
+    })).resolves.toEqual({ checked: 1, reconciled: 0 })
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state)
+      .toMatchObject({
+        pendingDeliveryIntentId: parentIntentId,
+      })
+    expect((await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )).jobs.find((record) => record.jobId === job.jobId)?.state.pendingOccurrenceAt)
+      .toBe('2026-04-08T10:00:00.000Z')
+
+    const sentChild = assistantOutboxIntentSchema.parse({
+      ...child,
+      sentAt: '2026-04-08T10:02:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-08T10:02:00.000Z',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, sentChild)
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: sentChild,
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state)
+      .toMatchObject({
+        lastSucceededAt: '2026-04-08T10:02:00.000Z',
+      })
+    expect((await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )).jobs.find((record) => record.jobId === job.jobId)?.state.pendingOccurrenceAt)
+      .toBeNull()
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state)
+      .not.toHaveProperty('pendingDeliveryIntentId')
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('takes the newsletter family snapshot after the outbox fanout writer commits', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-newsletter-family-snapshot-',
+    )
+    const job = await createCanonicalJob(vaultRoot, 'newsletter-family-snapshot')
+    const parentIntentId = 'outbox_newsletter_parent_family_snapshot'
+    const deliveryIdempotencyKey =
+      `group-newsletter:${job.jobId}:2026-04-08T10:00:00.000Z:group-one`
+    const parentPending = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: parentIntentId,
+      status: 'pending',
+      turnId: 'turn_newsletter_family_snapshot',
+      updatedAt: '2026-04-08T10:00:30.000Z',
+    })
+    const parentSent = assistantOutboxIntentSchema.parse({
+      ...parentPending,
+      nextAttemptAt: null,
+      sentAt: '2026-04-08T10:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+    const childSent = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: 'outbox_newsletter_child_family_snapshot',
+      recipientMemberId: 'member-one',
+      status: 'sent',
+      turnId: parentPending.turnId,
+      updatedAt: '2026-04-08T10:01:30.000Z',
+    })
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: parentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, parentPending)
+    const writerEntered = createDeferred<void>()
+    const releaseWriter = createDeferred<void>()
+    const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+      writerEntered.resolve(undefined)
+      await releaseWriter.promise
+      await saveAssistantOutboxIntent(vaultRoot, childSent)
+      await saveAssistantOutboxIntent(vaultRoot, parentSent)
+    })
+    await writerEntered.promise
+
+    let reconciliationSettled = false
+    const reconciliation = reconcileAssistantCronDeliveryIntent({
+      intent: parentSent,
+      vault: vaultRoot,
+    }).finally(() => {
+      reconciliationSettled = true
+    })
+    await Promise.resolve()
+    expect(reconciliationSettled).toBe(false)
+
+    releaseWriter.resolve(undefined)
+    await writer
+    await expect(reconciliation).resolves.toEqual({ reconciled: 1 })
+    expect((await getAssistantCronJob(vaultRoot, job.jobId)).state)
+      .toMatchObject({ lastSucceededAt: '2026-04-08T10:01:30.000Z' })
+  })
+
+  it('backs off the same newsletter occurrence for a mixed sent and safely replayable family', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-newsletter-recipient-safe-retry-',
+    )
+    const job = await createCanonicalJob(vaultRoot, 'newsletter-recipient-safe-retry')
+    const automation = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!automation) {
+      throw new Error('Expected newsletter automation fixture.')
+    }
+    automation.activeUntil = null
+    const parentIntentId = 'outbox_newsletter_parent_recipient_safe_retry'
+    const deliveryIdempotencyKey =
+      `group-newsletter:${job.jobId}:2026-04-08T10:00:00.000Z:group-one`
+    const parent = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: parentIntentId,
+      status: 'sent',
+      turnId: 'turn_newsletter_recipient_safe_retry',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+    const sentChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: 'outbox_newsletter_child_recipient_safe_retry_sent',
+      recipientMemberId: 'member-one',
+      status: 'sent',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:02:00.000Z',
+    })
+    const safelyReplayableChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: 'outbox_newsletter_child_recipient_safe_retry_failed',
+      lastError: {
+        code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+        message: 'recipient authority changed before provider delivery',
+      },
+      recipientMemberId: 'member-two',
+      status: 'abandoned',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:03:00.000Z',
+    })
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: parentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await Promise.all([
+      saveAssistantOutboxIntent(vaultRoot, parent),
+      saveAssistantOutboxIntent(vaultRoot, sentChild),
+      saveAssistantOutboxIntent(vaultRoot, safelyReplayableChild),
+    ])
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: safelyReplayableChild,
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    const reconciled = await getAssistantCronJob(vaultRoot, job.jobId)
+    expect(reconciled.state).toMatchObject({
+      consecutiveFailures: 1,
+      lastError: 'One or more group newsletter recipients can be retried safely.',
+      lastFailedAt: '2026-04-08T10:03:00.000Z',
+    })
+    const runtimeState = (await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )).jobs.find((record) => record.jobId === job.jobId)?.state
+    expect(runtimeState).toMatchObject({
+      pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      retryAfterAt: '2026-04-08T10:03:30.000Z',
+    })
+    expect(runtimeState).not.toHaveProperty('pendingDeliveryIntentId')
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['ambiguous', 'ASSISTANT_DELIVERY_AMBIGUOUS'],
+    ['retry-exhausted', 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED'],
+  ] as const)(
+    'consumes a newsletter occurrence after terminal %s recipient delivery',
+    async (label, failureCode) => {
+    const { vaultRoot } = await createRuntimeContext(
+      `assistant-cron-runtime-newsletter-recipient-${label}-`,
+    )
+    const job = await createCanonicalJob(vaultRoot, `newsletter-recipient-${label}`)
+    const automation = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!automation) {
+      throw new Error('Expected newsletter automation fixture.')
+    }
+    automation.activeUntil = '2026-04-15T10:00:00.000Z'
+    automation.tags.push('system:assistant-require-send')
+    const parentIntentId = `outbox_newsletter_parent_recipient_${label}`
+    const deliveryIdempotencyKey =
+      `group-newsletter:${job.jobId}:2026-04-08T10:00:00.000Z:group-one`
+    const parent = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: parentIntentId,
+      status: 'sent',
+      turnId: 'turn_newsletter_recipient_partial',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+    const sentChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: `outbox_newsletter_child_recipient_${label}_sent`,
+      recipientMemberId: 'member-one',
+      status: 'sent',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:02:00.000Z',
+    })
+    const failedChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: `outbox_newsletter_child_recipient_${label}_failed`,
+      lastError: {
+        code: failureCode,
+        message: 'private recipient failure',
+      },
+      recipientMemberId: 'member-two',
+      status: failureCode === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+        ? 'abandoned'
+        : 'failed',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:03:00.000Z',
+    })
+    const safelyReplayableChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: `outbox_newsletter_child_recipient_${label}_safe`,
+      lastError: {
+        code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+        message: 'recipient authority changed before provider delivery',
+      },
+      recipientMemberId: 'member-three',
+      status: 'abandoned',
+      turnId: parent.turnId,
+      updatedAt: '2026-04-08T10:02:30.000Z',
+    })
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: parentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await Promise.all([
+      saveAssistantOutboxIntent(vaultRoot, parent),
+      saveAssistantOutboxIntent(vaultRoot, sentChild),
+      saveAssistantOutboxIntent(vaultRoot, failedChild),
+      saveAssistantOutboxIntent(vaultRoot, safelyReplayableChild),
+    ])
+
+    await expect(reconcileAssistantCronDeliveryIntent({
+      intent: failedChild,
+      vault: vaultRoot,
+    })).resolves.toEqual({ reconciled: 1 })
+
+    const reconciled = await getAssistantCronJob(vaultRoot, job.jobId)
+    expect(reconciled.state).toMatchObject({
+      consecutiveFailures: 0,
+      lastError: 'One or more group newsletter deliveries did not complete.',
+      lastFailedAt: '2026-04-08T10:03:00.000Z',
+    })
+    expect((await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )).jobs.find((record) => record.jobId === job.jobId)?.state.pendingOccurrenceAt)
+      .toBeNull()
+    expect(reconciled.state).not.toHaveProperty('pendingDeliveryIntentId')
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    },
+  )
+
+  it('fails closed when a sent newsletter parent has no exact-turn recipients', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-newsletter-recipient-turn-isolation-',
+    )
+    const job = await createCanonicalJob(vaultRoot, 'newsletter-recipient-turn-isolation')
+    const parentIntentId = 'outbox_newsletter_parent_turn_isolation'
+    const deliveryIdempotencyKey =
+      `group-newsletter:${job.jobId}:2026-04-08T10:00:00.000Z:group-one`
+    const parent = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: parentIntentId,
+      status: 'sent',
+      turnId: 'turn_newsletter_current',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+    const staleChild = buildTestNewsletterOutboxIntent({
+      deliveryIdempotencyKey,
+      intentId: 'outbox_newsletter_child_old_turn',
+      recipientMemberId: 'member-one',
+      status: 'sent',
+      turnId: 'turn_newsletter_old',
+      updatedAt: '2026-04-08T10:02:00.000Z',
+    })
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: parentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, parent)
+    await saveAssistantOutboxIntent(vaultRoot, staleChild)
+
+    await expect(repairPendingAssistantCronDeliveries({
+      vault: vaultRoot,
+    })).resolves.toEqual({ checked: 1, reconciled: 1 })
+
+    const reconciled = await getAssistantCronJob(vaultRoot, job.jobId)
+    expect(reconciled.state).toMatchObject({
+      lastError: 'One or more group newsletter deliveries did not complete.',
+      lastFailedAt: '2026-04-08T10:01:00.000Z',
+    })
+    expect((await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )).jobs.find((record) => record.jobId === job.jobId)?.state.pendingOccurrenceAt)
+      .toBeNull()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('fails a stale pending canonical delivery when its outbox intent is missing', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-missing-pending-delivery-',
@@ -8946,6 +9633,94 @@ function findCanonicalAutomation(
   )
 }
 
+async function createBoundGroupChallengeExecutionFixture(input: {
+  prefix: string
+  projectionScopeKey?: string
+  withMediaReservation: boolean
+}) {
+  const automationId = 'automation-group-challenge-media'
+  const expectedUpdatedAt = '2026-07-18T12:00:00.000Z'
+  const occurrenceAt = '2026-07-19T08:00:00.000Z'
+  const { vaultRoot } = await createRuntimeContext(input.prefix)
+  getVaultAutomationStore(vaultRoot).push({
+    activeUntil: '2026-07-20T08:00:00.000Z',
+    automationId,
+    continuityPolicy: 'preserve',
+    createdAt: expectedUpdatedAt,
+    instructions: 'Dispatch the exact bound Summer Steps challenge update.',
+    route: {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'group-chat-1',
+      identityId: null,
+      participantId: null,
+      threadId: 'group-chat-1',
+      threadIsDirect: false,
+    },
+    schedule: { kind: 'dailyLocal', localTime: '08:00' },
+    scheduledTask: {
+      kind: 'group_challenge',
+      knowledgeSlug: 'summer-steps',
+      projectionScopeKey:
+        input.projectionScopeKey ?? 'steps-days.v0',
+    },
+    slug: 'summer-steps-dispatch',
+    status: 'active',
+    summary: null,
+    tags: ['assistant', 'scheduled'],
+    title: 'Summer Steps dispatch',
+    updatedAt: expectedUpdatedAt,
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+  if (!source || source.kind !== 'automation') {
+    throw new Error('Expected canonical group-challenge automation source.')
+  }
+  const baseRuntimeState = resolveCanonicalRuntimeState(
+    source,
+    await readAssistantCronCanonicalRuntimeStore(paths),
+  )
+  const mediaReservation = input.withMediaReservation
+    ? {
+        automationId,
+        expectedUpdatedAt,
+        lane: 'image' as const,
+        occurrenceAt,
+      }
+    : null
+  const runtimeState = {
+    ...baseRuntimeState,
+    state: {
+      ...baseRuntimeState.state,
+      pendingOccurrenceAt: occurrenceAt,
+      scheduledMediaReservation: mediaReservation,
+    },
+  }
+  await writeAssistantCronCanonicalRuntimeStore(paths, {
+    jobs: [runtimeState],
+    version: 1,
+  })
+  const claimed = await claimResolvedAssistantCronJob({
+    job: {
+      kind: 'canonical',
+      source,
+      runtimeState,
+      job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+    },
+    paths,
+  })
+
+  return {
+    automationId,
+    claimed,
+    expectedUpdatedAt,
+    mediaReservation,
+    occurrenceAt,
+    paths,
+    vaultRoot,
+  }
+}
+
 async function createRuntimeContext(prefix: string) {
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
@@ -9168,6 +9943,67 @@ function buildTestLinqOutboxIntent(input: {
     deliveryTransportIdempotent: false,
     lastError: null,
   })
+}
+
+function buildTestNewsletterOutboxIntent(input: {
+  deliveryIdempotencyKey: string
+  intentId: string
+  lastError?: AssistantOutboxIntent['lastError']
+  recipientMemberId?: string | null
+  status: AssistantOutboxIntent['status']
+  turnId: string
+  updatedAt: string
+}): AssistantOutboxIntent {
+  return assistantOutboxIntentSchema.parse({
+    schema: 'murph.assistant-outbox-intent.v1',
+    intentId: input.intentId,
+    sessionId: 'session_newsletter_reconciliation',
+    turnId: input.turnId,
+    createdAt: '2026-04-08T10:00:00.000Z',
+    updatedAt: input.updatedAt,
+    lastAttemptAt: input.updatedAt,
+    nextAttemptAt: input.status === 'pending' ? input.updatedAt : null,
+    sentAt: input.status === 'sent' ? input.updatedAt : null,
+    attemptCount: input.status === 'pending' ? 0 : 1,
+    status: input.status,
+    message: 'Weekly newsletter',
+    subject: null,
+    dedupeKey: `dedupe-${input.intentId}`,
+    targetFingerprint: `target-fingerprint-${input.intentId}`,
+    channel: 'email',
+    identityId: null,
+    actorId: null,
+    threadId: null,
+    threadIsDirect: false,
+    replyToMessageId: null,
+    bindingDelivery: null,
+    deliverySource: null,
+    explicitTarget: serializeHostedEmailThreadTarget({
+      groupId: 'group-one',
+      recipientMemberId: input.recipientMemberId ?? null,
+      subject: 'Weekly newsletter',
+      targetKind: 'group',
+    }),
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: true,
+    lastError: input.lastError ?? null,
+  })
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>
+  reject(reason?: unknown): void
+  resolve(value: T | PromiseLike<T>): void
+} {
+  let reject!: (reason?: unknown) => void
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, reject, resolve }
 }
 
 async function updateLocalJob(

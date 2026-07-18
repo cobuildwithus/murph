@@ -102,6 +102,22 @@ describe('assistant onboarding state', () => {
     })
   })
 
+  it('preserves the first terminal completion until onboarding is reopened', async () => {
+    const vault = await createTempVault()
+    const first = await completeAssistantOnboarding({
+      completedAt: '2026-04-23T00:15:00.000Z',
+      reason: 'user_answered',
+      vault,
+    })
+
+    await expect(completeAssistantOnboarding({
+      completedAt: '2026-04-23T00:20:00.000Z',
+      reason: 'manual',
+      vault,
+    })).resolves.toEqual(first)
+    await expect(readAssistantOnboardingState(vault)).resolves.toEqual(first)
+  })
+
   it('does not silently reopen onboarding when the persisted state is malformed', async () => {
     const vault = await createTempVault()
     const statePath = resolveAssistantOnboardingStatePath(vault)

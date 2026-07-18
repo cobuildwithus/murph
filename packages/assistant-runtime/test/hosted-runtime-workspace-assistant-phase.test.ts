@@ -206,6 +206,7 @@ import {
   saveAssistantAutomationState,
   saveAssistantSession,
 } from "@murphai/assistant-engine";
+import { upsertKnowledgePage } from "@murphai/assistant-engine/knowledge";
 import {
   parseAssistantSessionRecord,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -3501,6 +3502,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         createdAt: "2026-04-27T00:00:00.000Z",
         vaultRoot,
       });
+      await upsertKnowledgePage({
+        body: "# Morning mobility\n\nRun one lightweight mobility challenge.",
+        pageType: "challenge",
+        slug: "morning-mobility",
+        status: "active",
+        title: "Morning mobility",
+        vault: vaultRoot,
+      });
+      await upsertKnowledgePage({
+        body: "# Archived mobility\n\nThis challenge has ended.",
+        pageType: "challenge",
+        slug: "archived-mobility",
+        status: "archived",
+        title: "Archived mobility",
+        vault: vaultRoot,
+      });
       mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
         inputId === emailInputId
           ? {
@@ -3599,6 +3616,168 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           });
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
+          }
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            continuityPolicy: "fresh",
+            instructions: "This must not create a scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:32" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "fresh-mobility-dispatch",
+            title: "Fresh mobility dispatch",
+          })).rejects.toThrow(
+            "A group-challenge scheduled task must preserve conversation continuity.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "This must not create an evergreen scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:31" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "evergreen-mobility-dispatch",
+            title: "Evergreen mobility dispatch",
+          })).rejects.toThrow(
+            "A group-challenge scheduled task requires a finite activeUntil.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not create a device-triggered scheduled task.",
+            schedule: {
+              kind: "deviceActivity",
+              after: "2026-07-18T12:00:00.000Z",
+            },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "device-mobility-dispatch",
+            title: "Device mobility dispatch",
+          })).rejects.toMatchObject({
+            code: "invalid_option",
+            message: "A group-challenge scheduled task requires a time-driven schedule.",
+            name: "VaultCliError",
+          });
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not create a scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:31" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "profile-name.v0",
+            },
+            slug: "invalid-scope-mobility-dispatch",
+            title: "Invalid-scope mobility dispatch",
+          })).rejects.toThrow(
+            "A group-challenge scheduled task requires one selectable health projection scope.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not create a scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:31" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "group-email.v0",
+            },
+            slug: "email-scope-mobility-dispatch",
+            title: "Email-scope mobility dispatch",
+          })).rejects.toThrow(
+            "A group-challenge scheduled task requires one selectable health projection scope.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not create a scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:33" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "missing-challenge",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "missing-challenge-dispatch",
+            title: "Missing challenge dispatch",
+          })).rejects.toThrow(
+            'No derived knowledge page exists for slug "missing-challenge".',
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not create a scheduled task.",
+            schedule: { kind: "dailyLocal", localTime: "08:34" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "archived-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "archived-mobility-dispatch",
+            title: "Archived mobility dispatch",
+          })).rejects.toThrow(
+            "A group-challenge scheduled task requires the exact active challenge page.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not bind an existing automation.",
+            schedule: { kind: "dailyLocal", localTime: "08:35" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "group-check-in",
+            title: "Group check-in",
+          })).rejects.toThrow(
+            "A scheduled-task binding can be set only while creating a new automation.",
+          );
+          const scheduledChallenge = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "Send today's prepared mobility challenge dispatch.",
+            schedule: { kind: "dailyLocal", localTime: "08:36" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "morning-mobility-dispatch",
+            title: "Morning mobility dispatch",
+          });
+          if (!scheduledChallenge || scheduledChallenge.action !== "save") {
+            throw new Error("Expected saved group-challenge automation.");
+          }
+          const selectorScheduledChallenge =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              activeUntil: "2026-07-20T23:00:00.000-04:00",
+              instructions: "Send today's prepared running challenge dispatch.",
+              schedule: { kind: "dailyLocal", localTime: "08:37" },
+              scheduledTask: {
+                kind: "group_challenge",
+                knowledgeSlug: "morning-mobility",
+                projectionScopeKey:
+                  "activity-minutes-days.v1.activityKind.running",
+              },
+              slug: "running-minutes-dispatch",
+              title: "Running minutes dispatch",
+            });
+          if (
+            !selectorScheduledChallenge ||
+            selectorScheduledChallenge.action !== "save"
+          ) {
+            throw new Error("Expected saved selector-scoped challenge automation.");
           }
           const stale = await executionContext.hosted?.automationTool?.request({
             action: "save",
@@ -3699,9 +3878,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         ]),
       }));
       await expect(showAutomation({
+        slug: "morning-mobility-dispatch",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        activeUntil: "2026-07-20T23:00:00.000-04:00",
+        continuityPolicy: "preserve",
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_group_chat",
+          threadIsDirect: false,
+        }),
+        scheduledTask: {
+          kind: "group_challenge",
+          knowledgeSlug: "morning-mobility",
+          projectionScopeKey: "steps-days.v0",
+        },
+      }));
+      await expect(showAutomation({
         slug: "stale-group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
+      await expect(showAutomation({
+        slug: "running-minutes-dispatch",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        scheduledTask: {
+          kind: "group_challenge",
+          knowledgeSlug: "morning-mobility",
+          projectionScopeKey: "activity-minutes-days.v1.activityKind.running",
+        },
+      }));
       await expect(showAutomation({
         slug: "paused-group-check-in",
         vaultRoot,
@@ -3773,6 +3979,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!laneInput?.executionContext || !operationScope) {
         throw new Error("Expected hosted automation operation scope.");
       }
+
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            activeUntil: "2026-07-20T23:00:00.000-04:00",
+            instructions: "This must not bind a direct conversation.",
+            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            scheduledTask: {
+              kind: "group_challenge",
+              knowledgeSlug: "morning-mobility",
+              projectionScopeKey: "steps-days.v0",
+            },
+            slug: "direct-challenge-dispatch",
+            title: "Direct challenge dispatch",
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "A group-challenge scheduled task requires the current non-direct group route.",
+      );
 
       const patchThroughScope = async (retargetToCurrentConversation: boolean) =>
         await operationScope.runAutoReplyGroup({

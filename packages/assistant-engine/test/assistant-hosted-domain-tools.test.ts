@@ -84,6 +84,32 @@ describe('hosted domain dynamic tools', () => {
       },
     })
     expect(readToolRequest('automation', {
+      action: 'save',
+      activeUntil: '2026-07-20T23:00:00.000-04:00',
+      instructions: 'Send the prepared group challenge.',
+      schedule: { kind: 'dailyLocal', localTime: '08:30' },
+      scheduledTask: {
+        kind: 'group_challenge',
+        knowledgeSlug: 'morning-mobility',
+        projectionScopeKey: 'steps-days.v0',
+      },
+      title: 'Morning mobility dispatch',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        activeUntil: '2026-07-20T23:00:00.000-04:00',
+        instructions: 'Send the prepared group challenge.',
+        schedule: { kind: 'dailyLocal', localTime: '08:30' },
+        scheduledTask: {
+          kind: 'group_challenge',
+          knowledgeSlug: 'morning-mobility',
+          projectionScopeKey: 'steps-days.v0',
+        },
+        title: 'Morning mobility dispatch',
+      },
+    })
+    expect(readToolRequest('automation', {
       action: 'patch',
       lookup: 'evening-wind-down',
       retargetToCurrentConversation: true,
@@ -101,6 +127,15 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'patch',
       lookup: 'evening-wind-down',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      lookup: 'evening-wind-down',
+      scheduledTask: {
+        kind: 'group_challenge',
+        knowledgeSlug: 'morning-mobility',
+        projectionScopeKey: 'steps-days.v0',
+      },
     })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
       action: 'save',

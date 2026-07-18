@@ -24,6 +24,9 @@ import {
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
 import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
+import {
+  resolveAssistantScheduledTaskAuthorityFromSource,
+} from '../src/assistant/scheduled-task-authority.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -78,6 +81,64 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it('derives fixed task authority only from exact reconciled records', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    for (const expected of [
+      {
+        automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+        kind: 'managed_knowledge_ledger',
+        slug: 'weekly-health-insights',
+      },
+      {
+        automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+        kind: 'managed_knowledge_ledger',
+        slug: 'improvement-opportunities',
+      },
+      {
+        automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+        kind: 'research_ledger',
+        slug: 'weekly-health-research-scout',
+      },
+      {
+        automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        kind: 'product_notes',
+        slug: 'murph-product-notes',
+      },
+      {
+        automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+        kind: 'memory_maintenance',
+      },
+    ] as const) {
+      const record = await showAutomation({
+        automationId: expected.automationId,
+        vaultRoot,
+      })
+      if (!record) {
+        throw new Error(`Expected managed automation ${expected.automationId}.`)
+      }
+
+      expect(resolveAssistantScheduledTaskAuthorityFromSource(record)).toEqual({
+        ...expected,
+        expectedUpdatedAt: record.updatedAt,
+      })
+      expect(resolveAssistantScheduledTaskAuthorityFromSource({
+        ...record,
+        instructions: `${record.instructions}\nModel-controlled change.`,
+      })).toEqual({ kind: 'none' })
+    }
+  })
+
   it('creates managed health automations through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
@@ -106,10 +167,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.tags).toContain('murph-managed:weekly-health-digest')
     expect(record?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(record?.instructions).toContain('still remember ten seconds after reading')
-    expect(record?.instructions).toContain('murph.device')
-    expect(record?.instructions).toContain('vault-cli wearables sources list')
+    expect(record?.instructions).not.toContain('murph.device')
+    expect(record?.instructions).toContain('`murph.scheduled_read` with `action: "sources"`')
     expect(record?.instructions).toContain('Wearable connected but not delivering')
-    expect(record?.instructions).toContain('action: connect')
+    expect(record?.instructions).toContain('reply if they want help reconnecting')
+    expect(record?.instructions).toContain('cannot connect or reconcile a device')
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(record?.instructions).toContain('what was probably noise')
     expect(record?.instructions).toContain('Never restate single-day metric values')
@@ -137,13 +199,15 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('assistant onboarding')
     expect(insightRecord?.instructions).not.toContain('14 days')
-    expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
+    expect(insightRecord?.instructions).toContain('`action: "knowledge_get"` and `slug: "weekly-health-insights"`')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
-    expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
-    expect(insightRecord?.instructions).toContain('section already exists')
+    expect(insightRecord?.instructions).toContain('call `murph.scheduled_knowledge` once')
+    expect(insightRecord?.instructions).toContain('do not supply an action, date, timezone, heading, position, slug, or title')
+    expect(insightRecord?.instructions).not.toContain('`title:')
+    expect(insightRecord?.instructions).toContain('another run created this occurrence-local-date section first')
     expect(insightRecord?.instructions).toContain('useful enough to repeat now')
     expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
     expect(insightRecord?.instructions).toContain(
@@ -214,10 +278,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     expectCronSchedule(improvementCoachRecord?.schedule)
     expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(improvementCoachRecord?.instructions).toContain('knowledge show improvement-opportunities')
-    expect(improvementCoachRecord?.instructions).toContain(
-      'knowledge append-section improvement-opportunities YYYY-MM-DD',
-    )
+    expect(improvementCoachRecord?.instructions).toContain('`action: "knowledge_get"` and `slug: "improvement-opportunities"`')
+    expect(improvementCoachRecord?.instructions).toContain('call `murph.scheduled_knowledge` once')
+    expect(improvementCoachRecord?.instructions).toContain('do not supply an action, date, timezone, heading, position, slug, or title')
+    expect(improvementCoachRecord?.instructions).not.toContain('`title:')
     expect(improvementCoachRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
     )
@@ -247,13 +311,13 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
-    expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
-    expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
+    expect(researchScoutRecord?.instructions).toContain('Call `murph.research_scout_batch` once')
+    expect(researchScoutRecord?.instructions).not.toContain('vault-cli research scout')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
-    expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
-    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
-    expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
+    expect(researchScoutRecord?.instructions).toContain('`lanes`, `since`, `until`, and `maxCandidatesPerLane`')
+    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `murph.research_scout_batch`')
+    expect(researchScoutRecord?.instructions).toContain('not a generic `tags` field')
     expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
     expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
     expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
@@ -292,21 +356,23 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(productUpdatesRecord?.tags).toContain('murph-managed:weekly-product-updates')
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
-    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
-    expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
+    expect(productUpdatesRecord?.instructions).toContain('`murph.product_source` once with `source: "changelog"`')
+    expect(productUpdatesRecord?.instructions).toContain('`murph.product_source` once with `source: "feature_catalog"`')
+    expect(productUpdatesRecord?.instructions).toContain('`action: "knowledge_get"` and `slug: "murph-product-notes"`')
     expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
     expect(productUpdatesRecord?.instructions).toContain('last recorded changelog means feature discovery now')
     expect(productUpdatesRecord?.instructions).toContain('last recorded feature discovery means changelog now')
     expect(productUpdatesRecord?.instructions).toContain('Use `murph-product-notes` as the only ledger')
     expect(productUpdatesRecord?.instructions).toContain('Do not create per-week pages')
-    expect(productUpdatesRecord?.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
+    expect(productUpdatesRecord?.instructions).toContain('call `murph.scheduled_knowledge` once')
+    expect(productUpdatesRecord?.instructions).toContain('do not supply an action, date, timezone, heading, position, slug, or title')
+    expect(productUpdatesRecord?.instructions).not.toContain('`title:')
     expect(productUpdatesRecord?.instructions).toContain('Fallback is allowed at most once')
     expect(productUpdatesRecord?.instructions).toContain('never fall back from a fallback')
     expect(productUpdatesRecord?.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
-    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
-    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
-    expect(productUpdatesRecord?.instructions).toContain('another run already recorded today\'s note')
+    expect(productUpdatesRecord?.instructions).toContain('only a `body` that records this run\'s kind and the chosen item ids')
+    expect(productUpdatesRecord?.instructions).toContain('Do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(productUpdatesRecord?.instructions).toContain('another run already recorded this occurrence-local-date note')
     expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
     expect(productUpdatesRecord?.instructions).toContain('2-3 recently shipped Murph updates')
     expect(productUpdatesRecord?.instructions).toContain('2-3 things Murph can already do')
@@ -677,6 +743,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       'bounded committed user and assistant conversation messages from the last 7 days',
     )
     expect(automation.instructions).toContain('supplied conversation evidence')
+    expect(automation.instructions).toContain('Write durable memory only with `murph.maintenance_memory`')
+    expect(automation.instructions).not.toContain('vault-cli memory upsert')
+    expect(automation.instructions).not.toContain('vault-cli memory update')
     expect(automation.instructions).toContain('Do not read transcript files or session storage')
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })
@@ -1090,7 +1159,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expectEveryTwoWeeksSchedule(productNotesRecord?.schedule)
     expect(productNotesRecord?.instructions).toContain('Goal: every two weeks')
     expect(productNotesRecord?.instructions).toContain(
-      '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+      '`murph.product_source` once with `source: "changelog"`',
     )
     expect(productNotesRecord?.instructions).toContain(
       'last recorded changelog means feature discovery now',

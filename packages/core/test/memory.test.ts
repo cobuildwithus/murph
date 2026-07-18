@@ -15,6 +15,7 @@ import { readJsonlRecords } from "../src/index.ts";
 import {
   buildMemoryCorePromptBlock,
   forgetMemory,
+  forgetMemoryIfExactMatch,
   getMemoryRecord,
   readMemoryDocument,
   resolveMemoryDocumentPath,
@@ -497,5 +498,50 @@ describe("core memory package wrapper", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("forgets a memory record only when its section and text match atomically", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const pointerText =
+      "active challenge: summer-steps; read that knowledge page before any challenge action";
+    const inserted = await upsertMemory(vaultRoot, {
+      section: "Context",
+      text: pointerText,
+    });
+
+    for (const mismatch of [
+      { section: "Instructions" as const, text: pointerText },
+      { section: "Context" as const, text: `${pointerText}.` },
+    ]) {
+      const result = await forgetMemoryIfExactMatch(vaultRoot, {
+        recordId: inserted.record.id,
+        ...mismatch,
+      });
+      expect(result.forgotten).toBe(false);
+      expect(result.reason).toBe("mismatch");
+      expect(result.record).toBeNull();
+      expect(await getMemoryRecord(vaultRoot, inserted.record.id)).toEqual(inserted.record);
+    }
+
+    const missing = await forgetMemoryIfExactMatch(vaultRoot, {
+      recordId: "mem_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      section: "Context",
+      text: pointerText,
+    });
+    expect(missing).toMatchObject({
+      forgotten: false,
+      reason: "not_found",
+      record: null,
+    });
+
+    const deleted = await forgetMemoryIfExactMatch(vaultRoot, {
+      recordId: inserted.record.id,
+      section: "Context",
+      text: pointerText,
+    });
+    expect(deleted.forgotten).toBe(true);
+    expect(deleted.reason).toBeNull();
+    expect(deleted.record).toEqual(inserted.record);
+    expect(await getMemoryRecord(vaultRoot, inserted.record.id)).toBeNull();
   });
 });

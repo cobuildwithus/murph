@@ -4,6 +4,7 @@ import type {
   HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
+import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
@@ -22,6 +23,7 @@ import { createTempVaultContext } from './test-helpers.ts'
 
 const AUTHORITY = {
   automationId: 'automation_newsletter',
+  expectedUpdatedAt: '2026-07-12T12:00:00.000Z',
   occurrenceAt: '2026-07-12T13:00:00.000Z',
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
@@ -87,7 +89,13 @@ describe('newsletter durable outbox capability', () => {
   it('allows one prepare and one send, then queues a proof-carrying parent', async () => {
     const vault = await createVault('newsletter-outbox-queue-')
     const request = vi.fn(async () => preparationResponse())
-    const tool = createTool({ request, turnId: 'turn_one', vault })
+    const recordDeliveryIntent = vi.fn()
+    const tool = createTool({
+      recordDeliveryIntent,
+      request,
+      turnId: 'turn_one',
+      vault,
+    })
 
     await prepare(tool)
     await expect(send(tool)).resolves.toMatchObject({
@@ -102,6 +110,10 @@ describe('newsletter durable outbox capability', () => {
     const intents = await listAssistantOutboxIntents(vault)
     expect(intents).toHaveLength(1)
     expect(intents[0]).toMatchObject({
+      automationAuthority: {
+        automationId: AUTHORITY.automationId,
+        expectedUpdatedAt: AUTHORITY.expectedUpdatedAt,
+      },
       channel: 'email',
       deliveryIdempotencyKey: DELIVERY_KEY,
       emailHtml: '<p>Weekly</p>',
@@ -110,6 +122,26 @@ describe('newsletter durable outbox capability', () => {
       status: 'pending',
     })
     expect(request).toHaveBeenCalledTimes(1)
+    expect(recordDeliveryIntent).toHaveBeenCalledWith({
+      intentId: intents[0]?.intentId,
+    })
+
+    const replayRecordDeliveryIntent = vi.fn()
+    const replayTool = createTool({
+      recordDeliveryIntent: replayRecordDeliveryIntent,
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_replay',
+      vault,
+    })
+    await prepare(replayTool)
+    await expect(send(replayTool)).resolves.toMatchObject({
+      action: 'send',
+      result: { status: 'accepted' },
+    })
+    expect(replayRecordDeliveryIntent).toHaveBeenCalledWith({
+      intentId: intents[0]?.intentId,
+    })
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(1)
   })
 
   it('returns terminal sent after the current proof parent and recipients are durable', async () => {
@@ -321,6 +353,10 @@ describe('newsletter durable outbox capability', () => {
     expect(memberIntents).toHaveLength(2)
     const retryIntent = memberIntents[1]
     expect(retryIntent).toMatchObject({
+      automationAuthority: {
+        automationId: AUTHORITY.automationId,
+        expectedUpdatedAt: AUTHORITY.expectedUpdatedAt,
+      },
       emailHtml: '<p>Original weekly note</p>',
       message: 'Original weekly note',
       newsletterAuthorizationProof: AUTHORIZATION_PROOF,
@@ -332,6 +368,58 @@ describe('newsletter durable outbox capability', () => {
         recipientMemberId: 'member_one',
         subject: 'Original weekly note',
       })
+  })
+
+  it('recreates only the safely replayable recipient in a mixed sent family', async () => {
+    const vault = await createVault('newsletter-outbox-mixed-safe-retry-')
+    const firstTool = createTool({
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_first',
+      vault,
+    })
+    await prepare(firstTool)
+    await send(firstTool)
+    await markOnlyIntentSent(vault)
+    await createRecipientIntent({
+      memberId: 'member_one',
+      status: 'sent',
+      vault,
+    })
+    await createRecipientIntent({
+      errorCode: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+      memberId: 'member_two',
+      status: 'abandoned',
+      vault,
+    })
+
+    const retryTool = createTool({
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool)).resolves.toMatchObject({
+      action: 'send',
+      result: { status: 'accepted' },
+    })
+
+    const recipientGroups = new Map<string, AssistantOutboxIntent[]>()
+    for (const intent of await listAssistantOutboxIntents(vault)) {
+      const memberId = parseHostedEmailThreadTarget(
+        intent.explicitTarget,
+      )?.recipientMemberId
+      if (!memberId) {
+        continue
+      }
+      const group = recipientGroups.get(memberId) ?? []
+      group.push(intent)
+      recipientGroups.set(memberId, group)
+    }
+    expect(recipientGroups.get('member_one')).toHaveLength(1)
+    expect(recipientGroups.get('member_one')?.[0]?.status).toBe('sent')
+    expect(recipientGroups.get('member_two')).toHaveLength(2)
+    expect(recipientGroups.get('member_two')?.map((intent) => intent.status))
+      .toEqual(['abandoned', 'pending'])
   })
 
   it('treats proof changes as terminal without re-planning a sent occurrence', async () => {
@@ -382,6 +470,7 @@ describe('newsletter durable outbox capability', () => {
 })
 
 function createTool(input: {
+  recordDeliveryIntent?: (intent: { intentId: string }) => void
   request: (
     request: HostedRuntimeNewsletterToolRequest,
   ) => Promise<HostedRuntimeNewsletterToolResponse>
@@ -389,8 +478,8 @@ function createTool(input: {
   vault: string
 }) {
   return createAssistantNewsletterOutboxTool({
-    authority: AUTHORITY,
     newsletterTool: { request: input.request },
+    recordDeliveryIntent: input.recordDeliveryIntent,
     sessionId: 'session_newsletter',
     turnId: input.turnId,
     vault: input.vault,
@@ -424,7 +513,10 @@ function preparationResponse(input?: {
 }
 
 async function prepare(tool: ReturnType<typeof createTool>) {
-  return await tool.request({ action: 'prepare', groupId: 'group_123' })
+  return await tool.request({
+    action: 'prepare',
+    scheduledAutomationAuthority: AUTHORITY,
+  })
 }
 
 async function send(
@@ -437,8 +529,8 @@ async function send(
 ) {
   return await tool.request({
     action: 'send',
-    groupId: 'group_123',
     html: input?.html ?? '<p>Weekly</p>',
+    scheduledAutomationAuthority: AUTHORITY,
     subject: input?.subject ?? 'Weekly health note',
     text: input?.text ?? 'Weekly',
   })

@@ -67,6 +67,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   that Codex cannot accept through thread or turn RPC. Workspace invocation
   abort/preemption must synchronously stop the exact owned App Server before
   the invocation slot can be reused.
+- An unattended scheduled notification or maintenance model turn is not an
+  ordinary turn. It must not share the privileged attended App Server process
+  or provider thread. Each occurrence uses an exact-owned one-shot process with
+  no general native effect surface and is fully torn down before that
+  occurrence completes. Scheduled product effects remain parent-owned typed
+  operations and revalidate their canonical source immediately before the
+  effect.
 - Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
   automation or device authority are request facts, not App Server launch
   identity or ambient child-process authority. Expose invocation-scoped

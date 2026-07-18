@@ -1658,6 +1658,7 @@ async function executeAssistantAutoReply(input: {
     const automationTurn = buildAssistantAutomationTurnEnvelope({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
+      scheduledTaskAuthority: { kind: 'none' },
       signal: watchdog.signal,
       turnEnvironment: input.turnEnvironment ?? null,
       turnTrigger: 'automation-auto-reply',
