@@ -9,6 +9,8 @@ import {
 import { z } from "zod";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
@@ -28,6 +30,8 @@ import {
 
 export {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
@@ -59,6 +63,19 @@ const errorCodeSchema = z
   .min(1)
   .max(HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS)
   .regex(HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN);
+
+export const hostedClinicalRecordsConnectLinkRequestSchema = z.object({}).strict();
+
+const hostedClinicalRecordsConnectUrlSchema = z.string().url().max(2_048).refine(
+  isHostedClinicalRecordsConnectUrl,
+  "Hosted clinical records connect URL is invalid.",
+);
+
+export const hostedClinicalRecordsConnectLinkResponseSchema = z.object({
+  connectUrl: hostedClinicalRecordsConnectUrlSchema,
+  expiresAt: clinicalIsoDateTimeSchema,
+  ok: z.literal(true),
+}).strict();
 
 export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
   eventId: z.string().min(1),
@@ -134,6 +151,9 @@ export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
 export type HostedClinicalRecordsRetrievalScope = z.infer<
   typeof hostedClinicalRecordsRetrievalScopeSchema
 >;
+export type HostedClinicalRecordsConnectLinkResponse = z.infer<
+  typeof hostedClinicalRecordsConnectLinkResponseSchema
+>;
 export type HostedClinicalRecordsRunDescriptor = z.infer<
   typeof hostedClinicalRecordsRunDescriptorSchema
 >;
@@ -163,6 +183,38 @@ export function parseHostedClinicalRecordsSyncRequestedWake(
   value: unknown,
 ): HostedExecutionClinicalRecordsSyncRequestedWake {
   return hostedClinicalRecordsSyncRequestedWakeSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsConnectLinkResponse(
+  value: unknown,
+): HostedClinicalRecordsConnectLinkResponse {
+  return hostedClinicalRecordsConnectLinkResponseSchema.parse(value);
+}
+
+function isHostedClinicalRecordsConnectUrl(value: string): boolean {
+  const url = new URL(value);
+  const httpLoopbackAllowed = url.protocol === "http:"
+    && isLoopbackHostname(url.hostname);
+  if (
+    (url.protocol !== "https:" && !httpLoopbackAllowed)
+    || url.username.length > 0
+    || url.password.length > 0
+    || url.pathname !== "/records/connect"
+    || url.search.length > 0
+  ) {
+    return false;
+  }
+
+  return /^clinicalRecordsIntent=cr_[A-Za-z0-9_-]{32}$/u.test(
+    url.hash.slice(1),
+  );
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  return normalized === "localhost"
+    || normalized === "127.0.0.1"
+    || normalized === "::1";
 }
 
 export function parseHostedClinicalRecordsRunDescriptor(

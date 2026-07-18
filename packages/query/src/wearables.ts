@@ -27,6 +27,11 @@ import {
   resolveMetricTolerance,
 } from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
+import {
+  buildWearableSleepPatternSummary,
+  resolveWearableSleepPatternReadFilters,
+  type WearableSleepPatternBuildContext,
+} from "./wearables/sleep-pattern.ts";
 import { resolveWearablePublicSourceProvider, wearableDataOriginKey } from "./wearables/origin.ts";
 import {
   isAppleHealthKitSleepCandidate,
@@ -89,7 +94,11 @@ import type {
   WearableRecoverySummary,
   WearableResolvedMetric,
   WearableSleepWindowCandidate,
+  WearableSleepWindowEvidence,
   WearableSleepNight,
+  WearableSleepPatternFilters,
+  WearableSleepPatternSummary,
+  WearableSleepReportingTimeZoneSource,
   WearableSleepSummary,
   WearableSourceHealth,
   WearableSourceHealthSummary,
@@ -141,6 +150,9 @@ export type {
   WearableRecoverySummary,
   WearableResolvedMetric,
   WearableSleepNight,
+  WearableSleepPatternFilters,
+  WearableSleepPatternSummary,
+  WearableSleepReportingTimeZoneSource,
   WearableSleepSummary,
   WearableSourceHealth,
   WearableSourceHealthSummary,
@@ -309,6 +321,7 @@ const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
   "lightMinutes",
   "remMinutes",
 ];
+const MAX_SLEEP_WINDOW_EVIDENCE_PER_SUMMARY = 64;
 
 function buildDerivedTotalSleepCandidates(
   date: string,
@@ -482,6 +495,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const sleepWindows = preferDirectSleepWindows(rawSleepWindows);
     const windowSelection = resolveSleepWindowSelection(sleepWindows);
     const selectedWindow = windowSelection.selection;
+    const sleepWindowEvidence = buildBoundedSleepWindowEvidence(rawSleepWindows, selectedWindow);
     const sessionMinutes = resolveSessionMinutesForSleepWindows(selectedWindow, sleepWindows);
     const directTotalSleepMinutes = resolveMetric(
       "totalSleepMinutes",
@@ -509,6 +523,9 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       "Used the selected sleep session duration because no explicit time-in-bed metric was available.",
     );
     const sleepEfficiency = resolveMetric("sleepEfficiency", selectPreferredSleepMetricCandidates(dateCandidates, "sleepEfficiency", selectedWindow, sleepWindows), {
+      metricFamily: "sleep",
+    });
+    const sleepLatencyMinutes = resolveMetric("sleepLatencyMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "sleepLatencyMinutes", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
     const awakeMinutes = resolveMetric("awakeMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "awakeMinutes", selectedWindow, sleepWindows), {
@@ -555,6 +572,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       ["totalSleepMinutes", totalSleepMinutes],
       ["timeInBedMinutes", timeInBedMinutes],
       ["sleepEfficiency", sleepEfficiency],
+      ["sleepLatencyMinutes", sleepLatencyMinutes],
       ["sleepScore", sleepScore],
       ["sleepPerformance", sleepPerformance],
       ["sleepConsistency", sleepConsistency],
@@ -592,16 +610,75 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       sleepConsistency,
       sleepEfficiency,
       sleepEndAt: windowSelection.selection?.endAt ?? null,
+      sleepLatencyMinutes,
       sleepPerformance,
       sleepScore,
       sleepStartAt: windowSelection.selection?.startAt ?? null,
+      sleepType: windowSelection.selection?.sleepType ?? (windowSelection.selection?.nap ? "nap" : "unknown"),
+      sleepWindowEvidence: sleepWindowEvidence.windows,
+      sleepWindowEvidenceOmittedCount: sleepWindowEvidence.omittedCount,
+      sleepWindowEvidenceOmittedExactDuplicateCount: sleepWindowEvidence.omittedExactDuplicateCount,
       sleepWindowProvider: windowSelection.selection?.provider ?? null,
       spo2,
       summaryConfidence,
+      timeZone: windowSelection.selection?.timeZone ?? null,
       timeInBedMinutes,
       totalSleepMinutes,
     };
   });
+}
+
+function buildBoundedSleepWindowEvidence(
+  windows: readonly WearableSleepWindowCandidate[],
+  selectedWindow: WearableSleepWindowCandidate | null,
+): {
+  omittedCount: number;
+  omittedExactDuplicateCount: number;
+  windows: WearableSleepWindowEvidence[];
+} {
+  const ordered = [...windows].sort((left, right) => {
+    const leftIsSelected = left.candidateId === selectedWindow?.candidateId;
+    const rightIsSelected = right.candidateId === selectedWindow?.candidateId;
+    if (leftIsSelected !== rightIsSelected) return leftIsSelected ? -1 : 1;
+    return compareSleepWindowEvidence(left, right);
+  });
+  const retained = ordered.slice(0, MAX_SLEEP_WINDOW_EVIDENCE_PER_SUMMARY);
+  const omitted = ordered.slice(MAX_SLEEP_WINDOW_EVIDENCE_PER_SUMMARY);
+
+  return {
+    omittedCount: omitted.length + ordered.reduce(
+      (count, window) => count + (window.evidenceOmittedCount ?? 0),
+      0,
+    ),
+    omittedExactDuplicateCount: omitted.reduce(
+      (count, window) => count + (window.exactDuplicateCount ?? 0),
+      ordered.reduce(
+        (count, window) => count + (window.evidenceOmittedExactDuplicateCount ?? 0),
+        0,
+      ),
+    ),
+    windows: retained.map((window) => ({
+      date: window.date,
+      durationMinutes: window.durationMinutes,
+      endAt: window.endAt,
+      exactDuplicateCount: window.exactDuplicateCount ?? 0,
+      provider: resolveSleepWindowPublicProvider(window),
+      recordedAt: window.recordedAt,
+      sleepType: window.sleepType ?? (window.nap ? "nap" : "unknown"),
+      startAt: window.startAt,
+      timeZone: window.timeZone ?? null,
+    })),
+  };
+}
+
+function compareSleepWindowEvidence(
+  left: WearableSleepWindowCandidate,
+  right: WearableSleepWindowCandidate,
+): number {
+  return (left.startAt ?? "").localeCompare(right.startAt ?? "")
+    || (left.endAt ?? "").localeCompare(right.endAt ?? "")
+    || resolveSleepWindowPublicProvider(left).localeCompare(resolveSleepWindowPublicProvider(right))
+    || left.candidateId.localeCompare(right.candidateId);
 }
 
 function buildPublicSleepWindowConflictNotes(
@@ -613,8 +690,11 @@ function buildPublicSleepWindowConflictNotes(
   }
 
   const selectedPublicProvider = resolveSleepWindowPublicProvider(selectedWindow);
+  const comparableSleepWindows = sleepWindows.filter((window) =>
+    sleepWindowComparableToSelection(window, selectedWindow)
+  );
   const conflictingPublicProviders = uniqueStrings(
-    sleepWindows
+    comparableSleepWindows
       .filter((window) => window.candidateId !== selectedWindow.candidateId)
       .filter((window) =>
         Math.abs(window.durationMinutes - selectedWindow.durationMinutes) > resolveMetricTolerance("sessionMinutes")
@@ -622,7 +702,7 @@ function buildPublicSleepWindowConflictNotes(
       .map(resolveSleepWindowPublicProvider)
       .filter((provider) => provider !== selectedPublicProvider),
   ).sort();
-  const samePublicProviderConflict = sleepWindows
+  const samePublicProviderConflict = comparableSleepWindows
     .filter((window) => window.candidateId !== selectedWindow.candidateId)
     .some((window) =>
       resolveSleepWindowPublicProvider(window) === selectedPublicProvider
@@ -646,7 +726,10 @@ function resolveSessionMinutesForSleepWindows(
   selectedWindow: WearableSleepWindowCandidate | null,
   sleepWindows: readonly WearableSleepWindowCandidate[],
 ): WearableResolvedMetric {
-  const windowCandidates = sleepWindows.map((window) => buildSleepWindowMetricCandidate(window));
+  const comparableSleepWindows = selectedWindow
+    ? sleepWindows.filter((window) => sleepWindowComparableToSelection(window, selectedWindow))
+    : sleepWindows;
+  const windowCandidates = comparableSleepWindows.map((window) => buildSleepWindowMetricCandidate(window));
 
   if (!selectedWindow) {
     return resolveMetric("sessionMinutes", windowCandidates, { metricFamily: "sleep" });
@@ -659,6 +742,15 @@ function resolveSessionMinutesForSleepWindows(
   );
 
   return attachSleepWindowConflictEvidence(selectedSessionMinutes, windowCandidates);
+}
+
+function sleepWindowComparableToSelection(
+  candidate: WearableSleepWindowCandidate,
+  selected: WearableSleepWindowCandidate,
+): boolean {
+  const candidateIsNap = candidate.sleepType === "nap" || candidate.nap;
+  const selectedIsNap = selected.sleepType === "nap" || selected.nap;
+  return candidateIsNap === selectedIsNap;
 }
 
 function attachSleepWindowConflictEvidence(
@@ -1512,6 +1604,34 @@ export function summarizeWearableSleepFromBundle(
   filters: WearableSummaryFilters = {},
 ): WearableSleepSummary[] {
   return applyWearableSummaryLimit(bundle.sleepNights, filters.limit);
+}
+
+export function summarizeWearableSleepPattern(
+  vault: VaultReadModel,
+  filters: WearableSleepPatternFilters = {},
+): WearableSleepPatternSummary {
+  return summarizeWearableSleepPatternFromBundle(
+    buildWearableSummaryBundle(vault, resolveWearableSleepPatternReadFilters(filters)),
+    filters,
+  );
+}
+
+export function summarizeWearableSleepPatternFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSleepPatternFilters,
+  context?: WearableSleepPatternBuildContext,
+): WearableSleepPatternSummary;
+export function summarizeWearableSleepPatternFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSleepPatternFilters,
+  context?: WearableSleepPatternBuildContext,
+): WearableSleepPatternSummary;
+export function summarizeWearableSleepPatternFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSleepPatternFilters = {},
+  context: WearableSleepPatternBuildContext = {},
+): WearableSleepPatternSummary {
+  return buildWearableSleepPatternSummary(bundle, filters, context);
 }
 
 export function summarizeWearableActivity(

@@ -45,7 +45,7 @@ import {
 const userId = `member_local_snapshot_stress_${Date.now()}`;
 const replyText = "Got it - snapshot stress reply delivered.";
 const linqWebhookSecret = "linq-local-snapshot-stress-secret";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const stressCodexThreadId = "00000000-0000-4000-8000-000000000025";
 const stressCodexRolloutRelativePath =
   `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${stressCodexThreadId}.jsonl`;

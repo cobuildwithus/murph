@@ -117,6 +117,126 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+    expect(intent.automationAuthority).toBeUndefined()
+
+    const authorizedIntent = assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: ' automation_sleep_reminder ',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })
+    expect(authorizedIntent.automationAuthority).toEqual({
+      automationId: 'automation_sleep_reminder',
+      expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+    })
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...intent,
+      automationAuthority: {
+        automationId: 'automation_sleep_reminder',
+        expectedStatus: 'active',
+        expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
+      },
+    })).toThrow()
+  })
+
+  it('accepts only valid true-only native reply message intents', () => {
+    const legacyIntent = assistantOutboxIntentSchema.parse({
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: 'outbox_native_reply',
+      sessionId: 'session_native_reply',
+      turnId: 'turn_native_reply',
+      createdAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      sentAt: null,
+      attemptCount: 0,
+      status: 'pending',
+      message: 'hello',
+      dedupeKey: 'dedupe-native-reply',
+      targetFingerprint: 'target-native-reply',
+      channel: 'linq',
+      identityId: null,
+      actorId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+      replyToMessageId: 'linq-message',
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      explicitTarget: null,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+      lastError: null,
+    })
+
+    expect(legacyIntent).not.toHaveProperty('nativeReplyRequested')
+    expect(assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      nativeReplyRequested: true,
+    }).nativeReplyRequested).toBe(true)
+    expect(assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      channel: 'telegram',
+      nativeReplyRequested: true,
+      replyToMessageId: '42',
+    }).nativeReplyRequested).toBe(true)
+
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      nativeReplyRequested: false,
+    })).toThrow()
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      nativeReplyRequested: true,
+      replyToMessageId: null,
+    })).toThrow('Assistant native replies require a target message id.')
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      nativeReplyRequested: true,
+      operation: {
+        kind: 'message-reaction',
+        reaction: 'thumbs_up',
+      },
+    })).toThrow('Assistant native replies must use a normal message intent.')
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      channel: 'email',
+      nativeReplyRequested: true,
+    })).toThrow('Assistant native replies require a supported message channel.')
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...legacyIntent,
+      channel: 'telegram',
+      nativeReplyRequested: true,
+      replyToMessageId: 'not-numeric',
+    })).toThrow(
+      'Assistant Telegram native replies require a numeric target message id.',
+    )
+    for (const channel of ['linq', 'telegram']) {
+      for (const replyToMessageId of [
+        'ain_private-ref',
+        'hid_private-ref',
+        'h1_0123456789abcdef01234567',
+        '[redacted provider message]',
+        'hbid:private-ref',
+        'hbidx:private-ref',
+        'linq:ain_private-ref',
+        'linq:hid_private-ref',
+        'provider:hbid:private-ref',
+        'provider:hbidx:private-ref',
+      ]) {
+        expect(() => assistantOutboxIntentSchema.parse({
+          ...legacyIntent,
+          channel,
+          nativeReplyRequested: true,
+          replyToMessageId,
+        })).toThrow('Assistant native replies require a provider message id.')
+      }
+    }
   })
 
   it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {
@@ -306,6 +426,41 @@ describe('assistant CLI delivery contracts', () => {
       'https://example.test/dead-bug/setup.txt',
     ]) {
       expect(() => normalizeAssistantResponseMediaUrl(url), url).toThrow()
+    }
+  })
+
+  it('accepts only the exact assistant runtime generated-delivery ref exception', () => {
+    const media = {
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      kind: 'vault_file' as const,
+      ref: '.runtime/operations/assistant/generated-deliveries/report.pdf',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }
+
+    expect(assistantResponseMediaSchema.parse(media)).toEqual(media)
+    expect(assistantResponseMediaSchema.parse({
+      ...media,
+      ref: 'documents/report.pdf',
+    })).toMatchObject({ ref: 'documents/report.pdf' })
+
+    for (const ref of [
+      '.runtime/operations/assistant/generated-deliveries-backup/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/nested/report.pdf',
+      '.runtime/operations/assistant/generated-deliveries/.hidden.pdf',
+      '.runtime/operations/assistant/generated-deliveries/report.pdf.tmp',
+      '.runtime/operations/assistant/outbox/intent.json',
+      '.hidden/report.pdf',
+      '../report.pdf',
+      '/report.pdf',
+    ]) {
+      expect(() => assistantResponseMediaSchema.parse({
+        ...media,
+        ref,
+      }), ref).toThrow()
     }
   })
 

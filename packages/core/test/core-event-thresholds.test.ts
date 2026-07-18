@@ -546,6 +546,10 @@ test("public event builders cover the remaining kind-specific branches and valid
       interventionType: "breathing",
       durationMinutes: 12,
       protocolId: "prot_01JNV45XJ4M22V2PE9Q4KQ7H1X",
+      fields: {
+        estimated_sleep_onset_latency_minutes: 18,
+        subjective_sleep_quality: 4,
+      },
     }),
   );
 
@@ -565,6 +569,10 @@ test("public event builders cover the remaining kind-specific branches and valid
   assert.equal(sleep.durationMinutes, 480);
   assert.equal(intervention.kind, "intervention_session");
   assert.equal(intervention.protocolId, "prot_01JNV45XJ4M22V2PE9Q4KQ7H1X");
+  assert.deepEqual(intervention.fields, {
+    estimated_sleep_onset_latency_minutes: 18,
+    subjective_sleep_quality: 4,
+  });
 
   assert.throws(() => {
     buildPublicEventRecord(

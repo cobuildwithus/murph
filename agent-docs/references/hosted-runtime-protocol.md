@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-16
+Last verified: 2026-07-18
 
 ## Decision
 
@@ -399,17 +399,19 @@ that member's active grants as a top-level additive `disclosureGrants` array;
 older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
 
-For `murph.group(action="ask_member")`, the current accepted non-direct group
-input and signed route are origin authority. Web resolves the supplied current
-grant selector, binds the group runtime, personal runtime, exact membership and
-grant generations, permission digest, origin session/input, and ten-minute
-expiry, then appends a `consented_member` `assistant.ask.requested` item to the
-personal mailbox. Email, direct, unverified, stale, foreign, or model-selected
-routing fails closed. The group action targets one grant and one question; it
-never fans out. The group runtime plus accepted input derive the sole request
-identity. Exact retries reuse that mailbox item, while a different grant,
-question, or origin session conflicts and requires a fresh accepted group
-input.
+For `murph.group(action="ask_member")`, trusted runtime code injects one origin:
+either the current accepted non-direct group input and signed route or one
+claimed canonical scheduled-automation occurrence for that group runtime. Web
+resolves the supplied current grant selector, binds the group runtime, personal
+runtime, exact membership and grant generations, permission digest, injected
+origin, and ten-minute expiry, then appends a `consented_member`
+`assistant.ask.requested` item to the personal mailbox. Email, direct,
+unverified, stale, foreign, or model-selected invocation data fails closed. The
+group action targets one grant and one question; it never performs implicit
+roster fan-out. The group runtime, exact grant, and trusted invocation derive
+the request identity. Exact retries reuse that mailbox item, a changed question
+for the same grant conflicts, and another current grant in the same invocation
+is independent.
 
 Prepare revalidates the same authority immediately before private context is
 read and returns the exact immutable permission to the runtime. The personal
@@ -424,20 +426,23 @@ Murph mailbox, vault, assistant state, operational log, or error.
 On an allow, the completion control path revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
-`assistant.ask.completed` item to the bound group runtime with additive
-`deliveryMode: "reviewed_exact"`. That group completion bypasses the provider
+`assistant.ask.completed` item to the bound group runtime. The trusted `origin`
+discriminant owns what happens next: `accepted_input` bypasses the provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
-original group route; cannot-answer uses fixed non-disclosing copy. Missing
-`deliveryMode` retains the original private-to-group continuation behavior.
-Leave/rejoin and revoke/regrant produce new generations, so old work cannot
-cross either lifecycle boundary. If live authority disappears after an exact
-answer is queued, its existing outbox intent retains the completion id,
-deterministic delivery key, and authority expiry through terminal disposition.
-The runner rewrites that intent to the fixed cannot-answer copy before provider
-entry. At expiry it uses the outbox-owned deadline even if mailbox retention has
-already removed the request and completion rows; before expiry Web still owns
-live revocation revalidation. The final egress claim permits only the
-structurally bound fixed fallback without reviving the private grant.
+original group route, while `automation_occurrence` carries the exact permission
+into an isolated no-delivery group-runtime turn. Cannot-answer uses the fixed
+non-disclosing result. The original private-to-group continuation retains its
+legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
+produce new generations, so old work cannot cross either lifecycle boundary.
+For accepted-input delivery, if live authority disappears after an exact answer
+is queued, its existing outbox intent retains the completion id, deterministic
+delivery key, and authority expiry through terminal disposition. The runner
+rewrites that intent to the fixed cannot-answer copy before provider entry. At
+expiry it uses the outbox-owned deadline even if mailbox retention has already
+removed the request and completion rows; before expiry Web still owns live
+revocation revalidation. The final egress claim permits only the structurally
+bound fixed fallback without reviving the private grant. Automation-occurrence
+completion never creates a provider-delivery intent.
 
 Web caps retained permission history at 25 rows per group and retained grant
 generations at 25 per group and 25 per member. Counts run under the canonical
@@ -463,8 +468,9 @@ waits at least the full ten-minute request lifetime, and rolls consumers back
 only after pending request and completion items have drained or expired.
 
 The consented reverse adapter has a distinct producer gate. First deploy
-consumers that tolerate `consented_member`, prepare disclosure context, and the
-optional `reviewed_exact` completion while
+consumers that tolerate the `consented_member` target, trusted invocation
+origins, reviewed exact accepted-input completion, and isolated internal
+automation completion while
 `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
 immediate runner fleet converge and confinement/fingerprint smoke passes,
 the synchronous 25-row permission and per-group/per-member grant-generation
@@ -487,6 +493,16 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+Shared accepted-message targeting is a runtime-only strict outbox-shape change,
+so its reader and writer ship together in one runner bundle. Deploy Cloudflare
+and that runner with `container_rollout=immediate`, and require managed-container
+smoke to report the exact new runner-bundle fingerprint and prove its assistant
+CLI surface contract before accepting targeted work. There is no Web ordering
+dependency. A rollback to the prior bundle is safe only before the first
+`nativeReplyRequested: true` intent is written. After that write, the new bundle
+is the hard rollback floor because a workspace, checkpoint, or retained outbox
+intent may contain the marker. Do not try to prove an incident-time drain;
+forward-fix instead of adding a compatibility reader or dual writer.
 The preference sparse-delta plus cross-lane causal-sequence rollout uses the
 same compatibility rule behind one gate. Vercel predeploy first adds nullable
 `causal_seq` storage, the keyed assistant-input lookup, and nullable Humor,
@@ -813,6 +829,22 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
+
+Generated-delivery staging uses an expand-then-produce rollout. The first
+Cloudflare release adds persisted-outbox, hosted-side-effect, retry-read, and
+encrypted-checkpoint compatibility for the exact flat ref
+`.runtime/operations/assistant/generated-deliveries/<filename>`, while initial
+`send_vault_file` preparation continues to reject it so that release cannot
+mint state an older runner would quarantine. Deploy that release with immediate
+container rollout and prove the exact runner fingerprint has converged before a
+later release enables writer guidance or cleanup. Once a producer can persist
+the hidden ref, the compatibility release is the rollback floor while any
+active or retained outbox record or committed checkpoint can contain it.
+Portable support bundles continue to omit all `.runtime/**`; the generic
+`exports/assistant-deliveries/**` path remains ordinary checkpointed vault data
+and receives no path-specific portable-package exclusion. Existing global
+file-type exclusions still apply regardless of directory.
+
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
@@ -1167,6 +1199,17 @@ provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window closes when the
 bounded batch is selected before provider start; mailbox input that arrives
 after that boundary remains durable staged input for a later turn.
+For accepted Linq input positively identified as iMessage, or Telegram input
+with a valid numeric provider message target, the prompt may show the existing
+input id as an opaque `Message ref` when at least one targeting action is
+eligible. Linq SMS, RCS, and unknown service types expose no ref. Exact-message
+replies and reactions use one resolver that binds the ref to the current
+accepted delivery context, reloads the stored input, and rechecks route,
+audience, group-actor, provider-target, and action-specific authority. Provider
+ids never cross into model-visible state. Reply selection annotates a normal
+response; each delimiter-generated bubble persists the same true-only
+`nativeReplyRequested` marker and target. Reactions remain the existing
+`message-reaction` operation, and unmarked automatic replies remain flat.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable

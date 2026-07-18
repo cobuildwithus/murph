@@ -5,6 +5,10 @@ import path from "node:path";
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
+import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  buildAutomationSupportSeriesTag,
+} from "@murphai/contracts";
 import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
 import { upsertAutomation } from "@murphai/core";
 import {
@@ -119,6 +123,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
       threadId: null,
     },
     assistantTargetOverride: null,
+    supportKind: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
@@ -150,6 +155,7 @@ test("automation record schema accepts the canonical automation shape", () => {
       threadId: null,
     },
     assistantTargetOverride: null,
+    supportKind: null,
     continuityPolicy: "preserve",
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
@@ -257,6 +263,7 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal(automationCommandNames.includes("automation edit"), true);
   assert.equal(automationCommandNames.includes("automation import-json"), true);
   assert.equal(automationCommandNames.includes("automation set-status"), true);
+  assert.equal(automationCommandNames.includes("automation reconcile-support-series"), true);
   assert.equal(automationCommandNames.includes("automation upsert"), false);
 
   const saveSchema = await readCommandSchema(cli, ["automation", "save"]);
@@ -270,6 +277,9 @@ test("automation save and edit schemas expose typed fields while automation impo
     "slug",
     "status",
     "summary",
+    "activeUntil",
+    "clearActiveUntil",
+    "supportSeriesId",
     "tag",
     "tags",
     "continuityPolicy",
@@ -305,6 +315,9 @@ test("automation save and edit schemas expose typed fields while automation impo
     "assistantTargetOverrideModelProvider",
     "assistantTargetOverrideReasoningEffort",
     "clearAssistantTargetOverride",
+    "activeUntil",
+    "clearActiveUntil",
+    "supportSeriesId",
   ]) {
     assert.equal(field in editSchema.options.properties, true, field);
   }
@@ -321,6 +334,8 @@ test("automation save and edit schemas expose typed fields while automation impo
 
   const listSchema = await readCommandSchema(cli, ["automation", "list"]);
   assert.equal("includeBody" in listSchema.options.properties, false);
+  assert.equal("supportSeriesId" in listSchema.options.properties, true);
+  assert.equal("cursor" in listSchema.options.properties, true);
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {
@@ -380,7 +395,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "--delivery-target",
       "telegram_thread_real",
       "--assistant-target-override-model",
-      "gpt-5.5",
+      "gpt-5.6-terra",
       "--assistant-target-override-model-provider",
       "vercel-ai-gateway",
       "--assistant-target-override-reasoning-effort",
@@ -409,7 +424,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       reasoningEffort: "high",
     });
@@ -449,7 +464,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.exitCode, null);
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       reasoningEffort: "medium",
     });
@@ -1579,6 +1594,371 @@ test("automation commands round-trip save, import-json, show, and list through t
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
     assert.equal("instructions" in (listedData.items[0] ?? {}), false);
     assert.equal("markdown" in (listedData.items[0] ?? {}), false);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation support-series CLI pages exact matches and reconciles idempotently", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-support-series-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation support series test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    const seriesId = "experiment:exp_sleep";
+    const supportSeriesTag = buildAutomationSupportSeriesTag(seriesId);
+    const equalOneShotBound = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Equal one-shot bound",
+      "--slug",
+      "equal-one-shot-bound",
+      "--instructions",
+      "This one-shot must retain a finite retry window.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-08-01T08:00:00.000Z",
+      "--active-until",
+      "2026-08-01T08:00:00.000Z",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram:equal-bound",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(equalOneShotBound.exitCode, 1);
+    assert.equal(equalOneShotBound.envelope.ok, false);
+    assert.match(
+      equalOneShotBound.envelope.ok
+        ? ""
+        : equalOneShotBound.envelope.error.message ?? "",
+      /activeUntil must be after schedule\.at/u,
+    );
+
+    const manualSeriesId = "experiment:exp_manual";
+    const manualSeries = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Manual support series",
+      "--slug",
+      "manual-support-series",
+      "--instructions",
+      "Send the manual support check-in.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram:manual-series",
+      "--support-series-id",
+      manualSeriesId,
+      "--support-kind",
+      "check_in",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(manualSeries.exitCode, null);
+    assert.equal(manualSeries.envelope.ok, true);
+    const shownManualSeries = await runInProcessJsonCli<{
+      automation: { supportKind: string | null; tags: string[] } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "manual-support-series",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shownManualSeries.exitCode, null);
+    assert.equal(shownManualSeries.envelope.ok, true);
+    assert.deepEqual(shownManualSeries.envelope.data?.automation?.tags, [
+      buildAutomationSupportSeriesTag(manualSeriesId),
+    ]);
+    assert.equal(
+      shownManualSeries.envelope.data?.automation?.supportKind,
+      "check_in",
+    );
+
+    const clearedManualSupportKind = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "manual-support-series",
+      "--clear-support-kind",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(clearedManualSupportKind.exitCode, null);
+    assert.equal(clearedManualSupportKind.envelope.ok, true);
+    const shownClearedManualSeries = await runInProcessJsonCli<{
+      automation: { supportKind: string | null } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "manual-support-series",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shownClearedManualSeries.envelope.ok, true);
+    assert.equal(
+      shownClearedManualSeries.envelope.data?.automation?.supportKind,
+      null,
+    );
+
+    const automationIds = [
+      "automation_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "automation_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      "automation_01ARZ3NDEKTSV4RRFFQ69G5FAX",
+    ];
+    const created = await Promise.all(
+      Array.from({ length: 3 }, (_, index) => {
+        const payload = createAutomationScaffoldPayload();
+        return upsertAutomation({
+          ...payload,
+          activeUntil: "2026-08-01T00:00:00.000Z",
+          automationId: automationIds[index],
+          route: {
+            ...payload.route,
+            channel: "telegram",
+            deliveryTarget: "telegram:series",
+          },
+          slug: `cli-series-${index}`,
+          tags: [...(payload.tags ?? []), supportSeriesTag],
+          title: `CLI series ${index}`,
+          vaultRoot,
+        });
+      }),
+    );
+
+    const ordinaryTagEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--tag",
+      "ordinary-tag",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(ordinaryTagEdit.exitCode, null);
+    assert.equal(ordinaryTagEdit.envelope.ok, true);
+    const shownOrdinaryTagEdit = await runInProcessJsonCli<{
+      automation: { tags: string[] } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      created[0]?.record.slug ?? "missing",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shownOrdinaryTagEdit.envelope.ok, true);
+    assert.deepEqual(shownOrdinaryTagEdit.envelope.data?.automation?.tags, [
+      "ordinary-tag",
+      supportSeriesTag,
+    ]);
+
+    const sameOwner = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--support-series-id",
+      seriesId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(sameOwner.exitCode, null);
+    assert.equal(sameOwner.envelope.ok, true);
+
+    const rawOwner = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--tag",
+      supportSeriesTag,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(rawOwner.exitCode, 1);
+    assert.equal(rawOwner.envelope.ok, false);
+    assert.match(
+      rawOwner.envelope.ok ? "" : rawOwner.envelope.error.message ?? "",
+      /reserved system:support-series:.*--support-series-id/iu,
+    );
+
+    const forgedReconcileMarker = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--tag",
+      AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(forgedReconcileMarker.exitCode, 1);
+    assert.equal(forgedReconcileMarker.envelope.ok, false);
+    assert.match(
+      forgedReconcileMarker.envelope.ok
+        ? ""
+        : forgedReconcileMarker.envelope.error.message ?? "",
+      /internal reconciliation marker/iu,
+    );
+
+    const changedOwner = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--support-series-id",
+      "experiment:exp_other",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(changedOwner.exitCode, 1);
+    assert.equal(changedOwner.envelope.ok, false);
+    assert.match(
+      changedOwner.envelope.ok ? "" : changedOwner.envelope.error.message ?? "",
+      /support series ownership cannot be removed or replaced/u,
+    );
+
+    const rawImportPayload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Raw support-series import",
+      slug: "raw-support-series-import",
+      route: {
+        ...createAutomationScaffoldPayload().route,
+        channel: "telegram",
+        deliveryTarget: "telegram:raw-series",
+      },
+      tags: [supportSeriesTag],
+    };
+    const rawImportPath = path.join(parentRoot, "raw-support-series-import.json");
+    await writeFile(rawImportPath, `${JSON.stringify(rawImportPayload, null, 2)}\n`, "utf8");
+    const rawImport = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${rawImportPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(rawImport.exitCode, 1);
+    assert.equal(rawImport.envelope.ok, false);
+    assert.match(
+      rawImport.envelope.ok ? "" : rawImport.envelope.error.message ?? "",
+      /reserved system:support-series:.*--support-series-id/iu,
+    );
+
+    const first = await runInProcessJsonCli<{
+      count: number;
+      totalCount: number;
+      nextCursor: string | null;
+      items: Array<{ automationId: string; activeUntil: string | null }>;
+    }>(cli, [
+      "automation",
+      "list",
+      "--support-series-id",
+      seriesId,
+      "--limit",
+      "2",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(first.exitCode, null);
+    assert.equal(first.envelope.ok, true);
+    assert.equal(first.envelope.data?.count, 2);
+    assert.equal(first.envelope.data?.totalCount, 3);
+    assert.equal(first.envelope.data?.nextCursor, automationIds[1]);
+    assert.equal(first.envelope.data?.items[0]?.activeUntil, "2026-08-01T00:00:00.000Z");
+
+    const second = await runInProcessJsonCli<{
+      count: number;
+      totalCount: number;
+      nextCursor: string | null;
+      items: Array<{ automationId: string }>;
+    }>(cli, [
+      "automation",
+      "list",
+      "--support-series-id",
+      seriesId,
+      "--cursor",
+      first.envelope.data?.nextCursor ?? "missing",
+      "--limit",
+      "2",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(second.exitCode, null);
+    assert.equal(second.envelope.ok, true);
+    assert.equal(second.envelope.data?.count, 1);
+    assert.equal(second.envelope.data?.totalCount, 3);
+    assert.equal(second.envelope.data?.nextCursor, null);
+    assert.deepEqual(
+      second.envelope.data?.items.map((item) => item.automationId),
+      [automationIds[2]],
+    );
+
+    const reconciled = await runInProcessJsonCli<{
+      archivedCount: number;
+      matchedCount: number;
+      unchangedCount: number;
+      missingDesiredAutomationIds: string[];
+    }>(cli, [
+      "automation",
+      "reconcile-support-series",
+      seriesId,
+      "--desired-automation-id",
+      created[0]?.record.automationId ?? "missing",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(reconciled.exitCode, null);
+    assert.equal(reconciled.envelope.ok, true);
+    assert.equal(reconciled.envelope.data?.archivedCount, 2);
+    assert.equal(reconciled.envelope.data?.matchedCount, 3);
+    assert.deepEqual(reconciled.envelope.data?.missingDesiredAutomationIds, []);
+    assert.equal(reconciled.envelope.data?.unchangedCount, 1);
+
+    const repeated = await runInProcessJsonCli<{ archivedCount: number }>(cli, [
+      "automation",
+      "reconcile-support-series",
+      seriesId,
+      "--desired-automation-id",
+      created[0]?.record.automationId ?? "missing",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(repeated.exitCode, null);
+    assert.equal(repeated.envelope.ok, true);
+    assert.equal(repeated.envelope.data?.archivedCount, 0);
+
+    const cleared = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      created[0]?.record.slug ?? "missing",
+      "--clear-active-until",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(cleared.exitCode, null);
+    assert.equal(cleared.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: { activeUntil: string | null } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      created[0]?.record.slug ?? "missing",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.activeUntil, null);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

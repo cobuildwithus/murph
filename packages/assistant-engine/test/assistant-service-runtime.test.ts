@@ -777,7 +777,7 @@ describe("assistant usage recording seam", () => {
       },
       providerResult: createProviderResult({
         providerOptions: createProviderOptions({
-          model: "gpt-5.5-fallback",
+          model: "gpt-5.6-terra-fallback",
         }),
         usage: {
           apiKeyEnv: null,
@@ -806,7 +806,7 @@ describe("assistant usage recording seam", () => {
           memberId: "member-43",
           occurredAt: "2026-04-08T10:05:00.000Z",
           providerName: null,
-          requestedModel: "gpt-5.5-fallback",
+          requestedModel: "gpt-5.6-terra-fallback",
         }),
     );
   });
@@ -1433,6 +1433,74 @@ describe("assistant delivery orchestration seam", () => {
         turnTrigger: "automation-auto-reply",
       }),
     );
+  });
+
+  it("keeps one selected Telegram target and marker on every reply bubble", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-telegram-selected",
+        messageLength: 5,
+        providerMessageId: "provider-telegram-selected",
+        providerThreadId: null,
+        sentAt: "2026-07-16T12:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-telegram-selected",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryNativeReplyRequested: true,
+        deliveryReplyToMessageId: "4242",
+        prompt: "hello",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      response: "First.\n---\nSecond.",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-telegram-selected-bubbles",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(([call]) => ({
+        message: call?.message,
+        nativeReplyRequested: call?.nativeReplyRequested,
+        replyToMessageId: call?.replyToMessageId,
+      })),
+    ).toEqual([
+      {
+        message: "First.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+      {
+        message: "Second.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+    ]);
   });
 
   it("keeps explicit Telegram native reply anchors for manual final text delivery", async () => {
@@ -2220,6 +2288,7 @@ describe("assistant delivery orchestration seam", () => {
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
       answeredMailboxItemIds: [],
+      automationAuthority: null,
       bindingDelivery: {
         kind: "participant",
         target: "audience-delivery",
@@ -3325,7 +3394,7 @@ describe("assistant execution context normalization", () => {
     const deviceTool = { request: vi.fn() };
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       modelProvider: "vercel-ai-gateway",
       provider: "codex-cli",
     });
@@ -3379,7 +3448,7 @@ describe("assistant execution context normalization", () => {
 
   it("falls back to the provided target when no hosted default target exists", () => {
     const fallbackTarget = createAssistantModelTarget({
-      model: "gpt-5.5-mini",
+      model: "gpt-5.6-terra-mini",
       modelProvider: "vercel-ai-gateway",
       provider: "codex-cli",
     });
@@ -3402,7 +3471,7 @@ describe("assistant execution context normalization", () => {
 
   it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
     const hostedDefaultTarget = createAssistantModelTarget({
-      model: "gpt-5.5-mini",
+      model: "gpt-5.6-terra-mini",
       modelProvider: "vercel-ai-gateway",
       provider: "codex-cli",
     });
@@ -3418,7 +3487,7 @@ describe("assistant execution context normalization", () => {
             approvalPolicy: "never",
             codexCommand: null,
             codexHome: null,
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
             modelProvider: "vercel-ai-gateway",
             oss: false,
             profile: null,
@@ -3792,7 +3861,7 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         modelProvider: "vercel-ai-gateway",
         reasoningEffort: "medium",
       }),
@@ -3805,7 +3874,7 @@ describe("assistant turn finalizer seam", () => {
 
     const saved = await persistAssistantTurnAndSession({
       input: {
-        model: "gpt-5.5-mini",
+        model: "gpt-5.6-terra-mini",
         prompt: "Reply to the inbound message.",
         reasoningEffort: "low",
         turnTrigger: "automation-auto-reply",
@@ -3841,8 +3910,8 @@ describe("assistant turn finalizer seam", () => {
     );
     expect(saved.resumeState?.threadId).toBe("provider-session-stale");
     expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
-    expect(saved.providerOptions.model).toBe("gpt-5.5");
-    expect(saved.target.model).toBe("gpt-5.5");
+    expect(saved.providerOptions.model).toBe("gpt-5.6-terra");
+    expect(saved.target.model).toBe("gpt-5.6-terra");
   });
 
   it("preserves existing provider resume state after active-turn fallback fork", async () => {
@@ -4094,7 +4163,7 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         modelProvider: "vercel-ai-gateway",
         reasoningEffort: "low",
       }),
@@ -4118,7 +4187,7 @@ describe("assistant turn finalizer seam", () => {
         codexThreadId: "provider-session-high",
         route: createRoute({
           providerOptions: createProviderOptions({
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
             modelProvider: "vercel-ai-gateway",
             reasoningEffort: "high",
           }),
@@ -4177,7 +4246,7 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: "never",
     provider: "codex-cli",
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
     modelProvider: "vercel-ai-gateway",
     reasoningEffort: "medium",
     sandbox: "danger-full-access",

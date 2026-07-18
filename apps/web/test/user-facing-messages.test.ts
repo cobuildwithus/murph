@@ -176,6 +176,17 @@ describe("user-facing message variants", () => {
     }
   });
 
+  it("keeps every Family usage notice scoped to one member's allowance", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).toMatch(/^(?:You've|Your)\b/u);
+      expect(text).toMatch(
+        /separate|does not (?:affect|draw from|use)|unaffected/u,
+      );
+      expect(text).toMatch(/AI usage is paused until your allowance resets/iu);
+      expect(text).not.toMatch(/\bshared\b/iu);
+    }
+  });
+
   it("communicates every included-usage limit as a percentage without currency progress", () => {
     for (const key of [
       "linq.ai_usage.trial_limit_reached",
@@ -192,7 +203,11 @@ describe("user-facing message variants", () => {
   });
 
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {
-    expectEveryVariantMatches("assistant.signup_welcome", /personal health assistant/iu);
+    expectEveryVariantMatches("assistant.signup_welcome", /\bMurph\b/u);
+    expectEveryVariantDoesNotMatch(
+      "assistant.signup_welcome",
+      /personal health assistant/iu,
+    );
     expectEveryVariantMatches("assistant.signup_welcome", /private/iu);
     expectEveryVariantMatches("assistant.signup_welcome", /remember|keep|learn/iu);
     for (const text of collectRenderedTexts("assistant.signup_welcome")) {

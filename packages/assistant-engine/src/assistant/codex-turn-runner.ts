@@ -14,12 +14,13 @@ import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
-import {
-  supportsAssistantCurrentAudienceMessageReaction,
-} from './delivery-service.js'
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from './message-target-selection.js'
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
+  AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderRequestStartTiming,
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
@@ -157,10 +158,11 @@ export async function executeCodexTurnWithRecovery(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((
+    event: AssistantProviderFinishWithoutReplyAcceptedEvent
+  ) => Promise<void> | void) | null
   onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -297,10 +299,10 @@ function emitCodexPlanTraceEvent(input: {
         providerRequestOrdinal: input.providerRequestOrdinal,
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         dynamicToolCount: input.routePlanningDiagnostics.dynamicToolCount,
-        messageReactionsAvailable:
-          input.routePlanningDiagnostics.messageReactionsAvailable,
-        reactionDynamicToolAvailable:
-          input.routePlanningDiagnostics.reactionDynamicToolAvailable,
+        messageTargetingAvailable:
+          input.routePlanningDiagnostics.messageTargetingAvailable,
+        messageTargetDynamicToolsAvailable:
+          input.routePlanningDiagnostics.messageTargetDynamicToolsAvailable,
         routePlanningCliBootstrapElapsedMs:
           input.routePlanningDiagnostics.cliBootstrapElapsedMs,
         routePlanningMemoryOverviewElapsedMs: null,
@@ -428,11 +430,8 @@ async function executeAssistantCodexAttempt(input: {
         activeTurnSteering: executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
-        allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
-          input: executionPlan.input,
-          session: attemptPlan.session,
-          sharedPlan: executionPlan.sharedPlan,
-        }),
+        authorizeAcceptedMessageTarget:
+          executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: executionPlan.input.codexConfigOverrides ?? null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,

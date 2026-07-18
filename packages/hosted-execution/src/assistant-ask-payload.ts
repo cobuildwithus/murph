@@ -59,34 +59,6 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
     };
   }
 
-  // Consumer-first rollout compatibility: the first producer emitted the
-  // consented target with the accepted-input fields at the payload root.
-  if (record.origin === undefined) {
-    assertExactHostedExecutionAssistantAskKeys(record, [
-      "expiresAt",
-      "originAssistantInputId",
-      "originSessionId",
-      "question",
-      "target",
-    ], label);
-    return {
-      expiresAt,
-      origin: {
-        assistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-          record.originAssistantInputId,
-          `${label}.originAssistantInputId`,
-        ),
-        kind: "accepted_input",
-        sessionId: parseHostedExecutionAssistantAskOpaqueId(
-          record.originSessionId,
-          `${label}.originSessionId`,
-        ),
-      },
-      question,
-      target,
-    };
-  }
-
   assertExactHostedExecutionAssistantAskKeys(record, [
     "expiresAt",
     "origin",

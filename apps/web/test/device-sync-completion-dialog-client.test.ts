@@ -111,6 +111,70 @@ test("DeviceSyncCompletionDialog refreshes an unverified completion once before 
   await remount.cleanup();
 });
 
+test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary view", async () => {
+  const model = buildCompletionDialogModel({
+    detail:
+      "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
+    setupGuide: {
+      actionAriaLabel: "See how to sync all of your WHOOP data",
+      actionLabel: "Get full sync",
+      detail: "Two quick steps and Murph sees everything WHOOP tracks.",
+      downloadAction: {
+        ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+        href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+        label: "Download Murph",
+        rel: "noopener noreferrer",
+        target: "_blank",
+      },
+      steps: [
+        {
+          detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
+          title: "Download Murph and sign in",
+        },
+        {
+          detail:
+            "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
+          title: "Turn on Apple Health in WHOOP",
+        },
+      ],
+      title: "Get your full sync",
+      voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
+    },
+    title: "WHOOP is connected",
+  });
+  const render = await renderDeviceSyncCompletionDialog(model);
+  await act(async () => {});
+
+  expect(render.container.innerHTML).toContain("Get full sync");
+  expect(render.container.innerHTML).not.toContain("Download Murph and sign in");
+  expect(render.container.innerHTML).not.toContain("apps.apple.com");
+  expect(render.container.querySelector("audio")).toBeNull();
+
+  const guideButton = render.container.querySelector(
+    'button[aria-label="See how to sync all of your WHOOP data"]',
+  );
+  expect(guideButton).not.toBeNull();
+  await act(async () => {
+    guideButton?.dispatchEvent(new render.window.Event("click", { bubbles: true }));
+  });
+
+  expect(render.container.innerHTML).toContain("Get your full sync");
+  expect(render.container.innerHTML).toContain("Download Murph and sign in");
+  expect(render.container.innerHTML).toContain("Turn on Apple Health in WHOOP");
+  expect(render.container.innerHTML).toContain(
+    "https://apps.apple.com/us/app/murph-ai/id6786145859",
+  );
+  expect(render.container.innerHTML).toContain("Continue exploring");
+  expect(
+    render.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
+  ).not.toBeNull();
+  expect(
+    render.container.querySelector("button[aria-label='Play voice memo']"),
+  ).not.toBeNull();
+
+  await render.cleanup();
+});
+
 function buildCompletionDialogModel(
   overrides: Partial<DeviceSyncCompletionDialogModel> = {},
 ): DeviceSyncCompletionDialogModel {

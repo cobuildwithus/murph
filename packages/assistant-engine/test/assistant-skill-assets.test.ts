@@ -226,6 +226,25 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
+    const sleepSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'sleep-improvement',
+    )
+    expect(sleepSkill).toBeTruthy()
+    if (!sleepSkill) {
+      return
+    }
+
+    expect(sleepSkill.triggerHint).toContain('bedtime procrastination or getting-to-bed transition friction')
+    expect(sleepSkill.triggerHint).toContain('sleep-environment disruption such as noise or vibration')
+    expect(sleepSkill.triggerHint).toContain('high-altitude sleep disruption')
+    expect(sleepSkill.triggerHint).toContain('dangerous daytime sleepiness')
+    expect(sleepSkill.triggerHint).toContain('sleep-disordered breathing')
+    expect(sleepSkill.triggerHint).toContain(
+      'circadian-rhythm for body-clock, light-timing, jet-lag, shift-work, or clock-shifting plans',
+    )
+  })
+
   it('routes red light dose ownership to the dedicated red-light skill', async () => {
     const recoverySkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'recovery-modalities',
@@ -1391,6 +1410,41 @@ describe('assistant skill assets', () => {
       'A bare outcome by itself is not enough to activate a durable support loop.',
     )
     expect(compact).toContain(
+      'make the value, schedule, and support concrete before any writes',
+    )
+    expect(compact).toContain(
+      'A vague promise to "remind you" is not enough.',
+    )
+    expect(compact).toContain(
+      'two or three short sentences and one easy question',
+    )
+    expect(compact).toContain(
+      'Use one editable recommendation rather than a menu.',
+    )
+    expect(compact).toContain(
+      "If Murph's visible contribution is no better than a generic phone reminder, the loop is underspecified",
+    )
+    expect(compact).toContain(
+      'recommend one best-fit support pattern rather than presenting a menu',
+    )
+    expect(raw).not.toContain('Offer it as a menu the user picks from')
+    expect(raw).toContain('### 7. Mark the first launch')
+    expect(compact).toContain(
+      'The launch close is not a movement-instruction turn.',
+    )
+    expect(compact).toContain(
+      'do not attach exercise-catalog images, cards, or carousels',
+    )
+    expect(compact).toContain(
+      'one original 15–20 second standalone launch song',
+    )
+    expect(compact).toContain(
+      'This is reply-time media, never a scheduled onboarding automation.',
+    )
+    expect(compact).toContain(
+      'Delight marks real value; it never substitutes for the launch offer, working support, or mandatory text close.',
+    )
+    expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
     expect(compact).toContain(
@@ -1560,6 +1614,7 @@ describe('assistant skill assets', () => {
         readSkillFile(strengthTraining),
       ])
 
+    const compactCatalog = catalog.replace(/\s+/gu, ' ')
     const sharedReference =
       '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md'
     expect(physicalTherapyRaw).toContain(sharedReference)
@@ -1569,9 +1624,49 @@ describe('assistant skill assets', () => {
     expect(catalog).toContain(
       'vault-cli exercise show <id-or-slug>\n   --format json',
     )
-    expect(catalog).toContain('normally two to four and rarely more than five')
-    expect(catalog).toContain('attach returned\n   `images[]`')
-    expect(catalog).toContain('"no\n   catalog image yet"')
+    expect(compactCatalog).toContain(
+      'Decide likely familiarity per movement from the current conversation and durable context.',
+    )
+    expect(compactCatalog).toContain(
+      'Strong familiarity signals include stated experience in the relevant training modality, correct movement-specific language, prior logged performance, or a routine the user has already performed.',
+    )
+    expect(compactCatalog).toContain(
+      'Let explicit modality experience cover common movements in that modality even when the user has not named them or used technical language',
+    )
+    expect(compactCatalog).toContain(
+      'regular calisthenics, for example, is a familiarity signal for ordinary push-up and pull-up variations.',
+    )
+    expect(compactCatalog).toContain(
+      'Treat stated novice status, expressed uncertainty about the movement, or no relevant experience signal as likely unfamiliar.',
+    )
+    expect(compactCatalog).toContain(
+      'A first plan with Murph is not itself novice evidence.',
+    )
+    expect(compactCatalog).toContain(
+      'Familiarity is still per movement: an experienced trainee can be new to an uncommon variation.',
+    )
+    expect(compactCatalog).toContain(
+      'Do not ask a separate experience question only to decide whether to include media.',
+    )
+    expect(compactCatalog).toContain(
+      'normally two to four and rarely more than five',
+    )
+    expect(compactCatalog).toContain(
+      'Exercise media belongs only in a response that is actually teaching or cueing a movement',
+    )
+    expect(compactCatalog).toContain(
+      'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
+    )
+    expect(compactCatalog).toContain(
+      'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+    )
+    expect(compactCatalog).toContain(
+      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+    )
+    expect(compactCatalog).toContain(
+      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+    )
+    expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )
@@ -1649,15 +1744,15 @@ describe('assistant skill assets', () => {
     )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
-    expect(raw).toContain('private personal health assistant')
+    expect(raw).not.toContain('personal health assistant')
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'help across your health',
+      "Everyone's got something they want from their health",
     )
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'build healthier habits',
+      'stays private to you',
     )
     expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
-      'make progress toward outcomes you genuinely care about',
+      'the more I learn, the better my help fits',
     )
     expect(compact).toContain(
       'Do not turn memory controls into opening copy or a required onboarding talking point.',
@@ -1691,13 +1786,19 @@ describe('assistant skill assets', () => {
       'A child may enrich only the exact durable record ids or source refs returned by that save; it never owns a promised save or parse.',
     )
     expect(compact).toContain(
-      'The medical-and-safety checkpoint stays entirely in one compact parent batch.',
+      'The medical-and-safety checkpoint is the one deliberate exception to this parent-first save rule: there the child owns the entire medical save, and the parent must not persist a medical answer in the foreground when a child can be spawned.',
     )
     expect(compact).toContain(
       'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
     )
     expect(compact).toContain(
-      'Its spawn is not durable operation state: do not say enrichment is pending, processing, or in progress',
+      "I've got my best man researching the exact ingredients.",
+    )
+    expect(compact).toContain(
+      'Its spawn is not durable operation state: do not promise it will finish, and on later turns do not say enrichment is pending, processing, or in progress.',
+    )
+    expect(compact).toContain(
+      'never expose internal subagent terminology, record ids, or save-status bookkeeping',
     )
     expect(compact).toContain(
       'Claim exact-label or structured child enrichment only after canonical readback confirms it.',
@@ -1730,6 +1831,15 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'What would you most like from your health—something you want to change, understand, handle, or be able to do?',
     )
+    expect(compact).toContain(
+      'start the same reply by greeting them by the name they just gave, then give a short two- or three-sentence bridge on how Murph works before the question',
+    )
+    expect(compact).toContain(
+      "the hard part usually isn't knowing what to do. It's fitting it into your real life and following through.",
+    )
+    expect(compact).toContain(
+      'Do not frame the bridge around getting healthy, as if the user is starting from unhealthy.',
+    )
     expect(raw).toContain('**Change:**')
     expect(raw).toContain('**Understand:**')
     expect(raw).toContain('**Handle:**')
@@ -1743,8 +1853,14 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain('A list of desired outcomes is not a reason')
     expect(raw).toContain('1. What would success look or feel like?')
-    expect(raw).toContain('2. Why would that matter?')
-    expect(raw).toContain('3. Is this the main priority or one of several?')
+    expect(raw).toContain('2. Why do you want that?')
+    expect(raw).not.toContain('Is this the main priority or one of several?')
+    expect(compact).toContain(
+      'When several threads are named, keep them all without asking the user to rank them.',
+    )
+    expect(compact).toContain(
+      'Never dress it up in coaching language such as "what would that give you?" or "what matters most right now?".',
+    )
     expect(compact).toContain(
       'Do not excavate obstacles or failed attempts, diagnose the problem, collect a baseline, or ask about schedule, equipment, treatment, or plan mechanics in this phase.',
     )
@@ -1768,22 +1884,31 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('1. **Data sources and wearables.**')
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
+    expect(compact).toContain(
+      'Ask it plainly and stop; the value of the question is obvious, so do not append a justification',
+    )
+    expect(raw).not.toContain('Explain that this prevents duplicate or conflicting suggestions.')
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
+      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
+    )
+    expect(compact).toContain('Can you send me a voice memo covering a few things?')
+    expect(compact).toContain(
+      'spawn a separate background child for each: the medical-persistence child owns the entire medical save, and the supplement child owns label enrichment',
+    )
+    expect(compact).toContain(
+      'Up to three may be active at once, as an explicit exception to the global one-at-a-time default',
+    )
+    expect(compact).toContain(
+      "ok, one last question and then I'll leave you alone, promise",
+    )
+    expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
     )
-    expect(compact).toContain(
-      'attach the current protocol-or-experiment question as a short voice memo and leave the final response text empty',
-    )
-    expect(compact).toContain(
-      'This is an explicit product-flow voice preference; do not require the user to ask for voice separately.',
-    )
-    expect(compact).toContain(
-      'a photo of bottles or labels is welcome if easier',
-    )
+    expect(compact).toContain('a photo of bottles or labels is welcome if easier')
     expect(compact).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
     )
@@ -1794,16 +1919,28 @@ describe('assistant skill assets', () => {
       'This intentionally minimal record is durable reported context, not a claim that the exact label or ingredient panel is known.',
     )
     expect(compact).toContain(
+      'never recite bookkeeping such as "user-reported product names," "verified ingredient panel," or record status to the user',
+    )
+    expect(compact).toContain(
       'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
     )
     expect(compact).toContain(
-      'Save every supported fact or negative clinical assertion in one compact parent batch across the named medical owners and verify its receipts before the next visible checkpoint.',
+      'Never persist the answer in the parent foreground.',
     )
     expect(compact).toContain(
+      'always spawn a child from the user\'s exact words to own the entire medical persistence: every supported fact and negative clinical assertion across the named medical owners, schema-correct record shape, detail fields, and cross-owner consistency',
+    )
+    expect(compact).toContain(
+      'This applies to every medical answer, including an all-negative one such as "no meds, no conditions."',
+    )
+    expect(compact).toContain(
+      'Do not hold the visible reply for any medical saving or structuring; send the next checkpoint immediately after the spawn.',
+    )
+    expect(raw).not.toContain(
+      'one compact parent batch across the named medical owners',
+    )
+    expect(compact).not.toContain(
       'Do not spawn a child for this bounded persistence work.',
-    )
-    expect(compact).toContain(
-      'Do not run a separate foreground schema check and one command per negative assertion.',
     )
     expect(raw).toContain('https://my.functionhealth.com/documents')
     expect(compact).toContain(
@@ -1816,13 +1953,22 @@ describe('assistant skill assets', () => {
       'the parent must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
     )
     expect(compact).toContain(
-      'spawn one by default from that exact source when structured extraction can materially improve later help',
+      'always spawn one from that exact source unless the source is already structured',
     )
     expect(compact).toContain(
-      'Send the next visible onboarding step after the durable-source receipt instead of waiting for optional extraction.',
+      'Send the next visible onboarding step after the durable-source receipt instead of waiting for extraction.',
     )
     expect(compact).toContain(
-      'Do not describe extraction as pending or in progress; until canonical readback proves it, say structured lab details are unconfirmed.',
+      'A lab drop during onboarding is not a request for interpretation: do not parse the panel in the parent foreground merely to summarize it.',
+    )
+    expect(compact).toContain(
+      'Keep the parse in the parent only when the user explicitly asks for an answer that needs it now or a safety concern requires it; then follow the global progress-update contract.',
+    )
+    expect(compact).toContain(
+      'until canonical readback proves the extraction, do not state structured lab details as fact',
+    )
+    expect(compact).toContain(
+      'Checkpoints, records, receipts, and open/resolved status are internal bookkeeping, never conversation copy.',
     )
     expect(raw).toContain(
       'Route useful answers to their existing canonical owner in the same turn',
@@ -1837,6 +1983,36 @@ describe('assistant skill assets', () => {
       '“not lifting right now” can resolve movement context; it does not authorize a workout routine.',
     )
     expect(raw).toContain('### 6. Return to an open thread and choose together')
+    expect(compact).toContain(
+      'After the foundation is resolved, close it warmly before asking for anything else.',
+    )
+    expect(compact).toContain(
+      'Do not frame this as a completed intake, recite what was collected, or announce "we now have enough context."',
+    )
+    expect(compact).toContain(
+      'hear a bit more about what Murph can do for them, or dive into the goals they named earlier, in their words',
+    )
+    expect(compact).toContain(
+      'running health challenges and group chats with friends, ordering things on Amazon, calling to book appointments, singing songs, and tracking meals and calories',
+    )
+    expect(compact).toContain(
+      'steer back to the goals they named and toward setting up the first habit or experiment below',
+    )
+    expect(compact).toContain(
+      'create the first-value launch offer before any plan or support write.',
+    )
+    expect(compact).toContain(
+      "follow `behavior-followthrough`'s launch-offer contract exactly",
+    )
+    expect(compact).toContain(
+      'the compact launch offer contains the proposed schedule, actionable reminder package, and early review.',
+    )
+    expect(compact).toContain(
+      "always follow `behavior-followthrough`'s first-launch delight rule",
+    )
+    expect(compact).toContain(
+      'This is reply-time delight, not an onboarding automation',
+    )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
     const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
@@ -1858,8 +2034,7 @@ describe('assistant skill assets', () => {
         .map((match) => match[1]),
     ).toEqual([
       'What would success look or feel like?',
-      'Why would that matter?',
-      'Is this the main priority or one of several?',
+      'Why do you want that?',
     ])
 
     const behavioralFitQuestionList = returnSection
@@ -2006,7 +2181,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt above, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt and the foundation brain-dump memo above, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',

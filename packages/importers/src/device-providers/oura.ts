@@ -153,6 +153,19 @@ function firstDayKey(...candidates: unknown[]): string | undefined {
   return undefined;
 }
 
+function resolveOuraSleepType(value: unknown): "main_sleep" | "nap" | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/gu, "_");
+  if (normalized.includes("nap")) {
+    return "nap";
+  }
+
+  return normalized === "sleep" || normalized === "long_sleep" ? "main_sleep" : undefined;
+}
+
 const OURA_DAILY_ACTIVITY_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
   {
     metric: "activity-score",
@@ -591,6 +604,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       secondsToMinutes(sleep.time_in_bed) ??
       secondsToMinutes(sleep.total_sleep_duration);
     const sleepType = slugify(sleep.type, "sleep");
+    const canonicalSleepType = resolveOuraSleepType(sleep.type);
     const role = `sleep:${sleepId}`;
     const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
 
@@ -617,11 +631,12 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           title: sleepType.includes("nap") ? "Oura nap" : "Oura sleep",
           evidenceRoles: [role],
           externalRef: makeExternalRef("sleep", sleepId, version),
-          fields: {
+          fields: stripUndefined({
             startAt,
             endAt,
             durationMinutes,
-          },
+            sleepType: canonicalSleepType,
+          }),
         }),
       );
     }

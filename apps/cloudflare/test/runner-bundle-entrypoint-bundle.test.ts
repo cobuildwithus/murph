@@ -527,14 +527,25 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
     // overage, this PR's exact 1,929B merged-base overage, and the same final
     // 233B integration, less the same 179B ownership reduction, plus the same
-    // 230B provenance correction, its original 96,000B noise band, and the
-    // same 250,000B operational headroom because the closure contains the
+    // 230B provenance correction, shared message targeting's exact 38,978B
+    // local-macOS boot-critical overage, its original 96,000B noise band, and
+    // the same 250,000B operational headroom because the closure contains the
     // entry chunk.
+    // The static-closure baseline later advanced 24,408B to 7,121,190B on the
+    // 2026-07-16 mainline prompt integration, which landed without moving this
+    // lock; the lock is reconciled to that already-shipped ratchet here.
+    // The baseline then advanced 6,083B to 7,127,273B on the 2026-07-17
+    // static-closure ratchet for the July 16-17 mainline (Epic clinical
+    // records beta, onboarding clarifiers), which again landed without moving
+    // this lock; the lock is reconciled to that already-shipped ratchet here.
+    // The source ratchet subsequently advanced 12,638B to 7,139,911B for the
+    // V1 posture comment, delegation hints, subagent usage evidence, and hosted
+    // onboarding concurrency. Reconcile this lock to that shipped baseline.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_096_782 + 96_000 + 250_000,
+      staticClosureBytes: 7_500_000 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });

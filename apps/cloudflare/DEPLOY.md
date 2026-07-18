@@ -27,6 +27,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Shared Message Targeting Rollout
+
+The first release with shared exact-message reply and reaction targeting must
+deploy Cloudflare and the runner bundle with `container_rollout=immediate`.
+The bundle contains both the strict `nativeReplyRequested` outbox reader and its
+writer, so there is no Web deployment order or feature flag. Require
+managed-container smoke to report the exact new runner-bundle fingerprint and
+prove its assistant CLI surface contract before accepting targeted turns.
+
+Before the first `nativeReplyRequested: true` intent is written, the prior
+runner bundle remains a safe rollback. After that write, the new bundle is a
+hard rollback floor because an encrypted workspace, checkpoint, or retained
+outbox intent may contain the marker. Do not try to prove an incident-time
+drain. Forward-fix on that bundle or newer; do not restore an older runner or
+add a dual writer.
+
+After convergence, verify one unselected Linq or Telegram automatic model reply
+remains flat, one selected reply with `---` keeps the same native target on
+every bubble, and one reaction reaches its selected accepted message. Confirm
+no strict outbox parse failures or stale runner fingerprints appear in Workers
+Observability.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an
@@ -115,8 +137,9 @@ secret, Durable Object state, scheduler, workflow, or second container. Its
 producer gate is distinct from the original private-to-group Ask gate.
 
 1. Deploy Cloudflare/runner consumers for the `consented_member` request target,
-   prepare disclosure context, the private candidate plus fresh outgoing
-   reviewer, and `deliveryMode: "reviewed_exact"` group completion with
+   trusted accepted-input and scheduled-automation origins, disclosure-context
+   preparation, the private candidate plus fresh outgoing reviewer, reviewed
+   exact group delivery, and isolated no-delivery automation completion with
    `container_rollout=immediate`. Keep the Web producer gate off.
 2. Deploy the Web storage, consent-reaction, admission, prepare, and completion
    paths with `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0`. The
@@ -137,7 +160,7 @@ producer gate is distinct from the original private-to-group Ask gate.
 To roll back, set the Web gate to `0` and redeploy Web first. Do not delete
 permission or grant rows: they remain member-managed product truth and cannot
 erase already shared answers. Keep compatible Web and runner consumers until
-every consented request and reviewed-exact completion has drained or expired
+every consented request and accepted-input or automation completion has drained or expired
 from Web mailboxes, imported local pending items, and committed workspace
 snapshots. Wait at least the full ten-minute request lifetime and prefer a
 forward fix if any imported item remains.
@@ -376,7 +399,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -574,7 +597,7 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
-The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries conditional tool and per-turn mode hints: the active direct-route non-blocking section or an applicable Murph skill must authorize delegation. Hosted launches must not pass a boolean `features.multi_agent_v2=true` override because that would replace the table and drop those hints. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. The Codex App Server stays warm for the container lifetime; configuration changes take effect through normal container or process replacement, not per-turn restart.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. That disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.

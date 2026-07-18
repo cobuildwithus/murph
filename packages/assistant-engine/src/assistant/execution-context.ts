@@ -10,7 +10,11 @@ import type {
   AutomationContinuityPolicy,
   AutomationSchedule,
   AutomationStatus,
+  AutomationSupportKind,
 } from '@murphai/contracts'
+import type {
+  HostedClinicalRecordsConnectLinkResponse,
+} from '@murphai/hosted-execution/clinical-records'
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
@@ -133,6 +137,7 @@ export interface AssistantHostedLabsTool {
 export type AssistantHostedAutomationToolRequest =
   | {
       action: 'save'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
@@ -141,11 +146,14 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title: string
     }
   | {
       action: 'patch'
+      activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
       instructions?: string
@@ -155,18 +163,34 @@ export type AssistantHostedAutomationToolRequest =
       slug?: string
       status?: AutomationStatus
       summary?: string | null
+      supportKind?: AutomationSupportKind | null
+      supportSeriesId?: string
       tags?: readonly string[]
       title?: string
     }
+  | {
+      action: 'reconcile'
+      desiredAutomationIds: readonly string[]
+      supportSeriesId: string
+    }
 
-export interface AssistantHostedAutomationToolResponse {
-  action: 'patch' | 'save'
-  automationId: string
-  created: boolean
-  lookupId: string
-  routeBinding: 'current_conversation' | 'preserved'
-  status: AutomationStatus
-}
+export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'patch' | 'save'
+      automationId: string
+      created: boolean
+      lookupId: string
+      routeBinding: 'current_conversation' | 'preserved'
+      status: AutomationStatus
+    }
+  | {
+      action: 'reconcile'
+      archivedCount: number
+      matchedCount: number
+      missingDesiredAutomationIds: readonly string[]
+      supportSeriesId: string
+      unchangedCount: number
+    }
 
 export interface AssistantHostedAutomationTool {
   request(
@@ -206,6 +230,12 @@ export interface AssistantHostedSubscriptionTool {
   request(
     request: HostedRuntimeSubscriptionControlRequest,
   ): Promise<HostedRuntimeSubscriptionToolResponse>
+}
+
+export interface AssistantHostedClinicalRecordsConnectLinkTool {
+  createConnectLink(
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsConnectLinkResponse>
 }
 
 export interface AssistantHostedPersonalizationTool {
@@ -283,6 +313,7 @@ export interface AssistantHostedExecutionContext {
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
+  clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
@@ -333,6 +364,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.assistantConfigurationTool,
   )
   const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
+  const clinicalRecordsConnectLinkTool = normalizeAssistantClinicalRecordsConnectLinkTool(
+    hosted?.clinicalRecordsConnectLinkTool,
+  )
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
     hosted?.channelTypingDependencies,
@@ -383,6 +417,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
+      ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
@@ -499,6 +534,18 @@ function normalizeAssistantConnectedAppsPort(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantClinicalRecordsConnectLinkTool(
+  input: AssistantHostedExecutionContext['clinicalRecordsConnectLinkTool'] | undefined,
+): AssistantHostedClinicalRecordsConnectLinkTool | undefined {
+  if (!input || typeof input.createConnectLink !== 'function') {
+    return undefined
+  }
+
+  return {
+    createConnectLink: input.createConnectLink.bind(input),
   }
 }
 

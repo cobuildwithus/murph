@@ -619,6 +619,49 @@ type ReviewGptDomTestNode = {
   tagName?: string
 }
 
+type ReviewGptModelPickerTarget = {
+  desiredVersion: string
+  wantsInstant: boolean
+  wantsPro: boolean
+  wantsSol: boolean
+  wantsThinking: boolean
+}
+
+type ReviewGptModelPickerSummary = {
+  label: string
+  opensSubmenu: boolean
+  testId?: string
+  unavailable: boolean
+  visible: boolean
+}
+
+const reviewGptModelPickerModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft.js',
+  ),
+) as {
+  modelPickerOptionCanTraverseTarget: (
+    label: string,
+    testId: string,
+    target: ReviewGptModelPickerTarget,
+    opensSubmenu?: boolean,
+  ) => boolean
+  modelPickerOptionMatchesTarget: (
+    label: string,
+    testId: string,
+    target: ReviewGptModelPickerTarget,
+  ) => boolean
+  modelPickerSummarySelectionProof: (
+    summary: ReviewGptModelPickerSummary,
+    target: ReviewGptModelPickerTarget,
+  ) => boolean
+}
+
 const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
   path.join(
     repoRoot,
@@ -930,8 +973,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.109')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.109')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.110')
+    expect(
+      pnpmWorkspace
+        .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
+        ?.split('\n')
+        .filter((line) => line.includes('@cobuild/review-gpt')),
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.110'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -995,6 +1043,84 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
     )
+    const solTarget: ReviewGptModelPickerTarget = {
+      desiredVersion: '5-6',
+      wantsInstant: false,
+      wantsPro: false,
+      wantsSol: true,
+      wantsThinking: false,
+    }
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionMatchesTarget(
+        'GPT-5.6 Sol',
+        '',
+        solTarget,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'ModelGPT-5.6 Sol',
+          opensSubmenu: true,
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionCanTraverseTarget(
+        'ModelGPT-5.5',
+        '',
+        solTarget,
+        true,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionCanTraverseTarget(
+        'EffortHigh',
+        '',
+        solTarget,
+        true,
+      ),
+    ).toBe(false)
+    for (const invalidLabel of [
+      'GPT-5.5 Sol',
+      'GPT-15.6 Sol',
+      'GPT-5.60 Sol',
+      'GPT-5.6 Sol Extended Pro',
+    ]) {
+      expect(
+        reviewGptModelPickerModule.modelPickerOptionMatchesTarget(
+          invalidLabel,
+          '',
+          solTarget,
+        ),
+      ).toBe(false)
+    }
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'ModelGPT-5.5GPT-5.6 Sol',
+          opensSubmenu: true,
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(false)
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'Model',
+          opensSubmenu: true,
+          testId: 'model-switcher-pro-submenu',
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(false)
     expect(reviewGptDriver).toContain(
       'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS;',
     )
@@ -1070,7 +1196,19 @@ describe('monorepo release flow coverage audit', () => {
         '  let ownedTargetId = pageTargetId;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
+        '  let releasePageFocusEmulation = async () => {};',
         '  try {',
+      ].join('\n'),
+    )
+    expect(reviewGptDriver).toContain('  releasePageFocusEmulation = async () => {')
+    expect(reviewGptDriver).toContain(
+      [
+        '  let focusReleaseError = null;',
+        '  try {',
+        '    await releasePageFocusEmulation();',
+        '  } catch (error) {',
+        '    focusReleaseError = error;',
+        '  }',
       ].join('\n'),
     )
     expect(reviewGptDriver).toContain(
@@ -1340,7 +1478,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
-    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.6-terra')
     expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('scope-anomaly signal')
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')
@@ -3563,7 +3701,21 @@ exit 1
     mkdirSync(path.join(vaultRoot, '.runtime', 'operations', 'assistant', 'sessions'), {
       recursive: true,
     })
+    mkdirSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+      ),
+      { recursive: true },
+    )
     mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'assistant-deliveries'), {
+      recursive: true,
+    })
+    mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
@@ -3578,6 +3730,18 @@ exit 1
       '{"sessionId":"asst_test"}\n',
       'utf8',
     )
+    writeFileSync(
+      path.join(
+        vaultRoot,
+        '.runtime',
+        'operations',
+        'assistant',
+        'generated-deliveries',
+        'transient.pdf',
+      ),
+      'assistant runtime staging\n',
+      'utf8',
+    )
     writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
     writeFileSync(
       path.join(vaultRoot, '.runtime', 'projections', 'query.sqlite'),
@@ -3587,6 +3751,26 @@ exit 1
     writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.pdf'),
+      'ordinary pre-existing vault file\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'base-era.zip'),
+      'globally excluded archive\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.pdf'),
+      'generic export\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.zip'),
+      'globally excluded archive\n',
       'utf8',
     )
 
@@ -3610,7 +3794,7 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 3')
+      expect(output).toContain('Vault files: 5')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -3632,15 +3816,44 @@ exit 1
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.pdf`,
+      )
+      expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/base-era.zip`,
+      )
+      expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.zip`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
+      )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/.runtime/operations/assistant/generated-deliveries/transient.pdf`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )
+      const manifest = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', zipPath, `${bundleDir}/bundle-manifest.json`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      ))
+      expect(manifest).toMatchObject({
+        counts: {
+          totalFiles: 6,
+          vaultFiles: 5,
+        },
+        excludes: expect.arrayContaining(['.runtime/**']),
+      })
+      expect(manifest.excludes).toContain('*.zip')
+      expect(manifest.excludes).not.toContain('exports/assistant-deliveries/**')
     } finally {
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })

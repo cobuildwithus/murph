@@ -1,0 +1,173 @@
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, expect, test, vi } from "vitest";
+
+const captured = vi.hoisted(() => ({
+  chartConfig: null as Record<string, unknown> | null,
+  gridRendered: false,
+  lineChartProps: null as Record<string, unknown> | null,
+  referenceAreas: [] as Record<string, unknown>[],
+  referenceLines: [] as Record<string, unknown>[],
+  tooltipFormatter: null as ((value: unknown) => ReactNode) | null,
+  yAxisDomain: null as unknown,
+  yAxisPadding: null as unknown,
+  yAxisTickFormatter: null as ((value: unknown) => string) | null,
+  yAxisWidth: null as number | null,
+}));
+
+vi.mock("recharts", async () => {
+  const React = await import("react");
+  const passthrough = ({ children }: { children?: ReactNode }) =>
+    React.createElement(React.Fragment, null, children);
+
+  return {
+    CartesianGrid: () => {
+      captured.gridRendered = true;
+      return null;
+    },
+    Line: () => null,
+    LineChart(props: Record<string, unknown> & { children?: ReactNode }) {
+      captured.lineChartProps = props;
+      return passthrough(props);
+    },
+    ReferenceArea(props: Record<string, unknown>) {
+      captured.referenceAreas.push(props);
+      return null;
+    },
+    ReferenceLine(props: Record<string, unknown>) {
+      captured.referenceLines.push(props);
+      return null;
+    },
+    XAxis: () => null,
+    YAxis(props: {
+      domain?: unknown;
+      padding?: unknown;
+      tickFormatter?: (value: unknown) => string;
+      width?: number;
+    }) {
+      captured.yAxisDomain = props.domain ?? null;
+      captured.yAxisPadding = props.padding ?? null;
+      captured.yAxisTickFormatter = props.tickFormatter ?? null;
+      captured.yAxisWidth = props.width ?? null;
+      return null;
+    },
+  };
+});
+
+vi.mock("@/src/components/ui/chart", async () => {
+  const React = await import("react");
+  const passthrough = ({ children }: { children?: ReactNode }) =>
+    React.createElement(React.Fragment, null, children);
+
+  return {
+    ChartContainer(props: { children?: ReactNode; config?: Record<string, unknown> }) {
+      captured.chartConfig = props.config ?? null;
+      return passthrough(props);
+    },
+    ChartTooltip({ content }: { content?: ReactNode }) {
+      return React.createElement(React.Fragment, null, content);
+    },
+    ChartTooltipContent(props: { formatter?: (value: unknown) => ReactNode }) {
+      captured.tooltipFormatter = props.formatter ?? null;
+      return null;
+    },
+  };
+});
+
+import { LabBiomarkerHistoryChart } from "@/src/components/biomarkers/lab-biomarker-history-chart";
+
+beforeEach(() => {
+  captured.chartConfig = null;
+  captured.gridRendered = false;
+  captured.lineChartProps = null;
+  captured.referenceAreas = [];
+  captured.referenceLines = [];
+  captured.tooltipFormatter = null;
+  captured.yAxisDomain = null;
+  captured.yAxisPadding = null;
+  captured.yAxisTickFormatter = null;
+  captured.yAxisWidth = null;
+});
+
+test("lab chart keeps tiny values precise without adding a nested keyboard stop", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "Tiny marker",
+    points: [
+      { date: "2025-01-01", id: "tiny-2025", value: 0.0014 },
+      { date: "2026-01-01", id: "tiny-2026", value: 0.0015 },
+    ],
+    unit: "mg/L",
+  }));
+
+  expect(captured.lineChartProps?.accessibilityLayer).not.toBe(true);
+  expect(captured.yAxisTickFormatter?.(0.0014)).toBe("0.0014");
+  expect(captured.yAxisWidth).toBe(72);
+  expect(captured.chartConfig).toMatchObject({
+    value: { color: "var(--chart-1)" },
+  });
+
+  const tooltip = captured.tooltipFormatter?.(0.0015);
+  expect(tooltip).toBeTruthy();
+  expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("0.0015 mg/L");
+});
+
+test("a shared reference range renders a band, dashed bounds, and a data-safe domain", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "HbA1c",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 5.6 },
+      { date: "2026-06-14", id: "p2", value: 5.8 },
+    ],
+    referenceRange: { high: 5.6, low: 4 },
+    unit: "percent",
+  }));
+
+  expect(captured.referenceAreas).toHaveLength(1);
+  expect(captured.referenceAreas[0]).toMatchObject({ y1: 4, y2: 5.6 });
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([4, 5.6]);
+  expect(captured.gridRendered).toBe(false);
+  expect(captured.yAxisPadding).toMatchObject({ bottom: 16, top: 16 });
+
+  // The axis keeps its automatic domain; reference elements extend it when a
+  // bound sits outside the data so neither data nor band is ever clipped.
+  expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
+  expect(captured.referenceAreas[0]).toMatchObject({ ifOverflow: "extendDomain" });
+  for (const line of captured.referenceLines) {
+    expect(line).toMatchObject({ ifOverflow: "extendDomain" });
+  }
+
+  const tooltip = captured.tooltipFormatter?.(5.8);
+  expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("5.8%");
+});
+
+test("a single reference bound renders one dashed line and no band", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "LDL cholesterol",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 118 },
+      { date: "2026-06-14", id: "p2", value: 96 },
+    ],
+    referenceRange: { high: 99, low: null },
+    unit: "mg/dL",
+  }));
+
+  expect(captured.referenceAreas).toHaveLength(0);
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
+});
+
+test("no reference range keeps the grid and default domain", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "TSH",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 2.1 },
+      { date: "2026-06-14", id: "p2", value: 1.8 },
+    ],
+    unit: "mIU/L",
+  }));
+
+  expect(captured.referenceAreas).toHaveLength(0);
+  expect(captured.referenceLines).toHaveLength(0);
+  expect(captured.gridRendered).toBe(true);
+  expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
+  expect(captured.yAxisPadding).toBeNull();
+});

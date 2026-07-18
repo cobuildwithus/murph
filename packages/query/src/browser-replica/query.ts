@@ -12,6 +12,10 @@ import {
   type BrowserVaultTimelineFilters,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
+import {
+  labResultRowMatchesFilters,
+  sortBrowserVaultLabResultRows,
+} from "./lab-results.ts";
 import { metricRowMatchesFilters } from "./metric-points.ts";
 import {
   normalizeMetricKey,
@@ -25,6 +29,7 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
   const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
   const metricSelectionsByMetricKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
   const metricSelectionsByBiomarkerKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
+  const labResultRows = frozenReplica.labResultRows ?? [];
 
   for (const entity of frozenReplica.entities) {
     byLookupId.set(entity.id, entity);
@@ -53,6 +58,13 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
     metricGoals: {
       progress(filters = {}) {
         return frozenReplica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, normalizeMetricGoalFilters(filters)));
+      },
+    },
+    labResults: {
+      list(filters = {}) {
+        return sortBrowserVaultLabResultRows(
+          labResultRows.filter((row) => labResultRowMatchesFilters(row, filters)),
+        );
       },
     },
     metrics: {

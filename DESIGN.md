@@ -193,6 +193,22 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### Home Experiment History Cards
+Completed experiment cards on `/home` are compact index entries, not miniature
+results pages. Use three columns at wide desktop widths, two at small desktop
+and mobile-landscape widths, and one where the open desktop sidebar constrains
+the content column.
+Inside each card, keep the category and title, then show every comparable result
+as a small primary-first grid of mono labels and Fraunces deltas. Positive
+evidence uses sage, unfavorable movement uses Tailwind amber-700 rather than the
+lighter decorative amber grain token, and neutral movement stays slate so mixed
+results remain distinguishable. Keep the date, but omit the
+redundant Completed badge, circled privacy lock, Baseline-to-Latest block, and
+visible View arrow. The entire card remains the link to the detailed result.
+Active and paused cards keep the larger progress-first treatment, and stopped
+runs keep the standard history-card treatment. Keep privacy legible with a small
+unbordered lock beside the date rather than a separate header control.
+
 ### Library List Pattern (Hero / Standard / Table)
 For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker, recipes, protocols), break the rhythm into three tiers instead of an identical-card grid:
 1. **Hero rows (top 1–2)** — full-width row, image on the left (320px on desktop, 16:9 above on mobile), content on the right. Category eyebrow + serif h3 title + qualitative fit label top-right + mechanism prose + 4-stat band (`Exp. change` · `Duration` · `Burden` · `Evidence`). Optional small mono pill over the image (`RECOMMENDED FOR YOU`). The whole card is the link — no diagonal up-right arrow (it reads as "external" and is misleading); no "Open the experiment" CTA strip — the card surface itself is the affordance.
@@ -247,6 +263,17 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 
 ### Inputs / Fields
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
+
+### Murph Safe Search and Product Evidence
+The public `/search` page uses the editorial paper system without an app-shell
+dashboard. Lead with one direct question, one large explicit-submit field, and
+short privacy/evidence framing. Group results by Supplements and Branded foods;
+each flat row shows identity, source, and exact-linked test count without a
+safe/unsafe badge. Detail pages read like evidence files: identity, tests,
+ingredients, nutrition, unknowns, provenance, correction contact. Use sienna
+only for genuine warnings or failures. Evidence gaps stay neutral and explicit.
+At phone widths, metadata wraps under identity and long product/source strings
+must break without horizontal scrolling.
 
 ### Choice Cards
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to

@@ -16,7 +16,7 @@ describe('assistant provider config normalization', () => {
         kind: 'codex-cli',
         codexCommand: null,
         codexHome: null,
-        model: ' gpt-5.5 ',
+        model: ' gpt-5.6-terra ',
         modelProvider: ' VERCEL-AI-GATEWAY ',
         oss: false,
         profile: null,
@@ -34,7 +34,7 @@ describe('assistant provider config normalization', () => {
     if (normalized.target.kind !== 'codex-cli') {
       throw new Error('expected a Codex target after normalization')
     }
-    expect(normalized.target.model).toBe('gpt-5.5')
+    expect(normalized.target.model).toBe('gpt-5.6-terra')
     expect(normalized.target.modelProvider).toBe('vercel-ai-gateway')
     expect(serializeAssistantProviderSessionOptions(normalized)).toMatchObject({
       executionDriver: 'codex-app-server',

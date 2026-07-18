@@ -77,7 +77,7 @@ const TEST_USER_ID = "member_synthetic_conversation_import";
 const HASHED_IDENTIFIER_PATTERN = /^hid_[0-9a-f]{32}$/u;
 const HOSTED_ASSISTANT_SEED_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",

@@ -403,6 +403,7 @@ function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string
     protocol: frontmatter.protocol ?? null,
     safety: frontmatter.safety ?? null,
     testPlans: frontmatter.testPlans ?? [],
+    expectedSignalDescriptions: frontmatter.expectedSignalDescriptions ?? [],
     ...(frontmatter.measurementPlan === undefined
       ? {}
       : { measurementPlan: frontmatter.measurementPlan }),

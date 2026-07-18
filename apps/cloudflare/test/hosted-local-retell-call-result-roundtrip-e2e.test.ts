@@ -29,7 +29,7 @@ const chatId = `chat_local_retell_result_${runId}`;
 const phoneCallId = `hpc_local_retell_result_${runId}`;
 const providerCallId = `retell_call_local_${runId}`;
 const retellApiKey = "retell-local-test-key";
-const assistantModel = "gpt-5.5";
+const assistantModel = "gpt-5.6-terra";
 const resultSummary = "The pharmacy confirmed the prescription will be ready this afternoon.";
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
 

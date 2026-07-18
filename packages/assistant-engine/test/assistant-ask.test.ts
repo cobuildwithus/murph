@@ -72,7 +72,7 @@ describe('executeReadOnlyAssistantAsk', () => {
           OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
           PATH: '/runtime/bin',
         },
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
         now,
         question: 'What exercise is prescribed today?',
@@ -93,14 +93,13 @@ describe('executeReadOnlyAssistantAsk', () => {
     const turnInput = askMocks.executeTurn.mock.calls[0]?.[0]
     expect(turnInput).toMatchObject({
       allowFinishWithoutReply: false,
-      allowMessageReactions: false,
       approvalPolicy: 'never',
       codexCommand: '/runtime/codex',
       codexHome: '/runtime/codex-home',
       developerInstructions: 'Use Murph voice.',
       dynamicTools: [],
       ephemeral: true,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'hosted-openai',
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
       permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
@@ -429,7 +428,6 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     for (const turnInput of [answerInput, reviewInput]) {
       expect(turnInput).toMatchObject({
         allowFinishWithoutReply: false,
-        allowMessageReactions: false,
         approvalPolicy: 'never',
         dynamicTools: [],
         ephemeral: true,

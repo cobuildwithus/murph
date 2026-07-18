@@ -1,4 +1,5 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
+import type { ExperimentOutcome } from "@murphai/contracts";
 import type {
   OverviewExperiment,
   OverviewExperimentSummary,
@@ -95,6 +96,32 @@ export interface BrowserVaultEntity {
 
 export interface BrowserVaultSummaryConfidence {
   level: MetricConfidence;
+}
+
+export interface BrowserVaultLabResultReferenceRange {
+  high?: number;
+  low?: number;
+  text?: string;
+}
+
+export interface BrowserVaultLabResultRow {
+  analyte: string;
+  biomarkerKey: string | null;
+  comparator: MetricComparator | null;
+  date: string;
+  flag: string | null;
+  id: string;
+  labName: string | null;
+  metricKey: string;
+  normalizedUnit: string | null;
+  normalizedValue: number | null;
+  observedAt: string;
+  referenceRange: BrowserVaultLabResultReferenceRange | null;
+  rowSchema: "murph.browser-vault.lab-result-row.v1";
+  sourceLabel: string | null;
+  textValue: string | null;
+  unit: string | null;
+  value: number | null;
 }
 
 export interface BrowserVaultMetricRow {
@@ -205,7 +232,10 @@ export interface BrowserVaultMetricGoalProgressRow {
 export interface BrowserVaultReplica {
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
+  /** Absent only on replicas produced before canonical outcome projection shipped. */
+  experimentOutcomes?: ExperimentOutcome[];
   generatedAt: string;
+  labResultRows: BrowserVaultLabResultRow[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -219,6 +249,7 @@ export interface BrowserVaultReplica {
 }
 
 export interface CreateBrowserVaultReplicaInput {
+  experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
   sourceBundleHash: string;
@@ -244,6 +275,13 @@ export interface BrowserVaultMetricFilters {
   to?: string;
 }
 
+export interface BrowserVaultLabResultFilters {
+  biomarkerKey?: string;
+  from?: string;
+  metricKey?: string;
+  to?: string;
+}
+
 export type BrowserVaultMetricSelectionFilters = Pick<BrowserVaultMetricFilters, "biomarkerKey" | "metricKey">;
 
 export interface BrowserVaultTimelineFilters {
@@ -265,6 +303,9 @@ export interface BrowserVaultQueryClient {
   };
   metricGoals: {
     progress(filters?: { goalId?: string; metricKey?: string }): BrowserVaultMetricGoalProgressRow[];
+  };
+  labResults: {
+    list(filters?: BrowserVaultLabResultFilters): BrowserVaultLabResultRow[];
   };
   metrics: {
     latestRow(filters?: BrowserVaultMetricFilters): BrowserVaultMetricRow | null;

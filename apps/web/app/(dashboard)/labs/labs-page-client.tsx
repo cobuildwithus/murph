@@ -99,7 +99,7 @@ export function LabsPageClient() {
   const [searchKind, setSearchKind] = useState<SearchKind>("all");
   const [searchValidationError, setSearchValidationError] = useState<string | null>(null);
   const [searchState, setSearchState] = useState<SearchState>({ status: "idle" });
-  const [expandedOfferingId, setExpandedOfferingId] = useState<string | null>(null);
+  const [expandedOfferingIndex, setExpandedOfferingIndex] = useState<number | null>(null);
   const [zipCode, setZipCode] = useState("");
   const [zipValidationError, setZipValidationError] = useState<string | null>(null);
   const [locationsState, setLocationsState] = useState<LocationsState>({ status: "idle" });
@@ -118,7 +118,7 @@ export function LabsPageClient() {
   }, []);
 
   async function runSearch(request: HostedRuntimeLabsSearchRequest) {
-    setExpandedOfferingId(null);
+    setExpandedOfferingIndex(null);
     setSearchState({ request, status: "loading" });
 
     const tracked = startTrackedRequest(searchTracker.current);
@@ -166,10 +166,8 @@ export function LabsPageClient() {
     });
   }
 
-  function toggleDetails(item: HostedRuntimeLabsOffering) {
-    setExpandedOfferingId((current) =>
-      current === item.offeringId ? null : item.offeringId,
-    );
+  function toggleDetails(index: number) {
+    setExpandedOfferingIndex((current) => current === index ? null : index);
   }
 
   async function runLocations(request: HostedRuntimeLabsLocationsRequest) {
@@ -218,17 +216,17 @@ export function LabsPageClient() {
     <div className="flex flex-col gap-10 pb-8">
       <div className="flex flex-col gap-5">
         <PageHeader
-          eyebrow="Live catalog preview"
+          eyebrow="Live lab preview"
           title="Labs"
-          description="Search Junction's current test catalog and explore nearby collection sites. This preview reads live provider data without saving your searches."
+          description="Explore current lab tests and nearby collection sites. Searches are live. Murph does not save search terms or ZIP codes."
         />
 
         <Alert>
           <InfoIcon />
           <AlertTitle>Discovery only</AlertTitle>
           <AlertDescription>
-            Ordering through Murph is not available yet. Listed amounts are current Junction
-            catalog prices, not final quotes. Catalog and location listings do not confirm
+            You can explore available tests now. Ordering through Murph is planned for later.
+            Listed amounts are current catalog prices, not final quotes. Listings do not confirm
             eligibility or appointment availability.
           </AlertDescription>
         </Alert>
@@ -238,7 +236,7 @@ export function LabsPageClient() {
         <SectionHeading
           index="01"
           title="Search the live catalog"
-          description="Look for a test, panel, or named biomarker. Results stay in Junction's relevance order."
+          description="Look for a test, panel, or named biomarker. Results appear in the order returned by the live catalog."
           id="labs-catalog-heading"
         />
 
@@ -312,7 +310,7 @@ export function LabsPageClient() {
         </p>
 
         <CatalogResults
-          expandedOfferingId={expandedOfferingId}
+          expandedOfferingIndex={expandedOfferingIndex}
           onRetrySearch={(request) => void runSearch(request)}
           onToggleDetails={toggleDetails}
           state={searchState}
@@ -422,14 +420,14 @@ function SectionHeading({
 }
 
 function CatalogResults({
-  expandedOfferingId,
+  expandedOfferingIndex,
   onRetrySearch,
   onToggleDetails,
   state,
 }: {
-  expandedOfferingId: string | null;
+  expandedOfferingIndex: number | null;
   onRetrySearch: (request: HostedRuntimeLabsSearchRequest) => void;
-  onToggleDetails: (item: HostedRuntimeLabsOffering) => void;
+  onToggleDetails: (index: number) => void;
   state: SearchState;
 }) {
   if (state.status === "idle") {
@@ -448,7 +446,7 @@ function CatalogResults({
     if (state.failure === "auth") {
       return (
         <LabsAuthAlert>
-          Refresh this page, then sign in again if prompted. Your search was not saved.
+          Refresh this page, then sign in again if prompted. Murph did not save your search.
         </LabsAuthAlert>
       );
     }
@@ -457,7 +455,7 @@ function CatalogResults({
       <Alert variant="destructive">
         <AlertTitle>Catalog temporarily unavailable</AlertTitle>
         <AlertDescription>
-          The live catalog could not be loaded. Your search was not saved.
+          The live catalog could not be loaded. Murph did not save your search.
         </AlertDescription>
         <AlertAction>
           <Button
@@ -486,8 +484,8 @@ function CatalogResults({
         </AlertTitle>
         <AlertDescription>
           {filteredKind
-            ? "Try All catalog items or a shorter provider-facing name."
-            : "Try a shorter provider-facing name or a related term."}
+            ? "Try All catalog items or a shorter test name."
+            : "Try a shorter test name or a related term."}
         </AlertDescription>
       </Alert>
     );
@@ -503,7 +501,7 @@ function CatalogResults({
           {catalogResultSummary(state.data)}
         </p>
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Live Junction catalog · {formatCheckedAt(state.data.checkedAt)}
+          Live catalog · {formatCheckedAt(state.data.checkedAt)}
         </p>
       </div>
 
@@ -524,7 +522,7 @@ function CatalogResults({
           <TableBody>
             {state.data.items.map((item, index) => {
               const detailId = `labs-offering-detail-${index}`;
-              const expanded = expandedOfferingId === item.offeringId;
+              const expanded = expandedOfferingIndex === index;
 
               return (
                 <CatalogOfferingRows
@@ -532,8 +530,8 @@ function CatalogResults({
                   detailId={detailId}
                   expanded={expanded}
                   item={item}
-                  key={item.offeringId}
-                  onToggleDetails={onToggleDetails}
+                  key={`${item.kind}:${item.name}:${index}`}
+                  onToggleDetails={() => onToggleDetails(index)}
                 />
               );
             })}
@@ -542,7 +540,7 @@ function CatalogResults({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Prices shown are current Junction catalog amounts and may not be the final quote.
+        Prices shown are current catalog amounts and may not be the final quote.
       </p>
     </div>
   );
@@ -559,7 +557,7 @@ function CatalogOfferingRows({
   detailId: string;
   expanded: boolean;
   item: HostedRuntimeLabsOffering;
-  onToggleDetails: (item: HostedRuntimeLabsOffering) => void;
+  onToggleDetails: () => void;
 }) {
   return (
     <>
@@ -591,7 +589,7 @@ function CatalogOfferingRows({
             aria-controls={expanded ? detailId : undefined}
             aria-expanded={expanded}
             aria-label={`${expanded ? "Hide" : "View"} details for ${item.name}`}
-            onClick={() => onToggleDetails(item)}
+            onClick={onToggleDetails}
             size="icon-lg"
             type="button"
             variant="ghost"
@@ -631,11 +629,11 @@ function OfferingDetail({
             {formatOfferingKind(item.kind)}
           </Badge>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Listed in Junction&apos;s catalog
+            Live catalog listing
           </span>
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-foreground">
-          {item.description ?? "Junction does not provide a description for this catalog item."}
+          {item.description ?? "No description is available for this catalog item."}
         </p>
       </div>
 
@@ -670,7 +668,7 @@ function OfferingDetail({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        Ordering through Murph is not enabled yet. This listing does not confirm eligibility or a final quote.
+        Ordering through Murph is planned for later. This listing does not confirm eligibility or a final quote.
       </p>
     </>
   );
@@ -701,7 +699,7 @@ function CatalogLoading() {
   return (
     <div aria-busy="true" className="flex flex-col gap-3">
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Searching Junction&apos;s live catalog
+        <Spinner /> Searching the live catalog
       </p>
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <Table>
@@ -766,7 +764,7 @@ function LocationsResults({
     if (state.failure === "auth") {
       return (
         <LabsAuthAlert>
-          Refresh this page, then sign in again if prompted. Your ZIP was not saved.
+          Refresh this page, then sign in again if prompted. Murph did not save your ZIP.
         </LabsAuthAlert>
       );
     }
@@ -775,7 +773,7 @@ function LocationsResults({
       <Alert variant="destructive">
         <AlertTitle>Locations temporarily unavailable</AlertTitle>
         <AlertDescription>
-          Collection coverage could not be checked. Your ZIP was not saved.
+          Collection coverage could not be checked. Murph did not save your ZIP.
         </AlertDescription>
         <AlertAction>
           <Button onClick={() => onRetry(state.request)} size="sm" type="button" variant="outline">
@@ -791,7 +789,7 @@ function LocationsResults({
       <Alert>
         <AlertTitle>No collection coverage found</AlertTitle>
         <AlertDescription>
-          Junction did not return home or walk-in collection options within {state.data.radiusMiles} miles.
+          No home or walk-in collection options were found within {state.data.radiusMiles} miles.
         </AlertDescription>
       </Alert>
     );
@@ -820,14 +818,14 @@ function LocationsResults({
           {state.data.locations.map((location, index) => (
             <LocationRow
               index={index}
-              key={`${location.labId}:${location.siteCode}`}
+              key={`${location.name}:${location.address.line1}:${location.address.postalCode}:${index}`}
               location={location}
             />
           ))}
         </ol>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Junction returned general coverage but no walk-in sites in this radius.
+          Home collection is listed for this area, but no walk-in sites were found in this radius.
         </p>
       )}
     </div>
@@ -853,9 +851,6 @@ function LocationRow({
       <div className="min-w-0">
         <h3 className="font-serif text-lg font-semibold text-foreground">{location.name}</h3>
         <p className="text-sm text-foreground">{formatAddress(location)}</p>
-        <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          {formatLabName(location.labSlug)}
-        </p>
         {phoneHref && location.phoneNumber ? (
           <a
             className="mt-2 inline-block text-sm text-foreground underline underline-offset-4 hover:text-primary"
@@ -965,18 +960,6 @@ function formatAddress(location: HostedRuntimeLabsLocation): string {
   ].filter((part): part is string => Boolean(part)).join(", ");
 }
 
-function formatLabName(value: string | null): string {
-  if (!value) {
-    return "Junction lab network";
-  }
-
-  return value
-    .split(/[-_\s]+/u)
-    .filter((part) => part.length > 0)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
-    .join(" ");
-}
-
 function formatDistance(value: number): string {
   if (value < 0.05) {
     return "<0.1 mi";
@@ -986,7 +969,7 @@ function formatDistance(value: number): string {
 
 function catalogStatusText(state: SearchState): string {
   if (state.status === "loading") {
-    return "Searching Junction's live catalog.";
+    return "Searching the live catalog.";
   }
   if (state.status !== "success") {
     return "";
@@ -998,10 +981,7 @@ function catalogStatusText(state: SearchState): string {
 }
 
 function catalogResultSummary(data: HostedRuntimeLabsSearchResponse): string {
-  const returned = `${data.items.length === 1 ? "result" : "results"} shown`;
-  return data.provider.total !== null && data.provider.total > data.items.length
-    ? `${returned} of ${data.provider.total} matching catalog items`
-    : returned;
+  return `${data.items.length === 1 ? "result" : "results"} shown`;
 }
 
 function locationsStatusText(state: LocationsState): string {

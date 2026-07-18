@@ -55,14 +55,17 @@ import type {
 export function composePublicWearableSummaryBundleFromStoredRows(
   stored: QueryWearableSummaryRowSet,
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+  options: {
+    retainSourceHealthOutsideDateFilters?: boolean;
+  } = {},
 ): ProjectedWearableSummaryBundle {
   if (stored.providerFilterWasProvided && stored.providers.length === 0) {
     return emptyProjectedWearableSummaryBundle();
   }
 
   return stored.providers.length === 1
-    ? publicWearableSummaryBundleFromRows(stored.rows, filters)
-    : composePublicWearableSummaryBundleFromProviderRows(stored.rows, filters);
+    ? publicWearableSummaryBundleFromRows(stored.rows, filters, options)
+    : composePublicWearableSummaryBundleFromProviderRows(stored.rows, filters, options);
 }
 
 function emptyProjectedWearableSummaryBundle(): ProjectedWearableSummaryBundle {
@@ -78,6 +81,9 @@ function emptyProjectedWearableSummaryBundle(): ProjectedWearableSummaryBundle {
 function publicWearableSummaryBundleFromRows(
   rows: readonly QueryWearableSummaryRow[],
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+  options: {
+    retainSourceHealthOutsideDateFilters?: boolean;
+  },
 ): ProjectedWearableSummaryBundle {
   const bundle: ProjectedWearableSummaryBundle = {
     activityDays: [],
@@ -91,7 +97,13 @@ function publicWearableSummaryBundleFromRows(
     switch (row.summaryKind) {
       case "source_health": {
         const summary = parseJsonValue<ProjectedWearableSourceHealthSummary | null>(row.summaryJson, null);
-        if (summary && wearableSourceHealthMatchesDateFilters(summary, filters)) {
+        if (
+          summary
+          && (
+            options.retainSourceHealthOutsideDateFilters
+            || wearableSourceHealthMatchesDateFilters(summary, filters)
+          )
+        ) {
           bundle.sourceHealth.push(summary);
         }
         break;
@@ -133,8 +145,11 @@ function publicWearableSummaryBundleFromRows(
 function composePublicWearableSummaryBundleFromProviderRows(
   rows: readonly QueryWearableSummaryRow[],
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+  options: {
+    retainSourceHealthOutsideDateFilters?: boolean;
+  },
 ): ProjectedWearableSummaryBundle {
-  const providerBundle = publicWearableSummaryBundleFromRows(rows, filters);
+  const providerBundle = publicWearableSummaryBundleFromRows(rows, filters, options);
   const dataset = wearableDatasetFromProjectedBundle(providerBundle);
   const composed = mergeStoredMetricConflictEvidence(
     buildWearableSummaryBundleFromDataset(dataset),
@@ -488,6 +503,7 @@ function buildStoredSourceHealthCoverageRow(
     exactDuplicatesSuppressed: 0,
     firstDate: summary.firstDate,
     lastDate: summary.lastDate,
+    lastSleepDate: summary.lastSleepDate ?? null,
     latestRecordedAt: hasDiagnostics ? summary.latestRecordedAt : null,
     metricsContributed: [],
     notes: [...diagnosticNotes],
@@ -496,6 +512,7 @@ function buildStoredSourceHealthCoverageRow(
     recoveryDays: 0,
     selectedMetrics: 0,
     sleepNights: 0,
+    sleepStalenessVsNewestDays: null,
     stalenessVsNewestDays: null,
   };
 }
@@ -546,10 +563,7 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
       "sleep",
       sleepResolvedMetrics(summary),
     ));
-    const window = projectedSleepWindow(summary);
-    if (window) {
-      sleepWindows.push(window);
-    }
+    sleepWindows.push(...projectedSleepWindows(summary));
   }
 
   for (const summary of bundle.recoveryDays) {
@@ -696,7 +710,43 @@ function projectedActivitySessionRecordId(provider: string, date: string): strin
   return `projected:activity-session:${provider}:${date}`;
 }
 
-function projectedSleepWindow(summary: ProjectedWearableSleepSummary): WearableSleepWindowCandidate | null {
+function projectedSleepWindows(summary: ProjectedWearableSleepSummary): WearableSleepWindowCandidate[] {
+  const evidence = summary.sleepWindowEvidence ?? [];
+  if (evidence.length > 0) {
+    return evidence.map((window, index) => ({
+      candidateId: `projected:sleep-window:${window.provider}:${window.date}:${index}:${window.startAt ?? "unknown"}`,
+      dataOrigin: null,
+      date: window.date,
+      durationMinutes: window.durationMinutes,
+      endAt: window.endAt,
+      evidenceOmittedCount: index === 0 ? summary.sleepWindowEvidenceOmittedCount ?? 0 : 0,
+      evidenceOmittedExactDuplicateCount: index === 0
+        ? summary.sleepWindowEvidenceOmittedExactDuplicateCount ?? 0
+        : 0,
+      exactDuplicateCount: window.exactDuplicateCount,
+      externalRef: null,
+      nap: window.sleepType === "nap",
+      occurredAt: window.startAt,
+      paths: [],
+      provider: window.provider,
+      recordedAt: window.recordedAt,
+      recordIds: [],
+      sourceFamily: "derived",
+      sourceKind: "projected-sleep-window-evidence",
+      sleepType: window.sleepType,
+      startAt: window.startAt,
+      timeZone: window.timeZone,
+      title: `${window.provider} sleep summary evidence`,
+    }));
+  }
+
+  const fallback = projectedSelectedSleepWindow(summary);
+  return fallback ? [fallback] : [];
+}
+
+function projectedSelectedSleepWindow(
+  summary: ProjectedWearableSleepSummary,
+): WearableSleepWindowCandidate | null {
   const provider = normalizeWearableProviders([
     summary.sleepWindowProvider ?? summary.sessionMinutes.selection.provider ?? "",
   ])[0];
@@ -717,8 +767,11 @@ function projectedSleepWindow(summary: ProjectedWearableSleepSummary): WearableS
     date: summary.date,
     durationMinutes,
     endAt: summary.sleepEndAt,
+    evidenceOmittedCount: summary.sleepWindowEvidenceOmittedCount ?? 0,
+    evidenceOmittedExactDuplicateCount: summary.sleepWindowEvidenceOmittedExactDuplicateCount ?? 0,
+    exactDuplicateCount: 0,
     externalRef: null,
-    nap: false,
+    nap: summary.sleepType === "nap",
     occurredAt: summary.sessionMinutes.selection.occurredAt,
     paths: [],
     provider,
@@ -726,7 +779,9 @@ function projectedSleepWindow(summary: ProjectedWearableSleepSummary): WearableS
     recordIds: [],
     sourceFamily: "derived",
     sourceKind: "projected-sleep-window",
+    sleepType: summary.sleepType,
     startAt: summary.sleepStartAt,
+    timeZone: summary.timeZone,
     title: `${provider} sleep summary`,
   };
 }
@@ -765,6 +820,7 @@ function sleepResolvedMetrics(summary: ProjectedWearableSleepSummary): WearableR
     summary.sessionMinutes,
     summary.sleepConsistency,
     summary.sleepEfficiency,
+    summary.sleepLatencyMinutes,
     summary.sleepPerformance,
     summary.sleepScore,
     summary.spo2,

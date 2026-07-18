@@ -625,7 +625,7 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
             codexHome: null,
             detail: 'configured',
             enabled: true,
-            model: 'gpt-5.5',
+            model: 'gpt-5.6-terra',
             modelProvider: null,
             oss: false,
             preset: input.preset,

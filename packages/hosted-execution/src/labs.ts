@@ -15,12 +15,6 @@ export const HOSTED_RUNTIME_LABS_RADIUS_MILES = [10, 20, 25, 50] as const;
 const boundedText = (maximumLength: number) =>
   z.string().trim().min(1).max(maximumLength);
 
-const positiveIntegerSchema = z
-  .number()
-  .int()
-  .positive()
-  .max(Number.MAX_SAFE_INTEGER);
-
 const nonnegativeIntegerSchema = z
   .number()
   .int()
@@ -39,16 +33,7 @@ const hostedRuntimeLabsSearchRequestSchema = z
     action: z.literal("search"),
     query: z.string().trim().min(2).max(120),
     kind: z.enum(HOSTED_RUNTIME_LABS_SEARCH_KINDS).optional(),
-    page: z.number().int().min(1).max(100).optional(),
     limit: z.number().int().min(1).max(20).optional(),
-  })
-  .strict();
-
-const hostedRuntimeLabsShowRequestSchema = z
-  .object({
-    action: z.literal("show"),
-    labId: positiveIntegerSchema,
-    providerId: boundedText(120),
   })
   .strict();
 
@@ -56,7 +41,6 @@ const hostedRuntimeLabsLocationsRequestSchema = z
   .object({
     action: z.literal("locations"),
     zipCode: z.string().regex(/^\d{5}$/u),
-    labId: positiveIntegerSchema.optional(),
     radiusMiles: hostedRuntimeLabsRadiusMilesSchema.optional(),
     limit: z.number().int().min(1).max(10).optional(),
   })
@@ -66,7 +50,6 @@ export const hostedRuntimeLabsToolRequestSchema = z.discriminatedUnion(
   "action",
   [
     hostedRuntimeLabsSearchRequestSchema,
-    hostedRuntimeLabsShowRequestSchema,
     hostedRuntimeLabsLocationsRequestSchema,
   ],
 );
@@ -75,31 +58,24 @@ const hostedRuntimeLabsCatalogPriceSchema = z
   .object({
     amount: z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u),
     currency: z.literal("USD"),
-    source: z.literal("junction_catalog"),
   })
   .strict();
 
 const hostedRuntimeLabsIncludedMarkerSchema = z
   .object({
     name: boundedText(240),
-    slug: boundedText(180).nullable(),
   })
   .strict();
 
 export const hostedRuntimeLabsOfferingSchema = z
   .object({
-    offeringId: boundedText(256),
-    labId: positiveIntegerSchema,
-    providerId: boundedText(120),
     name: boundedText(240),
     kind: z.enum(HOSTED_RUNTIME_LABS_OFFERING_KINDS),
     description: boundedText(8_000).nullable(),
-    slug: boundedText(180).nullable(),
     unit: boundedText(120).nullable(),
     catalogPrice: hostedRuntimeLabsCatalogPriceSchema.nullable(),
     commonTurnaroundDays: nonnegativeIntegerSchema.nullable(),
     maximumTurnaroundDays: nonnegativeIntegerSchema.nullable(),
-    junctionOrderable: z.boolean(),
     includedMarkers: z.array(hostedRuntimeLabsIncludedMarkerSchema).max(40),
     includedMarkerCount: nonnegativeIntegerSchema,
   })
@@ -133,20 +109,15 @@ const hostedRuntimeLabsCoordinatesSchema = z
 
 export const hostedRuntimeLabsLocationSchema = z
   .object({
-    labId: positiveIntegerSchema,
-    labSlug: boundedText(180).nullable(),
-    siteCode: boundedText(120),
     name: boundedText(240),
     address: hostedRuntimeLabsAddressSchema,
     distanceMiles: z.number().finite().nonnegative().max(1_000),
     coordinates: hostedRuntimeLabsCoordinatesSchema.nullable(),
     phoneNumber: boundedText(40).nullable(),
-    capabilities: z.array(boundedText(120)).max(20),
   })
   .strict();
 
 const hostedRuntimeLabsResponseBase = {
-  source: z.literal("junction"),
   checkedAt: z.string().datetime({ offset: true }),
   orderingStatus: z.literal("discovery_only"),
   orderableThroughMurph: z.literal(false),
@@ -157,21 +128,6 @@ const hostedRuntimeLabsSearchResponseSchema = z
     action: z.literal("search"),
     ...hostedRuntimeLabsResponseBase,
     items: z.array(hostedRuntimeLabsOfferingSchema).max(20),
-    provider: z
-      .object({
-        page: positiveIntegerSchema,
-        pages: nonnegativeIntegerSchema.nullable(),
-        total: nonnegativeIntegerSchema.nullable(),
-      })
-      .strict(),
-  })
-  .strict();
-
-const hostedRuntimeLabsShowResponseSchema = z
-  .object({
-    action: z.literal("show"),
-    ...hostedRuntimeLabsResponseBase,
-    offering: hostedRuntimeLabsOfferingSchema,
   })
   .strict();
 
@@ -203,7 +159,6 @@ export const hostedRuntimeLabsToolResponseSchema = z.discriminatedUnion(
   "action",
   [
     hostedRuntimeLabsSearchResponseSchema,
-    hostedRuntimeLabsShowResponseSchema,
     hostedRuntimeLabsLocationsResponseSchema,
   ],
 );
@@ -213,9 +168,6 @@ export type HostedRuntimeLabsToolRequest = z.infer<
 >;
 export type HostedRuntimeLabsSearchRequest = z.infer<
   typeof hostedRuntimeLabsSearchRequestSchema
->;
-export type HostedRuntimeLabsShowRequest = z.infer<
-  typeof hostedRuntimeLabsShowRequestSchema
 >;
 export type HostedRuntimeLabsLocationsRequest = z.infer<
   typeof hostedRuntimeLabsLocationsRequestSchema
@@ -231,9 +183,6 @@ export type HostedRuntimeLabsToolResponse = z.infer<
 >;
 export type HostedRuntimeLabsSearchResponse = z.infer<
   typeof hostedRuntimeLabsSearchResponseSchema
->;
-export type HostedRuntimeLabsShowResponse = z.infer<
-  typeof hostedRuntimeLabsShowResponseSchema
 >;
 export type HostedRuntimeLabsLocationsResponse = z.infer<
   typeof hostedRuntimeLabsLocationsResponseSchema

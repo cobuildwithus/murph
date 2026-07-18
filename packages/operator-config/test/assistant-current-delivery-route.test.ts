@@ -224,6 +224,12 @@ describe('assistant current delivery route', () => {
   it('keeps private lookup identifiers separate from redacted placeholders', () => {
     expect(looksLikePrivateAssistantRoutePlaceholder(LINQ_THREAD_ID)).toBe(true)
     expect(
+      looksLikePrivateAssistantRoutePlaceholder('[REDACTED thread]'),
+    ).toBe(true)
+    expect(
+      looksLikePrivateAssistantRoutePlaceholder('WRAPPED:AIN_PRIVATE'),
+    ).toBe(true)
+    expect(
       stripPrivateAssistantRoutePlaceholders({
         channel: 'linq',
         deliveryTarget: 'linq_chat_real',

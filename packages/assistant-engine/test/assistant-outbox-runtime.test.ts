@@ -13,6 +13,16 @@ import type {
   AssistantOutboxIntent,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
+import {
+  createExperiment,
+  initializeVault,
+  patchAutomation,
+  scaffoldAutomationPayload,
+  showAutomation,
+  updateExperiment,
+  upsertAutomation,
+} from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
@@ -38,8 +48,10 @@ import {
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
+  readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import { listAssistantCronJobs } from '../src/assistant-cron.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -153,6 +165,237 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+  })
+
+  it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-state-')
+    const legacy = await createIntent(vaultRoot, {
+      channel: 'linq',
+      message: 'legacy contextual message',
+      replyToMessageId: 'linq-context-message',
+      sessionId: 'session-native-reply-legacy',
+      turnId: 'turn-native-reply-legacy',
+    })
+    const marked = await createIntent(vaultRoot, {
+      channel: 'linq',
+      message: 'selected native reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-selected-message',
+      sessionId: 'session-native-reply-marked',
+      turnId: 'turn-native-reply-marked',
+    })
+
+    expect(legacy.nativeReplyRequested).toBeUndefined()
+    expect(marked.nativeReplyRequested).toBe(true)
+    await expect(readRawOutboxIntent(vaultRoot, legacy.intentId)).resolves.not
+      .toHaveProperty('nativeReplyRequested')
+    await expect(readRawOutboxIntent(vaultRoot, marked.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+      })
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...marked,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-04-12T01:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-12T00:30:00.000Z',
+    })
+    expect(retryable.nativeReplyRequested).toBe(true)
+    await expect(readAssistantOutboxIntent(vaultRoot, marked.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+        status: 'retryable',
+      })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-native-reply-delivered',
+        target: 'thread-1',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: marked.intentId,
+      vault: vaultRoot,
+    })
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding.mock.calls[0]?.[0])
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+      })
+
+    for (const channel of ['linq', 'telegram'] as const) {
+      for (const replyToMessageId of [
+        'ain_private-ref',
+        'hid_private-ref',
+        'hbid:private-ref',
+        'hbidx:private-ref',
+        'linq:ain_private-ref',
+        'linq:hid_private-ref',
+        'provider:hbid:private-ref',
+        'provider:hbidx:private-ref',
+        'h1_0123456789abcdef01234567',
+        '[REDACTED message]',
+      ]) {
+        await expect(createAssistantOutboxIntent({
+          channel,
+          message: 'invalid native reply target',
+          nativeReplyRequested: true,
+          replyToMessageId,
+          sessionId: `session-native-reply-invalid-${channel}`,
+          turnId: `turn-native-reply-invalid-${channel}`,
+          vault: vaultRoot,
+        })).rejects.toMatchObject({
+          code: 'ASSISTANT_NATIVE_REPLY_TARGET_INVALID',
+        })
+      }
+    }
+  })
+
+  it('fails closed before mutating a same-token message target or native reply marker', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-dedupe-')
+    const first = await createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })
+    const exactRetry = await createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })
+    expect(exactRetry.intentId).toBe(first.intentId)
+
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:02:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:03:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-b',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'stable-native-reply-token',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-thread-native-reply',
+      reaction: 'thumbs_up',
+      sessionId: 'session-native-reply-dedupe',
+      targetMessageId: 'linq-message-a',
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-message-a',
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      })
+  })
+
+  it('fails closed when delivery-idempotency fallback finds a different marked effect', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-native-reply-idempotency-fallback-',
+    )
+    const legacy = await createAssistantOutboxIntent({
+      channel: 'linq',
+      dedupeToken: null,
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      message: 'legacy contextual message',
+      replyToMessageId: 'linq-message-fallback',
+      sessionId: 'session-native-reply-fallback',
+      threadId: 'linq-thread-fallback',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })
+
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      dedupeToken: 'hosted-native-reply-fallback',
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      message: 'legacy contextual message',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-fallback',
+      sessionId: 'session-native-reply-fallback',
+      threadId: 'linq-thread-fallback',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'hosted-native-reply-fallback',
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-thread-fallback',
+      reaction: 'thumbs_up',
+      sessionId: 'session-native-reply-fallback',
+      targetMessageId: 'linq-message-fallback',
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, legacy.intentId)).resolves
+      .toMatchObject({
+        operation: null,
+        replyToMessageId: 'linq-message-fallback',
+      })
   })
 
   it('persists answered mailbox item ids and defaults other sends to none', async () => {
@@ -322,7 +565,7 @@ describe('assistant outbox runtime', () => {
     ).resolves.toEqual(new Set([legacyIntent.intentId]))
   })
 
-  it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
+  it('repairs a targetless unmarked queued dedupe hit before the first dispatch attempt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
     const stale = await createAssistantOutboxIntent({
@@ -1874,6 +2117,60 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('rejects a deduped reaction target change after its safe mutation window', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-reaction-target-immutable-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-target-immutable',
+      dispatchMode: 'queue-only',
+      explicitTarget: '123',
+      reaction: 'heart',
+      sessionId: 'session-reaction-target-immutable',
+      targetMessageId: '45',
+      turnId: 'turn-reaction-target-immutable',
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      nextAttemptAt: null,
+      preparedDispatchToken: 'prepared-reaction-target-immutable',
+      status: 'sending',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+    const setTelegramMessageReaction = vi.fn()
+
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-target-immutable',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: 'session-reaction-target-immutable',
+      targetMessageId: '46',
+      turnId: 'turn-reaction-target-immutable',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    expect(setTelegramMessageReaction).not.toHaveBeenCalled()
+    await expect(readAssistantOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
+      .toMatchObject({
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+        },
+        preparedDispatchToken: 'prepared-reaction-target-immutable',
+        replyToMessageId: '45',
+        status: 'sending',
+      })
+  })
+
   it('dispatches and persists media-only Linq voice memo intents', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-voice-media-only-')
     const media = [createVoiceMemoMedia()]
@@ -2110,6 +2407,463 @@ describe('assistant outbox runtime', () => {
       }),
       undefined,
     )
+  })
+
+  it('dispatches a legacy queued intent with no automation authority field', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-no-automation-authority-',
+    )
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Legacy queued reminder.',
+      sessionId: 'session-legacy-no-automation-authority',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-legacy-no-automation-authority',
+      vault: vaultRoot,
+    })
+    const {
+      automationAuthority: ignoredAutomationAuthority,
+      ...legacyIntent
+    } = queued.intent
+    void ignoredAutomationAuthority
+    await saveAssistantOutboxIntent(vaultRoot, legacyIntent)
+    await expect(
+      readRawOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.not.toHaveProperty('automationAuthority')
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'telegram',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-legacy-no-automation-authority',
+        sentAt: '2026-07-16T12:02:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.deliveryError).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { label: 'paused', status: 'paused' as const },
+    { label: 'stopped', status: 'archived' as const },
+  ])('blocks a queued automation after it is $label', async ({ status }) => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      `assistant-outbox-automation-${status}-`,
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      now: new Date('2026-07-16T12:00:00.000Z'),
+      slug: `outbox-${status}-authority`,
+      title: `Outbox ${status} authority`,
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'This reminder should no longer send.',
+      sessionId: `session-outbox-${status}`,
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: `turn-outbox-${status}`,
+      vault: vaultRoot,
+    })
+
+    await patchAutomation({
+      lookup: automation.record.automationId,
+      now: new Date('2026-07-16T12:01:00.000Z'),
+      status,
+      vaultRoot,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('requires active status even when a queued intent names the current paused revision', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-current-paused-automation-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      now: new Date('2026-07-16T12:00:00.000Z'),
+      slug: 'outbox-current-paused-authority',
+      title: 'Outbox current paused authority',
+      vaultRoot,
+    })
+    const paused = await patchAutomation({
+      lookup: automation.record.automationId,
+      now: new Date('2026-07-16T12:01:00.000Z'),
+      status: 'paused',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: paused.record.automationId,
+        expectedUpdatedAt: paused.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'A paused automation cannot authorize a queued send.',
+      sessionId: 'session-outbox-current-paused',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-current-paused',
+      vault: vaultRoot,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('blocks a queued automation after its active definition is edited', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-edited-automation-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      now: new Date('2026-07-16T12:00:00.000Z'),
+      slug: 'outbox-edited-authority',
+      title: 'Outbox edited authority',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'This stale-definition reminder should not send.',
+      sessionId: 'session-outbox-edited',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-edited',
+      vault: vaultRoot,
+    })
+
+    await patchAutomation({
+      instructions: 'Use the newly edited reminder definition.',
+      lookup: automation.record.automationId,
+      now: new Date('2026-07-16T12:01:00.000Z'),
+      vaultRoot,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { label: 'paused', status: 'paused' as const },
+    { label: 'stopped', status: 'archived' as const },
+  ])(
+    'suppresses an immediate active send queued by a transient failure after it is $label',
+    async ({ status }) => {
+      const { vaultRoot } = await createInitializedAssistantVault(
+        `assistant-outbox-transient-then-${status}-`,
+      )
+      const scaffold = scaffoldAutomationPayload()
+      const automation = await upsertAutomation({
+        ...scaffold,
+        now: new Date('2026-07-16T12:00:00.000Z'),
+        slug: `outbox-transient-then-${status}`,
+        title: `Outbox transient then ${status}`,
+        vaultRoot,
+      })
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+        new VaultCliError(
+          'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+          'Hosted background delivery yielded before provider entry.',
+          {
+            assistantDeliveryFailureClass: 'transient',
+            retryable: true,
+          },
+        ),
+      )
+
+      const firstAttempt = await deliverAssistantOutboxMessage({
+        automationAuthority: {
+          automationId: automation.record.automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        channel: 'telegram',
+        explicitTarget: 'telegram-chat',
+        message: 'Retry this reminder only while it remains active.',
+        sessionId: `session-outbox-transient-${status}`,
+        threadId: 'telegram-chat',
+        threadIsDirect: true,
+        turnId: `turn-outbox-transient-${status}`,
+        vault: vaultRoot,
+      })
+
+      expect(firstAttempt.kind).toBe('queued')
+      expect(firstAttempt.intent.status).toBe('retryable')
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+      await patchAutomation({
+        lookup: automation.record.automationId,
+        now: new Date('2026-07-16T12:01:00.000Z'),
+        status,
+        vaultRoot,
+      })
+
+      const retry = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: firstAttempt.intent.intentId,
+        now: new Date('2026-07-16T12:02:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(retry.intent.status).toBe('failed')
+      expect(retry.deliveryError).toMatchObject({
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('blocks a queued plan reminder after support consent is revoked', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-plan-consent-revoked-',
+    )
+    const experiment = await createExperiment({
+      slug: 'queued-reminder-consent-owner',
+      startedOn: '2026-07-01',
+      title: 'Queued Reminder Consent Owner',
+      vaultRoot,
+    })
+    await updateExperiment({
+      assistantSupport: { remindersEnabled: true },
+      relativePath: experiment.experiment.relativePath,
+      vaultRoot,
+    })
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      instructions: 'Send only the accepted experiment reminder.',
+      now: new Date('2026-07-16T12:00:00.000Z'),
+      slug: 'outbox-revoked-plan-reminder',
+      supportKind: 'reminder',
+      tags: [
+        buildAutomationSupportSeriesTag(
+          `experiment:${experiment.experiment.id}`,
+        ),
+      ],
+      title: 'Outbox revoked plan reminder',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'This revoked reminder should not send.',
+      sessionId: 'session-outbox-revoked-plan',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-revoked-plan',
+      vault: vaultRoot,
+    })
+
+    await updateExperiment({
+      assistantSupport: { remindersEnabled: false },
+      relativePath: experiment.experiment.relativePath,
+      vaultRoot,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('rechecks each sequential drain intent at provider time and consumes an expired required send', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-16T12:00:00.000Z'))
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-sequential-authority-expiry-',
+    )
+    const occurrenceAt = '2026-07-16T12:00:00.000Z'
+    const activeUntil = '2026-07-16T12:00:05.000Z'
+    const automation = await upsertAutomation({
+      ...scaffoldAutomationPayload(),
+      activeUntil,
+      instructions: 'Send the bounded final check-in once.',
+      now: new Date('2026-07-16T11:59:00.000Z'),
+      schedule: {
+        at: occurrenceAt,
+        kind: 'at',
+      },
+      slug: 'sequential-authority-expiry',
+      tags: [
+        'assistant',
+        'scheduled',
+        'system:assistant-require-send',
+      ],
+      title: 'Sequential authority expiry',
+      vaultRoot,
+    })
+    await createIntent(vaultRoot, {
+      createdAt: '2026-07-16T11:59:58.000Z',
+      message: 'Earlier slow delivery.',
+      sessionId: 'session-sequential-slow',
+      turnId: 'turn-sequential-slow',
+    })
+    const expiringIntent = await createIntent(vaultRoot, {
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      createdAt: '2026-07-16T11:59:59.000Z',
+      message: 'Bounded required delivery.',
+      sessionId: 'session-sequential-expiring',
+      turnId: 'turn-sequential-expiring',
+    })
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.updatedAt = occurrenceAt
+    runtimeRecord.state.lastRunAt = occurrenceAt
+    runtimeRecord.state.pendingDeliveryIntentId = expiringIntent.intentId
+    runtimeRecord.state.pendingOccurrenceAt = occurrenceAt
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+
+    let markFirstProviderEntered: (() => void) | undefined
+    const firstProviderEntered = new Promise<void>((resolve) => {
+      markFirstProviderEntered = resolve
+    })
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(
+      async () => {
+        markFirstProviderEntered?.()
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 6_000)
+        })
+        return {
+          delivery: createDelivery({
+            providerMessageId: 'provider-sequential-slow',
+            sentAt: new Date().toISOString(),
+          }),
+          deliveryDeduplicated: false,
+          deliveryTransportIdempotent: false,
+          outboxIntentId: null,
+          session: undefined,
+        }
+      },
+    )
+
+    const drain = drainAssistantOutboxLocal({
+      limit: 2,
+      now: new Date(),
+      vault: vaultRoot,
+    })
+    await firstProviderEntered
+    await vi.advanceTimersByTimeAsync(6_000)
+
+    await expect(drain).resolves.toEqual({
+      attempted: 2,
+      failed: 1,
+      queued: 0,
+      sent: 1,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, expiringIntent.intentId),
+    ).resolves.toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      },
+      status: 'failed',
+      updatedAt: '2026-07-16T12:00:06.000Z',
+    })
+    await expect(showAutomation({
+      automationId: automation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'archived',
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(runtimeStore.jobs).toHaveLength(1)
+    expect(runtimeStore.jobs[0]?.state).toMatchObject({
+      pendingOccurrenceAt: null,
+      retryAfterAt: null,
+    })
+    expect(
+      runtimeStore.jobs[0]?.state.pendingDeliveryIntentId,
+    ).toBeUndefined()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toHaveLength(2)
   })
 
   it('persists caller-provided transport idempotency when queueing delivery intents', async () => {
@@ -3538,6 +4292,24 @@ async function createAssistantVault(prefix: string): Promise<{
   }
 }
 
+async function createInitializedAssistantVault(prefix: string): Promise<{
+  paths: ReturnType<typeof resolveAssistantStatePaths>
+  vaultRoot: string
+}> {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(prefix)
+  tempRoots.push(parentRoot)
+  await initializeVault({
+    createdAt: new Date('2026-07-16T11:00:00.000Z'),
+    vaultRoot,
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await ensureAssistantState(paths)
+  return {
+    paths,
+    vaultRoot,
+  }
+}
+
 async function expectRawOutboxIntentMessage(
   vault: string,
   intentId: string,
@@ -3577,6 +4349,7 @@ async function createIntent(
   overrides: Partial<{
     actorId: string | null
     answeredMailboxItemIds: string[]
+    automationAuthority: AssistantOutboxIntent['automationAuthority']
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -3584,6 +4357,7 @@ async function createIntent(
     explicitTarget: string | null
     identityId: string | null
     message: string
+    nativeReplyRequested: true
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
     reviewedAssistantAskCompletionExpiresAt: string | null
@@ -3600,6 +4374,7 @@ async function createIntent(
   return createAssistantOutboxIntent({
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
+    automationAuthority: overrides.automationAuthority,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
@@ -3613,6 +4388,9 @@ async function createIntent(
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
     reviewedAssistantAskCompletionExpiresAt:
       overrides.reviewedAssistantAskCompletionExpiresAt,
+    ...(overrides.nativeReplyRequested === undefined
+      ? {}
+      : { nativeReplyRequested: overrides.nativeReplyRequested }),
     replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
     threadId: overrides.threadId ?? 'thread-1',

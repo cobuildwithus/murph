@@ -52,9 +52,15 @@ describe('assistant outbox intent helpers', () => {
       buildAssistantOutboxPersistedTarget({
         bindingDelivery: null,
         channel: 'telegram',
+        nativeReplyRequested: true,
+        replyToMessageId: '42',
         threadId: 'thread-1',
-      }).bindingDelivery,
-    ).toBeNull()
+      }),
+    ).toMatchObject({
+      bindingDelivery: null,
+      nativeReplyRequested: true,
+      replyToMessageId: '42',
+    })
 
     expect(
       buildAssistantOutboxPersistedTarget({
@@ -128,6 +134,28 @@ describe('assistant outbox intent helpers', () => {
     expect(fallbackA).not.toBe(fallbackB)
   })
 
+  it('includes native reply intent in non-token identity while preserving legacy absence', () => {
+    const base = {
+      channel: 'linq',
+      dedupeToken: null,
+      identityId: 'user-a',
+      media: [],
+      message: 'reply message',
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-a',
+      subject: null,
+      threadId: 'linq-thread-a',
+      turnId: 'turn-a',
+    }
+
+    const legacyIdentity = hashAssistantOutboxIdentity(base)
+    expect(hashAssistantOutboxIdentity({ ...base })).toBe(legacyIdentity)
+    expect(hashAssistantOutboxIdentity({
+      ...base,
+      nativeReplyRequested: true,
+    })).not.toBe(legacyIdentity)
+  })
+
   it('hashes target fingerprints from the extracted raw delivery identity', () => {
     const rawTarget = buildAssistantOutboxRawTargetIdentity({
       channel: 'telegram',
@@ -151,9 +179,14 @@ describe('assistant outbox intent helpers', () => {
       ...rawTarget,
       replyToMessageId: 'reply-2',
     })
+    const markedFingerprint = hashAssistantOutboxTargetFingerprint({
+      ...rawTarget,
+      nativeReplyRequested: true,
+    })
 
     expect(hashAssistantOutboxTargetFingerprint(rawTarget)).toBe(sameFingerprint)
     expect(hashAssistantOutboxTargetFingerprint(rawTarget)).not.toBe(changedFingerprint)
+    expect(hashAssistantOutboxTargetFingerprint(rawTarget)).not.toBe(markedFingerprint)
   })
 
   it('keeps outbox intent files inside the expected directory and exposes quarantine storage', () => {

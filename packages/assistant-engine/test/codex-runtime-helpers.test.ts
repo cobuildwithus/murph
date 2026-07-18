@@ -102,7 +102,8 @@ function executeCodexAssistantTurnAttempt(
     ...input,
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
-      allowMessageReactions: input.allowMessageReactions,
+      messageTargetingAvailable:
+        input.authorizeAcceptedMessageTarget != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
@@ -231,7 +232,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread/settings/updated',
       params: {
         threadSettings: {
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           serviceTier: 'flex',
         },
@@ -241,7 +242,7 @@ describe('Codex assistant registry helpers', () => {
       method: 'thread.settings.updated',
       params: {
         thread_settings: {
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           model_provider: 'hosted-openai',
           service_tier: 'flex',
         },
@@ -249,22 +250,22 @@ describe('Codex assistant registry helpers', () => {
     }
 
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       serviceTier: 'flex',
     })).toBe('standard')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'openai',
       serviceTier: null,
     })).toBe('standard')
@@ -278,7 +279,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -293,7 +294,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -308,7 +309,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -323,7 +324,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -344,7 +345,7 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toMatchObject({
       providerName: 'openai',
-      requestedModel: 'gpt-5.5',
+      requestedModel: 'gpt-5.6-terra',
       servedModel: 'openai-production-alias',
       tokenPricingBasis: 'openai-flex',
     })
@@ -352,7 +353,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'hosted-openai',
           oss: false,
         }),
@@ -397,7 +398,7 @@ describe('Codex assistant registry helpers', () => {
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),
@@ -406,7 +407,7 @@ describe('Codex assistant registry helpers', () => {
             method: 'thread/settings/updated',
             params: {
               threadSettings: {
-                model: 'gpt-5.5',
+                model: 'gpt-5.6-terra',
                 modelProvider: 'openai',
                 serviceTier: null,
               },
@@ -425,7 +426,7 @@ describe('Codex assistant registry helpers', () => {
     const usage = extractCodexAssistantProviderUsage({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         oss: false,
       }),
       rawEvents: [
@@ -1908,8 +1909,9 @@ describe('Codex assistant registry helpers', () => {
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
   })
 
-  it('forwards Telegram reaction availability through input wrappers to Codex execution', async () => {
+  it('forwards message-target tools and their authorizer to Codex execution', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null)
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -1928,9 +1930,9 @@ describe('Codex assistant registry helpers', () => {
       executeCodexAssistantTurnFromInput({
         providerConfig: { provider: 'codex-cli' },
         turn: {
-          allowMessageReactions: true,
+          authorizeAcceptedMessageTarget,
           dynamicTools: resolveMurphDynamicTools({
-            allowMessageReactions: true,
+            messageTargetingAvailable: true,
             progressUpdatesAvailable: false,
           }),
           prompt: 'react to this',
@@ -1943,18 +1945,19 @@ describe('Codex assistant registry helpers', () => {
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
     ).toMatchObject({
-      allowMessageReactions: true,
+      authorizeAcceptedMessageTarget,
       dynamicTools: expect.arrayContaining([
         expect.objectContaining({ name: 'react_to_message' }),
+        expect.objectContaining({ name: 'select_reply_target' }),
       ]),
     })
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: { provider: 'codex-cli' },
       turn: {
-        allowMessageReactions: true,
+        authorizeAcceptedMessageTarget,
         dynamicTools: resolveMurphDynamicTools({
-          allowMessageReactions: true,
+          messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
         }),
         onTraceEvent: (event) => {
@@ -1969,17 +1972,16 @@ describe('Codex assistant registry helpers', () => {
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
     ).toMatchObject({
-      allowMessageReactions: true,
+      authorizeAcceptedMessageTarget,
     })
     expect(
       findProviderPromptSizeTraceRawEvent(traceEvents, 'primary'),
     ).toMatchObject({
       dynamicToolCount: resolveMurphDynamicTools({
-        allowMessageReactions: true,
+        messageTargetingAvailable: true,
         progressUpdatesAvailable: false,
       }).length,
-      messageReactionsAvailable: true,
-      reactionDynamicToolAvailable: true,
+      messageTargetDynamicToolsAvailable: true,
     })
   })
 

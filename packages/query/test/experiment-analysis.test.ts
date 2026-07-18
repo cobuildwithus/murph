@@ -349,6 +349,7 @@ function makeSession(input: {
   date?: string;
   experimentId?: string;
   experimentSlug?: string;
+  fields?: Record<string, string | number | boolean | null>;
   interventionType?: string;
   relatedIds?: string[];
   scheduledLocalDate?: string;
@@ -375,6 +376,7 @@ function makeSession(input: {
       confounders: input.confounders,
       experimentId: input.experimentId,
       experimentSlug,
+      fields: input.fields,
       interventionType: input.interventionType,
       scheduledLocalDate: input.scheduledLocalDate,
       sessionLocalDate: input.sessionLocalDate,
@@ -384,6 +386,228 @@ function makeSession(input: {
     },
   });
 }
+
+test("declared subjective session fields become primary experiment metric windows", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGW";
+  const slug = "subjective-sleep-onset";
+  const sessions = [
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AA", "2026-04-01", 45],
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AB", "2026-04-02", 40],
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AC", "2026-04-03", 35],
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AD", "2026-04-04", 25],
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AE", "2026-04-05", 20],
+    ["evt_01JNV45RHN0TQ9ZXE0A7YSE3AF", "2026-04-06", 15],
+  ] as const;
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-subjective-sleep",
+    metadata: { timezone: "UTC" },
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug,
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-03",
+          interventionStart: "2026-04-04",
+          interventionEnd: "2026-04-06",
+          modality: "sleep routine",
+          targetSessions: 3,
+          minimumUsefulSessions: 2,
+          logging: {
+            sessionFields: ["estimated-sleep-onset-minutes"],
+          },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:sleep-onset-latency",
+          desiredDirection: "decrease",
+        },
+      }),
+      ...sessions.map(([entityId, date, value]) => makeSession({
+        entityId,
+        experimentId,
+        experimentSlug: slug,
+        occurredAt: `${date}T08:00:00.000Z`,
+        sessionLocalDate: date,
+        fields: { "estimated-sleep-onset-minutes": value },
+      })),
+      ...sessions.map(([entityId, date]) => makeSession({
+        entityId: `${entityId}_other_run`,
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGX",
+        experimentSlug: "other-subjective-sleep-run",
+        occurredAt: `${date}T09:00:00.000Z`,
+        sessionLocalDate: date,
+        fields: { "estimated-sleep-onset-minutes": 700 },
+      })),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3AG",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGX",
+        experimentSlug: slug,
+        occurredAt: "2026-04-01T10:00:00.000Z",
+        sessionLocalDate: "2026-04-01",
+        fields: { "estimated-sleep-onset-minutes": 700 },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3AH",
+        experimentId,
+        experimentSlug: slug,
+        occurredAt: "2026-04-01T11:00:00.000Z",
+        sessionLocalDate: "2026-04-01",
+        fields: { subjective_sleep_quality: 1 },
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, slug, { asOf: "2026-04-06" });
+  const outcome = analyzeExperimentOutcome(vault, slug, { asOf: "2026-04-06" });
+
+  assert.deepEqual(progress.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.deepEqual(progress.signals[0], {
+    baseline: { daysWithData: 3, mean: 40, totalDays: 3, unit: "minutes" },
+    baselineDayCount: 3,
+    baselineMean: 40,
+    biomarkerKey: "biomarker:sleep-onset-latency",
+    completeness: "good",
+    deltaAbs: -20,
+    deltaPct: -50,
+    expectedDirection: "decrease",
+    intervention: { daysWithData: 3, mean: 20, totalDays: 3, unit: "minutes" },
+    interventionDayCount: 3,
+    interventionMean: 20,
+    label: "Sleep Onset Latency",
+    movedAsExpected: true,
+    unit: "minutes",
+  });
+  assert.equal(outcome.metricResults[0]?.baselineMean, 40);
+  assert.equal(outcome.metricResults[0]?.interventionMean, 20);
+});
+
+test("bedtime delay diary values form bounded baseline and intervention windows", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGY";
+  const slug = "bedtime-delay";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-bedtime-delay",
+    metadata: { timezone: "UTC" },
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug,
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-02",
+          interventionStart: "2026-04-03",
+          interventionEnd: "2026-04-04",
+          modality: "bedtime transition",
+          logging: { sessionFields: ["bedtime_delay_minutes"] },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:bedtime-delay",
+          desiredDirection: "decrease",
+        },
+      }),
+      ...[
+        ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AA", "2026-04-01", 30],
+        ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AB", "2026-04-02", 45],
+        ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AC", "2026-04-03", 10],
+        ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AD", "2026-04-04", 0],
+      ].map(([entityId, date, value]) => makeSession({
+        entityId: String(entityId),
+        experimentId,
+        experimentSlug: slug,
+        occurredAt: `${date}T08:00:00.000Z`,
+        sessionLocalDate: String(date),
+        fields: { bedtime_delay_minutes: Number(value) },
+      })),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE4AE",
+        experimentId,
+        experimentSlug: slug,
+        occurredAt: "2026-04-04T09:00:00.000Z",
+        sessionLocalDate: "2026-04-04",
+        fields: { bedtime_delay_minutes: 721 },
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, slug, { asOf: "2026-04-04" });
+  const outcome = analyzeExperimentOutcome(vault, slug, { asOf: "2026-04-04" });
+
+  assert.deepEqual(progress.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.deepEqual(progress.signals[0], {
+    baseline: { daysWithData: 2, mean: 37.5, totalDays: 2, unit: "minutes" },
+    baselineDayCount: 2,
+    baselineMean: 37.5,
+    biomarkerKey: "biomarker:bedtime-delay",
+    completeness: "partial",
+    deltaAbs: -32.5,
+    deltaPct: -86.67,
+    expectedDirection: "decrease",
+    intervention: { daysWithData: 2, mean: 5, totalDays: 2, unit: "minutes" },
+    interventionDayCount: 2,
+    interventionMean: 5,
+    label: "Bedtime Delay",
+    movedAsExpected: true,
+    unit: "minutes",
+  });
+  assert.equal(outcome.metricResults[0]?.baselineMean, 37.5);
+  assert.equal(outcome.metricResults[0]?.interventionMean, 5);
+});
+
+test("analysis readiness rejects unsupported and undeclared subjective primary outcomes", () => {
+  const unsupported = summarizeExperimentProgress(createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-unsupported-primary",
+    metadata: null,
+    entities: [makeExperiment("active", {
+      slug: "unsupported-primary",
+      analysisPlan: { primaryBiomarkerKey: "biomarker:not-a-real-metric" },
+    })],
+  }), "unsupported-primary", { asOf: "2026-04-10" });
+  const undeclared = summarizeExperimentProgress(createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-uncapturable-primary",
+    metadata: null,
+    entities: [makeExperiment("active", {
+      slug: "uncapturable-primary",
+      analysisPlan: { primaryBiomarkerKey: "biomarker:sleep-onset-latency" },
+    })],
+  }), "uncapturable-primary", { asOf: "2026-04-10" });
+  const ambiguous = summarizeExperimentProgress(createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-ambiguous-primary",
+    metadata: null,
+    entities: [makeExperiment("active", {
+      slug: "ambiguous-primary",
+      analysisPlan: { primaryBiomarkerKey: "biomarker:sleep-onset-latency" },
+      runPlan: {
+        logging: {
+          sessionFields: [
+            "sleep-onset-latency-minutes",
+            "estimated_sleep_onset_minutes",
+          ],
+        },
+      },
+    })],
+  }), "ambiguous-primary", { asOf: "2026-04-10" });
+
+  assert.equal(unsupported.analysisReadiness.status, "incomplete");
+  assert.equal(
+    unsupported.analysisReadiness.blockingReasons.includes("unsupported_primary_biomarker"),
+    true,
+  );
+  assert.equal(undeclared.analysisReadiness.status, "incomplete");
+  assert.equal(
+    undeclared.analysisReadiness.blockingReasons.includes("uncapturable_primary_biomarker"),
+    true,
+  );
+  assert.equal(ambiguous.analysisReadiness.status, "incomplete");
+  assert.equal(
+    ambiguous.analysisReadiness.blockingReasons.includes("uncapturable_primary_biomarker"),
+    true,
+  );
+});
 
 function makeActivitySession(input: {
   activityType: string;

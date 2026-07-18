@@ -25047,7 +25047,17 @@ async function ensureHostedBootstrapMetadataForSystemMailboxTest(
   try {
     await stat(metadataPath);
   } catch {
-    await writeFile(metadataPath, "{}\n", "utf8");
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify({
+        createdAt: TEST_NOW,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Synthetic hosted workspace",
+        vaultId: `vault_${"0".repeat(26)}`,
+      }, null, 2)}\n`,
+      "utf8",
+    );
   }
 }
 
@@ -25188,10 +25198,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.5",
+    requestedModel: "gpt-5.6-terra",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.5",
+    servedModel: "gpt-5.6-terra",
     sessionId: "asst_entrypoint_usage",
     stripeMeterSource: "murph",
     surface: null,

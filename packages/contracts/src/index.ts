@@ -19,6 +19,7 @@ export * from "./assistant.ts";
 export * from "./activity-kind.ts";
 export * from "./memory.ts";
 export * from "./preferences.ts";
+export * from "./public-products.ts";
 export * from "./relation-links.ts";
 export * from "./shares.ts";
 export * from "./time.ts";

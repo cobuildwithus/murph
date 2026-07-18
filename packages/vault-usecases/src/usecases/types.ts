@@ -52,6 +52,7 @@ import type {
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
   QueryRuntimeModule as SharedQueryRuntimeModule,
+  QueryWearableSleepPatternSummary,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
@@ -376,6 +377,12 @@ export interface ExperimentListResult {
   nextCursor: string | null
 }
 
+export interface ExperimentLifecycleFrontmatterListResult {
+  vault: string
+  items: ExperimentFrontmatter[]
+  yielded?: true
+}
+
 export interface ExperimentSessionLogResult {
   vault: string
   experimentId: string
@@ -548,6 +555,7 @@ export type WearablePublicLatestSummary = JsonObject
 export type WearablePublicMetricLatestSummary = JsonObject
 export type WearablePublicMetricTrendSummary = JsonObject
 export type WearablePublicDriftSummary = JsonObject
+export type WearablePublicSleepPatternSummary = QueryWearableSleepPatternSummary
 
 export interface WearableDayResult {
   date: string
@@ -602,6 +610,16 @@ export interface WearableMetricTrendResult {
 export interface WearableDriftResult {
   filters: WearableDriftFiltersResult
   summary: WearablePublicDriftSummary | null
+}
+
+export interface WearableSleepPatternFiltersResult extends Omit<WearableListFiltersResult, "limit"> {
+  timeZone: string | null
+  windowDays: number
+}
+
+export interface WearableSleepPatternResult {
+  filters: WearableSleepPatternFiltersResult
+  summary: WearablePublicSleepPatternSummary
 }
 
 export interface VaultShowResult {
@@ -985,6 +1003,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       afterExercise?: boolean
       symptoms?: string[]
       confounders?: string[] | Record<string, string | number | boolean | null>
+      fields?: Record<string, string | number | boolean | null>
     },
   ): Promise<ExperimentSessionLogResult>
   logExperimentSessionJson(
@@ -1325,6 +1344,11 @@ export interface QueryServices extends HealthQueryServiceMethods {
       limit: number
     },
   ): Promise<ExperimentListResult>
+  listExperimentLifecycleFrontmatter(
+    input: CommandContext & {
+      shouldYield?: (() => boolean) | null
+    },
+  ): Promise<ExperimentLifecycleFrontmatterListResult>
   showExperimentProgress(
     input: CommandContext & {
       lookup: string
@@ -1416,6 +1440,16 @@ export interface QueryServices extends HealthQueryServiceMethods {
       windowDays?: number
     },
   ): Promise<WearableDriftResult>
+  showWearableSleepPattern(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      timeZone?: string
+      windowDays?: number
+    },
+  ): Promise<WearableSleepPatternResult>
   listWearableSleep(
     input: CommandContext & {
       date?: string

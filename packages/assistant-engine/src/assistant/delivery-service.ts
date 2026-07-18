@@ -47,9 +47,11 @@ import {
 } from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
+  deliveryContextOrdinal?: number
   deliveryContext?: AssistantReplyDeliveryContext | null
   media?: readonly AssistantResponseMedia[] | null
   response: string
+  targetInputId?: string | null
 }
 
 export type { AssistantReplyDeliveryContext }
@@ -414,6 +416,11 @@ export function buildAssistantReactionDeliveryIdempotencyKey(input: {
 // dropped by last-wins extraction.
 export async function deliverAssistantPrecedingReplies(input: {
   input: AssistantMessageInput
+  resolveSegmentDeliveryInput?: ((input: {
+    input: AssistantMessageInput
+    segment: AssistantPrecedingReplySegment
+    session: AssistantSession
+  }) => Promise<AssistantMessageInput>) | null
   segments?: readonly AssistantPrecedingReplySegment[]
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
@@ -428,10 +435,17 @@ export async function deliverAssistantPrecedingReplies(input: {
   let session = input.session
   for (const [ordinal, segment] of segments.entries()) {
     try {
-      const segmentInput = applyAssistantReplyDeliveryContext({
+      const baseSegmentInput = applyAssistantReplyDeliveryContext({
         context: segment.deliveryContext ?? null,
         input: input.input,
       })
+      const segmentInput = input.resolveSegmentDeliveryInput
+        ? await input.resolveSegmentDeliveryInput({
+            input: baseSegmentInput,
+            segment,
+            session,
+          })
+        : baseSegmentInput
       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
         input: segmentInput,
         session,
@@ -479,9 +493,13 @@ function normalizeAssistantPrecedingReplySegments(input: {
   segments?: readonly AssistantPrecedingReplySegment[]
 }): AssistantPrecedingReplySegment[] {
   return (input.segments ?? []).map((segment) => ({
+    ...(segment.deliveryContextOrdinal === undefined
+      ? {}
+      : { deliveryContextOrdinal: segment.deliveryContextOrdinal }),
     deliveryContext: segment.deliveryContext ?? null,
     response: segment.response,
     media: normalizeAssistantResponseMediaList(segment.media ?? []),
+    ...(segment.targetInputId ? { targetInputId: segment.targetInputId } : {}),
   }))
 }
 
@@ -716,6 +734,7 @@ function resolveAssistantCurrentAudienceTextDeliveryFields(input: {
   input: AssistantMessageInput
 }): AssistantCurrentAudienceDeliveryFields {
   if (
+    input.input.deliveryNativeReplyRequested === true ||
     !shouldSuppressAssistantNativeTextReplyToMessageId({
       channel: input.deliveryFields.channel,
       turnTrigger: input.input.turnTrigger ?? null,
@@ -851,9 +870,11 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    automationAuthority: input.input.outboxAutomationAuthority ?? null,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,
+    nativeReplyRequested: input.input.deliveryNativeReplyRequested,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     turnId: input.turnId,

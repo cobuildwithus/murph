@@ -65,6 +65,26 @@ parked local item, committed snapshot, approved row, or in-flight reconciliation
 can depend on it. Disable and redeploy the producer gate before rollback, but do
 not roll web below this floor without a separate migration or a forward runtime
 that removes the dependency.
+
+## Direct-login deferred-checkpoint deployment compatibility
+
+A completed direct-login handoff now means "the user completed takeover; the
+profile checkpoint is pending until an authorized resume," rather than "the
+profile checkpoint already finished." That persisted semantic change is
+necessary for Done to return before Kernel stop/save/replacement work. A prior
+web bundle will instead reuse the old task browser, mark the run running, and
+consume `pendingHandoffId` without performing the deferred checkpoint.
+
+The first production web deployment containing the deferred-checkpoint claim is
+therefore the rollback floor while any matching active row can exist. Record the
+production alias at that head and confirm prior web functions have drained before
+treating the rollout as established. Do not roll below the floor until a database
+check proves there is no active `awaiting_user` run whose pending direct-login
+handoff has non-null `completedAt` and status `completed` or `checkpointing`.
+After deferred writes stop, waiting one full one-hour active-run TTL before that
+zero-row check provides the bounded drain condition. This is a web-only rollout;
+it does not require a coordinated Cloudflare deployment.
+
 When a valid `idle_shutdown` checkpoint matches the locked workspace version,
 web commits it even if a newer durable conversation row is pending. The same CAS
 commits the request snapshot, redacted watermarks, and wake projection as one
@@ -88,12 +108,12 @@ adaptation, seed composition, and cross-app E2E imports.
 
 ## Experiment detail data sources
 
-The experiment detail page composes two narrow data sources:
+The experiment detail routes compose two narrow data sources:
 
-- Health Commons is the public protocol source of truth. Server components resolve generated route bundles/projections and pass a typed `ExperimentProtocol` into the page.
-- The browser vault is the private run source. Client components decrypt the dashboard snapshot in-browser, project a matching `ExperimentRunProjection`, and overlay only private status, timeline, next-step, and outcome fields.
+- Health Commons is the public protocol source of truth. Server components resolve generated route projections for the Protocol, Research, and public portion of Your results.
+- The browser vault is the private run source. The Your results client decrypts the dashboard snapshot in-browser, projects the matching active run or newest completed run, and renders private status, timeline, context, next-step, and outcome fields. Completed and low-confidence runs remain reachable at `/experiments/[experimentId]/results`.
 
-The UI receives the composed `Experiment` view model, but public protocol prose, citations, and commons revisions are never copied into private run state.
+Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
@@ -272,11 +292,22 @@ is active.
   do not reflect commit order. Timestamps remain audit metadata. Unmarked
   direct-login and pre-migration rows retain the existing timestamp reply proof
   during the bounded active-run drain and are never reclassified from mutable
-  handoff timestamps. Browser publication and handoff conversion or completion
-  commit in one transaction. If both idempotent terminal-write attempts
-  return an error, Murph treats the outcome as unknown and leaves the handoff
-  checkpointing until durable state can be reread or safely reclaimed; it does
-  not provision or delete another task browser in that request. Every
+  handoff timestamps. For a direct `login` Live View handoff, Done durably
+  completes the handoff and returns to the conversation while the existing task
+  browser remains the sole profile writer. The next resume that proves a newer
+  mailbox item must first claim that exact completed handoff as `checkpointing`
+  under the member lock. Only the claim owner may stop the browser so Kernel
+  saves the profile, remove a stale deterministic replacement, create and
+  publish the replacement, and atomically mark the handoff completed while the
+  run becomes `running`. An overlapping open or start request returns a retryable
+  checkpoint-in-progress result without calling Kernel. A failed or ambiguous
+  replacement retains the `checkpointing` owner; stale-owner recovery can clean
+  a deterministic orphan and retry without another login or Done click. Managed
+  Auth browser publication and handoff conversion or
+  completion commit in one transaction. If both idempotent terminal-write
+  attempts return an error, Murph treats the outcome as unknown and leaves the
+  handoff checkpointing until durable state can be reread or safely reclaimed;
+  it does not provision or delete another task browser in that request. Every
   nonterminal Managed Auth row remains on the provider-aware recovery path,
   including when its inter-request claim is yielded to `open`; generic
   completion and open/resume logic cannot replace, terminally expire, or
@@ -438,6 +469,39 @@ any proven violations, then validate `supplements_payload_format_check`
 explicitly. After this constraint is installed, importer rollback must stay at
 or above the first version that bounds and validates the affected payload
 fields; an older importer requires an explicit constraint rollback first.
+
+## Murph Safe public product data
+
+`/search` exposes the public Murph Safe product-evidence experience. Its browser
+search calls `POST /api/public/v1/products/search`; server-rendered product
+details use the same service as
+`GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
+is available at `/api/public/v1/openapi.json`, and the current schema id is
+`murph.public-products.v1`.
+
+The public catalog includes current supplement and branded-food sources and
+excludes generic food origins. Search and detail DTOs are bounded normalized
+projections; product tests join only through the selected row's exact
+`food_id` or `supplement_id`. Search terms stay in POST bodies and are not
+echoed, persisted, analyzed, or logged.
+
+Before a production build, configure these Production-scoped server values:
+
+- `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
+- `MURPH_SAFE_SEARCH_WAF_RULE_ID`
+- `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `HOSTED_WEB_VERCEL_PROJECT_ID`
+- optional `HOSTED_WEB_VERCEL_TEAM_ID`
+- `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
+
+The exact-id custom rules must be the first active rules after the optional
+companion diagnostics rule. Search is an exact POST path with a fixed-window
+per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
+while excluding search, plus the public web-detail prefix, at 120 requests per
+60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+configuration and fails on disabled firewall, order, condition, algorithm,
+key, limit, window, action, or id drift. It never downloads environment values
+or prints the provider token or response body.
 
 Provider-owned webhook-admin settings:
 

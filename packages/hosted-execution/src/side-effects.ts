@@ -4,6 +4,9 @@ import {
   type GatewayDeliveryTargetKind,
   type GatewayReplyRouteKind,
 } from "@murphai/gateway-core";
+import {
+  isNormalizedAssistantVaultFileRef,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
@@ -120,6 +123,7 @@ export interface HostedAssistantDeliveryPayload {
   identityId: string | null;
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
+  nativeReplyRequested?: true;
   newsletterAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
@@ -682,6 +686,14 @@ function parseHostedAssistantDeliveryPayload(
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),
+    ...(record.nativeReplyRequested === undefined
+      ? {}
+      : {
+          nativeReplyRequested: requireTrue(
+            record.nativeReplyRequested,
+            `${label}.nativeReplyRequested`,
+          ),
+        }),
     ...(record.newsletterAuthorizationProof === undefined
       ? {}
       : {
@@ -812,19 +824,8 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     );
   }
   const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
-  if (
-    ref.startsWith("/")
-    || /^[A-Za-z]:/u.test(ref)
-    || ref.includes("\\")
-    || /[\u0000-\u001F\u007F]/u.test(ref)
-    || ref.split("/").some((segment) => (
-      segment.length === 0
-      || segment === "."
-      || segment === ".."
-      || segment.startsWith(".")
-    ))
-  ) {
-    throw new TypeError(`${label}.ref must be a normalized, non-hidden vault-relative path.`);
+  if (!isNormalizedAssistantVaultFileRef(ref)) {
+    throw new TypeError(`${label}.ref must be a normalized supported vault-relative path.`);
   }
   const sha256 = requireString(record.sha256, `${label}.sha256`);
   if (!/^[0-9a-f]{64}$/u.test(sha256)) {
@@ -1198,6 +1199,14 @@ function requireBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
+}
+
+function requireTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true when present.`);
+  }
+
+  return true;
 }
 
 function requireNullableBoolean(value: unknown, label: string): boolean | null {

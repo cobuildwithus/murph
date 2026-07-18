@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFoodsQueries } from "../src/lib/foods";
 import {
+  createPublicSupplementsQueries,
   createSupplementsQueries,
   type SupplementSearchItem,
 } from "../src/lib/supplements";
@@ -907,6 +908,268 @@ describe.runIf(Boolean(testDatabaseUrl))(
     it("intercepts every contaminant lookup instead of requiring product-test tables", () => {
       expect(contaminantQueryCount).toBeGreaterThan(0);
     });
+  },
+);
+
+describe.runIf(Boolean(testDatabaseUrl))(
+  "public supplement evidence PostgreSQL query",
+  () => {
+    it("deduplicates, counts, bounds, and screens exact-record product evidence", async () => {
+      const client = new pg.Client({
+        connectionString: testDatabaseUrl ?? undefined,
+        statement_timeout: 8_000,
+      });
+
+      await client.connect();
+      await client.query("BEGIN");
+
+      try {
+        await client.query(`
+          CREATE TEMP TABLE supplements (
+            id TEXT PRIMARY KEY,
+            canonical_key TEXT NOT NULL,
+            data_origin TEXT NOT NULL,
+            data_origin_id TEXT NOT NULL,
+            data_origin_url TEXT,
+            data_origin_priority SMALLINT NOT NULL DEFAULT 100,
+            name TEXT NOT NULL,
+            brand TEXT,
+            upc TEXT,
+            off_market BOOLEAN NOT NULL DEFAULT FALSE,
+            search_text TEXT NOT NULL,
+            label JSONB NOT NULL,
+            serving_grams NUMERIC,
+            imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO supplements (
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            search_text,
+            label,
+            serving_grams
+          )
+          VALUES
+            (
+              'brand:public-source',
+              'canonical-public-product',
+              'brand_site',
+              'brand:public-source',
+              'Public Source Product',
+              'Example Nutrition',
+              'Public Source Product Example Nutrition',
+              '{}'::jsonb,
+              5
+            ),
+            (
+              'dsld:tested-alias',
+              'canonical-public-product',
+              'dsld',
+              'dsld:tested-alias',
+              'Tested Alias Product',
+              'Example Nutrition',
+              'Tested Alias Product Example Nutrition',
+              '{}'::jsonb,
+              5
+            )
+        `);
+        await client.query(`
+          CREATE TEMP TABLE product_tests (
+            id TEXT PRIMARY KEY,
+            food_id TEXT,
+            supplement_id TEXT,
+            source_key TEXT NOT NULL,
+            source_result_id TEXT NOT NULL,
+            source_name TEXT NOT NULL,
+            source_url TEXT,
+            source_report_title TEXT,
+            report_date DATE,
+            tested_product_name TEXT,
+            tested_product_brand TEXT,
+            tested_product_upc TEXT,
+            tested_source_product_id TEXT,
+            match_method TEXT NOT NULL,
+            contaminant_key TEXT NOT NULL,
+            contaminant_name TEXT NOT NULL,
+            result_operator TEXT NOT NULL,
+            result_value NUMERIC,
+            result_unit TEXT NOT NULL,
+            result_basis TEXT NOT NULL,
+            normalized_value NUMERIC,
+            normalized_unit TEXT,
+            normalized_basis TEXT,
+            lab_name TEXT,
+            test_method TEXT,
+            imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO product_tests (
+            id,
+            supplement_id,
+            source_key,
+            source_result_id,
+            source_name,
+            report_date,
+            tested_product_name,
+            tested_product_brand,
+            match_method,
+            contaminant_key,
+            contaminant_name,
+            result_operator,
+            result_value,
+            result_unit,
+            result_basis,
+            normalized_value,
+            normalized_unit,
+            normalized_basis,
+            lab_name,
+            test_method
+          )
+          SELECT
+            'test-' || series,
+            'brand:public-source',
+            'example_report',
+            'result-' || series,
+            'Example Report',
+            DATE '2026-06-01',
+            'Public Source Product',
+            'Example Nutrition',
+            'manual_confirmed',
+            'lead',
+            'Lead',
+            'eq',
+            CASE WHEN series = 1 THEN 2 ELSE 0.5 END,
+            'ppm',
+            'product_mass',
+            CASE WHEN series = 1 THEN 2 ELSE 0.5 END,
+            'ppm',
+            'product_mass',
+            'Example Lab',
+            'Example Method'
+          FROM generate_series(1, 21) series
+        `);
+        await client.query(`
+          INSERT INTO product_tests (
+            id,
+            supplement_id,
+            source_key,
+            source_result_id,
+            source_name,
+            tested_product_name,
+            match_method,
+            contaminant_key,
+            contaminant_name,
+            result_operator,
+            result_value,
+            result_unit,
+            result_basis
+          )
+          VALUES (
+            'sibling-only-test',
+            'dsld:tested-alias',
+            'example_report',
+            'sibling-result',
+            'Example Report',
+            'Tested Alias Product',
+            'manual_confirmed',
+            'lead',
+            'Lead',
+            'eq',
+            10,
+            'ppm',
+            'product_mass'
+          )
+        `);
+        await client.query(`
+          CREATE TEMP TABLE contaminant_thresholds (
+            id TEXT PRIMARY KEY,
+            contaminant_key TEXT NOT NULL,
+            threshold_name TEXT NOT NULL,
+            authority_name TEXT NOT NULL,
+            threshold_url TEXT,
+            threshold_value NUMERIC NOT NULL,
+            threshold_unit TEXT NOT NULL,
+            threshold_basis TEXT NOT NULL,
+            normalized_value NUMERIC,
+            normalized_unit TEXT,
+            normalized_basis TEXT,
+            concern_level_if_exceeded TEXT NOT NULL,
+            active BOOLEAN NOT NULL
+          ) ON COMMIT DROP
+        `);
+        await client.query(`
+          INSERT INTO contaminant_thresholds (
+            id,
+            contaminant_key,
+            threshold_name,
+            authority_name,
+            threshold_value,
+            threshold_unit,
+            threshold_basis,
+            normalized_value,
+            normalized_unit,
+            normalized_basis,
+            concern_level_if_exceeded,
+            active
+          )
+          VALUES (
+            'lead-screening',
+            'lead',
+            'Example screening threshold',
+            'Example Authority',
+            1,
+            'ppm',
+            'product_mass',
+            1,
+            'ppm',
+            'product_mass',
+            'medium',
+            true
+          )
+        `);
+
+        const queryClient = {
+          async query<T>(text: string, values: unknown[]) {
+            const result = await client.query(text, values);
+            return { rows: result.rows as T[] };
+          },
+        };
+        const publicQueries = createPublicSupplementsQueries(queryClient);
+        const evidence = await publicQueries.getPublicSupplementEvidence({
+          id: "brand:public-source",
+        });
+
+        expect(evidence).toMatchObject({
+          total: 21,
+          returned: 20,
+          truncated: true,
+        });
+        expect(evidence.observations).toHaveLength(20);
+        expect(evidence.observations.map((observation) => observation.id)).not.toContain(
+          "sibling-only-test",
+        );
+        expect(evidence.observations[0]).toMatchObject({
+          id: "test-1",
+          labName: "Example Lab",
+          testMethod: "Example Method",
+          screening: {
+            comparison: "exceeds",
+          },
+          alert: {
+            concernLevel: "medium",
+          },
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        await client.end();
+      }
+    }, 20_000);
   },
 );
 

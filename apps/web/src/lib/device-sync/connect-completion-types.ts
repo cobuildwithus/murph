@@ -17,6 +17,24 @@ export interface DeviceSyncCompletionSetupAction {
   target: "_blank";
 }
 
+export interface DeviceSyncCompletionSetupGuideStep {
+  detail: string;
+  title: string;
+}
+
+// A second in-dialog view: the summary view's primary button (`actionLabel`)
+// flips the dialog to this numbered checklist with a download CTA.
+export interface DeviceSyncCompletionSetupGuide {
+  actionAriaLabel: string;
+  actionLabel: string;
+  detail: string;
+  downloadAction: DeviceSyncCompletionSetupAction;
+  steps: DeviceSyncCompletionSetupGuideStep[];
+  title: string;
+  // Pre-generated memo in the member's picked Murph voice.
+  voiceMemoSrc: string;
+}
+
 // `kind` chooses the dialog header icon: "device-sync" → watch+check (the
 // wearable connect flow), "connected-app" → connect-link (Composio-backed
 // integrations like Gmail). The model shape itself is shared because the
@@ -29,7 +47,7 @@ export interface DeviceSyncCompletionDialogModel {
   failed: boolean;
   kind: CompletionDialogKind;
   retryHref: string | null;
-  setupAction?: DeviceSyncCompletionSetupAction | null;
+  setupGuide?: DeviceSyncCompletionSetupGuide | null;
   title: string;
   // True when the URL asserted a successful device connect but the server could
   // not verify it: no member session, no matching active source, or a transient

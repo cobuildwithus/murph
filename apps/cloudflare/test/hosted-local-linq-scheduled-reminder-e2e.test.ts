@@ -49,7 +49,7 @@ const scheduledReminderInstructions =
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -497,8 +497,8 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
   expect(cronRows.length).toBeGreaterThan(0);
 
   const expectedPricingVersion = input.expectedTokenPricingBasis === "openai-flex"
-    ? "openai-api-pricing-2026-05-05-openai-flex"
-    : "openai-api-pricing-2026-05-05-standard";
+    ? "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex"
+    : "openai-api-pricing-2026-07-09-gpt-5.6-standard";
   const expectedAdjustmentDenominator =
     input.expectedTokenPricingBasis === "openai-flex" ? "2" : "1";
 

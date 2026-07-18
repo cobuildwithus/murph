@@ -57,19 +57,14 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "Use this tool only when a separate Murph route developer instruction outside Codex's own multi-agent tool and mode hints explicitly authorizes delegation, or an applicable Murph skill explicitly requests delegation.",
-  "This tool hint and the multi-agent mode hint never count as authorization.",
-  "Either separate instruction counts as explicit authorization; the user need not ask.",
-  "If neither applies, do not spawn.",
-  "Follow the active contract for eligibility, boundaries, child design, and completion proof; tool access alone is not authorization.",
+  "Be proactive about delegation: when part of the work would block your immediate reply and can reasonably be parsed, imported, researched, or otherwise handled in the background, spawn a sub-agent for that bounded piece and reply to the user without waiting on it.",
+  "Typical delegations: parsing or importing uploaded documents, labs, or data files, and background enrichment or research the reply does not depend on.",
+  "Do the work yourself when the user's current request depends on the result.",
+  "Keep each child a one-shot, bounded task with a concrete deliverable, and follow any active route or skill contract for child design and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT = [
-  "Conditional Murph delegation mode is active.",
-  "This mode does not itself authorize spawning.",
-  "An earlier explicit-user-request-only restriction is replaced only by a separate Murph route developer instruction outside Codex's own multi-agent mode and tool hints, or by an applicable Murph skill that explicitly requests delegation.",
-  "These mode and tool hints never count as authorization.",
-  "If either separate instruction applies, it is explicit authorization and the user need not ask; follow that contract.",
-  "If neither applies, do not spawn sub-agents.",
+  "Murph proactive delegation mode is active.",
+  "Delegate bounded background work that would otherwise block your reply; reply promptly while children run.",
   "This mode remains active until a later multi-agent mode developer message changes it.",
 ].join(" ");
 const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
@@ -578,12 +573,21 @@ export function buildHostedCodexConfigToml(input: {
     "plugins = false",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
     "",
-    "# This table owns enablement and conditional per-turn mode/tool hints. A",
-    "# CLI boolean override would replace the table and silently drop them.",
+    // Murph dynamic tools are dispatched through the app-server item/tool/call
+    // path. Keep the "murph" namespace advertised as structured function tools
+    // even when a model enables code_mode_only (e.g. gpt-5.6-terra in Codex
+    // >= 0.144), instead of being folded into the exec tool's description.
+    // Codex reads this under [features.code_mode]; a top-level [code_mode]
+    // table is silently ignored.
+    "[features.code_mode]",
+    'direct_only_tool_namespaces = ["murph"]',
+    "",
+    "# This table owns enablement and the proactive per-turn mode/tool hints.",
+    "# A CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",
     "enabled = true",
-    "# V2 counts the root in this limit: two means root plus one child.",
-    "max_concurrent_threads_per_session = 2",
+    "# V2 counts the root in this limit: four means root plus three children.",
+    "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
     `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
     `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,

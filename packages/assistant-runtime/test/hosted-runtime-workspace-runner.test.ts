@@ -7848,6 +7848,127 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves an invocation-local retry before a later post-checkpoint assistant wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_local_retry",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_local_retry",
+        async runAssistantPhase() {
+          const invocationLocalAssistantWakeAt = "2026-04-26T00:00:30.000Z";
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: "2026-04-26T07:00:00.000Z",
+              nextWakeReason: "assistant",
+            }),
+            checkpointReason: "canonical_runtime_commit",
+            invocationLocalAssistantWakeAt,
+            nextWakeAt: invocationLocalAssistantWakeAt,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        "2026-04-26T00:00:30.000Z",
+      );
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(
+        result.assistantPhaseResult?.invocationLocalAssistantWakeAt,
+        "2026-04-26T00:00:30.000Z",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("preserves an invocation-local retry when post-checkpoint work has no wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_local_retry_null",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_local_retry_null",
+        async runAssistantPhase() {
+          const invocationLocalAssistantWakeAt = "2026-04-26T00:00:30.000Z";
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+            }),
+            checkpointReason: "canonical_runtime_commit",
+            invocationLocalAssistantWakeAt,
+            nextWakeAt: invocationLocalAssistantWakeAt,
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        "2026-04-26T00:00:30.000Z",
+      );
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(
+        result.assistantPhaseResult?.invocationLocalAssistantWakeAt,
+        "2026-04-26T00:00:30.000Z",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("does not import foreground mailbox work during post-assistant cleanup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
@@ -8966,10 +9087,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.5",
+    requestedModel: "gpt-5.6-terra",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.5",
+    servedModel: "gpt-5.6-terra",
     sessionId: "asst_runner_usage",
     stripeMeterSource: "murph",
     surface: null,

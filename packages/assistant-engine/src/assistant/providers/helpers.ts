@@ -256,10 +256,11 @@ export function mergeCodexConfigOverrides(input: {
     )
   }
   // Multi-agent V2 is enabled by the hosted config.toml's
-  // [features.multi_agent_v2] table (which also carries
-  // Murph's tool and mode hints). A CLI `--config features.multi_agent_v2=true`
-  // boolean would take precedence over that table and silently reset the
-  // feature to defaults, dropping those configured hints — never emit it.
+  // [features.multi_agent_v2] table (which also carries Murph's
+  // proactive-delegation tool and mode hints). A CLI
+  // `--config features.multi_agent_v2=true` boolean would take precedence
+  // over that table and silently reset the feature to defaults, dropping
+  // those configured hints — never emit it.
   if (!input.showThinkingTraces) {
     return overrides.length > 0 ? overrides : undefined
   }
@@ -1158,17 +1159,22 @@ export interface CodexSubagentTokenUsageSample {
 // notifications. This converts the buffered first/final tokenUsage samples
 // per child thread into additional usage drafts on the parent turn, using
 // the same total-delta arithmetic as the parent's billed usage. Billing is
-// gated on collab evidence: only threads named in some parent-thread
-// collabAgentToolCall item's receiverThreadIds (spawnAgent, sendInput, wait,
-// resume — covering freshly spawned and reused children) become drafts; the
-// model is attributed from spawn items, the only ones that carry it. Warm
-// processes are reused across threads, so a foreign thread id alone is not
-// proof of a subagent — a stale flush from a previous thread must never mint
-// a usage row. Unattributed threads are counted, not billed.
+// gated on spawn evidence: only threads named by a parent-thread
+// collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
+// sendInput, wait, resume — covering freshly spawned and reused children) or
+// by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
+// activity items instead of collab tool calls) become drafts. The model is
+// attributed from V1 spawn items, the only ones that carry it; V2 children
+// inherit the parent model by default, so evidence without a model falls
+// back to parentModel. Warm processes are reused across threads, so a
+// foreign thread id alone is not proof of a subagent — a stale flush from a
+// previous thread must never mint a usage row. Unattributed threads are
+// counted, not billed.
 export function extractCodexSubagentUsageDrafts(input: {
   droppedThreadCount: number
   modelProvider: string | null
   ordinalStart: number
+  parentModel?: string | null
   parentRawEvents: readonly unknown[]
   serviceTier?: AssistantProviderServiceTier | null
   subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
@@ -1201,7 +1207,8 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model = spawnModelByThreadId.get(threadId) ?? null
+    const model =
+      spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
     const rawUsageJson: Record<string, unknown> = {
       codexSubagentThreadId: threadId,
       tokenUsage: delta,
@@ -1288,11 +1295,12 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
   })
 }
 
-// Collab evidence map: every thread id named by a parent-thread collab tool
-// call item (spawnAgent, sendInput, wait, resumeAgent, ...) is a key — that
-// membership is what authorizes billing a foreign thread's usage, covering
-// both freshly spawned children and reused existing children. The effective
-// model is only known from spawn items and may be null otherwise.
+// Spawn evidence map: every thread id named by a parent-thread collab tool
+// call item (V1: spawnAgent, sendInput, wait, resumeAgent, ...) or
+// subAgentActivity item (V2) is a key — that membership is what authorizes
+// billing a foreign thread's usage, covering both freshly spawned children
+// and reused existing children. The effective model is only known from V1
+// spawn items and may be null otherwise.
 function readCodexCollabSpawnModelsByThread(
   rawEvents: readonly unknown[],
 ): Map<string, string | null> {
@@ -1314,9 +1322,10 @@ function readCodexCollabSpawnModelsByThread(
   return modelByThreadId
 }
 
-// Receiver thread ids named by a single parent-thread collab tool call
-// event, if any. Exported so the live turn loop can prioritize evidenced
-// subagent threads when its bounded usage buffer fills up.
+// Receiver thread ids named by a single parent-thread collab tool call or
+// subagent activity event, if any. Exported so the live turn loop can
+// prioritize evidenced subagent threads when its bounded usage buffer fills
+// up.
 export function readCodexCollabReceiverThreadIds(
   rawEvent: unknown,
 ): readonly string[] {
@@ -1343,6 +1352,19 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
     item.itemType,
     item.item_type,
   )
+  // Multi-agent V2 emits subAgentActivity items (started/interacted/
+  // interrupted) instead of collab tool calls; any of them names the child
+  // thread this parent turn engaged, which is exactly the spawn evidence the
+  // billing gate needs. V2 activity items carry no model.
+  if (itemType === 'subAgentActivity' || itemType === 'sub_agent_activity') {
+    const agentThreadId = readAssistantProviderString(
+      item.agentThreadId,
+      item.agent_thread_id,
+    )
+    return agentThreadId
+      ? { receiverThreadIds: [agentThreadId], spawnModel: null }
+      : null
+  }
   if (itemType !== 'collabAgentToolCall') {
     return null
   }

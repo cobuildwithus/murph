@@ -12,6 +12,9 @@ import {
   type AutomationRoute,
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
+import {
+  isNormalizedAssistantVaultFileRef,
+} from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   gatewayDeliveryTargetKindValues,
@@ -34,6 +37,9 @@ import {
   normalizeCodexResumeState,
   type CodexResumeState,
 } from './assistant/codex-resume-state.js'
+import {
+  looksLikePrivateAssistantRoutePlaceholder,
+} from './assistant/current-delivery-route.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -333,6 +339,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
   })
   .strict()
 
+export const assistantOutboxAutomationAuthoritySchema = z
+  .object({
+    automationId: z.string().trim().min(1),
+    expectedUpdatedAt: isoTimestampSchema,
+  })
+  .strict()
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -412,7 +425,7 @@ const assistantVaultFileResponseMediaSchema = z
       .min(1)
       .max(1024)
       .refine(
-        (value) => isSafeAssistantVaultFileRef(value),
+        (value) => isNormalizedAssistantVaultFileRef(value),
         'Assistant vault file refs must be normalized vault-relative paths.',
       ),
     sha256: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -444,25 +457,6 @@ export const assistantResponseMediaSchema = z.union([
   assistantVoiceMemoResponseMediaSchema,
   assistantVaultFileResponseMediaSchema,
 ])
-
-function isSafeAssistantVaultFileRef(value: string): boolean {
-  if (
-    value.startsWith('/')
-    || /^[A-Za-z]:/u.test(value)
-    || value.includes('\\')
-    || /[\u0000-\u001F\u007F]/u.test(value)
-  ) {
-    return false
-  }
-
-  const segments = value.split('/')
-  return segments.every((segment) => (
-    segment.length > 0
-    && segment !== '.'
-    && segment !== '..'
-    && !segment.startsWith('.')
-  ))
-}
 
 export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
 
@@ -862,8 +856,12 @@ export const assistantOutboxIntentSchema = z
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
     replyToMessageId: z.string().min(1).nullable().default(null),
+    nativeReplyRequested: z.literal(true).optional(),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+    automationAuthority: assistantOutboxAutomationAuthoritySchema
+      .nullable()
+      .optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -885,6 +883,51 @@ export const assistantOutboxIntentSchema = z
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()
+  .superRefine((intent, context) => {
+    if (intent.nativeReplyRequested !== true) {
+      return
+    }
+
+    if (intent.operation !== null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies must use a normal message intent.',
+        path: ['nativeReplyRequested'],
+      })
+    }
+
+    const replyToMessageId = intent.replyToMessageId?.trim() ?? ''
+    if (!replyToMessageId) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a target message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+
+    if (looksLikePrivateAssistantRoutePlaceholder(replyToMessageId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a provider message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+
+    const channel = intent.channel?.trim().toLowerCase() ?? ''
+    if (channel !== 'linq' && channel !== 'telegram') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant native replies require a supported message channel.',
+        path: ['channel'],
+      })
+    } else if (channel === 'telegram' && !/^\d+$/u.test(replyToMessageId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant Telegram native replies require a numeric target message id.',
+        path: ['replyToMessageId'],
+      })
+    }
+  })
 
 export const assistantDiagnosticEventSchema = z
   .object({
@@ -1662,6 +1705,9 @@ export type AssistantTurnReceiptSummary = z.infer<
   typeof assistantTurnReceiptSummarySchema
 >
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
+export type AssistantOutboxAutomationAuthority = z.infer<
+  typeof assistantOutboxAutomationAuthoritySchema
+>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
 >

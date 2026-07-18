@@ -41,8 +41,8 @@ Before asking the user for appointment details:
    including facts given before an information-only or test call.
 2. In a direct/private conversation, inspect canonical Durable Memory with
    `vault-cli memory show --vault "$VAULT" --format json` when a saved name,
-   provider relationship, location, modality, recurring availability, or
-   standing scheduling rule could answer part of the brief.
+   date of birth, provider relationship, location, modality, recurring
+   availability, or standing scheduling rule could answer part of the brief.
 3. Inspect the relevant canonical provider or health record when it could own
    the fact. Do not copy structured health or provider data into freeform
    memory merely to make this workflow convenient.
@@ -122,10 +122,13 @@ proceed, or not applicable:
    referral/order/authorization status, accessibility needs, cost or deposit
    ceiling, and cancellation/no-show bounds. Never invent coverage or quote a
    saved price as current.
-7. **Identity, contact, and disclosure:** the minimum patient name, preferred
-   caller name, callback method, date of birth, or other fact the destination
-   is likely to require, plus current approval to disclose each fact needed for
-   this action. A memory record is not disclosure consent.
+7. **Identity, contact, and disclosure:** the patient's name and date of birth,
+   preferred caller name, callback method, any other fact the destination is
+   likely to require, and current approval to disclose each fact needed for
+   this action. Patient name and date of birth are required for every real
+   booking, rescheduling, cancellation, or waitlist action covered by this
+   skill, even when the destination's public instructions do not mention them.
+   A memory record is not disclosure consent.
 8. **Success and stop condition:** what counts as done and what must come back
    to the user, such as a confirmed booking, a short option list, fee details,
    or a transfer when an unanticipated decision falls outside the brief.
@@ -174,9 +177,43 @@ For example, when a practice is chosen but service and availability are
 missing, ask: "What kind of appointment do you need, and what days or times
 usually work? Any clinician preference, or is anyone okay?"
 
+For the required date of birth, tell the user it will be saved in their private
+vault for future medical scheduling. If the user declines either the date or
+durable storage, do not start the real action.
+
 ## Durable Memory boundary
 
-When the user supplies a fact, classify it before writing:
+Date of birth is the one required durable identity exception for this workflow.
+For every real action covered by this skill, keep exactly one normalized
+canonical memory record in the `Identity` section:
+
+`Date of birth: YYYY-MM-DD`
+
+This renders under `Identity` in `bank/memory.md`, with a stable prefix that is
+easy to find and update later.
+
+In a direct/private conversation:
+
+1. Read the canonical memory document and find records whose text starts exactly
+   `Date of birth: `.
+2. Reuse one valid normalized record. If it is missing, malformed, ambiguous, or
+   conflicts with current user evidence, ask the user to supply or confirm the
+   date. Never infer month/day order or derive a birth date from age.
+3. Before writing a newly supplied or corrected value, tell the user it will be
+   saved in their private vault for future medical scheduling.
+4. Update an existing record with
+   `vault-cli memory update <memoryId> "Date of birth: YYYY-MM-DD" --vault "$VAULT" --section Identity`;
+   otherwise create it with
+   `vault-cli memory upsert "Date of birth: YYYY-MM-DD" --vault "$VAULT" --section Identity`.
+5. Inspect the returned document. Do not claim it was saved until the write
+   succeeded. If conflicting duplicate date-of-birth records exist, confirm the
+   value, keep one normalized record, and remove the others with
+   `vault-cli memory forget <memoryId> --vault "$VAULT"`.
+6. Treat the saved value as reusable identity evidence, not current approval to
+   disclose it. If the user declines to provide or durably save the value, stop
+   before the real scheduling action.
+
+For every other fact, classify it before writing:
 
 - **Canonical structured fact:** keep provider, health, insurance, order, or
   appointment data with its existing structured owner; do not duplicate it in
@@ -191,7 +228,7 @@ day-of-week or time-of-day preference, a preferred modality, permission to use
 any clinician by default, or a standing rule such as always asking before
 accepting a cancellation fee. They remain defaults, not current authorization.
 
-For a durable, user-approved fact:
+For any other durable, user-approved fact:
 
 1. Read `vault-cli memory show --vault "$VAULT" --format json` first.
 2. Use `vault-cli memory set-name <displayName> --vault "$VAULT"` only for the
@@ -206,10 +243,11 @@ For a durable, user-approved fact:
    succeeded and the returned value matches the intended fact.
 
 Never store one appointment's reason, exact date or time, transient
-availability, date of birth, callback details, full address, medical details,
+availability, callback details, full address, medical details,
 insurance or prescription identifiers, referral or authorization data,
-confirmation codes, appointment details, or current action/disclosure
-authority in freeform memory.
+confirmation codes, appointment details, or current action/disclosure authority
+in freeform memory. Do not extend the date-of-birth exception to other sensitive
+identifiers or health details.
 
 ## Ready-to-act gate
 
@@ -218,6 +256,10 @@ until every outcome-critical slot is resolved and the current user request
 authorizes the action within explicit bounds. A successful test call, office
 hours lookup, or availability inquiry cannot satisfy this gate.
 
+For every real action covered by this skill, the gate also requires exactly one
+verified `Date of birth: YYYY-MM-DD` Identity record and current approval to
+disclose the patient's name and date of birth to the destination.
+
 When intake is complete:
 
 1. Prefer a structured integration when it can complete the task safely;
@@ -225,8 +267,10 @@ When intake is complete:
    a call.
 2. Before acting, summarize in one line what Murph will request, what choices it
    may accept, and what personal facts it will share.
-3. Put only approved, call-relevant facts in `shareableFacts`. If a live choice
-   exceeds the brief, consult or transfer to the user when available; otherwise
+3. Put only approved, call-relevant facts in `shareableFacts`. For an appointment
+   call, include the approved `patient_name` and normalized `date_of_birth`
+   (`YYYY-MM-DD`). If a live choice exceeds the brief, consult or transfer to the
+   user when available; otherwise
    collect options or end without committing.
 4. For browser execution, follow `computer-use` for final-term authorization,
    private handoff, submission, and verification.

@@ -1,9 +1,12 @@
 import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
+  experimentSessionMetricIsDeclared,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
   type MetricComparator,
   type MetricConfidence,
   type MetricGrain,
@@ -24,6 +27,8 @@ import { buildSampleSummaryId } from "../sample-summary-id.ts";
 export { parseGoalMetricTargets } from "./goals.ts";
 
 export type {
+  ExperimentPrimaryMetricCaptureAssessment,
+  ExperimentPrimaryMetricCaptureIssue,
   GoalMetricTarget,
   MetricComparator,
   MetricConfidence,
@@ -50,8 +55,10 @@ export type {
 export {
   METRIC_POINT_SCHEMA_VERSION,
   METRIC_SELECTION_SCHEMA_VERSION,
+  assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
+  experimentSessionMetricIsDeclared,
   formatMetricDisplayValue,
   listMetricPoints,
   listMetricDefinitions,
@@ -59,12 +66,15 @@ export {
   normalizeMetricKey,
   normalizeMetricValue,
   resolveMetricDefinition,
+  resolveExperimentSessionMetricSpec,
+  resolveExperimentSessionMetricSpecForBiomarker,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricWindowComparison,
   selectMetricValue,
+  validateExperimentSessionMetricValue,
 } from "@murphai/health-metrics";
 
 export interface MetricRowEvidence {
@@ -487,7 +497,7 @@ function scalarMetricPoint(input: {
   unit: string | null;
   value: number | null;
 }): MetricPoint {
-  const metricKey = normalizeMetricKey(input.metric);
+  const metricKey = resolveNonEmptyMetricKey(input.metric);
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: input.unit ?? definition.displayUnit, value: input.value });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
@@ -588,6 +598,11 @@ function fnv1a64Hex(value: string): string {
   }
 
   return hash.toString(16).padStart(16, "0");
+}
+
+function resolveNonEmptyMetricKey(metric: string): string {
+  const normalized = normalizeMetricKey(metric);
+  return normalized || `custom-${fnv1a64Hex(metric.normalize("NFKC").toLowerCase())}`;
 }
 
 function compareMetricPointDesc(left: MetricPoint, right: MetricPoint): number {

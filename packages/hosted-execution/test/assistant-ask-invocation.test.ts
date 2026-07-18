@@ -42,16 +42,22 @@ describe("Assistant Ask trusted invocation contracts", () => {
     });
   });
 
-  it("normalizes the deployed reviewed-exact request shape to an accepted-input origin", () => {
-    expect(parseHostedExecutionAssistantAskRequestedPayload({
+  it("requires the trusted origin object for consented-member requests", () => {
+    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
       expiresAt: "2026-07-20T13:10:00.000Z",
       originAssistantInputId: acceptedOrigin.assistantInputId,
       originSessionId: acceptedOrigin.sessionId,
       question: "How much sleep did they get last night?",
       target,
-    })).toMatchObject({
-      origin: acceptedOrigin,
-    });
+    })).toThrow(/unsupported field|origin/u);
+
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask_member",
+      grantId: "hdg_availability",
+      originAssistantInputId: acceptedOrigin.assistantInputId,
+      originSessionId: acceptedOrigin.sessionId,
+      question: "How much sleep did they get last night?",
+    })).toThrow(/not allowed/u);
   });
 
   it("rejects the removed delivery-mode field on the trusted invocation", () => {

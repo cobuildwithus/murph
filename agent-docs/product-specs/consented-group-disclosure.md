@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-16
+Last verified: 2026-07-18
 
 ## Decision
 
@@ -59,8 +59,9 @@ review the candidate disclosure inside that boundary.
 5. During either a fresh accepted group input or a claimed scheduled group
    automation occurrence, group Murph calls `murph.group(action="ask_member")`
    with one self-contained question and the exact `grantId` returned by the
-   current read. Trusted runtime code injects the invocation and delivery mode;
-   the model never supplies them. One invocation owns at most one request per
+   current read. Trusted runtime code injects the invocation origin, and
+   delivery behavior is derived from that origin; the model supplies neither.
+   One invocation owns at most one request per
    grant. Exact retry reuses it, while a changed question for that grant
    conflicts. The same occurrence may ask other grants independently.
 6. The member's private runtime runs one read-only candidate pass against its
@@ -223,14 +224,16 @@ and disclosure contract.
 ## Rollout and rollback
 
 Deploy consumers first. Cloudflare/runner and Web must tolerate the new
-`consented_member` request target, prepare disclosure context, and optional
-`deliveryMode: "reviewed_exact"` completion before Web may emit new work.
+`consented_member` request target, trusted accepted-input and
+scheduled-automation origins, disclosure-context preparation, reviewed exact
+group delivery, and isolated no-delivery automation completion before Web may
+emit new work.
 Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
 deployment and the runner fingerprint/confinement smoke. The synchronous
 history caps satisfy the cardinality prerequisite; enable exact `1` only after
 both planes have converged and smoke has passed.
 
 Rollback disables and redeploys the Web producer first. Keep compatible
-consumers deployed until every consented request and reviewed-exact completion
+consumers deployed until every consented request and accepted-input or automation completion
 has drained from Web mailboxes, imported runtime state, and existing outbox
 obligations. Prefer a forward fix once new work has been produced.

@@ -15,6 +15,7 @@ export type AssistantOutboxRawTargetIdentityInput = {
   deliverySource?: AssistantOutboxIntent['deliverySource']
   explicitTarget?: string | null
   identityId?: string | null
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   replyToMessageId?: string | null
   threadId?: string | null
 }
@@ -31,6 +32,7 @@ export type AssistantOutboxPersistedTarget = Pick<
   | 'deliverySource'
   | 'explicitTarget'
   | 'identityId'
+  | 'nativeReplyRequested'
   | 'replyToMessageId'
   | 'threadId'
   | 'threadIsDirect'
@@ -62,6 +64,9 @@ export function buildAssistantOutboxRawTargetIdentity(
     identityId: input.identityId,
     actorId: input.actorId,
     threadId: input.threadId,
+    ...(input.nativeReplyRequested === undefined
+      ? {}
+      : { nativeReplyRequested: input.nativeReplyRequested }),
     replyToMessageId: input.replyToMessageId,
     explicitTarget: input.explicitTarget,
     bindingDelivery: input.bindingDelivery,
@@ -84,6 +89,9 @@ export function buildAssistantOutboxPersistedTarget(
     actorId,
     threadId,
     threadIsDirect,
+    ...(input.nativeReplyRequested === undefined
+      ? {}
+      : { nativeReplyRequested: input.nativeReplyRequested }),
     replyToMessageId: normalizeNullableString(input.replyToMessageId),
     bindingDelivery: input.bindingDelivery === undefined
       ? resolveAssistantBindingDelivery({
@@ -108,6 +116,7 @@ export function hashAssistantOutboxIdentity(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   operation?: AssistantOutboxIntent['operation']
   replyToMessageId?: string | null
   sessionId: string
@@ -135,6 +144,9 @@ export function hashAssistantOutboxIdentity(input: {
         identityId: input.identityId,
         actorId: input.actorId,
         threadId: input.threadId,
+        ...(input.nativeReplyRequested === undefined
+          ? {}
+          : { nativeReplyRequested: input.nativeReplyRequested }),
         replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
@@ -168,6 +180,7 @@ export function hashAssistantOutboxTargetFingerprint(input: {
   deliverySource?: AssistantOutboxIntent['deliverySource']
   explicitTarget?: string | null
   identityId?: string | null
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   replyToMessageId?: string | null
   threadId?: string | null
 }): string {
@@ -178,6 +191,9 @@ export function hashAssistantOutboxTargetFingerprint(input: {
         identityId: input.identityId,
         actorId: input.actorId,
         threadId: input.threadId,
+        ...(input.nativeReplyRequested === undefined
+          ? {}
+          : { nativeReplyRequested: input.nativeReplyRequested }),
         replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,

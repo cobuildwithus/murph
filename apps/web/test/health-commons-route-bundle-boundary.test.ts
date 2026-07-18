@@ -17,6 +17,7 @@ const sourceFiles: readonly string[] = [
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
+  "apps/web/app/(dashboard)/experiments/[experimentId]/results/page.tsx",
   "apps/web/app/(dashboard)/biomarkers/[biomarkerId]/page.tsx",
   "apps/web/app/measurement-methods/[measurementMethodId]/page.tsx",
 ] as const;
@@ -57,6 +58,15 @@ describe("Health Commons route-bundle boundary", () => {
     expect(source).not.toContain("prisma");
     expect(source).not.toContain("getServerSession");
     expect(source).not.toContain("auth(");
+  });
+
+  it("keeps experiment browse code off the filesystem-backed Health Commons runtime", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "apps/web/src/lib/health-commons/experiment-browse.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("@murphai/health-commons/runtime");
   });
 
   it("keeps public biomarker pages on generated page projections instead of route bundles", () => {

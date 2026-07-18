@@ -324,7 +324,6 @@ async function executeConfinedReadOnlyAssistantAskTurn(
       const result = await executeCodexAppServerTurn({
         abortSignal: input.abortSignal,
         allowFinishWithoutReply: false,
-        allowMessageReactions: false,
         approvalPolicy: 'never',
         baseInstructions: turn.baseInstructions,
         codexCommand: input.codexCommand,

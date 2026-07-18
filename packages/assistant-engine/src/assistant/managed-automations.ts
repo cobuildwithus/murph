@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   loadVault,
   patchAutomation,
+  reconcileAutomationSupportSeriesNamespace,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -10,7 +11,9 @@ import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
 import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   MURPH_PRODUCT_ORIGIN,
+  parseAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationRoute,
@@ -27,7 +30,9 @@ import {
   resolveDeliverableAutomationRoute,
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
-import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import {
+  prepareExperimentLifecycleAutomations,
+} from './experiment-support-automations.js'
 import { readAssistantOnboardingState } from './onboarding-state.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 
@@ -39,6 +44,7 @@ export type MurphManagedAutomationSchedule = Exclude<
 >
 
 export interface MurphManagedAutomationSeed {
+  activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
@@ -60,6 +66,7 @@ export interface ApplyMurphManagedAutomationsInput {
   routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   runtimeEnv?: Readonly<Record<string, string | undefined>>
   seeds?: readonly MurphManagedAutomationSeed[]
+  shouldYield?: (() => boolean) | null
   vaultRoot: string
 }
 
@@ -69,6 +76,7 @@ export interface ApplyMurphManagedAutomationsResult {
   stableKeyFailure?: unknown
   stableKeyRetryNeeded?: true
   updated: number
+  yielded?: true
 }
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
@@ -143,6 +151,7 @@ const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
   'scheduled',
   'murph-managed',
 ] as const
+const EXPERIMENT_SUPPORT_SERIES_ID_PREFIX = 'experiment-lifecycle:'
 
 const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
   'This scheduled check helps continue Murph setup.',
@@ -226,7 +235,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Good finding shapes include:',
       '- Bloodwork plus behavior: lab markers, symptoms, workouts, food timing, or supplement use that move with sleep, HRV, recovery mismatch, fatigue, soreness, or GI notes.',
-      '- Biomarkers plus sleep: ferritin/iron, vitamin D, thyroid, inflammation, glucose/lipids, cortisol if present, or similar markers that may help explain sleep depth, wakeups, latency, morning energy, or restless periods.',
+      '- Biomarkers plus sleep: ferritin/iron, vitamin D, thyroid, inflammation, glucose/lipids, cortisol if present, or similar markers that line up with sleep continuity, wakeups, latency, morning energy, or restless periods.',
       '- Supplement interplay: timing, dose, starts/stops, or combinations that line up with sleep, HRV, GI symptoms, training response, or lab movement. Treat this as a hypothesis, not advice to start or stop anything.',
       '- Surprising mismatches: an independent signal improves while another worsens, or the user beats or misses their baseline in a way vendor scores do not explain.',
       '- Research-backed hypotheses: a credible outside study suggests a mechanism, and the vault either supports, contradicts, or narrows it for this user.',
@@ -240,10 +249,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Recurring stress windows: HRV dips, RHR spikes, restless sleep, or "felt anxious/off" notes that cluster at the same day-of-week or time-of-day (Sunday evening, weekday 6pm, post-standup, after a recurring call), pointing at a repeating trigger worth naming.',
       '- Stress coupled to a place, person, or event: stress signatures that line up with logged context like a specific location, transition (commute, coming home), recurring meeting series, social plan, family interaction, or living situation. Name the pattern; do not diagnose the relationship.',
       '- Anticipatory stress: sleep, HRV, or wake time degrading the night before a recurring event (Sunday-night dread, pre-flight, pre-presentation, day-before travel) rather than during it.',
-      "- Personal cliff (your number, not the generic one): a specific sleep duration, drink count, last-bite-to-bed gap, weekly training load, caffeine cutoff time, or similar threshold where this user's next-day signal (HRV, deep sleep, RHR, mood, GI, recovery) stops degrading gracefully and breaks. State the personal number with how confident the data is, not a population norm.",
+      "- Personal cliff (your number, not the generic one): a specific sleep duration, drink count, last-bite-to-bed gap, weekly training load, caffeine cutoff time, or similar threshold where this user's independent next-day signal (HRV, RHR, mood, GI, recovery, or reported function) stops degrading gracefully and breaks. State the personal number with how confident the data is, not a population norm.",
       '- Slow drift over months: a trend in baseline RHR, HRV, weight, sleep onset, cycle length, fasting glucose, ApoB, or recovery scores that is invisible week-to-week but real over 60-180 days. Only surface when there is enough history to call a slope, not noise.',
       '- Compounding inputs: two or more behaviors that are each fine alone but reliably backfire together (late dinner plus early alarm, alcohol plus travel day, hard lift plus low-carb day, sauna plus late caffeine). Name the pairing; either side can be the lever.',
-      '- Environmental confounders: bedroom temperature, humidity, CO2, outdoor air quality, ambient light, or noise that explains sleep, HRV, or morning energy better than the behavior the user is currently tuning. Worth flagging when paired data points more at the room than the routine.',
+      '- Environmental confounders: bedroom temperature, humidity, CO2, outdoor air quality, ambient light, or noise that lines up with sleep, HRV, or morning energy better than the behavior the user is currently tuning. Worth flagging when paired data points more at the room than the routine.',
       '- Quiet decay or asymmetric ROI: a routine, supplement, or practice that used to correlate with a positive signal but has silently stopped working, or a small low-effort behavior that is punching above its weight while a more effortful one is not. Suggest one thing to drop alongside one thing to keep.',
       '- Adherence friction: recurring places where the user forgets to log, take supplements, eat enough, prep food, or wind down, plus one low-effort way to make the behavior easier.',
       '- Fun experiments: suggest a tiny one-week experiment only when it follows from the data, is low risk, and has a clear thing to measure.',
@@ -252,6 +261,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Interestingness gate: send only if the finding is worth a short weekly note. It should make the user think "I did not know that about me, that is interesting!" or change what they might measure, try, interpret, or ignore. Interesting can mean surprising, explanatory, actionable, hunch-falsifying, or showing a stable personal threshold or tradeoff; it does not have to be a tidy recommendation.',
       'Suppress true-but-boring findings. Do not send when the main point is missing data, messy tags, lack of evidence for a stated goal, generic goal progress, or "Murph cannot currently see X." Better tagging or more complete logging can be a caveat or follow-up, but it is not the insight.',
       "Reject tautological findings: do not treat a vendor score as the insight when the evidence is a direct or obvious input to how that score is designed or calculated. For example, do not say WHOOP recovery tracks sleep, HRV, resting heart rate, or respiratory rate unless the finding isolates a non-obvious mismatch, exception, lag, threshold, or personal pattern beyond the score's formula.",
+      'A consumer sleep-stage estimate by itself is never a weekly finding or reason to coach. Require a meaningful independent signal such as sleep opportunity, timing, awakenings, next-day function, or a user-reported change.',
+      'Calibrate causal language to the design. One weekly window or a repeated correlation can support "lined up with" or "was associated with," not "caused," "explains," or "proved." Check plausible alternatives and confounders. Reserve causal wording for evidence such as a planned comparison with the expected timing and a repeatable reversal, and still state the limits.',
       'Prefer findings that compare independent signals, explain a surprising mismatch, show a durable threshold, or expose a personal tradeoff the user could plausibly act on.',
       'Prefer insights that make the user feel more in control of their day. Avoid insights that only explain a score, praise or criticize compliance, or require perfect tracking to be useful.',
       'Stop when one candidate clearly clears the bar or clearly does not; do not keep researching to make a weak idea sound interesting.',
@@ -265,7 +276,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- If append-section reports that the section already exists, another run created it first: read `weekly-health-insights` and apply the same current interestingness gate before deciding whether to send or return a `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}` decision.',
       '- Then, only when the finding clears the bar, send one concise note in plain adult language: a clear claim anchored in recognizable context, compact evidence, the simple translation, and a light optional follow-up.',
       '- Use dates for traceability, not as the story: prefer context the user may recognize (for example, "after two hard days in a row") and use exact dates only when they help.',
-      '- Name the outcome before contrasting causes. Prefer "The recovery dip looked tied to stacking hard days, not running by itself" over "running itself is not the problem."',
+      '- Name the outcome before contrasting inputs. Prefer "The recovery dip lined up with stacking hard days more than with running by itself" over "running itself is not the problem."',
       '- Do not make the user infer the point from raw biomarker names, lab ranges, supplement ingredients, or device jargon. Explain the marker or mechanism in one short phrase when it matters, such as "TSH is the brain\'s signal asking the thyroid for more hormone."',
       '- Name the practical takeaway clearly: watch this context next time, measure one thing, test a hunch, ignore a misleading score, change a low-risk behavior, or ask a clinician. If the short note would be confusing, simplify the framing or choose another candidate.',
       '',
@@ -292,7 +303,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled weekly run, find zero or one clearly actionable health improvement opportunity and, only when the evidence is strong, send one short invitation to work on it together. Most weeks the right outcome is silence; an unproven or repeated nudge is worse than no message.',
       '',
       'This run is the sibling of the weekly health insight, with the opposite bar: the insight scout hunts for non-obvious findings, while this run looks for obvious-but-tractable deficits the user could realistically start improving this week. Candidate domains include:',
-      '- Deep sleep or total sleep consistently well below typical reference ranges.',
+      '- Repeatedly short sleep opportunity, materially irregular sleep timing, or disrupted sleep paired with daytime impact.',
       '- Low daily activity: few active minutes or consistently low movement.',
       '- Little or no strength training logged over recent weeks.',
       '- Little or no cardio logged over recent weeks.',
@@ -303,6 +314,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Capability: the metric must be positively captured by a connected, healthy source. When `murph.device` is available, use it with `action: list_accounts`; always read `vault-cli wearables sources list`. If account health cannot be proved without the tool, suppress any candidate that depends on it. Never infer absence of a behavior from absence of data: if no connected source captures strength workouts, "no strength training" is unknowable, not a deficit. Providers differ in what they report, so confirm the metric actually appears in this user\'s data before judging it.',
       '- Plausibility: treat exact zeros, sudden cliffs, or values wildly inconsistent with the rest of the data as pipeline or sync bugs, not behavior. If a reading looks broken, suppress; never tell the user they are inactive because a counter reads zero.',
       '- Sufficiency: require a real pattern window, roughly three or more weeks of reasonably continuous coverage for the metric, before calling anything consistent. One bad week is noise.',
+      '- Sleep validity: consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own. Require reliable timing/opportunity or disruption evidence plus a meaningful independent signal such as next-day function or the user\'s stated concern. Do not diagnose a sleep disorder from device data.',
       '',
       'Dedupe and pacing:',
       '- Read `vault-cli knowledge show improvement-opportunities`. If the page is missing, treat that as no prior offers. Use `improvement-opportunities` as the only dedupe ledger; do not create per-week pages.',
@@ -316,7 +328,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'If one domain clears every gate:',
       '- Append one dated section to the rolling ledger before sending, using the locked append surface, for example: `vault-cli knowledge append-section improvement-opportunities YYYY-MM-DD --title "Improvement opportunities" --body <markdown> --source-path <canonical-vault-path>`. The body records the domain, the compact evidence, and that an offer was sent, so future runs can pace themselves. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
       '- If append-section reports that the section already exists, another run created it first: read the existing section, apply the same evidence gate, and either send from it or return `{"kind":"skip","privateSummary":"Existing improvement opportunity did not clear the current send bar."}`.',
-      '- Then send one short, warm note in plain adult language: name the pattern with its compact evidence (for example, "your deep sleep has averaged about 45 minutes a night over the last month; most adults get 1.5 to 2 hours"), say in one sentence why it is worth caring about, and ask whether they want to work on it together. Population reference points are welcome here when they help the user calibrate.',
+      '- Then send one short, warm note in plain adult language: name the personal pattern with compact evidence (for example, "your sleep window has shifted by more than 90 minutes on most weeknights this month, and you have mentioned feeling wiped out in the mornings"), say in one sentence why it is worth caring about, and ask whether they want to work on it together. Do not use population sleep-stage targets as the rationale.',
       '- Frame it as an invitation, not a verdict or a lecture. Do not prescribe a plan in this message; if the user says yes, the follow-up conversation is where a plan or a small experiment gets designed.',
       '',
       'Do not diagnose, do not alarm, do not shame, and do not pad the note with generic health tips.',
@@ -510,12 +522,35 @@ export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
   const now = input.now ?? new Date()
+  const result: ApplyMurphManagedAutomationsResult = {
+    created: 0,
+    skipped: 0,
+    updated: 0,
+  }
+  if (input.shouldYield?.() === true) {
+    return { ...result, yielded: true }
+  }
+  // Deterministic closeout and user-facing seed composition share one
+  // authoritative experiment scan and still run before route resolution.
+  const experimentLifecycle = input.seeds === undefined
+    ? await prepareExperimentLifecycleAutomations({
+        now,
+        shouldYield: input.shouldYield ?? null,
+        vaultRoot: input.vaultRoot,
+      })
+    : null
+  if (experimentLifecycle?.yielded === true || input.shouldYield?.() === true) {
+    return { ...result, yielded: true }
+  }
   const rawSeeds =
     input.seeds ??
     markPersonalMurphManagedAutomationSeeds([
       ...MURPH_MANAGED_AUTOMATIONS,
-      ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
+      ...(experimentLifecycle?.seeds ?? []),
     ])
+  const desiredExperimentSupportSeries = input.seeds === undefined
+    ? buildDesiredExperimentSupportSeries(rawSeeds)
+    : null
   const seeds = rawSeeds.filter((seed) =>
     murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
   )
@@ -538,17 +573,17 @@ export async function applyMurphManagedAutomations(
     createRoute = await resolveMurphManagedAutomationCreateRoute(input)
     return createRoute
   }
-  const result: ApplyMurphManagedAutomationsResult = {
-    created: 0,
-    skipped: 0,
-    updated: 0,
-  }
-
   for (const rawSeed of seeds) {
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
     const existing = await showAutomation({
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
     })
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
 
     if (
       existing &&
@@ -559,6 +594,9 @@ export async function applyMurphManagedAutomations(
         continue
       }
 
+      if (input.shouldYield?.() === true) {
+        return { ...result, yielded: true }
+      }
       await patchAutomation({
         lookup: existing.automationId,
         now,
@@ -586,6 +624,9 @@ export async function applyMurphManagedAutomations(
           result.stableKeyRetryNeeded = true
           continue
         }
+        if (input.shouldYield?.() === true) {
+          return { ...result, yielded: true }
+        }
       }
 
       const seed = resolveMurphManagedAutomationCreateSeed({
@@ -611,12 +652,18 @@ export async function applyMurphManagedAutomations(
         slug: seed.slug,
         vaultRoot: input.vaultRoot,
       })
+      if (input.shouldYield?.() === true) {
+        return { ...result, yielded: true }
+      }
       if (existingSlug) {
         result.skipped += 1
         continue
       }
 
       const route = await resolveCreateRoute()
+      if (input.shouldYield?.() === true) {
+        return { ...result, yielded: true }
+      }
       if (!route) {
         result.skipped += 1
         continue
@@ -627,7 +674,13 @@ export async function applyMurphManagedAutomations(
       }
 
       const summary = normalizeMurphManagedAutomationSummary(seed)
+      if (input.shouldYield?.() === true) {
+        return { ...result, yielded: true }
+      }
       await upsertAutomation({
+        ...(seed.activeUntil === undefined
+          ? {}
+          : { activeUntil: seed.activeUntil }),
         automationId: seed.automationId,
         continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
         instructions: seed.instructions,
@@ -654,7 +707,9 @@ export async function applyMurphManagedAutomations(
       shouldSpreadMurphManagedAutomationSchedule(rawSeed)
     const seed = rawSeed
 
-    if (existing.status !== 'active') {
+    const reactivateReconciledLifecycleOneShot =
+      canReactivateReconciledLifecycleOneShot({ existing, now, seed: rawSeed })
+    if (existing.status !== 'active' && !reactivateReconciledLifecycleOneShot) {
       result.skipped += 1
       continue
     }
@@ -679,7 +734,7 @@ export async function applyMurphManagedAutomations(
       existing,
       seed,
       { ignoreSchedule: preserveExistingSchedule },
-    )) {
+    ) && !reactivateReconciledLifecycleOneShot) {
       result.skipped += 1
       continue
     }
@@ -693,24 +748,37 @@ export async function applyMurphManagedAutomations(
     // schedule (cron/every/dailyLocal) under one-shot instructions would
     // fire the final-review repeatedly, so it must be replaced with the
     // new desired schedule (and archived if that is itself stale).
-    const newDesiredStale = preserveExistingSchedule
+    const newDesiredOccurrenceStale = preserveExistingSchedule
       ? false
       : isStaleOneShotSchedule(seed.schedule, now)
-    const legacyOneShotStillFires =
-      existing.schedule.kind === 'at' &&
-      !isStaleOneShotSchedule(existing.schedule, now)
+    const newDesiredWindowExpired = preserveExistingSchedule
+      ? false
+      : isStaleMurphManagedOneShotSeed(seed, now)
+    const legacyOneShotStillFires = canPreserveLegacyOneShotSchedule({
+      existingSchedule: existing.schedule,
+      now,
+      seed,
+    })
     let reconciledSchedule: AutomationSchedule = preserveExistingSchedule
       ? existing.schedule
       : seed.schedule
-    let reconciledStatus: AutomationStatus = existing.status
-    if (newDesiredStale && legacyOneShotStillFires) {
+    let reconciledStatus: AutomationStatus = reactivateReconciledLifecycleOneShot
+      ? 'active'
+      : existing.status
+    if (newDesiredOccurrenceStale && legacyOneShotStillFires) {
       reconciledSchedule = existing.schedule
-    } else if (newDesiredStale) {
+    } else if (newDesiredWindowExpired) {
       reconciledStatus = 'archived'
     }
 
     const summary = normalizeMurphManagedAutomationSummary(seed)
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
     await upsertAutomation({
+      ...(seed.activeUntil === undefined
+        ? {}
+        : { activeUntil: seed.activeUntil }),
       automationId: existing.automationId,
       continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
       instructions: seed.instructions,
@@ -736,14 +804,70 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
-  if (await reconcileExistingOnboardingFollowupAutomation({
+  if (input.shouldYield?.() === true) {
+    return { ...result, yielded: true }
+  }
+  const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
     now,
+    shouldYield: input.shouldYield ?? null,
     vaultRoot: input.vaultRoot,
-  })) {
+  })
+  if (onboardingReconciliation.yielded) {
+    return { ...result, yielded: true }
+  }
+  if (onboardingReconciliation.updated) {
     result.updated += 1
   }
 
+  if (desiredExperimentSupportSeries !== null) {
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
+    const reconciliation = await reconcileAutomationSupportSeriesNamespace({
+      desiredSeries: desiredExperimentSupportSeries,
+      now,
+      seriesIdPrefix: EXPERIMENT_SUPPORT_SERIES_ID_PREFIX,
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    })
+    if (reconciliation.yielded === true) {
+      return { ...result, yielded: true }
+    }
+    result.updated += reconciliation.archivedCount
+  }
+
   return result
+}
+
+function buildDesiredExperimentSupportSeries(
+  seeds: readonly MurphManagedAutomationSeed[],
+): Array<{
+  desiredAutomationIds: string[]
+  supportSeriesTag: string
+}> {
+  const desiredIdsByTag = new Map<string, Set<string>>()
+
+  for (const seed of seeds) {
+    const supportSeriesTag = (seed.tags ?? []).find((tag) => {
+      const parsed = parseAutomationSupportSeriesTag(tag)
+      return parsed?.seriesId.startsWith(EXPERIMENT_SUPPORT_SERIES_ID_PREFIX) === true
+    })
+    if (!supportSeriesTag) {
+      continue
+    }
+
+    const desiredIds = desiredIdsByTag.get(supportSeriesTag) ?? new Set<string>()
+    desiredIds.add(seed.automationId)
+    desiredIdsByTag.set(supportSeriesTag, desiredIds)
+  }
+
+  return [...desiredIdsByTag.entries()].map(([
+    supportSeriesTag,
+    desiredAutomationIds,
+  ]) => ({
+    desiredAutomationIds: [...desiredAutomationIds],
+    supportSeriesTag,
+  }))
 }
 
 function markPersonalMurphManagedAutomationSeeds(
@@ -836,34 +960,48 @@ function stableHashToIndex(material: string, length: number): number {
 
 async function reconcileExistingOnboardingFollowupAutomation(input: {
   now: Date
+  shouldYield: (() => boolean) | null
   vaultRoot: string
-}): Promise<boolean> {
+}): Promise<{ updated: boolean; yielded: boolean }> {
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
+  }
   const existing = await showAutomation({
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     vaultRoot: input.vaultRoot,
   })
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
+  }
   if (!existing || existing.status === 'archived') {
-    return false
+    return { updated: false, yielded: false }
   }
 
   if (!isManagedOnboardingFollowupAutomation(existing)) {
-    return false
+    return { updated: false, yielded: false }
   }
 
-  if ((await readAssistantOnboardingState(input.vaultRoot)).status === 'completed') {
+  const onboardingState = await readAssistantOnboardingState(input.vaultRoot)
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
+  }
+  if (onboardingState.status === 'completed') {
     await patchAutomation({
       lookup: existing.automationId,
       now: input.now,
       status: 'archived',
       vaultRoot: input.vaultRoot,
     })
-    return true
+    return { updated: true, yielded: false }
   }
 
   if (!onboardingFollowupAutomationDefinitionChanged(existing)) {
-    return false
+    return { updated: false, yielded: false }
   }
 
+  if (input.shouldYield?.() === true) {
+    return { updated: false, yielded: true }
+  }
   await patchAutomation({
     continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
@@ -875,7 +1013,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     vaultRoot: input.vaultRoot,
   })
 
-  return true
+  return { updated: true, yielded: false }
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
@@ -961,6 +1099,10 @@ function murphManagedAutomationSeedChanged(
   // "changed" on every run and rewrite the record forever.
   const summary = normalizeMurphManagedAutomationSummary(seed)
   return existing.title !== seed.title ||
+    (
+      seed.activeUntil !== undefined &&
+      existing.activeUntil !== seed.activeUntil
+    ) ||
     (summary !== null && existing.summary !== summary) ||
     existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
     existing.instructions !== seed.instructions ||
@@ -1048,10 +1190,60 @@ function murphManagedAutomationValuesEqual(
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+function canReactivateReconciledLifecycleOneShot(input: {
+  existing: AutomationRecord
+  now: Date
+  seed: MurphManagedAutomationSeed
+}): boolean {
+  if (
+    input.existing.status !== 'archived' ||
+    !input.existing.tags.includes(
+      AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    ) ||
+    input.seed.schedule.kind !== 'at'
+  ) {
+    return false
+  }
+
+  const belongsToExperimentLifecycle = (input.seed.tags ?? []).some((tag) => {
+    const parsed = parseAutomationSupportSeriesTag(tag)
+    return parsed?.seriesId.startsWith(EXPERIMENT_SUPPORT_SERIES_ID_PREFIX) === true
+  })
+  if (!belongsToExperimentLifecycle) {
+    return false
+  }
+
+  const nowMs = input.now.getTime()
+  const scheduledAtMs = Date.parse(input.seed.schedule.at)
+  if (
+    !Number.isFinite(nowMs) ||
+    !Number.isFinite(scheduledAtMs) ||
+    nowMs >= scheduledAtMs
+  ) {
+    return false
+  }
+
+  if (input.seed.activeUntil === undefined || input.seed.activeUntil === null) {
+    return true
+  }
+  const activeUntilMs = Date.parse(input.seed.activeUntil)
+  return Number.isFinite(activeUntilMs) && nowMs < activeUntilMs
+}
+
 function isStaleMurphManagedOneShotSeed(
   seed: MurphManagedAutomationSeed,
   now: Date,
 ): boolean {
+  // An explicit finite activity window owns staleness for bounded work that
+  // must survive a dormant runtime, including required user reviews and
+  // silent deterministic experiment closeout.
+  if (
+    seed.activeUntil !== undefined &&
+    seed.activeUntil !== null
+  ) {
+    const activeUntilMs = Date.parse(seed.activeUntil)
+    return !Number.isFinite(activeUntilMs) || activeUntilMs <= now.getTime()
+  }
   return isStaleOneShotSchedule(seed.schedule, now)
 }
 
@@ -1070,4 +1262,31 @@ function isStaleOneShotSchedule(
   }
 
   return scheduledAtMs + MURPH_MANAGED_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS <= nowMs
+}
+
+function canPreserveLegacyOneShotSchedule(input: {
+  existingSchedule: AutomationSchedule
+  now: Date
+  seed: MurphManagedAutomationSeed
+}): boolean {
+  if (
+    input.existingSchedule.kind !== 'at' ||
+    isStaleOneShotSchedule(input.existingSchedule, input.now)
+  ) {
+    return false
+  }
+
+  if (
+    input.seed.activeUntil === undefined ||
+    input.seed.activeUntil === null
+  ) {
+    return true
+  }
+
+  const activeUntilMs = Date.parse(input.seed.activeUntil)
+  const existingAtMs = Date.parse(input.existingSchedule.at)
+  return Number.isFinite(activeUntilMs) &&
+    Number.isFinite(existingAtMs) &&
+    input.now.getTime() < activeUntilMs &&
+    existingAtMs <= activeUntilMs
 }

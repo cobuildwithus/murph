@@ -280,7 +280,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   }))
 
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.5-mini',
+    model: 'gpt-5.6-terra-mini',
   })
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
@@ -741,6 +741,18 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   )
 
   const result = await sendAssistantNotificationLocal({
+    beforeDelivery: (context) => {
+      expect(context).toEqual({
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Sent required exact notification text.',
+          text: 'Fixed welcome text',
+        },
+        deliveryOutcome: null,
+        response: 'Fixed welcome text',
+      })
+      order.push('authority')
+    },
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
     executionContext: {
@@ -765,7 +777,12 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
   expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(order).toEqual(['deliver:Fixed welcome text', 'transcript', 'session'])
+  expect(order).toEqual([
+    'authority',
+    'deliver:Fixed welcome text',
+    'transcript',
+    'session',
+  ])
   expect(runtimeState.turns.createReceipt).toHaveBeenCalledWith(
     expect.objectContaining({
       deliveryRequested: true,
@@ -773,7 +790,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
         notificationMode: 'deterministic-exact-text',
       },
       provider: 'codex-cli',
-      providerModel: 'gpt-5.5',
+      providerModel: 'gpt-5.6-terra',
       sessionId: initialSession.sessionId,
       turnId: 'turn-exact',
     }),
@@ -2357,7 +2374,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
-test('sendAssistantNotificationLocal exposes device authority only to direct non-maintenance turns', async () => {
+test('sendAssistantNotificationLocal isolates hosted capabilities and delivery for internal turns', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
@@ -2369,12 +2386,22 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
       sourceProvider: null,
     })),
   }
-  const observedHostedToolContexts: Array<
-    NotificationTurnProviderInput['hostedToolContext']
-  > = []
-  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+  const groupRequest = vi.fn(async () => {
+    throw new Error('The group tool should not execute in this boundary test.')
+  })
+  const newsletterRequest = vi.fn(async () => {
+    throw new Error(
+      'The newsletter tool must not be available to an internal turn.',
+    )
+  })
+  const observedProviderInputs: NotificationTurnProviderInput[] = []
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
-      observedHostedToolContexts.push(providerInput.hostedToolContext)
+      observedProviderInputs.push(providerInput)
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -2389,6 +2416,33 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
       memberId: 'member-notification-device-scope',
       userEnvKeys: [],
     },
+  }
+  const internalExecutionContext = {
+    hosted: {
+      deviceTool,
+      groupTool: {
+        request: groupRequest,
+      },
+      memberId: 'member-notification-internal-scope',
+      newsletterTool: {
+        request: newsletterRequest,
+      },
+      userEnvKeys: [],
+    },
+  }
+  const internalNotificationInput = {
+    executionContext: internalExecutionContext,
+    instructions: 'Process the reviewed member answer inside the group runtime.',
+    scheduledInvocationAuthority: {
+      automationId: 'automation_call_circle',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+    turnPolicy: {
+      kind: 'internal-exact-skip' as const,
+      privateSummary: 'No notification required.',
+    },
+    vault: '/vaults/notification-internal-scope',
   }
 
   await sendAssistantNotificationLocal({
@@ -2405,10 +2459,86 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
     },
     vault: '/vaults/notification-device-scope',
   })
+  const internalResult = await sendAssistantNotificationLocal(
+    internalNotificationInput,
+  )
 
-  expect(observedHostedToolContexts).toHaveLength(2)
-  expect(observedHostedToolContexts[0]?.deviceTool).toBe(deviceTool)
-  expect(observedHostedToolContexts[1]).toBeNull()
+  expect(observedProviderInputs).toHaveLength(3)
+  expect(observedProviderInputs[0]?.hostedToolContext?.deviceTool).toBe(
+    deviceTool,
+  )
+  expect(observedProviderInputs[1]?.hostedToolContext).toBeNull()
+  const internalProviderInput = observedProviderInputs[2]
+  expect(internalProviderInput?.profile).toEqual(
+    expect.objectContaining({
+      nativeResumePolicy: 'disabled',
+      threadScope: 'isolated-thread',
+      toolProfile: 'internal-turn',
+    }),
+  )
+  expect(internalProviderInput?.input).toEqual(
+    expect.objectContaining({
+      codexConfigOverrides: [
+        'memories.use_memories=false',
+        'memories.generate_memories=false',
+      ],
+      scheduledInvocationAuthority: {
+        automationId: 'automation_call_circle',
+        occurrenceAt: '2026-07-20T13:00:00.000Z',
+      },
+      scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+      suppressProviderFailureTranscriptAudit: true,
+    }),
+  )
+  expect(internalProviderInput?.hostedToolContext?.groupTool?.request).toBe(
+    groupRequest,
+  )
+  expect(internalProviderInput?.hostedToolContext?.deviceTool).toBeNull()
+  expect(internalProviderInput?.hostedToolContext?.newsletterTool).toBeNull()
+  expect(
+    internalProviderInput?.hostedToolContext?.currentInvocationScope?.(),
+  ).toEqual({
+    conversationScope: null,
+    origin: {
+      automationId: 'automation_call_circle',
+      kind: 'automation_occurrence',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+    },
+  })
+  expect(internalResult.decision).toEqual({
+    kind: 'skip',
+    privateSummary: 'No notification required.',
+  })
+  expect(internalResult.response).toBeNull()
+  expect(internalResult.session.sessionId).not.toBe(
+    providerResult.session.sessionId,
+  )
+  expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledTimes(1)
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledTimes(1)
+  expect(mocks.startAssistantChannelTypingIndicator).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Should not send.',
+        text: 'Visible internal message.',
+      }),
+    }),
+  })
+
+  await expect(
+    sendAssistantNotificationLocal(internalNotificationInput),
+  ).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INTERNAL_DECISION_INVALID',
+  })
+  expect(mocks.resolveAssistantSessionForMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
@@ -2500,15 +2630,67 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
         hosted: null,
       },
       instructions: 'Queue this scheduled reminder.',
+      outboxAutomationAuthority: {
+        automationId: 'automation_sleep_reminder',
+        expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
+      },
       vault: '/vaults/deferred-queue',
     }),
   ).rejects.toBe(commitError)
 
   expect(events).toEqual(['deliver', 'beforeCommit'])
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    automationAuthority: {
+      automationId: 'automation_sleep_reminder',
+      expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
+    },
+  }))
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
   expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
   expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rechecks notification authority before outbound delivery', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Prepared scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-before-delivery-authority',
+    })
+  const authorityError = new VaultCliError(
+    'ASSISTANT_CRON_AUTHORITY_STALE',
+    'Scheduled notification authority changed during provider work.',
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      beforeDelivery: (context) => {
+        expect(context).toEqual(expect.objectContaining({
+          deliveryOutcome: null,
+          response: 'Remember to sleep.',
+        }))
+        throw authorityError
+      },
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Prepare this scheduled reminder.',
+      vault: '/vaults/before-delivery-authority',
+    }),
+  ).rejects.toBe(authorityError)
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal abandons queued delivery when deferred commit fails', async () => {
@@ -2850,7 +3032,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.5-primary',
+      model: 'gpt-5.6-terra-primary',
     },
     routeId: 'route-primary',
   })
@@ -2978,7 +3160,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
       provider: 'codex-cli',
-      providerModel: 'gpt-5.5-primary',
+      providerModel: 'gpt-5.6-terra-primary',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -2990,7 +3172,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.5-primary',
+    assistantNotificationProviderModel: 'gpt-5.6-terra-primary',
     assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
   })
@@ -3014,7 +3196,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-5.5-primary',
+      model: 'gpt-5.6-terra-primary',
     },
     routeId: 'route-primary',
   })
@@ -3166,13 +3348,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   const primaryRoute = createRoute({
     routeId: 'route-primary',
     providerOptions: {
-      model: 'gpt-5.5-primary',
+      model: 'gpt-5.6-terra-primary',
     },
   })
   const route = createRoute({
     routeId: 'route-provider-failure',
     providerOptions: {
-      model: 'gpt-5.5-mini',
+      model: 'gpt-5.6-terra-mini',
     },
   })
   const mocks = {
@@ -3269,7 +3451,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.5-mini',
+    assistantNotificationProviderModel: 'gpt-5.6-terra-mini',
     assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
@@ -3595,7 +3777,7 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     provider: 'codex-cli',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
@@ -3698,7 +3880,7 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,

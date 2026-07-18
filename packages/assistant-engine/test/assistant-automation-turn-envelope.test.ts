@@ -6,14 +6,14 @@ describe('assistant automation turn envelope', () => {
   it('carries automation target overrides as turn-scoped input', () => {
     expect(buildAssistantAutomationTurnEnvelope({
       assistantTargetOverride: {
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
       },
       turnTrigger: 'automation-cron',
     })).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
       },

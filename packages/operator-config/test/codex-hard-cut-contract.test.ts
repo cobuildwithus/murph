@@ -58,7 +58,7 @@ describe('operator config Codex-only hard-cut contracts', () => {
   it('serializes Vercel AI Gateway through Codex modelProvider config', () => {
     const sessionOptions = serializeAssistantProviderSessionOptions({
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
@@ -67,7 +67,7 @@ describe('operator config Codex-only hard-cut contracts', () => {
 
     expect(assistantProviderSessionOptionsSchema.parse(sessionOptions)).toMatchObject({
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       resumeKind: 'codex-thread',

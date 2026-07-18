@@ -1,13 +1,18 @@
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
+  automationActiveUntilSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
+  automationScheduleAtSchema,
   automationScheduleKindValues,
   automationStatusValues,
+  automationSupportKindValues,
+  parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -17,6 +22,7 @@ import {
   type AutomationSchedule,
   type AutomationScheduleKind,
   type AutomationStatus,
+  type AutomationSupportKind,
 } from "@murphai/contracts";
 
 import { readMarkdownDocument, readOptionalMarkdownDocumentOutcome, walkRelativeFiles } from "./health/loaders.ts";
@@ -42,6 +48,7 @@ export type {
   AutomationRoute,
   AutomationSchedule,
   AutomationStatus,
+  AutomationSupportKind,
 };
 
 export interface AutomationQueryRecord {
@@ -52,9 +59,11 @@ export interface AutomationQueryRecord {
   title: string;
   status: AutomationStatus;
   summary: string | null;
+  activeUntil: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
+  supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -65,9 +74,20 @@ export interface AutomationQueryRecord {
 }
 
 export interface AutomationListOptions {
+  exactTag?: string;
   status?: string | string[];
   text?: string;
   limit?: number;
+}
+
+export interface AutomationListPageOptions extends AutomationListOptions {
+  cursor?: string;
+}
+
+export interface AutomationListPageResult {
+  items: AutomationQueryRecord[];
+  nextCursor: string | null;
+  totalCount: number;
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {
@@ -106,6 +126,36 @@ function requireStringValue(value: unknown, fieldName: string): string {
   }
 
   return normalized;
+}
+
+function normalizeAutomationActiveUntil(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = automationActiveUntilSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      "activeUntil must be a valid ISO 8601 timestamp with an explicit offset.",
+    );
+  }
+
+  return parsed.data;
+}
+
+function normalizeAutomationSupportKind(value: unknown): AutomationSupportKind | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (
+    typeof value !== "string" ||
+    !automationSupportKindValues.includes(value as AutomationSupportKind)
+  ) {
+    throw new Error(
+      `supportKind must be one of ${automationSupportKindValues.join(", ")}.`,
+    );
+  }
+  return value as AutomationSupportKind;
 }
 
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
@@ -197,11 +247,13 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
   }
 
   switch (kind) {
-    case "at":
-      return {
-        kind,
-        at: requireStringValue(object.at, "schedule.at"),
-      };
+    case "at": {
+      const parsed = automationScheduleAtSchema.safeParse(object);
+      if (!parsed.success) {
+        throw new Error("schedule.at must be a valid ISO 8601 timestamp with an explicit offset.");
+      }
+      return parsed.data;
+    }
     case "every": {
       const everyMs = typeof object.everyMs === "number" ? object.everyMs : Number(object.everyMs);
       if (!Number.isInteger(everyMs) || everyMs <= 0) {
@@ -378,12 +430,23 @@ function normalizeTags(value: unknown): string[] {
     return [];
   }
 
-  return [...new Set(
+  const tags = [...new Set(
     value.flatMap((entry) => {
       const tag = normalizeNullableString(typeof entry === "string" ? entry : null);
       return tag ? [tag] : [];
     }),
   )];
+  const supportSeriesTags = tags.filter((tag) =>
+    tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+  );
+  if (supportSeriesTags.some((tag) => parseAutomationSupportSeriesTag(tag) === null)) {
+    throw new Error("Support series tags must use a valid canonical support series id.");
+  }
+  if (supportSeriesTags.length > 1) {
+    throw new Error("An automation may belong to at most one support series.");
+  }
+
+  return tags;
 }
 
 function normalizeInstructions(body: string): string {
@@ -408,6 +471,15 @@ function parseAutomationRecord(
   }
 
   const parsed = parseFrontmatterDocument(markdown);
+  const schedule = normalizeAutomationSchedule(attributes.schedule);
+  const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
+  if (
+    activeUntil !== null &&
+    schedule.kind === "at" &&
+    Date.parse(activeUntil) <= Date.parse(schedule.at)
+  ) {
+    throw new Error("activeUntil must be after schedule.at for a one-shot automation.");
+  }
 
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -417,11 +489,13 @@ function parseAutomationRecord(
     title: requireStringValue(attributes.title, "title"),
     status: normalizeAutomationStatus(attributes.status),
     summary: normalizeNullableString(typeof attributes.summary === "string" ? attributes.summary : null),
-    schedule: normalizeAutomationSchedule(attributes.schedule),
+    activeUntil,
+    schedule,
     route: normalizeAutomationRoute(attributes.route),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
+    supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
     createdAt: requireStringValue(attributes.createdAt, "createdAt"),
@@ -476,6 +550,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.slug,
       record.title,
       record.summary,
+      record.activeUntil,
       record.instructions,
       record.createdAt,
       record.updatedAt,
@@ -483,6 +558,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.continuityPolicy,
       JSON.stringify(record.schedule),
       JSON.stringify(record.route),
+      record.supportKind,
       JSON.stringify(record.assistantTargetOverride),
       record.tags,
     ],
@@ -497,17 +573,64 @@ function matchesAutomationStatus(
   return matchesStatus(value, status);
 }
 
+function matchesAutomationExactTag(
+  record: AutomationQueryRecord,
+  exactTag: string | undefined,
+): boolean {
+  const normalized = normalizeNullableString(exactTag);
+  return normalized === null || record.tags.includes(normalized);
+}
+
+function filterAutomationRecords(
+  records: readonly AutomationQueryRecord[],
+  options: AutomationListOptions,
+): AutomationQueryRecord[] {
+  return records.filter((record) =>
+    matchesAutomationStatus(record.status, options.status) &&
+    matchesAutomationExactTag(record, options.exactTag) &&
+    matchesAutomationText(record, options.text)
+  );
+}
+
 export async function listAutomations(
   vaultRoot: string,
   options: AutomationListOptions = {},
 ): Promise<AutomationQueryRecord[]> {
   const records = await loadAutomationRecords(vaultRoot);
-  const filtered = records.filter((record) =>
-    matchesAutomationStatus(record.status, options.status) &&
-    matchesAutomationText(record, options.text),
-  );
+  const filtered = filterAutomationRecords(records, options);
 
   return applyLimit(filtered, options.limit);
+}
+
+export async function listAutomationPage(
+  vaultRoot: string,
+  options: AutomationListPageOptions = {},
+): Promise<AutomationListPageResult> {
+  const records = await loadAutomationRecords(vaultRoot);
+  const filtered = filterAutomationRecords(records, options);
+  const stablePagination = Boolean(
+    normalizeNullableString(options.exactTag) || normalizeNullableString(options.cursor),
+  );
+  if (stablePagination) {
+    filtered.sort((left, right) => left.automationId.localeCompare(right.automationId));
+  }
+  const cursor = normalizeNullableString(options.cursor);
+  const afterCursor = cursor === null
+    ? filtered
+    : filtered.filter((record) => record.automationId.localeCompare(cursor) > 0);
+  const limit = Number.isInteger(options.limit) && options.limit !== undefined && options.limit > 0
+    ? options.limit
+    : afterCursor.length;
+  const items = afterCursor.slice(0, limit);
+  const nextCursor = stablePagination && afterCursor.length > items.length
+    ? items.at(-1)?.automationId ?? null
+    : null;
+
+  return {
+    items,
+    nextCursor,
+    totalCount: filtered.length,
+  };
 }
 
 export async function readAutomation(

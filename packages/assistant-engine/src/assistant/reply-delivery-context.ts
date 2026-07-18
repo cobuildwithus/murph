@@ -6,6 +6,7 @@ export type AssistantReplyDeliveryContext = Pick<
   | 'deliveryDispatchMode'
   | 'deliveryIdempotencyKey'
   | 'deliveryMessageReactionsAvailable'
+  | 'deliveryNativeReplyRequested'
   | 'deliveryReplyToMessageId'
   | 'deliverySource'
   | 'deliverySubject'
@@ -25,6 +26,7 @@ export function pickAssistantReplyDeliveryContext(
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
       input.deliveryMessageReactionsAvailable,
+    deliveryNativeReplyRequested: input.deliveryNativeReplyRequested,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject,
@@ -52,6 +54,9 @@ export function pickDefinedAssistantReplyDeliveryContext(
           deliveryMessageReactionsAvailable:
             input.deliveryMessageReactionsAvailable,
         }),
+    ...(input.deliveryNativeReplyRequested === undefined
+      ? {}
+      : { deliveryNativeReplyRequested: input.deliveryNativeReplyRequested }),
     ...(input.deliveryReplyToMessageId === undefined
       ? {}
       : { deliveryReplyToMessageId: input.deliveryReplyToMessageId }),
@@ -91,6 +96,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
       second?.deliveryMessageReactionsAvailable === undefined
         ? first.deliveryMessageReactionsAvailable
         : second.deliveryMessageReactionsAvailable,
+    deliveryNativeReplyRequested:
+      second?.deliveryNativeReplyRequested === undefined
+        ? first.deliveryNativeReplyRequested
+        : second.deliveryNativeReplyRequested,
     deliveryReplyToMessageId:
       second?.deliveryReplyToMessageId === undefined
         ? first.deliveryReplyToMessageId
@@ -129,6 +138,8 @@ export function applyAssistantReplyDeliveryContext(input: {
     deliveryIdempotencyKey: input.context.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
       input.context.deliveryMessageReactionsAvailable,
+    deliveryNativeReplyRequested:
+      input.context.deliveryNativeReplyRequested,
     deliveryReplyToMessageId: input.context.deliveryReplyToMessageId,
     deliverySource: input.context.deliverySource,
     deliverySubject: input.context.deliverySubject,

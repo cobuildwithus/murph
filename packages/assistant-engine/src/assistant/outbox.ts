@@ -19,6 +19,9 @@ import {
 } from '@murphai/query'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  looksLikePrivateAssistantRoutePlaceholder,
+} from '@murphai/operator-config/assistant/current-delivery-route'
 import { mergeAssistantBinding } from './bindings.js'
 import {
   getAssistantChannelAdapter,
@@ -45,6 +48,7 @@ import {
   resolveAssistantOutboxIntentPath,
 } from './outbox/intents.js'
 import {
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   createAssistantDeliveryRetryExhaustedError,
@@ -95,6 +99,9 @@ import {
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
 } from './device-activity-cron-tags.js'
 import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
+import {
+  resolveAssistantOutboxAutomationAuthorityError,
+} from './outbox/automation-authority.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -108,6 +115,7 @@ export {
   isAssistantOutboxReplyBubbleSuccessor,
 } from './outbox/ordering.js'
 export {
+  assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   isAssistantOutboxRetryableError,
@@ -133,6 +141,7 @@ export interface AssistantOutboxDispatchMessage {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -233,6 +242,7 @@ export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -248,6 +258,7 @@ export type AssistantOutboxCreateIntentInput = {
     | { nextAttemptAt: string; status: 'awaiting_approval' }
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   newsletterAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
   replyToMessageId?: string | null
@@ -285,6 +296,12 @@ export async function createAssistantOutboxIntent(
     const persistedTarget = buildAssistantOutboxPersistedTarget({
       ...input,
       replyToMessageId,
+    })
+    assertAssistantOutboxNativeReplyTarget({
+      channel: persistedTarget.channel,
+      nativeReplyRequested: persistedTarget.nativeReplyRequested,
+      operation,
+      replyToMessageId: persistedTarget.replyToMessageId,
     })
     const subject = operation
       ? null
@@ -331,6 +348,11 @@ export async function createAssistantOutboxIntent(
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
+      assertAssistantOutboxDedupeEffectMatches({
+        intent: existing,
+        operation,
+        persistedTarget,
+      })
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
         deliveryTransportIdempotent,
@@ -402,6 +424,7 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      automationAuthority: input.automationAuthority ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -874,14 +897,23 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       message: 'Injected assistant delivery failure.',
     })
 
-    const deviceActivityAuthorityError = await resolveDeviceActivityOutboxAuthorityError({
-      intent: dispatchIntent,
-      vault: input.vault,
-    })
-    if (deviceActivityAuthorityError) {
+    const deviceActivityAuthorityError =
+      await resolveDeviceActivityOutboxAuthorityError({
+        intent: dispatchIntent,
+        vault: input.vault,
+      })
+    const authorityError =
+      deviceActivityAuthorityError ??
+      (await resolveAssistantOutboxAutomationAuthorityError({
+        intent: dispatchIntent,
+        vault: input.vault,
+      }))
+    if (authorityError) {
       const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
-        error: deviceActivityAuthorityError,
-        failedAt: now,
+        error: authorityError,
+        // `now` may be the earlier drain-selection timestamp. Authority is
+        // evaluated at provider entry, so persist that wall-clock failure time.
+        failedAt: new Date(),
         intent: dispatchIntent,
         intentPath: dispatchIntentPath,
         status: 'failed',
@@ -1087,6 +1119,7 @@ export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1100,6 +1133,7 @@ export async function deliverAssistantOutboxMessage(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1116,6 +1150,7 @@ export async function deliverAssistantOutboxMessage(input: {
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.reviewedAssistantAskCompletionExpiresAt ?? null,
+    automationAuthority: input.automationAuthority ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
@@ -1126,6 +1161,9 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    ...(input.nativeReplyRequested === undefined
+      ? {}
+      : { nativeReplyRequested: input.nativeReplyRequested }),
     replyToMessageId: input.replyToMessageId ?? null,
     subject: input.subject ?? null,
     sessionId: input.sessionId,
@@ -1379,6 +1417,9 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
       sessionId: input.sessionId,
       media: input.media ?? [],
       message: input.message,
+      ...(input.nativeReplyRequested === undefined
+        ? {}
+        : { nativeReplyRequested: input.nativeReplyRequested }),
       answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       subject,
       channel: input.channel,
@@ -1813,6 +1854,100 @@ export async function markAssistantOutboxIntentSentById(input: {
   })
 }
 
+function assertAssistantOutboxNativeReplyTarget(input: {
+  channel: string | null
+  nativeReplyRequested?: unknown
+  operation: AssistantOutboxOperation | null
+  replyToMessageId: string | null
+}): void {
+  if (input.nativeReplyRequested === undefined) {
+    return
+  }
+  if (input.nativeReplyRequested !== true) {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_INVALID',
+      'Assistant native reply requests must use the true-only marker.',
+    )
+  }
+  if (input.operation !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_INVALID',
+      'Assistant native replies must use a normal message intent.',
+    )
+  }
+
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  if (!replyToMessageId) {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_TARGET_REQUIRED',
+      'Assistant native replies require a target message id.',
+    )
+  }
+  if (looksLikePrivateAssistantRoutePlaceholder(replyToMessageId)) {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_TARGET_INVALID',
+      'Assistant native replies require a provider message id.',
+    )
+  }
+
+  const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
+  if (channel !== 'linq' && channel !== 'telegram') {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_CHANNEL_UNSUPPORTED',
+      `Assistant native replies are not supported for ${channel ?? 'unknown channel'}.`,
+    )
+  }
+  if (channel === 'telegram' && !/^\d+$/u.test(replyToMessageId)) {
+    throw new VaultCliError(
+      'ASSISTANT_NATIVE_REPLY_TARGET_INVALID',
+      'Assistant Telegram native replies require a numeric target message id.',
+    )
+  }
+}
+
+function assertAssistantOutboxDedupeEffectMatches(input: {
+  intent: AssistantOutboxIntent
+  operation: AssistantOutboxOperation | null
+  persistedTarget: AssistantOutboxPersistedTarget
+}): void {
+  const existingOperationKind = input.intent.operation?.kind ?? null
+  const requestedOperationKind = input.operation?.kind ?? null
+  if (existingOperationKind !== requestedOperationKind) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+  if (requestedOperationKind === 'message-reaction') {
+    return
+  }
+
+  const existingNativeReplyRequested =
+    input.intent.nativeReplyRequested === true
+  const requestedNativeReplyRequested =
+    input.persistedTarget.nativeReplyRequested === true
+  if (!existingNativeReplyRequested && !requestedNativeReplyRequested) {
+    return
+  }
+
+  const existingReplyToMessageId = normalizeNullableString(
+    input.intent.replyToMessageId,
+  )
+  const requestedReplyToMessageId = normalizeNullableString(
+    input.persistedTarget.replyToMessageId,
+  )
+  if (
+    existingReplyToMessageId !== requestedReplyToMessageId
+    || existingNativeReplyRequested !== requestedNativeReplyRequested
+  ) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+}
+
+function createAssistantOutboxDedupeEffectMismatchError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    'Assistant outbox dedupe identity is already bound to a different delivery effect.',
+  )
+}
+
 function normalizeOutboxMessage(input: {
   media: readonly AssistantResponseMedia[]
   message: string
@@ -2192,17 +2327,19 @@ function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
   rawTargetIdentity: AssistantOutboxRawTargetIdentityInput
   updatedAt: string
 }): AssistantOutboxIntent {
-  if (!shouldUpgradeAssistantOutboxIntentReactionOperation(input.intent)) {
-    return input.intent
-  }
-
+  const targetFingerprint = hashAssistantOutboxTargetFingerprint(
+    input.rawTargetIdentity,
+  )
   if (
     input.intent.operation?.kind === 'message-reaction' &&
     input.intent.operation.reaction === input.operation.reaction &&
     input.intent.replyToMessageId === input.persistedTarget.replyToMessageId &&
-    input.intent.targetFingerprint === hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity)
+    input.intent.targetFingerprint === targetFingerprint
   ) {
     return input.intent
+  }
+  if (!shouldUpgradeAssistantOutboxIntentReactionOperation(input.intent)) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
   }
 
   return assistantOutboxIntentSchema.parse(
@@ -2224,7 +2361,7 @@ function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
       sentAt: null,
       status: 'pending',
       subject: null,
-      targetFingerprint: hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity),
+      targetFingerprint,
       updatedAt: input.updatedAt,
     }),
   )

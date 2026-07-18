@@ -1,8 +1,11 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "./contact-privacy";
+import {
   acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
@@ -11,6 +14,8 @@ import {
 } from "./hosted-member-routing-store";
 import {
   chooseHostedLinqHomeLine,
+  chooseHostedLinqSignupWelcomeLine,
+  resolveHostedLinqSignupWelcomeDailyLimit,
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
   type HostedLinqActiveRouteDecision,
@@ -21,21 +26,29 @@ import {
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
 import {
+  claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
 } from "./linq-line-store";
+import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+} from "./linq-observability-identifiers";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import { lockHostedMemberRow } from "./shared";
 import type { Prisma } from "@prisma/client";
 
+const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
+
 export interface HostedMemberActivationLinqRouteResolution {
-  welcomeRoute: HostedMemberAssistantNotificationRoute;
+  welcomeRoute: HostedMemberAssistantNotificationRoute | null;
 }
 
 export interface HostedLinqHomeLineAssignmentReservation {
   assignedAt: Date;
   line: HostedLinqAssignableHomeLine;
+  proactiveConversationReserved: boolean;
 }
 
 export type HostedLinqHomeLinePhoneReservationResult =
@@ -55,6 +68,7 @@ export type HostedLinqHomeLineRouteBindingResult =
       homeLineAssignedAt: Date | null;
       kind: "bind";
       recipientPhone: string | null;
+      selectedLine?: HostedLinqAssignableHomeLine;
     }
   | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
   | {
@@ -76,6 +90,169 @@ export type HostedLinqHomeLineRouteBindingAuthority =
       kind: "member-identity";
     };
 
+export type HostedSignupWelcomeHomeRouteMaterializationResult =
+  | {
+      kind: "materialized" | "already_materialized";
+    }
+  | {
+      kind: "superseded";
+    };
+
+/**
+ * Promotes the provider chat returned by Murph's canonical participant welcome
+ * into the existing Web-owned home route. Provider/dashboard telemetry is not
+ * sufficient authority for this transition; the signed runtime callback must
+ * agree with the verified member, assigned line, and pre-provider dispatch
+ * fence while the current route is locked.
+ */
+export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
+  directRecipientPhoneNumber: string;
+  fromPhoneNumber: string;
+  idempotencyKey: string;
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedSignupWelcomeHomeRouteMaterializationResult> {
+  const idempotencyKey = input.idempotencyKey.trim();
+  const linqChatId = input.linqChatId.trim();
+  const directRecipientPhoneNumber = normalizePhoneNumber(
+    input.directRecipientPhoneNumber,
+  );
+  const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
+  const expectedIdempotencyKey =
+    `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  const deliveryIdempotencyLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+  const directRecipientLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(directRecipientPhoneNumber);
+  const fromPhoneLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
+  const linqChatLookupKeys =
+    createHostedLinqChatLookupKeyReadCandidates(linqChatId);
+
+  if (
+    idempotencyKey !== expectedIdempotencyKey
+    || !deliveryIdempotencyLookupKey
+    || !directRecipientPhoneNumber
+    || directRecipientLookupKeys.length === 0
+    || !fromPhoneNumber
+    || fromPhoneLookupKeys.length === 0
+    || !linqChatId
+    || linqChatLookupKeys.length === 0
+  ) {
+    throwHostedSignupWelcomeRouteAuthorityInvalid();
+  }
+
+  // Identity reconciliation locks the member row before mutating verified
+  // identity. Taking the same lock closes the send-to-callback phone-change
+  // race without persisting the raw participant target.
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey: deliveryIdempotencyLookupKey },
+    select: {
+      acceptedAt: true,
+      linqChatLookupKey: true,
+      phoneNumberLookupKey: true,
+      source: true,
+      targetKind: true,
+    },
+  });
+
+  if (
+    !delivery
+    || delivery.source !== "hosted_runtime_linq_delivery"
+    || delivery.targetKind !== "participant"
+    || !delivery.phoneNumberLookupKey
+    || !fromPhoneLookupKeys.includes(delivery.phoneNumberLookupKey)
+    || (
+      delivery.linqChatLookupKey !== null
+      && !linqChatLookupKeys.includes(delivery.linqChatLookupKey)
+    )
+    || (delivery.acceptedAt !== null && delivery.linqChatLookupKey === null)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_PROVENANCE_MISMATCH",
+      httpStatus: 409,
+      message: "Hosted signup welcome delivery does not match its provider dispatch claim.",
+      retryable: true,
+    });
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      phoneLookupKey: true,
+      phoneNumberVerifiedAt: true,
+    },
+  });
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const authority = readHostedLinqHomeLineAuthority(routing);
+  if (
+    (authority.kind === "home" || authority.kind === "pending")
+    && authority.chatId !== linqChatId
+  ) {
+    return { kind: "superseded" };
+  }
+
+  if (authority.kind === "none") {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIGNUP_WELCOME_HOME_ROUTE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "Hosted signup welcome home-line authority is unavailable.",
+      retryable: true,
+    });
+  }
+
+  if (
+    normalizePhoneNumber(authority.recipientPhone) !== fromPhoneNumber
+    || !identity?.phoneNumberVerifiedAt
+    || !identity.phoneLookupKey
+    || !directRecipientLookupKeys.includes(identity.phoneLookupKey)
+  ) {
+    // The send was valid when it crossed the provider fence, but current member
+    // identity or routing has since changed. Preserve the newer authority while
+    // still allowing the factual delivery outcome to be recorded.
+    return { kind: "superseded" };
+  }
+
+  await upsertHostedMemberHomeLinqBindingTx({
+    clearPending: true,
+    homeLineAssignedAt: authority.assignedAt,
+    linqChatId,
+    memberId: input.memberId,
+    participantContact: {
+      kind: "phone",
+      lookupKey: identity.phoneLookupKey,
+    },
+    prisma: input.prisma,
+    recipientPhone: fromPhoneNumber,
+  });
+
+  return {
+    kind:
+      authority.kind === "home"
+        ? "already_materialized"
+        : "materialized",
+  };
+}
+
+function throwHostedSignupWelcomeRouteAuthorityInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_SIGNUP_WELCOME_ROUTE_AUTHORITY_INVALID",
+    httpStatus: 400,
+    message: "Hosted signup welcome route materialization authority is invalid.",
+    retryable: false,
+  });
+}
+
 export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   preferredRecipientPhone: string | null;
   prisma: Prisma.TransactionClient;
@@ -87,6 +264,7 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   return reserveHostedLinqHomeLineFromPoolAfterLockTx({
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
+    reservationKind: "inbound",
   });
 }
 
@@ -120,8 +298,8 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
       prisma: input.prisma,
     });
 
-    // Routing and capacity may have changed while another transaction held a
-    // lock, so the claim decision must be re-resolved under both owners.
+    // Routing and line eligibility may have changed while another transaction
+    // held a lock, so assignment must be re-resolved under both owners.
     const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
     if (lockedDecision.kind === "done") {
       return lockedDecision.result;
@@ -157,13 +335,11 @@ async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
   decision: Extract<HostedLinqHomeLineRouteBindingDecision, { kind: "reserve" }>;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
-  // Reserve from the whole assignable pool, preferring the line the member
-  // contacted. A healthy, under-quota incoming line is chosen unchanged; a
-  // degraded or full one falls over to another working line.
   const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
     preferredRecipientPhone: input.decision.preferredRecipientPhone,
     now: new Date(),
     prisma: input.prisma,
+    reservationKind: "inbound",
   });
 
   if (reservationResult.kind !== "reserved") {
@@ -176,6 +352,7 @@ async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
     homeLineAssignedAt: reservationResult.reservation.assignedAt,
     kind: "bind",
     recipientPhone: reservationResult.reservation.line.phoneNumber,
+    selectedLine: reservationResult.reservation.line,
   };
 }
 
@@ -409,6 +586,12 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     recipientPhone: targetRecipientPhone,
   });
 
+  if (!target.proactiveConversationReserved) {
+    return {
+      welcomeRoute: null,
+    };
+  }
+
   return {
     welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
       linqChatId: null,
@@ -426,6 +609,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
+  reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
   const recipientPhones = input.lines.map((line) => line.phoneNumber);
 
@@ -442,24 +626,76 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     prisma: input.prisma,
     recipientPhones,
   });
-  const newAssignmentsByRecipientPhone =
-    await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
-      prisma: input.prisma,
-      recipientPhones,
-      since: startOfUtcDay(now),
-    });
-
-  const chosen = chooseHostedLinqHomeLine({
+  const dayUtc = startOfUtcDay(now);
+  const proactiveConversationCounts = new Map(
+    input.lines.map((line) => [
+      line.phoneNumber,
+      line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
+        ? line.proactiveConversationCount ?? 0
+        : 0,
+    ]),
+  );
+  const preferredOrFallbackLine = chooseHostedLinqHomeLine({
     activeMembersByRecipientPhone,
+    ignoreDailyNewConversationLimit: true,
     lines: input.lines,
-    newAssignmentsByRecipientPhone,
+    newAssignmentsByRecipientPhone: proactiveConversationCounts,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
   });
+  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
 
-  return chosen
+  if (
+    input.reservationKind === "inbound"
+    && preferredOrFallbackLine?.phoneNumber === preferredRecipientPhone
+  ) {
+    return {
+      assignedAt: now,
+      line: preferredOrFallbackLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
+  const proactiveLine = chooseHostedLinqSignupWelcomeLine({
+    activeMembersByRecipientPhone,
+    lines: input.lines,
+    newAssignmentsByRecipientPhone: proactiveConversationCounts,
+    preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+  });
+  if (input.reservationKind === "inbound") {
+    const selectedLine = proactiveLine ?? preferredOrFallbackLine;
+    if (!selectedLine) {
+      return null;
+    }
+
+    return {
+      assignedAt: now,
+      line: selectedLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
+  const proactiveConversationReserved = proactiveLine
+    ? await claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: resolveHostedLinqSignupWelcomeDailyLimit(proactiveLine),
+        phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
+        prisma: input.prisma,
+      })
+    : false;
+
+  if (proactiveLine && proactiveConversationReserved) {
+    return {
+      assignedAt: now,
+      line: proactiveLine,
+      proactiveConversationReserved: true,
+    };
+  }
+
+  return preferredOrFallbackLine
     ? {
         assignedAt: now,
-        line: chosen,
+        line: proactiveLine ?? preferredOrFallbackLine,
+        proactiveConversationReserved: false,
       }
     : null;
 }
@@ -469,29 +705,26 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
   routing: HostedMemberRoutingStateSnapshot | null;
-}): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null } | "needs_claim"> {
+}): Promise<{
+  homeLineAssignedAt?: Date;
+  proactiveConversationReserved?: boolean;
+  recipientPhone: string | null;
+} | "needs_claim"> {
   const routing = input.routing;
-  // An existing assigned line is durable authority; activation keeps it
-  // without rechecking assignable-pool eligibility.
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-  if (existingRecipientPhone) {
-    return {
-      ...(routing?.linqHomeLineAssignedAt
-        ? { homeLineAssignedAt: routing.linqHomeLineAssignedAt }
-        : {}),
-      recipientPhone: existingRecipientPhone,
-    };
-  }
 
-  // Claiming a new line consumes pool capacity; the caller must hold the
-  // pool lock before allowing this branch.
   if (!input.claimNewHomeLine) {
     return "needs_claim";
   }
 
   const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
-    preferredRecipientPhone: routing?.pendingLinqRecipientPhone ?? null,
+    excludedActiveMemberId: existingRecipientPhone ? input.member.core.id : null,
+    preferredRecipientPhone:
+      existingRecipientPhone
+      ?? routing?.pendingLinqRecipientPhone
+      ?? null,
     prisma: input.prisma,
+    reservationKind: "signup_welcome",
   });
 
   if (reservationResult.kind !== "reserved") {
@@ -499,21 +732,32 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   }
 
   return {
-    homeLineAssignedAt: reservationResult.reservation.assignedAt,
+    homeLineAssignedAt:
+      existingRecipientPhone === reservationResult.reservation.line.phoneNumber
+        ? routing?.linqHomeLineAssignedAt ?? reservationResult.reservation.assignedAt
+        : reservationResult.reservation.assignedAt,
     recipientPhone: reservationResult.reservation.line.phoneNumber,
+    proactiveConversationReserved: reservationResult.reservation.proactiveConversationReserved,
   };
 }
 
 async function reserveHostedLinqHomeLineFromPoolAfterLockTx(input: {
+  excludedActiveMemberId?: string | null;
   now?: Date;
   preferredRecipientPhone: string | null;
   prisma: Prisma.TransactionClient;
+  reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const lines = await listHostedLinqAssignableHomeLines({ prisma: input.prisma });
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
-    lines: await listHostedLinqAssignableHomeLines({ prisma: input.prisma }),
+    ...(input.excludedActiveMemberId
+      ? { excludedActiveMemberId: input.excludedActiveMemberId }
+      : {}),
+    lines,
     ...(input.now ? { now: input.now } : {}),
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
+    reservationKind: input.reservationKind,
   });
 
   if (!reservation) {

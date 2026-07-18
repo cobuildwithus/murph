@@ -17,6 +17,7 @@ import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
   AssistantProviderRequestStartTiming,
   AssistantProviderServiceTier,
+  AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
 import type {
@@ -97,9 +98,7 @@ export type AssistantProviderRequestStartHook = (event: {
 
 export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   acceptedInputIds: readonly string[]
-  deliveryContextOrdinal: number
-  messageReactionsAvailable?: boolean | null
-}) => Promise<void> | void
+} & AssistantProviderFinishWithoutReplyAcceptedEvent) => Promise<void> | void
 
 export type AssistantProviderAcceptedInputsRelease = () => Promise<void> | void
 
@@ -139,6 +138,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
   deliveryMessageReactionsAvailable?: boolean | null
+  deliveryNativeReplyRequested?: true
   deliveryReplyToMessageId?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliverySubject?: string | null
@@ -152,6 +152,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
+  outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   persistUserPromptOnFailure?: boolean
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean

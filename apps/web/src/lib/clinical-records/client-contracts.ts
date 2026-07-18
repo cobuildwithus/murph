@@ -96,6 +96,12 @@ export interface ClinicalRecordConnectIntentResponseContract {
   ok: true;
 }
 
+export interface ClinicalRecordDisconnectResponseContract {
+  connectionId: string;
+  ok: true;
+  status: "disconnected";
+}
+
 export function parseClinicalProviderSearchResponse(
   value: unknown,
 ): ClinicalProviderSearchResponseContract {
@@ -163,6 +169,18 @@ export function parseClinicalRecordConnectIntentResponse(
     claim,
     expiresAt: requireIsoTimestamp(record.expiresAt),
     ok: true,
+  };
+}
+
+export function parseClinicalRecordDisconnectResponse(
+  value: unknown,
+): ClinicalRecordDisconnectResponseContract {
+  const record = requireExactRecord(value, ["connectionId", "ok", "status"]);
+  if (record.ok !== true || record.status !== "disconnected") throw invalidContract();
+  return {
+    connectionId: requireIdentifier(record.connectionId),
+    ok: true,
+    status: "disconnected",
   };
 }
 

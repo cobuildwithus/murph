@@ -43,7 +43,7 @@ const runId = Date.now();
 const userId = `member_local_stale_deferred_${runId}`;
 const chatId = `chat_local_stale_deferred_${runId}`;
 const linqWebhookSecret = "linq-local-stale-deferred-secret";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const replyText = "Reply after stale deferred wake preemption.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

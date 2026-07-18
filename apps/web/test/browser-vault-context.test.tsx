@@ -1754,5 +1754,6 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     timelineRows: [],
     weeklySampleSummaries: [],
     ...overrides,
+    labResultRows: overrides.labResultRows ?? [],
   };
 }

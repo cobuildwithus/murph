@@ -39,7 +39,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -67,7 +67,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: " ",
         pendingWork: false,
         recordUsage: null,
@@ -185,7 +185,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -225,7 +225,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -265,7 +265,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -317,7 +317,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       materializeRetentionCandidatePaths,
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       pendingWork: false,
       protectedAttachmentIds: ["att_pending"],
       protectedCaptureIds: ["cap_pending"],
@@ -360,7 +360,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -399,7 +399,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -440,7 +440,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -482,7 +482,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       pendingWork: false,
       protectedAttachmentIds: ["att_active_01"],
       protectedCaptureIds: ["cap_active"],
@@ -514,7 +514,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -528,7 +528,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -551,7 +551,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: null,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.5",
+      requestedModel: "gpt-5.6-terra",
       sessionId: "asst_real_session",
       surface: "hosted-runtime",
       tokenPricingBasis: "standard",
@@ -569,7 +569,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -582,7 +582,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async () => {
@@ -622,7 +622,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -664,7 +664,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -681,7 +681,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: true,
         recordUsage: null,
@@ -709,7 +709,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         runHostedIdleCheckpointMaintenance({
           credentialSource: "platform",
           memberId: "member_1",
-          model: "gpt-5.5",
+          model: "gpt-5.6-terra",
           pendingWork: true,
           protectedCaptureIds: ["cap_pending"],
           providerName: "hosted-openai",
@@ -770,7 +770,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -788,7 +788,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
       serviceTier: null,
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,
@@ -801,7 +801,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {

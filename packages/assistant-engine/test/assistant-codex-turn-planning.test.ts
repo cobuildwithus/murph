@@ -120,6 +120,44 @@ describe('assistant Codex turn planning', () => {
     expect(plan.onFinishWithoutReplyRecorded).toBe(onFinishWithoutReplyRecorded)
   })
 
+  it('exposes message-target tools only when the execution plan carries an authorizer', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null)
+    const session = createSession()
+    const executionPlan = await buildCodexTurnExecutionPlan({
+      authorizeAcceptedMessageTarget,
+      input: {
+        ...createMessageInput(),
+        deliveryTarget: '123',
+      },
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-message-targeting',
+    })
+    const attemptPlan = await buildCodexTurnAttemptPlan({
+      attemptCount: 1,
+      executionPlan,
+      session,
+    })
+
+    expect(executionPlan.authorizeAcceptedMessageTarget).toBe(
+      authorizeAcceptedMessageTarget,
+    )
+    expect(attemptPlan.routePlan.dynamicTools.map((tool) => tool.name))
+      .toEqual(expect.arrayContaining([
+        'react_to_message',
+        'select_reply_target',
+      ]))
+  })
+
   it('resolves disabled native resume notification turns as isolated threads', async () => {
     const plan = await buildCodexTurnExecutionPlan({
       input: createMessageInput(),
@@ -285,10 +323,11 @@ describe('assistant Codex turn planning', () => {
     const internalPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       hostedToolContext: {
+        ...createHostedToolContext(),
         groupTool: {
           request: vi.fn(),
         },
-      } as unknown as AssistantHostedToolContext,
+      },
       input: {
         ...createMessageInput(),
         scheduledInvocationAuthority: {
@@ -746,7 +785,7 @@ describe('assistant Codex turn planning', () => {
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
-        'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+        'Humor 9/10: initiate when there is an opening and commit to the bit',
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: lead with the shortest complete answer',
@@ -846,7 +885,7 @@ describe('assistant Codex turn planning', () => {
       })
       expect(
         localAttemptPlan.routePlan.developerInstructions,
-      ).toContain('Humor 9/10: when humor is welcome, take a bold, situation-specific swing')
+      ).toContain('Humor 9/10: initiate when there is an opening and commit to the bit')
       expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
       )
@@ -1144,18 +1183,19 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(direct.dynamicTools.map((tool) => tool.name)).toContain('labs')
-    expect(direct.developerInstructions).toContain('Junction lab catalog:')
+    expect(direct.developerInstructions).toContain('Lab test discovery:')
+    expect(direct.developerInstructions).not.toMatch(/junction/iu)
     expect(group.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(group.developerInstructions).not.toContain('Junction lab catalog:')
+    expect(group.developerInstructions).not.toContain('Lab test discovery:')
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(maintenance.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
     expect(notification.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(notification.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(notification.systemPrompt).not.toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(outputOnly.systemPrompt).not.toContain('Junction lab catalog:')
+    expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
-  it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
+  it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1173,9 +1213,10 @@ describe('assistant Codex turn planning', () => {
     }
     const telegramReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
-        deliveryReplyToMessageId: 'message-1',
+        deliveryTarget: '123',
       },
       profile,
       promptTimeContext,
@@ -1189,7 +1230,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: true,
+          messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
         }),
@@ -1197,8 +1238,26 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
+    const telegramWithoutAuthorizerPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        deliveryTarget: '123',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const toolsWithoutAuthorizer = telegramWithoutAuthorizerPlan.dynamicTools
+      .map((tool) => tool.name)
+    expect(toolsWithoutAuthorizer).not.toContain('react_to_message')
+    expect(toolsWithoutAuthorizer).not.toContain('select_reply_target')
+
     const linqReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -1218,7 +1277,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: true,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1226,8 +1285,9 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
-    const linqSmsReplyPlan = await resolveAssistantRouteTurnPlan({
+    const linqCurrentMessageNotReactionEligiblePlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -1242,12 +1302,13 @@ describe('assistant Codex turn planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(linqSmsReplyPlan.assistantContractFingerprint).toBe(
+    expect(linqCurrentMessageNotReactionEligiblePlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: linqSmsReplyPlan.developerInstructions,
+        developerInstructions:
+          linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1257,6 +1318,7 @@ describe('assistant Codex turn planning', () => {
 
     const telegramBusinessReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         deliveryReplyToMessageId: 'message-1',
@@ -1274,7 +1336,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1284,6 +1346,7 @@ describe('assistant Codex turn planning', () => {
 
     const telegramNoReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: createMessageInput(),
       profile,
       promptTimeContext,
@@ -1297,7 +1360,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1372,6 +1435,7 @@ describe('assistant Codex turn planning', () => {
       ...createHostedToolContext(),
       assistantConfigurationTool: { request: vi.fn() },
       automationTool: { request: vi.fn() },
+      clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1493,6 +1557,7 @@ describe('assistant Codex turn planning', () => {
       'computer_open',
       'assistant_configuration',
       'connected_apps_manage',
+      'create_clinical_records_connect_link',
       'create_phone_call',
       'family_plan',
       'labs',
@@ -1553,6 +1618,59 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.dynamicTools.some((tool) => tool.name === 'subscription'))
         .toBe(expectedAvailable)
+    },
+  )
+
+  it.each([
+    ['assistant-input', true],
+    ['manual', true],
+    ['initial', false],
+    ['system', false],
+  ] as const)(
+    'gates Clinical Records connect links on eligible current-turn %s input',
+    async (source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+      }
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'c'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-clinical-records-link-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-16',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.dynamicTools.some((tool) =>
+        tool.name === 'create_clinical_records_connect_link'
+      )).toBe(expectedAvailable)
     },
   )
 
@@ -3086,7 +3204,7 @@ describe('assistant Codex turn planning', () => {
         executionContext: null,
         input: {
           ...createMessageInput(),
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           prompt: 'Use medium reasoning now.',
           vault,
         },

@@ -996,38 +996,6 @@ export function parseHostedRuntimeGroupToolRequest(
       value: record.question,
     });
 
-    // Consumer-first rollout compatibility for an already-deployed runner.
-    if (record.origin === undefined) {
-      assertAllowedObjectKeys(
-        record,
-        new Set([
-          "action",
-          "grantId",
-          "originAssistantInputId",
-          "originSessionId",
-          "question",
-        ]),
-        label,
-      );
-      return {
-        action,
-        grantId,
-        origin: {
-          assistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-            record.originAssistantInputId,
-            `${label} originAssistantInputId`,
-          ),
-          kind: "accepted_input",
-          sessionId: parseHostedRuntimeGroupAskBoundedText({
-            label: `${label} originSessionId`,
-            maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
-            value: record.originSessionId,
-          }),
-        },
-        question,
-      };
-    }
-
     assertAllowedObjectKeys(
       record,
       new Set(["action", "grantId", "origin", "question"]),

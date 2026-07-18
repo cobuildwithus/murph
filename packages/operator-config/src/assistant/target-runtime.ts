@@ -102,7 +102,7 @@ const ASSISTANT_CODEX_MODEL_PROVIDER_REGISTRATIONS = [
     localOnboarding: createLocalOnboardingProviderConfig(
       VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       {
-        defaultModel: 'gpt-5.5',
+        defaultModel: 'gpt-5.6-terra',
         description: 'Use Codex through Vercel AI Gateway.',
         label: 'Vercel AI Gateway',
         modelPrompt: 'Model id to use with Codex',
