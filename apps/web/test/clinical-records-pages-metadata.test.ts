@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 describe("Clinical Records page metadata", () => {
   it.each([
     {
-      description: "Connect a supported patient portal and see which lab results and report summaries Murph copied.",
+      description: "Connect a supported patient portal and check the copy status of lab results and report summaries.",
       load: () => import("../app/(dashboard)/records/page"),
       route: "/records",
     },

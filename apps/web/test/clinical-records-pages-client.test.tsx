@@ -701,9 +701,9 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain("Records connected");
-    expect(rendered.container.textContent).toContain("Some results added");
+    expect(rendered.container.textContent).toContain("Partly complete");
     expect(rendered.container.textContent).toContain(
-      "Some lab results and report summaries were added.",
+      "Murph added some lab results or report summaries, but part of the copy could not finish.",
     );
     const addedLabel = Array.from(rendered.container.querySelectorAll("p"))
       .find((paragraph) => paragraph.textContent === "Added");
@@ -714,7 +714,7 @@ describe("Clinical Records status page", () => {
     assert.ok(reviewLabel);
     expect(reviewLabel.nextElementSibling?.textContent).toBe("1");
     const partialBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Some results added");
+      .find((span) => span.textContent === "Partly complete");
     assert.ok(partialBadge);
     expect(partialBadge.className).not.toContain("bg-primary");
     expect(String(rendered.replaceState.mock.lastCall?.[2])).toBe(
@@ -763,7 +763,7 @@ describe("Clinical Records status page", () => {
       expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
       expect(rendered.container.textContent).toContain("No patient portals connected");
       expect(rendered.container.textContent).not.toContain("Records connected");
-      expect(rendered.container.textContent).not.toContain("Some results added");
+      expect(rendered.container.textContent).not.toContain("Partly complete");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
       .find((alert) => alert.textContent?.includes("Patient portal disconnected"));
@@ -773,7 +773,7 @@ describe("Clinical Records status page", () => {
     expect(disconnectNotice.className).not.toContain("focus:ring-2");
   });
 
-  it("uses an affirmative badge only for completion and truthful attention copy", async () => {
+  it("derives terminal copy from the status and added count", async () => {
     const connection = makeConnection();
     const { RecordsPageClient } = await import(
       "../app/(dashboard)/records/records-page-client"
@@ -807,11 +807,47 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Results added");
+      .find((span) => span.textContent === "Copy complete");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "Available lab results and report summaries were added to your private vault.",
+      "The totals below show how many lab results and report summaries were added",
+    );
+
+    await rendered.rerender(renderWithConnection({
+      ...connection,
+      latestRun: {
+        completedAt: "2026-07-16T18:15:00.000Z",
+        importedCount: 0,
+        reviewCount: 1,
+        runId: "crr_complete_empty",
+        status: "complete",
+      },
+    }));
+    const nothingAddedBadge = Array.from(rendered.container.querySelectorAll("span"))
+      .find((span) => span.textContent === "Nothing added");
+    assert.ok(nothingAddedBadge);
+    expect(nothingAddedBadge.className).not.toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "Murph finished this copy, but nothing was added.",
+    );
+
+    await rendered.rerender(renderWithConnection({
+      ...connection,
+      latestRun: {
+        completedAt: "2026-07-16T18:15:00.000Z",
+        importedCount: 0,
+        reviewCount: 0,
+        runId: "crr_partial_empty",
+        status: "partial",
+      },
+    }));
+    const emptyPartialBadge = Array.from(rendered.container.querySelectorAll("span"))
+      .find((span) => span.textContent === "Could not finish");
+    assert.ok(emptyPartialBadge);
+    expect(emptyPartialBadge.className).not.toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "Part of the copy could not finish, and nothing was added.",
     );
 
     await rendered.rerender(renderWithConnection({

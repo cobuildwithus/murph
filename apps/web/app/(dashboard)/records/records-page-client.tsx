@@ -247,7 +247,7 @@ export function RecordsPageClient({
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   {hasActiveImport
                     ? "This page updates on its own while Murph is copying records."
-                    : "See what Murph copied from each patient portal."}
+                    : "Check the latest copy status for each patient portal."}
                 </p>
               </div>
               {hasActiveImport ? (
@@ -601,14 +601,17 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
     };
   }
 
-  return describeRun(connection.latestRun?.status ?? null);
+  return describeRun(connection.latestRun);
 }
 
-function describeRun(status: ClinicalRecordRunStatus | null): {
+function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
   badgeVariant: "default" | "destructive" | "outline" | "secondary";
   detail: string;
   label: string;
 } {
+  const importedCount = run?.importedCount ?? 0;
+  const status = run?.status ?? null;
+
   switch (status) {
     case "queued":
       return { badgeVariant: "secondary", detail: "Murph is waiting to copy records from your patient portal.", label: "Waiting to start" };
@@ -617,9 +620,13 @@ function describeRun(status: ClinicalRecordRunStatus | null): {
     case "importing":
       return { badgeVariant: "secondary", detail: "Murph is saving the records into your private vault.", label: "Saving records" };
     case "complete":
-      return { badgeVariant: "default", detail: "Available lab results and report summaries were added to your private vault.", label: "Results added" };
+      return importedCount > 0
+        ? { badgeVariant: "default", detail: "Murph finished this copy. The totals below show how many lab results and report summaries were added and whether anything needs review.", label: "Copy complete" }
+        : { badgeVariant: "outline", detail: "Murph finished this copy, but nothing was added. The totals below show whether anything needs review.", label: "Nothing added" };
     case "partial":
-      return { badgeVariant: "outline", detail: "Some lab results and report summaries were added. Others could not be added or need review.", label: "Some results added" };
+      return importedCount > 0
+        ? { badgeVariant: "outline", detail: "Murph added some lab results or report summaries, but part of the copy could not finish. The totals below show whether anything needs review.", label: "Partly complete" }
+        : { badgeVariant: "outline", detail: "Part of the copy could not finish, and nothing was added. The totals below show whether anything needs review.", label: "Could not finish" };
     case "needs_reauth":
       return { badgeVariant: "outline", detail: "Access from your patient portal ended before Murph finished copying records. Connecting it again is not available in this beta.", label: "Portal access ended" };
     case "failed":
