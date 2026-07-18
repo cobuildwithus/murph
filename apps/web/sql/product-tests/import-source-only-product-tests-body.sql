@@ -135,16 +135,56 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TEMP TABLE source_only_product_test_group_high_watermarks ON COMMIT DROP AS
+SELECT
+  revision_candidates.source_key,
+  revision_candidates.tested_source_product_id,
+  MAX(revision_candidates.remap_revision) AS remap_revision
+FROM (
+  SELECT
+    incoming.source_key,
+    incoming.tested_source_product_id,
+    destination_rows.remap_revision
+  FROM source_only_product_test_incoming_identities incoming
+  JOIN product_tests destination_rows
+    ON destination_rows.source_key = incoming.source_key
+    AND destination_rows.tested_source_product_id
+      = incoming.tested_source_product_id
+
+  UNION ALL
+
+  SELECT
+    current_import.source_key,
+    NULLIF(current_import.tested_source_product_id, ''),
+    moving_rows.remap_revision
+  FROM source_only_product_tests_import current_import
+  JOIN product_tests moving_rows
+    ON moving_rows.source_key = current_import.source_key
+    AND moving_rows.source_result_id = current_import.source_result_id
+    AND moving_rows.contaminant_key = current_import.contaminant_key
+  WHERE NULLIF(current_import.tested_source_product_id, '') IS NOT NULL
+) revision_candidates
+GROUP BY
+  revision_candidates.source_key,
+  revision_candidates.tested_source_product_id;
+
 CREATE TEMP TABLE source_only_product_test_groups_to_demote ON COMMIT DROP AS
 SELECT
   incoming.source_key,
   incoming.tested_source_product_id,
-  MAX(existing.remap_revision) AS remap_revision
+  high_watermarks.remap_revision
 FROM source_only_product_test_incoming_identities incoming
 JOIN product_tests existing
   ON existing.source_key = incoming.source_key
   AND existing.tested_source_product_id = incoming.tested_source_product_id
-GROUP BY incoming.source_key, incoming.tested_source_product_id
+JOIN source_only_product_test_group_high_watermarks high_watermarks
+  ON high_watermarks.source_key = incoming.source_key
+  AND high_watermarks.tested_source_product_id
+    = incoming.tested_source_product_id
+GROUP BY
+  incoming.source_key,
+  incoming.tested_source_product_id,
+  high_watermarks.remap_revision
 HAVING BOOL_OR(NOT (
   existing.tested_product_name IS NOT DISTINCT FROM incoming.tested_product_name
   AND existing.tested_product_brand IS NOT DISTINCT FROM incoming.tested_product_brand
@@ -172,7 +212,7 @@ SELECT DISTINCT
   existing.food_id,
   existing.supplement_id,
   existing.match_method,
-  existing.remap_revision
+  high_watermarks.remap_revision
 FROM source_only_product_test_incoming_identities incoming
 JOIN product_tests existing
   ON existing.source_key = incoming.source_key
@@ -182,6 +222,10 @@ JOIN product_tests existing
   AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
   AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
   AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
+JOIN source_only_product_test_group_high_watermarks high_watermarks
+  ON high_watermarks.source_key = incoming.source_key
+  AND high_watermarks.tested_source_product_id
+    = incoming.tested_source_product_id
   AND (
     existing.match_method <> 'source_only'
     OR existing.remap_revision > 0
@@ -224,7 +268,33 @@ WHERE
   AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
   AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
   AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
-  AND existing.match_method = 'source_only';
+  AND (
+    existing.food_id IS DISTINCT FROM group_links.food_id
+    OR existing.supplement_id IS DISTINCT FROM group_links.supplement_id
+    OR existing.match_method IS DISTINCT FROM group_links.match_method
+    OR existing.remap_revision IS DISTINCT FROM group_links.remap_revision
+  );
+
+UPDATE product_tests existing
+SET
+  remap_revision = high_watermarks.remap_revision,
+  imported_at = now()
+FROM
+  source_only_product_test_group_high_watermarks high_watermarks,
+  source_only_product_test_incoming_identities incoming
+WHERE
+  incoming.source_key = high_watermarks.source_key
+  AND incoming.tested_source_product_id
+    = high_watermarks.tested_source_product_id
+  AND existing.source_key = high_watermarks.source_key
+  AND existing.tested_source_product_id
+    = high_watermarks.tested_source_product_id
+  AND existing.tested_product_name IS NOT DISTINCT FROM incoming.tested_product_name
+  AND existing.tested_product_brand IS NOT DISTINCT FROM incoming.tested_product_brand
+  AND existing.tested_product_upc IS NOT DISTINCT FROM incoming.tested_product_upc
+  AND existing.tested_product_upc_raw IS NOT DISTINCT FROM incoming.tested_product_upc_raw
+  AND existing.tested_package_size IS NOT DISTINCT FROM incoming.tested_package_size
+  AND existing.remap_revision < high_watermarks.remap_revision;
 
 DELETE FROM product_tests tests
 USING (
@@ -339,7 +409,7 @@ SELECT
   COALESCE(group_links.match_method, current_import.match_method),
   COALESCE(
     group_links.remap_revision,
-    groups_to_demote.remap_revision,
+    high_watermarks.remap_revision,
     0
   ),
   current_import.contaminant_key,
@@ -369,9 +439,9 @@ LEFT JOIN source_only_product_test_group_links group_links
   ON group_links.source_key = current_import.source_key
   AND group_links.tested_source_product_id
     = NULLIF(current_import.tested_source_product_id, '')
-LEFT JOIN source_only_product_test_groups_to_demote groups_to_demote
-  ON groups_to_demote.source_key = current_import.source_key
-  AND groups_to_demote.tested_source_product_id
+LEFT JOIN source_only_product_test_group_high_watermarks high_watermarks
+  ON high_watermarks.source_key = current_import.source_key
+  AND high_watermarks.tested_source_product_id
     = NULLIF(current_import.tested_source_product_id, '')
 ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
@@ -389,10 +459,8 @@ DO UPDATE SET
     ELSE product_tests.match_method
   END,
   remap_revision = CASE
-    WHEN
-      product_tests.match_method = 'source_only'
-      AND EXCLUDED.remap_revision > 0
-      THEN EXCLUDED.remap_revision
+    WHEN product_tests.match_method = 'source_only'
+      THEN GREATEST(product_tests.remap_revision, EXCLUDED.remap_revision)
     ELSE product_tests.remap_revision
   END,
   source_name = EXCLUDED.source_name,

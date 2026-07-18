@@ -118,7 +118,7 @@ describe("product-test measurement metadata contract", () => {
       "remap_revision = group_links.remap_revision",
     );
     expect(sourceOnlyImport).toContain(
-      "groups_to_demote.remap_revision",
+      "source_only_product_test_group_high_watermarks",
     );
     expect(sourceOnlyImport).toContain(
       "product_tests.match_method = 'source_only'",
@@ -1005,6 +1005,185 @@ describe.runIf(Boolean(testDatabaseUrl))(
       }]);
     });
 
+    it("retains the maximum generation when a stable observation moves between source-product groups", async () => {
+      await client.query(`
+        INSERT INTO foods (id, data_origin)
+        VALUES
+          ('target-a', 'brand_site'),
+          ('target-b', 'brand_site');
+
+        INSERT INTO product_tests (
+          id, food_id, source_key, source_result_id, source_name,
+          tested_product_name, tested_product_brand, tested_product_upc_raw,
+          tested_source_product_id, match_method, remap_revision,
+          contaminant_key, contaminant_name, result_operator, result_value,
+          result_unit, result_basis
+        ) VALUES
+          (
+            'catalog:stable:lead', 'target-a', 'catalog', 'stable', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-a',
+            'manual_confirmed', 2, 'lead', 'Lead', 'eq', 1, 'ppm',
+            'product_mass'
+          ),
+          (
+            'catalog:b:cadmium', 'target-b', 'catalog', 'b-cadmium', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-b',
+            'manual_confirmed', 1, 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
+            'product_mass'
+          ),
+          (
+            'catalog:b:arsenic', 'target-b', 'catalog', 'b-arsenic', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-b',
+            'manual_confirmed', 1, 'arsenic', 'Arsenic', 'eq', 0.1, 'ppm',
+            'product_mass'
+          );
+      `);
+
+      const stableObservation = {
+        id: "catalog:stable:lead",
+        sourceResultId: "stable",
+        contaminantKey: "lead",
+        contaminantName: "Lead",
+        lotCode: "LOT-A",
+        resultValue: "1",
+      };
+      await runImport([{
+        ...stableObservation,
+        testedSourceProductId: "product-b",
+      }]);
+
+      const moved = await client.query<{
+        food_ids: string;
+        revisions: string;
+        rows: string;
+      }>(`
+        SELECT
+          COUNT(*)::text AS rows,
+          string_agg(DISTINCT food_id, ',' ORDER BY food_id) AS food_ids,
+          string_agg(
+            DISTINCT remap_revision::text,
+            ',' ORDER BY remap_revision::text
+          ) AS revisions
+        FROM product_tests
+        WHERE source_key = 'catalog' AND tested_source_product_id = 'product-b'
+      `);
+      expect(moved.rows).toEqual([{
+        rows: "3",
+        food_ids: "target-b",
+        revisions: "2",
+      }]);
+
+      await runImport([{
+        ...stableObservation,
+        testedSourceProductId: "product-a",
+      }]);
+
+      const restored = await client.query<{
+        food_id: string | null;
+        match_method: string;
+        remap_revision: string;
+      }>(`
+        SELECT food_id, match_method, remap_revision::text
+        FROM product_tests
+        WHERE source_key = 'catalog' AND source_result_id = 'stable'
+      `);
+      expect(restored.rows).toEqual([{
+        food_id: null,
+        match_method: "source_only",
+        remap_revision: "2",
+      }]);
+
+      const inconsistentGroups = await client.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM (
+          SELECT source_key, tested_source_product_id
+          FROM product_tests
+          WHERE tested_source_product_id IS NOT NULL
+          GROUP BY source_key, tested_source_product_id
+          HAVING
+            COUNT(DISTINCT jsonb_build_array(
+              food_id,
+              supplement_id,
+              match_method
+            )) > 1
+            OR COUNT(DISTINCT remap_revision) > 1
+        ) inconsistent
+      `);
+      expect(inconsistentGroups.rows).toEqual([{ count: "0" }]);
+    });
+
+    it("carries a moving generation into a source-only generation-zero group without replay churn", async () => {
+      await client.query(`
+        INSERT INTO product_tests (
+          id, source_key, source_result_id, source_name,
+          tested_product_name, tested_product_brand, tested_product_upc_raw,
+          tested_source_product_id, match_method, remap_revision,
+          contaminant_key, contaminant_name, result_operator, result_value,
+          result_unit, result_basis, imported_at
+        ) VALUES
+          (
+            'catalog:stable:lead', 'catalog', 'stable', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-a',
+            'source_only', 2, 'lead', 'Lead', 'eq', 1, 'ppm',
+            'product_mass', '2000-01-01'
+          ),
+          (
+            'catalog:b:cadmium', 'catalog', 'b-cadmium', 'Catalog',
+            'Ground Cinnamon', 'Example Spice', '12345678901', 'product-b',
+            'source_only', 0, 'cadmium', 'Cadmium', 'eq', 0.2, 'ppm',
+            'product_mass', '2001-01-01'
+          );
+      `);
+
+      const movingObservation = {
+        id: "catalog:stable:lead",
+        sourceResultId: "stable",
+        contaminantKey: "lead",
+        contaminantName: "Lead",
+        lotCode: "LOT-A",
+        resultValue: "1",
+        testedSourceProductId: "product-b",
+      };
+      await runImport([movingObservation]);
+
+      const first = await client.query<{
+        food_id: string | null;
+        imported_at: Date;
+        match_method: string;
+        remap_revision: string;
+        source_result_id: string;
+      }>(`
+        SELECT
+          source_result_id,
+          food_id,
+          match_method,
+          remap_revision::text,
+          imported_at
+        FROM product_tests
+        WHERE source_key = 'catalog' AND tested_source_product_id = 'product-b'
+        ORDER BY source_result_id
+      `);
+      expect(first.rows).toMatchObject([
+        { food_id: null, match_method: "source_only", remap_revision: "2" },
+        { food_id: null, match_method: "source_only", remap_revision: "2" },
+      ]);
+
+      await runImport([movingObservation]);
+      const replay = await client.query<{
+        imported_at: Date;
+        source_result_id: string;
+      }>(`
+        SELECT source_result_id, imported_at
+        FROM product_tests
+        WHERE source_key = 'catalog' AND tested_source_product_id = 'product-b'
+        ORDER BY source_result_id
+      `);
+      expect(replay.rows).toEqual(first.rows.map((row) => ({
+        source_result_id: row.source_result_id,
+        imported_at: row.imported_at,
+      })));
+    });
+
     it("preserves the group high-watermark when schema repair demotes a legacy target", async () => {
       await client.query(`
         INSERT INTO foods (id, data_origin)
@@ -1207,6 +1386,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       testedPackageSize?: string;
       testedProductName?: string;
       testedProductUpcRaw?: string;
+      testedSourceProductId?: string;
     }>, options: { replaceSource?: boolean } = {}): Promise<void> {
       await client.query("DROP TABLE IF EXISTS source_only_product_tests_import");
       await client.query(`
@@ -1274,7 +1454,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           ) VALUES (
             $1, $9, $2, 'Catalog',
             $7, 'Example Spice', NULL,
-            $8, 'product-1', 'regulatory_laboratory',
+            $8, $11, 'regulatory_laboratory',
             'targeted_market_sampling', '6', $3, $10, 'source_only', $4, $5,
             'eq', $6, 'ppm', 'product_mass', $6, 'ppm', 'product_mass'
           )
@@ -1289,6 +1469,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           row.testedProductUpcRaw ?? "12345678901",
           row.sourceKey ?? "catalog",
           row.testedPackageSize ?? null,
+          row.testedSourceProductId ?? "product-1",
         ]);
       }
 

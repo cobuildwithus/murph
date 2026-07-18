@@ -433,6 +433,10 @@ and published package size; source identity drift repairs the row back to
 `source_only` for review while retaining the group's reviewed-generation
 high-watermark. A replacement decision must use a strictly higher artifact
 generation; older and same-generation contradictory artifacts remain invalid.
+When a stable observation is reassigned between source-product groups, the
+destination keeps its reviewed link and every affected row uses the maximum
+existing generation across destination rows and moving-row preimages. The
+importer never lowers either group's reviewed-generation fence.
 
 Canonical `tested_product_upc` values are checksum-valid GTIN-8/12/13/14 only.
 Formatting copied from a source, including invalid or incomplete identifiers,
