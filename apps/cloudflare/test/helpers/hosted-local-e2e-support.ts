@@ -174,7 +174,7 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
-    messageReactionsAvailable?: boolean;
+    messageTargetingAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
@@ -200,8 +200,11 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
-        options.messageReactionsAvailable !== true
-        && name === "murph.react_to_message"
+        options.messageTargetingAvailable !== true
+        && (
+          name === "murph.react_to_message"
+          || name === "murph.select_reply_target"
+        )
       ) {
         return false;
       }
@@ -238,19 +241,44 @@ export function expectAdvertisedMurphDynamicTools(
 }
 
 function readMurphDynamicToolNamesFromResponsesRequest(body: string): string[] {
-  const tools = parseJsonObject(body)?.tools;
-  if (!Array.isArray(tools)) {
-    return [];
+  const request = parseJsonObject(body);
+  const candidateToolLists: unknown[][] = [];
+
+  // The murph namespace appears in the top-level `tools` array on the full
+  // Responses API. Responses Lite models (e.g. gpt-5.6-terra in Codex >= 0.144)
+  // relocate the structured tool specs into an `additional_tools` input item
+  // and null the top-level `tools`, so look in both places.
+  const topLevelTools = request?.tools;
+  if (Array.isArray(topLevelTools)) {
+    candidateToolLists.push(topLevelTools);
   }
 
-  const murphNamespace = tools.find((tool): tool is { tools?: unknown } =>
-    Boolean(
-      tool
-      && typeof tool === "object"
-      && (tool as { type?: unknown }).type === "namespace"
-      && (tool as { name?: unknown }).name === "murph",
-    )
-  );
+  const input = request?.input;
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (
+        item
+        && typeof item === "object"
+        && (item as { type?: unknown }).type === "additional_tools"
+      ) {
+        const tools = (item as { tools?: unknown }).tools;
+        if (Array.isArray(tools)) {
+          candidateToolLists.push(tools);
+        }
+      }
+    }
+  }
+
+  const murphNamespace = candidateToolLists
+    .flat()
+    .find((tool): tool is { tools?: unknown } =>
+      Boolean(
+        tool
+        && typeof tool === "object"
+        && (tool as { type?: unknown }).type === "namespace"
+        && (tool as { name?: unknown }).name === "murph",
+      )
+    );
   if (!murphNamespace || !Array.isArray(murphNamespace.tools)) {
     return [];
   }

@@ -1,6 +1,3 @@
-import type {
-  HostedPhoneCallBrief,
-} from "@murphai/hosted-execution/phone-calls";
 import {
   Retell,
   UnprocessableEntityError,
@@ -364,7 +361,6 @@ function buildRetellDynamicVariables(
   return {
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
-    opening_line: renderOpeningLine(brief),
     ...(publicBaseOrigin
       ? {
         [RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE]: publicBaseOrigin,
@@ -374,23 +370,6 @@ function buildRetellDynamicVariables(
       ? call.transferNumber ?? ""
       : "",
   };
-}
-
-function renderOpeningLine(brief: HostedPhoneCallBrief): string {
-  const goal = formatOpeningGoal(brief.goal);
-  const callerName = brief.callerName?.trim();
-  if (callerName) {
-    return `Hi, this is Murph. I'm calling for ${callerName} to ${goal}`;
-  }
-  return `Hi, this is Murph. I'm calling to ${goal}`;
-}
-
-function formatOpeningGoal(goal: string): string {
-  const trimmed = goal.trim();
-  if (/^[A-Z][a-z]/u.test(trimmed)) {
-    return `${trimmed[0]!.toLowerCase()}${trimmed.slice(1)}`;
-  }
-  return trimmed;
 }
 
 function requireEnv(name: string): string {

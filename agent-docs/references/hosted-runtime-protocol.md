@@ -409,6 +409,16 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+Shared accepted-message targeting is a runtime-only strict outbox-shape change,
+so its reader and writer ship together in one runner bundle. Deploy Cloudflare
+and that runner with `container_rollout=immediate`, and require managed-container
+smoke to report the exact new runner-bundle fingerprint and prove its assistant
+CLI surface contract before accepting targeted work. There is no Web ordering
+dependency. A rollback to the prior bundle is safe only before the first
+`nativeReplyRequested: true` intent is written. After that write, the new bundle
+is the hard rollback floor because a workspace, checkpoint, or retained outbox
+intent may contain the marker. Do not try to prove an incident-time drain;
+forward-fix instead of adding a compatibility reader or dual writer.
 The preference sparse-delta plus cross-lane causal-sequence rollout uses the
 same compatibility rule behind one gate. Vercel predeploy first adds nullable
 `causal_seq` storage, the keyed assistant-input lookup, and nullable Humor,
@@ -1140,6 +1150,17 @@ provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window closes when the
 bounded batch is selected before provider start; mailbox input that arrives
 after that boundary remains durable staged input for a later turn.
+For accepted Linq input positively identified as iMessage, or Telegram input
+with a valid numeric provider message target, the prompt may show the existing
+input id as an opaque `Message ref` when at least one targeting action is
+eligible. Linq SMS, RCS, and unknown service types expose no ref. Exact-message
+replies and reactions use one resolver that binds the ref to the current
+accepted delivery context, reloads the stored input, and rechecks route,
+audience, group-actor, provider-target, and action-specific authority. Provider
+ids never cross into model-visible state. Reply selection annotates a normal
+response; each delimiter-generated bubble persists the same true-only
+`nativeReplyRequested` marker and target. Reactions remain the existing
+`message-reaction` operation, and unmarked automatic replies remain flat.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable

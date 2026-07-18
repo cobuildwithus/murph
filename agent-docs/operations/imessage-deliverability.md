@@ -99,6 +99,7 @@ Linq egress should stay small and obvious:
 - Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
 - Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.
 - Delimiter-generated Linq reply bubbles send the first bubble immediately, then pause 1.5 seconds after each confirmed sibling send. The pause applies only within that reply's existing outbox sequence; it does not pace unrelated sends, retries, reactions, or progress updates.
+- An ordinary automatic model reply stays flat even when its delivery context carries an inbound message id. For automatic model responses, Murph requests a native reply only through `murph.select_reply_target`, and every delimiter-generated bubble from that response targets the same accepted message. This changes thread placement, not message count or pacing, and does not change explicit or manual low-level reply calls. Exact-message reactions continue through the separate existing reaction effect and do not select the text reply target.
 - Do not restart typing between reply bubbles. Linq clears the turn's existing indicator on send, and repeated typing cycles add line activity without proven deliverability value.
 
 ## Prompt and copy guidance

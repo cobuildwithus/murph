@@ -336,6 +336,7 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "conversationContextPresent",
   "developerInstructionsPresent",
+  "messageTargetDynamicToolsAvailable",
   "messageReactionsAvailable",
   "reactionDynamicToolAvailable",
   "resumeCodexThreadIdPresent",
@@ -538,10 +539,12 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
   const details: HostedExecutionStructuredLogDetails = {
     codexContinuation,
     providerPlanKind: "provider.plan",
-    messageReactionsAvailable:
-      readHostedAssistantProviderPlanBoolean(record, "messageReactionsAvailable"),
-    reactionDynamicToolAvailable:
-      readHostedAssistantProviderPlanBoolean(record, "reactionDynamicToolAvailable"),
+    messageTargetingAvailable:
+      readHostedAssistantProviderPlanBoolean(record, "messageTargetingAvailable")
+      ?? readHostedAssistantProviderPlanBoolean(record, "messageReactionsAvailable"),
+    messageTargetDynamicToolsAvailable:
+      readHostedAssistantProviderPlanBoolean(record, "messageTargetDynamicToolsAvailable")
+      ?? readHostedAssistantProviderPlanBoolean(record, "reactionDynamicToolAvailable"),
     providerRequestOrdinal:
       readHostedAssistantProviderPlanNullableNumber(record, "providerRequestOrdinal"),
     resumeCodexThreadIdPresent:

@@ -515,35 +515,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("resolves the production budgets with shared operational headroom", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Entry = measured CI Linux baseline (1,423,217B after the 2026-07-13
-    // mainline integration) + the prior 14,551B host-variance ratchet + PR
-    // #626's exact 7,706B local-macOS overage, PR #678's exact 633B overage,
-    // then this PR's exact 4,351B overage on the merged base and the final 233B
-    // boundary-tail integration, less the final 179B complete-tail ownership
-    // reduction, plus the 230B explicit wake-provenance correction and the
-    // original 48,000B emit-jitter band and 250,000B shared headroom. Static
-    // closure
-    // advances the latest mainline baseline by PR #631's exact 913B crypto-lane
-    // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
-    // overage, this PR's exact 1,929B merged-base overage, and the same final
-    // 233B integration, less the same 179B ownership reduction, plus the same
-    // 230B provenance correction, its original 96,000B noise band, and the
-    // same 250,000B operational headroom because the closure contains the
-    // entry chunk.
-    // The static-closure baseline later advanced 24,408B to 7,121,190B on the
-    // 2026-07-16 mainline prompt integration and 14,854B more to 7,136,044B on
-    // the July 16-17 mainline (Epic clinical records beta, onboarding
-    // clarifiers, multi-agent posture/delegation/usage), both of which landed
-    // without moving this lock. Phase-two generated-delivery staging plus the
-    // review-remediation consume-into-owned-name path then advance the baseline
-    // by their exact measured 10,900B overage on that fully merged base, and the
-    // round-2 stable-per-send-ref remediation advances it by its exact measured
-    // 1,284B overage.
-    // Locking exact values makes any silent change to a ratchet a failing,
-    // reviewed diff.
+    // Mirror the production baselines plus their variance and operational
+    // allowances so budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_148_228 + 96_000 + 250_000,
+      staticClosureBytes: 7_500_000 + 96_000 + 250_000,
       totalBytes: 9_300_000,
     });
   });

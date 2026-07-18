@@ -2982,6 +2982,7 @@ function createHostedAssistantLinqSendDependency(input: {
     const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
       answeredMailboxItemIds: request.answeredMailboxItemIds,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+      nativeReplyRequested: request.nativeReplyRequested,
       replyToMessageId: request.replyToMessageId ?? null,
     });
     const deliveryContext = currentHomeRouteOnly
@@ -3088,6 +3089,7 @@ function createHostedAssistantLinqSendDependency(input: {
         idempotencyKey,
         media: request.media ?? null,
         message: request.message,
+        ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
         targetKind: providerTargetKind,
@@ -3809,9 +3811,11 @@ function normalizeHostedAssistantLinqTargetKind(
 function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   homeRouteFallbackAllowed: boolean;
+  nativeReplyRequested?: true;
   replyToMessageId: string | null;
 }): boolean {
   return input.homeRouteFallbackAllowed
+    && input.nativeReplyRequested !== true
     && !input.replyToMessageId?.trim()
     && (input.answeredMailboxItemIds?.length ?? 0) === 0;
 }
@@ -4378,6 +4382,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "intentId"
     | "media"
     | "message"
+    | "nativeReplyRequested"
     | "newsletterAuthorizationProof"
     | "subject"
     | "replyToMessageId"
@@ -4387,7 +4392,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "turnId"
   >,
 ): HostedAssistantDeliveryPayload {
-  const payload = {
+  const payload: HostedAssistantDeliveryPayload = {
     actorId: intent.actorId ?? null,
     answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
@@ -4400,6 +4405,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     identityId: intent.identityId ?? null,
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
+    ...(intent.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
     ...(intent.newsletterAuthorizationProof == null
       ? {}
       : { newsletterAuthorizationProof: intent.newsletterAuthorizationProof }),

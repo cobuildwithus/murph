@@ -66,6 +66,11 @@ export function extractAssistantAutoReplyFailedPromptText(prompt: string): strin
 
   if (matched.length === 0) {
     return prompt
+      .split('\n')
+      .filter((line) => !/^Message ref: ain_[0-9a-f]{32}$/u.test(line))
+      .join('\n')
+      .replace(/\n{3,}/gu, '\n\n')
+      .trim()
   }
 
   return matched.length === 1 ? matched[0] : matched.join('\n\n')

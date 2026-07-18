@@ -27,6 +27,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Shared Message Targeting Rollout
+
+The first release with shared exact-message reply and reaction targeting must
+deploy Cloudflare and the runner bundle with `container_rollout=immediate`.
+The bundle contains both the strict `nativeReplyRequested` outbox reader and its
+writer, so there is no Web deployment order or feature flag. Require
+managed-container smoke to report the exact new runner-bundle fingerprint and
+prove its assistant CLI surface contract before accepting targeted turns.
+
+Before the first `nativeReplyRequested: true` intent is written, the prior
+runner bundle remains a safe rollback. After that write, the new bundle is a
+hard rollback floor because an encrypted workspace, checkpoint, or retained
+outbox intent may contain the marker. Do not try to prove an incident-time
+drain. Forward-fix on that bundle or newer; do not restore an older runner or
+add a dual writer.
+
+After convergence, verify one unselected Linq or Telegram automatic model reply
+remains flat, one selected reply with `---` keeps the same native target on
+every bubble, and one reaction reaches its selected accepted message. Confirm
+no strict outbox parse failures or stale runner fingerprints appear in Workers
+Observability.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an

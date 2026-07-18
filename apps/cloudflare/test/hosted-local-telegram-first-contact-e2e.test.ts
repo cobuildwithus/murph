@@ -4,6 +4,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import {
   buildAssistantProviderMurphToolCall,
@@ -37,6 +40,10 @@ const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const telegramHeartEmoji = "\u2764";
 const defaultTelegramInboundText = "yo murph telegram first contact e2e";
 const reactionReplyText = "Heart reaction test sent.";
+const reactionEventId =
+  `telegram.message.received:local:${reactionUserId}:evt_telegram_reaction`;
+const reactionFailureEventId =
+  `telegram.message.received:local:${reactionFailureUserId}:evt_telegram_reaction_failure`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
@@ -229,7 +236,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
+      buildAssistantProviderMurphToolCall("react_to_message", {
+        message_ref: buildAcceptedTelegramMessageRef(reactionUserId, reactionEventId),
+        reaction: "heart",
+      }),
       reactionReplyText,
     ], {
       matchInputContains: "react to this with a heart",
@@ -249,7 +259,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     );
 
     await requireScenario().runWake(buildInboundTelegramWake(reactionUserId, {
-      eventId: `telegram.message.received:local:${reactionUserId}:evt_telegram_reaction`,
+      eventId: reactionEventId,
       text: "react to this with a heart",
     }), reactionUserId);
 
@@ -261,7 +271,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
-      messageReactionsAvailable: true,
+      messageTargetingAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
     });
@@ -313,7 +323,13 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
+      buildAssistantProviderMurphToolCall("react_to_message", {
+        message_ref: buildAcceptedTelegramMessageRef(
+          reactionFailureUserId,
+          reactionFailureEventId,
+        ),
+        reaction: "heart",
+      }),
       reactionReplyText,
     ], {
       matchInputContains: "try to react to this with a heart",
@@ -339,7 +355,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     );
 
     await requireScenario().runWake(buildInboundTelegramWake(reactionFailureUserId, {
-      eventId: `telegram.message.received:local:${reactionFailureUserId}:evt_telegram_reaction_failure`,
+      eventId: reactionFailureEventId,
       text: "try to react to this with a heart",
     }), reactionFailureUserId);
 
@@ -405,6 +421,16 @@ function buildInboundTelegramWake(
       text: overrides.text ?? defaultTelegramInboundText,
       threadId: buildTelegramThreadId(userId),
     },
+    userId,
+  });
+}
+
+function buildAcceptedTelegramMessageRef(userId: string, eventId: string): string {
+  return createHostedMailboxAssistantInputId({
+    dedupeKey: eventId,
+    eventId,
+    lane: "conversation",
+    secret: buildTelegramThreadId(userId),
     userId,
   });
 }
