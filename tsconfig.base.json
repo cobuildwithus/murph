@@ -396,6 +396,9 @@
       "@murphai/assistant-engine": [
         "./packages/assistant-engine/src/index.ts"
       ],
+      "@murphai/assistant-evals": [
+        "./packages/assistant-evals/src/index.ts"
+      ],
       "@murphai/assistant-engine/assistant-cli-access": [
         "./packages/assistant-engine/src/assistant-cli-access.ts"
       ],

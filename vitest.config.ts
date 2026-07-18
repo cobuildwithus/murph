@@ -1,4 +1,5 @@
 import assistantEngineProject from "./packages/assistant-engine/vitest.config.ts";
+import assistantEvalsProject from "./packages/assistant-evals/vitest.config.ts";
 import assistantCliProject from "./packages/assistant-cli/vitest.config.ts";
 import assistantRuntimeProject from "./packages/assistant-runtime/vitest.config.ts";
 import assistantdProject from "./packages/assistantd/vitest.config.ts";
@@ -63,6 +64,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: assistantEngineProject,
     root: "packages/assistant-engine",
+    include: ["test/**/*.test.ts"],
+  },
+  {
+    config: assistantEvalsProject,
+    root: "packages/assistant-evals",
     include: ["test/**/*.test.ts"],
   },
   {

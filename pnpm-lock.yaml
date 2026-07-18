@@ -425,6 +425,15 @@ importers:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
 
+  packages/assistant-evals:
+    dependencies:
+      '@murphai/assistant-engine':
+        specifier: workspace:*
+        version: link:../assistant-engine
+      '@murphai/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/assistant-runtime:
     dependencies:
       '@murphai/assistant-engine':

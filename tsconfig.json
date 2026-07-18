@@ -35,6 +35,9 @@
       "path": "./packages/assistant-engine"
     },
     {
+      "path": "./packages/assistant-evals"
+    },
+    {
       "path": "./packages/vault-usecases"
     },
     {

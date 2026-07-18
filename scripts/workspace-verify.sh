@@ -87,6 +87,7 @@ readonly typecheck_package_dirs=(
   "packages/cloudflare-hosted-control"
   "packages/operator-config"
   "packages/assistant-engine"
+  "packages/assistant-evals"
   "packages/assistant-cli"
   "packages/setup-cli"
   "packages/core"
@@ -664,6 +665,7 @@ run_all_package_coverage() {
   local package_coverage_dirs=(
     "packages/cli"
     "packages/assistant-engine"
+    "packages/assistant-evals"
     "packages/core"
     "packages/assistant-runtime"
     "packages/setup-cli"
@@ -695,6 +697,7 @@ run_all_package_coverage() {
   local package_coverage_labels=(
     "CLI package coverage"
     "Assistant engine package coverage"
+    "Assistant evals package coverage"
     "Core owner coverage"
     "Assistant runtime package coverage"
     "Setup CLI package coverage"
