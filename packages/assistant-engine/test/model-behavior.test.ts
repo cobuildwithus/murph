@@ -545,29 +545,38 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'explain naturally that approval is required',
+      'Only after this turn establishes an obligation to send a newly generated file now',
     )
     expect(prompt).toContain(
-      'The file is not attached yet.',
+      '.runtime/operations/assistant/generated-deliveries/<flat-filename>',
     )
     expect(prompt).toContain(
-      'The runtime appends the exact approval link outside model context',
-    )
-    expect(prompt).toContain('do not invent, request, or print an approval URL')
-    expect(prompt).toContain(
-      'When `murph.send_vault_file` returns `status: "approved"`',
+      'Do not use runtime staging for "prepare now, maybe send later,"',
     )
     expect(prompt).toContain(
-      'write a concise, natural reply using the returned filename when useful',
+      'never move or copy existing, user-owned, canonical, or durable files there.',
     )
     expect(prompt).toContain(
-      'such as "Here it is: report.pdf."',
+      'say approval is required and the file is not attached',
     )
     expect(prompt).toContain(
-      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+      'the runtime adds the exact approval link outside model context',
+    )
+    expect(prompt).toContain('Never invent or print a link')
+    expect(prompt).toContain(
+      'On `status: "approved"`',
     )
     expect(prompt).toContain(
-      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
+      'reply naturally with the filename',
+    )
+    expect(prompt).toContain(
+      'for example, "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Never expose `deliveryStatus`, approval/queue mechanics, or stock "delivery is not confirmed" copy',
+    )
+    expect(prompt).toContain(
+      'claim success only after later evidence says `sent`.',
     )
   })
 
@@ -2145,6 +2154,10 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('WHOOP: More > App Settings')
+    expect(prompt).not.toContain('Automatic meal capture:')
+    expect(prompt).not.toContain(
+      'automatic-meal-capture alongside food-journal',
+    )
     expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant local action window')
     expect(prompt).not.toContain('Assistant tone preference:')
   })

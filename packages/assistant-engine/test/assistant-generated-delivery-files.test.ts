@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  MURPH_SEND_VAULT_FILE_TOOL,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
   isAssistantGeneratedDeliveryRef,
   resolveSupportedAssistantVaultFileContentType,
 } from '../src/assistant/generated-delivery-files.ts'
 
 describe('assistant generated delivery files', () => {
-  it('owns only one assistant runtime subtree', () => {
+  it('owns only one flat assistant runtime subtree', () => {
     expect(ASSISTANT_GENERATED_DELIVERY_DIRECTORY).toBe(
       '.runtime/operations/assistant/generated-deliveries',
     )
@@ -34,5 +37,23 @@ describe('assistant generated delivery files', () => {
     )
     expect(resolveSupportedAssistantVaultFileContentType('.zip')).toBeNull()
     expect(resolveSupportedAssistantVaultFileContentType('report.bin')).toBeNull()
+  })
+
+  it('routes only newly generated same-turn sends into runtime staging', () => {
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'Only after this turn establishes an obligation to send a newly generated file now',
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>`,
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'Do not stage files for possible later delivery',
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'never move or copy existing, user-owned, canonical, or durable files there',
+    )
+    expect(
+      MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.ref.description,
+    ).toContain('all other hidden paths')
   })
 })

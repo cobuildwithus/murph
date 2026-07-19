@@ -1757,7 +1757,10 @@ describe('assistant skill assets', () => {
       'vault-cli assistant onboarding resume-context --format json',
     )
     expect(compact).toContain(
-      'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
+      'Make one targeted owning read only on an ordinary interactive or inbound turn when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
+    )
+    expect(compact).toContain(
+      'The managed scheduled follow-up performs no targeted CLI reads and uses only its parent-supplied snapshot.',
     )
     expect(raw).toContain('vault-cli memory show --format json')
     expect(compact).toContain('vault-cli blood-test list --format json')
