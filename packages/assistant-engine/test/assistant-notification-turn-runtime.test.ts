@@ -2374,7 +2374,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
-test('sendAssistantNotificationLocal isolates hosted capabilities and delivery for internal turns', async () => {
+test('sendAssistantNotificationLocal isolates hosted capabilities and retains trusted scheduled group scope', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
@@ -2459,16 +2459,59 @@ test('sendAssistantNotificationLocal isolates hosted capabilities and delivery f
     },
     vault: '/vaults/notification-device-scope',
   })
+  await sendAssistantNotificationLocal({
+    executionContext: internalExecutionContext,
+    instructions: 'Run an ordinary group notification without scheduled authority.',
+    vault: '/vaults/notification-group-scope',
+  })
+  await sendAssistantNotificationLocal({
+    executionContext: internalExecutionContext,
+    instructions: 'Run a personal scheduled check-in.',
+    scheduledInvocationAuthority: {
+      automationId: 'automation_scheduled_personal_check_in',
+      occurrenceAt: '2026-07-20T11:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T11:00:00.000Z',
+    threadIsDirect: true,
+    vault: '/vaults/notification-group-scope',
+  })
+  await sendAssistantNotificationLocal({
+    executionContext: internalExecutionContext,
+    instructions: 'Ask one member for a scheduled group check-in.',
+    scheduledInvocationAuthority: {
+      automationId: 'automation_scheduled_group_check_in',
+      occurrenceAt: '2026-07-20T12:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T12:00:00.000Z',
+    threadIsDirect: false,
+    vault: '/vaults/notification-group-scope',
+  })
   const internalResult = await sendAssistantNotificationLocal(
     internalNotificationInput,
   )
 
-  expect(observedProviderInputs).toHaveLength(3)
+  expect(observedProviderInputs).toHaveLength(6)
   expect(observedProviderInputs[0]?.hostedToolContext?.deviceTool).toBe(
     deviceTool,
   )
   expect(observedProviderInputs[1]?.hostedToolContext).toBeNull()
-  const internalProviderInput = observedProviderInputs[2]
+  expect(observedProviderInputs[2]?.hostedToolContext?.groupTool).toBeNull()
+  expect(observedProviderInputs[3]?.hostedToolContext?.groupTool).toBeNull()
+  const scheduledProviderInput = observedProviderInputs[4]
+  expect(scheduledProviderInput?.hostedToolContext?.groupTool?.request).toBe(
+    groupRequest,
+  )
+  expect(
+    scheduledProviderInput?.hostedToolContext?.currentInvocationScope?.(),
+  ).toEqual({
+    conversationScope: null,
+    origin: {
+      automationId: 'automation_scheduled_group_check_in',
+      kind: 'automation_occurrence',
+      occurrenceAt: '2026-07-20T12:00:00.000Z',
+    },
+  })
+  const internalProviderInput = observedProviderInputs[5]
   expect(internalProviderInput?.profile).toEqual(
     expect.objectContaining({
       nativeResumePolicy: 'disabled',
@@ -2513,9 +2556,9 @@ test('sendAssistantNotificationLocal isolates hosted capabilities and delivery f
   expect(internalResult.session.sessionId).not.toBe(
     providerResult.session.sessionId,
   )
-  expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledTimes(1)
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledTimes(1)
-  expect(mocks.startAssistantChannelTypingIndicator).toHaveBeenCalledTimes(1)
+  expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledTimes(4)
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledTimes(4)
+  expect(mocks.startAssistantChannelTypingIndicator).toHaveBeenCalledTimes(4)
   expect(deliverMessage).not.toHaveBeenCalled()
 
   vi.clearAllMocks()

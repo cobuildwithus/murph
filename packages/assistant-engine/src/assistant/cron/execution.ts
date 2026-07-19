@@ -32,6 +32,7 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
+import type { AssistantAutomationOperationScope } from '../automation/operation-scope.js'
 import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
@@ -435,6 +436,7 @@ interface ExecuteClaimedAssistantCronJobInput {
   job: ResolvedAssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  operationScope?: AssistantAutomationOperationScope | null
   paths: AssistantStatePaths
   shouldYield?: (() => boolean) | null
   signal?: AbortSignal
@@ -713,7 +715,9 @@ export async function executeClaimedAssistantCronJob(
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
-          const result = await sendAssistantNotificationLocal({
+          const notificationInput: Parameters<
+            typeof sendAssistantNotificationLocal
+          >[0] = {
             vault: input.vault,
             ...automationTurn,
             // Replay barrier: once the provider was admitted, a yielded
@@ -809,7 +813,22 @@ export async function executeClaimedAssistantCronJob(
             threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
-          })
+          }
+          const result = automationTurn.scheduledInvocationAuthority
+            && input.operationScope
+            && input.executionContext
+            ? await input.operationScope.runScheduledAutomationOccurrence({
+                executionContext: input.executionContext,
+                operation: async (executionContext, turnEnvironment) =>
+                  await sendAssistantNotificationLocal({
+                    ...notificationInput,
+                    executionContext,
+                    turnEnvironment,
+                  }),
+                threadIsDirect: deliveryRoute.threadIsDirect,
+                turnEnvironment: input.turnEnvironment ?? null,
+              })
+            : await sendAssistantNotificationLocal(notificationInput)
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary

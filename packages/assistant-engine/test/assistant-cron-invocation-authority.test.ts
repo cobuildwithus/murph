@@ -34,11 +34,16 @@ describe("scheduled automation invocation authority", () => {
     }
   });
 
-  it("does not mint authority for manual runs or non-automation records", () => {
+  it("does not mint authority for manual runs, local jobs, or non-automation records", () => {
     expect(resolveAssistantCronScheduledInvocationAuthority({
       job: automationJob({ kind: "cron", expression: "0 9 * * 1" }) as never,
       occurrenceAt,
       trigger: "manual",
+    })).toBeNull();
+    expect(resolveAssistantCronScheduledInvocationAuthority({
+      job: { kind: "local" } as never,
+      occurrenceAt,
+      trigger: "scheduled",
     })).toBeNull();
     expect(resolveAssistantCronScheduledInvocationAuthority({
       job: {

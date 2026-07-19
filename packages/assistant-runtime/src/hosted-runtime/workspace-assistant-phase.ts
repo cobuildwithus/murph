@@ -487,6 +487,29 @@ function createHostedAssistantAutomationOperationScope(
         scopeInput.turnEnvironment,
       );
     },
+    async runScheduledAutomationOccurrence<T>(scopeInput: {
+      executionContext: AssistantExecutionContext;
+      operation(
+        executionContext: AssistantExecutionContext,
+        turnEnvironment: AssistantTurnEnvironment | null,
+      ): Promise<T>;
+      threadIsDirect: boolean | null;
+      turnEnvironment: AssistantTurnEnvironment | null;
+    }): Promise<T> {
+      const scopedExecutionContext = scopeInput.threadIsDirect === false
+        ? scopeHostedGroupToolToAssistantOperation({
+            emailDeliveryContexts: [],
+            executionContext: scopeInput.executionContext,
+            groupEmailIngress: false,
+            groupToolPort: input.runtime.platform.groupToolPort ?? null,
+            linqDeliveryContexts: [],
+          })
+        : scopeInput.executionContext;
+      return await scopeInput.operation(
+        scopedExecutionContext,
+        scopeInput.turnEnvironment,
+      );
+    },
   };
 }
 

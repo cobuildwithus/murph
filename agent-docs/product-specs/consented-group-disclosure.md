@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-18
+Last verified: 2026-07-19
 
 ## Decision
 
@@ -61,6 +61,10 @@ review the candidate disclosure inside that boundary.
    with one self-contained question and the exact `grantId` returned by the
    current read. Trusted runtime code injects the invocation origin, and
    delivery behavior is derived from that origin; the model supplies neither.
+   For a claimed canonical schedule, the initial notification receives the
+   existing group port only after route authority proves a non-direct thread;
+   runtime-minted scheduled invocation authority is required for the turn to
+   retain it.
    One invocation owns at most one request per
    grant. Exact retry reuses it, while a changed question for that grant
    conflicts. The same occurrence may ask other grants independently.
@@ -90,6 +94,9 @@ group.
   group runtime, or the claimed occurrence of a canonical scheduled automation
   running in that group runtime. Direct, email-derived, unknown, stale, or
   model-supplied invocation data is not authority.
+- The scheduled initial-turn group port is operation-scoped, not part of the
+  base runtime context. Ordinary notifications and manual, direct,
+  unknown-audience, or local cron runs must not receive it.
 - The model never supplies invocation, delivery mode, member, membership,
   runtime, mailbox, session, callback, or return-route identity. It may use only
   a current server-issued `grantId` from the live group read.

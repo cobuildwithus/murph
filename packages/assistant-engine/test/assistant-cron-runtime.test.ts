@@ -167,6 +167,7 @@ import {
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
+import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -6549,9 +6550,38 @@ describe('assistant cron runtime orchestration', () => {
       target: 'saved-group-chat',
       threadIsDirect: false,
     })
-    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
-
-    const result = await executeClaimedAssistantCronJob({
+    const groupTool = {
+      request: vi.fn(async () => {
+        throw new Error('The cron scope test must not execute the group tool.')
+      }),
+    }
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment)
+      },
+      async runScheduledAutomationOccurrence({
+        executionContext,
+        operation,
+        threadIsDirect,
+        turnEnvironment,
+      }) {
+        expect(threadIsDirect).toBe(false)
+        if (!executionContext.hosted) {
+          throw new Error('Expected hosted cron execution context.')
+        }
+        return await operation({
+          hosted: {
+            ...executionContext.hosted,
+            groupTool,
+          },
+        }, turnEnvironment)
+      },
+    }
+    const scheduledScopeSpy = vi.spyOn(
+      operationScope,
+      'runScheduledAutomationOccurrence',
+    )
+    const result = await processDueAssistantCronJobsLocal({
       executionContext: {
         hosted: {
           memberId: 'member-linq-group-authority',
@@ -6559,13 +6589,13 @@ describe('assistant cron runtime orchestration', () => {
           userEnvKeys: [],
         },
       },
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
+      limit: 1,
+      operationScope,
       vault: vaultRoot,
     })
 
-    expect(result.run.status).toBe('succeeded')
+    expect(result).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(scheduledScopeSpy).toHaveBeenCalledOnce()
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
         homeRouteFallbackAllowed: false,
@@ -6578,6 +6608,9 @@ describe('assistant cron runtime orchestration', () => {
         bindingDeliveryTarget: 'saved-group-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({ groupTool }),
+        }),
         threadIsDirect: false,
       }),
     )

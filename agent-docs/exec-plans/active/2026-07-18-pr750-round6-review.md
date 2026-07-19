@@ -1,25 +1,25 @@
-# Complete PR #750 ReviewGPT round 6
+# Complete PR #750 ReviewGPT correction loop
 
 Status: active
 Created: 2026-07-18
-Updated: 2026-07-18
+Updated: 2026-07-19
 
 ## Goal
 
-- Reconcile PR #750 with current `main`, prove the resulting exact head through every non-ReviewGPT gate required after the five-round cap, and run one trusted correction-verification round that preserves the immutable review lineage.
+- Resolve the valid round-6 initial scheduled-turn capability finding with the smallest existing-owner correction, then continue exact-head ReviewGPT rounds until the PR-specific patch passes.
 
 ## Success criteria
 
 - Manual conflict resolution preserves both current-main behavior and the consented group-to-member disclosure plus autonomous scheduled-origin behavior.
-- The stale round-1 reset is removed from PR metadata; the first-reviewed head remains `a4b6ac0670e44624f4d3d28ec2fee24035b11da2` and the immediately previous reviewed head remains `060aadaa3124291162f1a8f97f54efde6d653ada`.
+- The stale round-1 reset is removed from PR metadata; the first-reviewed head remains `a4b6ac0670e44624f4d3d28ec2fee24035b11da2`, round 6 correctly used `060aadaa3124291162f1a8f97f54efde6d653ada` as its previous reviewed head, and round 7 uses the round-6 reviewed head `dccc065d1f363cec265095a719fe09613daa6f55`.
 - Required focused and full verification, coverage-write, parent final review, and exact-head PR CI are green before round 6 begins.
 - A cap retrospective records the original requirement, first-to-current shape, review-driven growth, repeated mechanisms, post-pass scope expansion, and explicit continuation decision.
-- ReviewGPT round 6 runs through an existing managed browser lane. Stop and report immediately if the valid result contains a finding; otherwise require `ROUND_OUTCOME: PASS` with zero accepted findings.
+- Round 6 remains the reviewed baseline at `dccc065d1f363cec265095a719fe09613daa6f55`; each correction round preserves the immutable first-reviewed head and requires `ROUND_OUTCOME: PASS` with zero accepted findings before completion.
 
 ## Scope
 
-- In scope: current-main merge and manual conflict resolution; stale plan cleanup; PR intent/review metadata; cap retrospective; required local audits and verification; exact-head push/CI; trusted ReviewGPT round 6.
-- Out of scope: new product behavior, speculative compatibility machinery, a baseline reset, a fresh PR, PR merge, or fixing a newly reported ReviewGPT finding without a follow-up instruction.
+- In scope: the accepted round-6 finding, focused tests and durable boundary docs, required local audits and verification, exact-head push/CI, and trusted ReviewGPT correction rounds through a pass.
+- Out of scope: speculative compatibility machinery, a baseline reset, a fresh PR, unrelated product behavior, or PR merge.
 
 ## Decisions
 
@@ -35,7 +35,8 @@ Updated: 2026-07-18
 2. Run focused verification for conflict paths, the full acceptance lane, coverage-write, and parent final review; correct only proven pre-review issues.
 3. Update the PR description with the immutable lineage, current change shape, cap retrospective, intended behavior, invariants, affected surfaces, and deployment order.
 4. Push the exact candidate head and wait for all applicable GitHub Actions and Vercel checks to pass.
-5. Run trusted ReviewGPT round 6 with full prior-finding dispositions and stop on the first valid finding.
+5. Reuse the existing hosted automation operation scope for the initial claimed scheduled group occurrence; do not add state, a service, or another capability owner.
+6. Push the exact correction head, run CI and trusted ReviewGPT concurrently, and resolve any further valid findings until a trusted pass.
 
 ## Verification
 
@@ -48,4 +49,8 @@ Updated: 2026-07-18
 - Documentation now matches one request per exact grant per trusted invocation, origin-derived delivery, and the live-E2E coverage gap. `pnpm docs:drift` and `pnpm docs:gardening` passed.
 - Privacy/secret and forbidden-cast scans were clean after the pre-review corrections; rerun on the final staged candidate before commit.
 - The resource-bounded full acceptance rerun passed on the final reconciled candidate: `NODE_OPTIONS='--max-old-space-size=8192' MURPH_VERIFY_SHARED_HOST=1 MURPH_PACKAGE_COVERAGE_CONCURRENCY=2 MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY=1 MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS=2 MURPH_VITEST_MAX_WORKERS=2 pnpm verify:acceptance`. It covered repository guards, typechecks, documentation checks, every package coverage lane, the Web test/lint/dev-smoke/production-build lane, the Cloudflare Node and Worker suites, and fixture smoke coverage.
-- Exact-head PR CI, cap-retrospective PR metadata publication, and ReviewGPT round 6 remain pending on the final reconciled head.
+- Exact-head PR CI and the next trusted ReviewGPT correction round remain pending on the pushed correction head.
+- ReviewGPT round 6 validly found that the initial scheduled group turn retained no group port, so it could not call `ask_member`; the user explicitly authorized continued correction rounds.
+- The correction now passes the operation scope through the automation cron path, attaches the existing platform group port only for a resolved non-direct scheduled occurrence, and retains it only with runtime-minted scheduled invocation authority plus an explicit non-direct audience. Focused Assistant Engine tests pass 327 cases, Assistant Runtime tests pass 304 cases, and both package typechecks pass.
+- The required coverage-write pass added only the missing local/noncanonical authority negative. The resource-bounded `test:diff` lane passed all affected typechecks and 7,492 tests after raising the Node heap for the Assistant Engine coverage worker.
+- The final resource-bounded `pnpm verify:acceptance` passed in 640 seconds, including repository guards, every package coverage lane, 5,934 Web tests plus lint/dev-smoke/production build, 1,843 Cloudflare tests, and fixture smoke coverage.

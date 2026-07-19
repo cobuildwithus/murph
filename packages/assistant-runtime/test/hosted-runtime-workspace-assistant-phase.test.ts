@@ -3715,6 +3715,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("scopes the group port only to scheduled group occurrences", async () => {
+    const groupRequest = vi.fn(async () => {
+      throw new Error("The scheduled scope boundary test must not call the port.");
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeGroupToolPort: { request: groupRequest },
+    }));
+
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+
+    const runScheduledScope = async (threadIsDirect: boolean | null) =>
+      await operationScope.runScheduledAutomationOccurrence({
+        executionContext: laneInput.executionContext,
+        operation: async (executionContext, turnEnvironment) => {
+          expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
+          return executionContext.hosted?.groupTool != null;
+        },
+        threadIsDirect,
+        turnEnvironment: { env: { BASE_ENV: "preserved" } },
+      });
+
+    await expect(runScheduledScope(false)).resolves.toBe(true);
+    await expect(runScheduledScope(true)).resolves.toBe(false);
+    await expect(runScheduledScope(null)).resolves.toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
   it("preserves an automation route unless the accepted current conversation explicitly retargets it", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-retarget-"));
     const vaultRoot = path.join(parentRoot, "vault");

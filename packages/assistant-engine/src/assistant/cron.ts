@@ -55,6 +55,7 @@ import type { AssistantProviderTraceEvent } from './provider-traces.ts'
 import { resolveAssistantStatePaths } from './store/paths.ts'
 import type { AssistantOutboxDispatchMode } from './outbox.ts'
 import type { AssistantExecutionContext } from './execution-context.ts'
+import type { AssistantAutomationOperationScope } from './automation/operation-scope.ts'
 import {
   addAssistantCronJob,
   installAssistantCronPreset,
@@ -150,6 +151,7 @@ export interface ProcessDueAssistantCronJobsInput {
   limit?: number
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  operationScope?: AssistantAutomationOperationScope | null
   shouldYield?: (() => boolean) | null
   signal?: AbortSignal
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
@@ -639,6 +641,7 @@ export async function processDueAssistantCronJobsLocal(
         job: claimed,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
+        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         paths,
         shouldYield: input.shouldYield ?? null,
         shouldYieldBackgroundMaintenance:

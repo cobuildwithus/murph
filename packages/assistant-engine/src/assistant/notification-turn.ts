@@ -359,7 +359,9 @@ export async function sendAssistantNotificationLocal(
         conversationScope === 'direct'
           ? executionContext?.hosted?.deviceTool ?? null
           : null
-      const hostedGroupTool = internalTurn
+      const hostedGroupTool = internalTurn || (
+        input.scheduledInvocationAuthority && input.threadIsDirect === false
+      )
         ? executionContext?.hosted?.groupTool ?? null
         : null
       const hostedToolContext =

@@ -72,6 +72,12 @@ trusted accepted-input or scheduled-automation invocation owns at most one
 consented-member request per exact grant; exact replay reuses it, a changed
 question for that grant conflicts, and another current grant in the same
 invocation remains independent without creating an implicit roster fan-out API.
+The initial turn of a claimed canonical scheduled group occurrence reuses the
+hosted automation operation scope: only after route authority resolves a
+non-direct thread does that scope attach the existing platform group port, and
+the notification retains it only with the runtime-minted occurrence authority.
+Ordinary notifications and manual, direct, unknown-audience, or local cron runs
+do not receive that group capability.
 An automation-origin completion runs as an isolated exact-skip turn in that
 same synthetic group runtime. Its native write sandbox is limited to the group
 vault, its only dynamic group actions are `read_current` and `ask_member`, and
