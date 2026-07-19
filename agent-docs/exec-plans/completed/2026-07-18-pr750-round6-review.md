@@ -1,6 +1,6 @@
 # Complete PR #750 ReviewGPT correction loop
 
-Status: active
+Status: completed
 Created: 2026-07-18
 Updated: 2026-07-19
 
@@ -49,8 +49,10 @@ Updated: 2026-07-19
 - Documentation now matches one request per exact grant per trusted invocation, origin-derived delivery, and the live-E2E coverage gap. `pnpm docs:drift` and `pnpm docs:gardening` passed.
 - Privacy/secret and forbidden-cast scans were clean after the pre-review corrections; rerun on the final staged candidate before commit.
 - The resource-bounded full acceptance rerun passed on the final reconciled candidate: `NODE_OPTIONS='--max-old-space-size=8192' MURPH_VERIFY_SHARED_HOST=1 MURPH_PACKAGE_COVERAGE_CONCURRENCY=2 MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY=1 MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS=2 MURPH_VITEST_MAX_WORKERS=2 pnpm verify:acceptance`. It covered repository guards, typechecks, documentation checks, every package coverage lane, the Web test/lint/dev-smoke/production-build lane, the Cloudflare Node and Worker suites, and fixture smoke coverage.
-- Exact-head PR CI and the next trusted ReviewGPT correction round remain pending on the pushed correction head.
+- Exact-head PR CI passed on `3097a27bb5cfe28fa89f67d0ed9ea6e273231e59`. The Linq delivery/recovery/Temporal lane initially lost a local port-allocation race before its test ran; the unchanged exact-head retry passed, as did every required gate.
 - ReviewGPT round 6 validly found that the initial scheduled group turn retained no group port, so it could not call `ask_member`; the user explicitly authorized continued correction rounds.
 - The correction now passes the operation scope through the automation cron path, attaches the existing platform group port only for a resolved non-direct scheduled occurrence, and retains it only with runtime-minted scheduled invocation authority plus an explicit non-direct audience. Focused Assistant Engine tests pass 327 cases, Assistant Runtime tests pass 304 cases, and both package typechecks pass.
 - The required coverage-write pass added only the missing local/noncanonical authority negative. The resource-bounded `test:diff` lane passed all affected typechecks and 7,492 tests after raising the Node heap for the Assistant Engine coverage worker.
 - The final resource-bounded `pnpm verify:acceptance` passed in 640 seconds, including repository guards, every package coverage lane, 5,934 Web tests plus lint/dev-smoke/production build, 1,843 Cloudflare tests, and fixture smoke coverage.
+- ReviewGPT round 7 passed on the exact pushed correction head with valid model attestation, `ROUND_OUTCOME: PASS`, and zero qualifying findings. It accepted the existing-owner operation-scope correction, the route plus runtime-authority capability gate, the positive scheduled-group path, and the direct, null-route, manual, local, and noncanonical exclusions.
+Completed: 2026-07-19
