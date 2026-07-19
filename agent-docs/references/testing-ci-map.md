@@ -217,7 +217,11 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   outcome replay, and account-deletion coverage. Package tests cover the shared
   runtime contracts and clinical cursor crypto lane. No automated check logs
   into a live Epic tenant or asserts that a provider's production patient data
-  is complete.
+  is complete. Focused recovery tests prove that the Temporal-owned scheduled
+  command's shared mailbox handoff sweep selects at most one pending item per
+  user and accepts a Clinical Records candidate only for an exact active
+  queued-generation mailbox item ahead of its lane watermark. It stays bounded
+  and creates no replacement work.
 
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:scenario-integrity` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.

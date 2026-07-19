@@ -455,7 +455,10 @@ export async function appendClinicalRetrievalWakeTx(input: {
 }): Promise<ClinicalMailboxCheckpoint> {
   const appended = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionClinicalRecordsSyncRequestedWake({
-      eventId: `clinical-records:sync:v1:${input.runId}:${input.generation}`,
+      eventId: buildClinicalRetrievalWakeEventId({
+        generation: input.generation,
+        runId: input.runId,
+      }),
       generation: input.generation,
       occurredAt: input.occurredAt.toISOString(),
       runId: input.runId,
@@ -477,6 +480,13 @@ export async function appendClinicalRetrievalWakeTx(input: {
     laneSeq: appended.item.laneSeq,
     userId: input.memberId,
   };
+}
+
+export function buildClinicalRetrievalWakeEventId(input: {
+  generation: number;
+  runId: string;
+}): string {
+  return `clinical-records:sync:v1:${input.runId}:${input.generation}`;
 }
 
 export async function signalClinicalRetrievalWake(
@@ -774,7 +784,10 @@ async function readSanitizedFhirPage(input: {
     entries.forEach((entry) => {
       const entryRecord = requireRecord(entry);
       const resource = requireRecord(entryRecord.resource);
-      if (resource.resourceType !== input.resourceType) throw invalidFhirResponseError();
+      if (
+        resource.resourceType !== input.resourceType
+        && !isMarkedFhirSearchOutcomeEntry(entryRecord, resource)
+      ) throw invalidFhirResponseError();
     });
     nextUrl = readNextFhirUrl(record.link, input.fhirBaseUrl, input.resourceType);
     validated = record;
@@ -785,6 +798,15 @@ async function readSanitizedFhirPage(input: {
     throw invalidFhirResponseError();
   }
   return { body, bodyBytes, nextUrl };
+}
+
+function isMarkedFhirSearchOutcomeEntry(
+  entry: Record<string, unknown>,
+  resource: Record<string, unknown>,
+): boolean {
+  if (resource.resourceType !== "OperationOutcome") return false;
+  const search = requireRecord(entry.search);
+  return search.mode === "outcome";
 }
 
 function readNextFhirUrl(
@@ -933,7 +955,12 @@ async function completeRetrievalPageRequest(input: {
   const now = new Date();
   return getPrisma().$transaction(async (tx) => {
     const completed = await tx.clinicalRecordRetrievalRequest.updateMany({
-      data: { completedAt: now, reservedBytes: 0, responseBytes: input.bodyBytes },
+      data: {
+        claimVersion: { increment: 1 },
+        completedAt: now,
+        reservedBytes: 0,
+        responseBytes: input.bodyBytes,
+      },
       where: {
         claimVersion: input.claimVersion,
         completedAt: null,

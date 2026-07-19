@@ -78,7 +78,10 @@ Last verified: 2026-07-16
   requeues the same run and preserves page progress. The initial backend lane
   permits one retrieval generation per member/provider connection; retry,
   reconnect, and refresh remain closed until immutable raw references have a
-  bounded retention lifecycle.
+  bounded retention lifecycle. The existing Temporal recovery schedule's
+  shared mailbox handoff sweep may select at most one exact pending item per
+  user; a Clinical Records candidate must be the unconsumed wake for an active
+  queued generation. It creates no replacement work or generation.
 - Clinical provider calls use manual redirects, 20-second FHIR timeouts,
   15-second token timeouts, bounded streaming reads, 5 MiB/page, 500 provider
   fetch attempts, 32 MiB charged egress/run, and exact-family pagination. The

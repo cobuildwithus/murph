@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { normalizeClinicalFhirPatientId } from "@murphai/clinical-records";
+
 import { clinicalRecordsError } from "./errors";
 import {
   buildEpicBetaSmartResourceScope,
@@ -186,7 +188,14 @@ export async function exchangeSmartAuthorizationCode(input: {
     throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_INVALID", "The provider returned an unsupported token type.");
   }
   const accessToken = requireBoundedString(body.access_token, "SMART access token", 65_536);
-  const patientId = requireBoundedString(body.patient, "SMART patient context", 512);
+  const patientContext = requireBoundedString(body.patient, "SMART patient context", 512);
+  const patientId = normalizeClinicalFhirPatientId(patientContext);
+  if (!patientId) {
+    throw providerUnavailable(
+      "CLINICAL_RECORD_SMART_TOKEN_INVALID",
+      "The provider returned an invalid patient context.",
+    );
+  }
   const expiresInSeconds = parseExpiresIn(body.expires_in);
   const grantedScopes = body.scope === undefined
     ? [...input.requestedScopes]

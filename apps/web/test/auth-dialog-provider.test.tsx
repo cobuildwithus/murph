@@ -304,6 +304,55 @@ test("AuthProvider does not resume Clinical Records connect without a valid stag
   await rendered.cleanup();
 });
 
+test("AuthProvider returns an unauthenticated medical-records viewer to that page", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
 test("AuthProvider resumes a private computer handoff after sign-in completion", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

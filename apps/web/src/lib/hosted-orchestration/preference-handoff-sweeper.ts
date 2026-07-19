@@ -57,6 +57,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     limit: handoffLimit + 1,
     now,
   });
+  const uniqueCandidates = selectFirstCandidatePerUser(candidates);
   const hasActiveAccess = input.hasActiveAccess ?? hasHostedRuntimeActiveAccess;
   const requestHandoff = input.requestHandoff ?? signalHostedMailboxAppendRuntime;
 
@@ -70,7 +71,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   // the canonical async gate to fail closed if access changes after selection;
   // those races do not consume the handoff-attempt budget.
   await runWithConcurrency(
-    candidates,
+    uniqueCandidates,
     HANDOFF_CONCURRENCY,
     async (candidate) => {
       if (await hasActiveAccess(candidate.userId)) {
@@ -80,7 +81,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
       }
     },
   );
-  const activeCandidates = candidates.filter((candidate) =>
+  const activeCandidates = uniqueCandidates.filter((candidate) =>
     activeUserIds.has(candidate.userId)
   );
   const selectedCandidates = activeCandidates.slice(0, handoffLimit);
@@ -114,7 +115,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     activeCandidates.length - selectedCandidates.length,
   );
   logger.info("Hosted preference mailbox handoff recovery finished.", {
-    candidateUsers: candidates.length,
+    candidateUsers: uniqueCandidates.length,
     handoffAccepted,
     handoffAttempted,
     handoffFailed,
@@ -124,7 +125,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   });
 
   return {
-    candidateUsers: candidates.length,
+    candidateUsers: uniqueCandidates.length,
     handoffAccepted,
     handoffAttempted,
     handoffFailed,
@@ -140,16 +141,20 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-      // Style writes target either a person member or a synthetic thread
-      // container. Mirror the person branch of member-access.ts once, then let
-      // containers inherit active owner or current-participant access before
-      // LIMIT; the async access gate above remains the canonical race check.
+      // Preference writes can target a person member or a synthetic thread
+      // container, while Clinical Records wakes only target person members.
+      // One exact mailbox signal wakes the runtime to reconcile all durable
+      // mailbox lag, so choose at most one pending item per user before LIMIT.
+      // Mirror the person branch of member-access.ts once, then let containers
+      // inherit active owner or current-participant access. The async access
+      // gate above remains the canonical race check.
       return await prisma.$queryRaw<Array<HostedPreferenceHandoffCandidate>>(Prisma.sql`
         WITH "pending_preference_users" AS (
           SELECT DISTINCT ON ("item"."user_id")
             "item"."id" AS "mailboxItemId",
             "item"."user_id" AS "userId",
-            "item"."created_at" AS "createdAt"
+            "item"."created_at" AS "createdAt",
+            "item"."lane_seq" AS "laneSeq"
           FROM "hosted_mailbox_item" AS "item"
           LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
             ON "lane_counter"."user_id" = "item"."user_id"
@@ -159,6 +164,47 @@ function createHostedPreferenceHandoffCandidateStore(
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
+        ),
+        "pending_clinical_record_users" AS (
+          SELECT
+            "item"."id" AS "mailboxItemId",
+            "item"."user_id" AS "userId",
+            "item"."created_at" AS "createdAt",
+            "item"."lane_seq" AS "laneSeq"
+          FROM "clinical_record_retrieval_run" AS "run"
+          JOIN "clinical_record_connection" AS "connection"
+            ON "connection"."id" = "run"."connection_id"
+            AND "connection"."status" = 'active'
+            AND "connection"."retrieval_generation" = "run"."generation"
+          JOIN "hosted_mailbox_item" AS "item"
+            ON "item"."user_id" = "run"."member_id"
+            AND "item"."kind" = 'clinical-records.sync-requested'
+            AND "item"."lane" = 'system'
+            AND "item"."dedupe_key" = (
+              'clinical-records:sync:v1:' || "run"."id" || ':' || "run"."generation"::text
+            )
+          LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
+            ON "lane_counter"."user_id" = "item"."user_id"
+            AND "lane_counter"."lane" = "item"."lane"
+          WHERE "run"."status" = 'queued'
+            AND "run"."completed_at" IS NULL
+            AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
+            AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
+        ),
+        "pending_handoff_candidates" AS (
+          SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
+          FROM "pending_preference_users"
+          UNION ALL
+          SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
+          FROM "pending_clinical_record_users"
+        ),
+        "pending_handoff_users" AS (
+          SELECT DISTINCT ON ("userId")
+            "mailboxItemId",
+            "userId",
+            "createdAt"
+          FROM "pending_handoff_candidates"
+          ORDER BY "userId", "createdAt" ASC, "laneSeq" ASC, "mailboxItemId" ASC
         ),
         "active_person_members" AS (
           SELECT "person"."id"
@@ -182,7 +228,7 @@ function createHostedPreferenceHandoffCandidateStore(
             )
         )
         SELECT "mailboxItemId", "userId"
-        FROM "pending_preference_users" AS "pending"
+        FROM "pending_handoff_users" AS "pending"
         JOIN "hosted_member" AS "member"
           ON "member"."id" = "pending"."userId"
         LEFT JOIN "hosted_thread_container" AS "thread_container"
@@ -217,6 +263,20 @@ function createHostedPreferenceHandoffCandidateStore(
       `);
     },
   };
+}
+
+function selectFirstCandidatePerUser(
+  candidates: readonly HostedPreferenceHandoffCandidate[],
+): HostedPreferenceHandoffCandidate[] {
+  const selected: HostedPreferenceHandoffCandidate[] = [];
+  const selectedUserIds = new Set<string>();
+  for (const candidate of candidates) {
+    if (!selectedUserIds.has(candidate.userId)) {
+      selectedUserIds.add(candidate.userId);
+      selected.push(candidate);
+    }
+  }
+  return selected;
 }
 
 function normalizeLimit(
