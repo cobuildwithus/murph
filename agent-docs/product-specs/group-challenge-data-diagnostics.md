@@ -149,8 +149,8 @@ to each `in` participant and stops at the first match:
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
 | Current challenge-metric data through the reporting cutoff | Include the participant in the ranked standings. | None. Device status cannot override current metric evidence. |
-| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Offer the exact missing scope once after the current read. |
-| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Offer the diagnostic scope once after the current read. |
+| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Explain the exact missing share naturally and say the participant can explicitly ask Murph to open the permission offer. |
+| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Explain that diagnostic access is missing and say the participant can explicitly ask Murph to open the permission offer. |
 | Live diagnostic result with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
 | Live diagnostic result with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
 | Live diagnostic result with `needs-attention` | The visible source needs attention; the result does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
@@ -230,25 +230,19 @@ data or proves the cause of a missing metric.
 ## Permission behavior
 
 At challenge kickoff, the exact scoring scope and `device-sync-status.v0` are
-workflow-specific requests. For a new group, add both to the reusable
-group-chat core set as one unique union in the same permission-bearing creation
-request; a scoring scope already in the core appears only once. The device scope
-is not part of the universal core set. For an existing group, request only
-those challenge scopes through one additive `post_join_offer`; existing members
-do not rejoin. Web, not the model, writes the causal Like-or-heart sentence,
-exact frozen scope disclosure, and first-party customize link. Liking or
-hearting adds only that disclosed snapshot; the first-party page remains the
-customize path.
+workflow-specific scopes. Challenge kickoff and standings do not create a
+hosted group or post an additive permission offer, whether or not the hosted
+group already exists. Murph explains the exact missing group setup or share in
+ordinary language inside its one normal reply and says the affected participant
+can explicitly ask Murph to open the permission flow. The challenge flow never
+tells someone to react to an ordinary challenge message.
 
-An interactive group turn may post one new additive offer when the room asks
-for a missing scope. A scheduled challenge turn may also post one offer, but
-only after its model-triggered `read_shared` result and only for the exact scopes
-that result observed as `not_granted`. The operation-local adapter rejects calls
-before that read, scopes not supported by that evidence, and every second
-attempt without calling Web. Web's current active-offer and all-granted checks
-remain the final durable authority and suppress duplicate permission cards.
-Do not repost or nag someone who ignores or declines an offer, and never tell
-someone to react to the ordinary standings message.
+Only a later interactive turn containing an explicit request to enable the
+missing share may enter `group-chat`'s existing `post_join_offer` flow. Web, not
+the model, writes that separate offer's causal Like-or-heart sentence, exact
+frozen scope disclosure, and first-party customize link. Liking or hearting
+adds only that disclosed snapshot; the first-party page remains the customize
+path. Ignoring or declining it never causes a retry or nudge.
 
 ## Message shape
 
@@ -279,10 +273,7 @@ This is a consumer-first hard cut:
    omits `device-sync-status.v0`, so ordinary group creation remains compatible
    during this interval. Challenge setup requests that new scope explicitly and
    remains unavailable until Web supports it; there is no retry or widened
-   fallback. The runtime continues sending the ignored legacy permission-offer
-   template field only so old Web accepts scheduled offer requests during this
-   consumer-first window; delete that field after new Web is deployed and the
-   Cloudflare rollback floor is set.
+   fallback.
 3. Verify complete member/scope matrices, empty-snapshot behavior, stale-writer
    rejection, revoke/regrant clearing, device privacy, and the challenge output
    against the deployed route.
@@ -306,8 +297,10 @@ drain, or foreground reconciliation step in either deployment or rollback.
   opening Murph and checking Steps access only as recovery steps.
 - A three-day-old connection sync-job timestamp may be named literally but is
   not presented as health-data receipt or a proven cause.
-- A scheduled occurrence may attempt one evidence-bound permission offer after
-  `read_shared`; it never claims a new card was sent when Web reports only that
-  a matching card is already active.
+- Challenge kickoff and a scheduled occurrence never call `post_join_offer` or
+  emit a second permission message; a missing grant is explained naturally in
+  the one normal challenge reply.
+- A later interactive permission offer requires an explicit participant request
+  and remains owned by the existing group-chat permission flow.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

@@ -883,7 +883,7 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
     expect(raw).toMatch(
-      /after any required group creation, and\s+before writing the challenge roster, call\s+`murph\.group action="read_shared"` exactly once/u,
+      /When the hosted group exists, after the model turn has begun and before\s+writing the challenge roster, call\s+`murph\.group action="read_shared"` exactly once/u,
     )
     expect(raw).toMatch(
       /exact current prompt `Sender:` handle appears\s+in that row's `currentTurnHandles`/u,
@@ -899,39 +899,15 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('Gap disclosure log')
     expect(raw).not.toContain('`gapState`')
     expect(raw).not.toContain('`episodePublicGapDate`')
-    expect(raw).toContain(
-      'After `read_shared`, collect the exact scopes whose current evidence is',
-    )
-    expect(raw).toContain(
-      '`murph.group action="post_join_offer"` exactly once with only those exact',
-    )
-    expect(raw).toContain(
-      'Never infer or request a scope from granted-but-missing or stale data.',
-    )
-    expect(raw).toContain('Do not call it when the list is empty.')
-    expect(raw).toMatch(/matching active\s+offer exists/u)
-    expect(raw).toContain(
-      'The permission card is a separate server-owned message.',
-    )
-    expect(raw).toContain(
-      'Never imply that reacting to the standings message grants anything.',
-    )
-    expect(raw).toContain(
-      'grant Apple Health or operating-system\n   Steps access',
-    )
-    expect(raw).toContain(
-      'If the narrow tool\n   is absent or returns `unavailable`',
-    )
-    expect(raw).toContain('manual debugging hunt')
-    expect(raw).toContain(
-      'synchronously reuses the Linq egress-route assertion\n   that scheduled delivery already completed',
-    )
-    expect(raw).toContain(
-      'this feature adds no new\n   pre-model work.',
-    )
-    expect(raw).toContain(
-      'Web reauthorization, active-offer lookup, and provider work\n   begin only after the tool call.',
-    )
+    expect(raw).toContain('state the exact missing group share\n   in ordinary language')
+    expect(raw).toContain('Never infer a missing permission from\n   granted-but-missing or stale data.')
+    expect(raw).toContain('scheduled challenge turns never call\n   `murph.group action="post_join_offer"`')
+    expect(raw).toContain('emit a separate permission card, or\n   ask the platform to send a second message')
+    expect(raw).toContain('The scheduled tool surface is\n   read-only.')
+    expect(raw).toContain('Do not imply that reacting to the standings grants anything.')
+    expect(raw).toMatch(/grant Apple Health or\s+operating-system Steps access/u)
+    expect(raw).not.toContain('A separate permission card is available')
+    expect(raw).not.toMatch(/matching active\s+offer exists/u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')
     expect(raw).toContain(
       'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',
@@ -939,15 +915,11 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toContain('one permission request containing the unique union of the group-chat core')
-    expect(raw).toContain('never list a\n   scope twice')
-    expect(raw).toMatch(/The device scope is not part of\s+the universal core/u)
-    expect(raw).toMatch(/When the\s+group already exists, do not add the core\s+set/u)
-    expect(raw).toContain('`murph.group action="post_join_offer"` with only the exact scoring scope')
-    expect(raw).toMatch(
-      /Existing\s+members like the server-owned message\s+to opt into/u,
-    )
-    expect(raw).toMatch(/Do not tell the room to\s+join again/u)
+    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
+    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
+    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
+    expect(raw).toMatch(/Only that explicit later request may enter\s+`group-chat`'s existing permission flow/u)
+    expect(raw).toMatch(/Do not tell\s+the room to join again/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",

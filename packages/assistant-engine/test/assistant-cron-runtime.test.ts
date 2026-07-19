@@ -6481,13 +6481,13 @@ describe('assistant cron runtime orchestration', () => {
       target: 'current-home-chat',
       threadIsDirect: true,
     })
-    const createScheduledGroupTools = vi.fn()
+    const createScheduledGroupSharedReader = vi.fn()
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
 
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
-          createScheduledGroupTools,
+          createScheduledGroupSharedReader,
           memberId: 'member-linq-participant-authority',
           resolveScheduledLinqRoute,
           userEnvKeys: [],
@@ -6507,7 +6507,7 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'explicit',
       }),
     )
-    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(createScheduledGroupSharedReader).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'current-home-chat',
@@ -6557,36 +6557,22 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: false,
       }
     })
-    type ScheduledGroupToolsFactory = NonNullable<
-      NonNullable<AssistantExecutionContext['hosted']>['createScheduledGroupTools']
+    type ScheduledGroupSharedReaderFactory = NonNullable<
+      NonNullable<AssistantExecutionContext['hosted']>['createScheduledGroupSharedReader']
     >
-    const scheduledGroupTools: NonNullable<
-      ReturnType<ScheduledGroupToolsFactory>
+    const scheduledGroupSharedReader: NonNullable<
+      ReturnType<ScheduledGroupSharedReaderFactory>
     > = {
-      groupPermissionOfferTool: {
-        async request() {
-          return {
-            action: 'post_join_offer',
-            result: {
-              group: null,
-              status: 'unavailable',
-              unavailableReason: 'synthetic_unavailable',
-            },
-          }
-        },
-      },
-      groupSharedReader: {
-        async request() {
-          return {
-            status: 'unavailable',
-            unavailableReason: 'synthetic_unavailable',
-          }
-        },
+      async request() {
+        return {
+          status: 'unavailable',
+          unavailableReason: 'synthetic_unavailable',
+        }
       },
     }
-    const createScheduledGroupTools: ScheduledGroupToolsFactory = vi.fn(() => {
+    const createScheduledGroupSharedReader: ScheduledGroupSharedReaderFactory = vi.fn(() => {
       sequence.push('scheduled_group_factory')
-      return scheduledGroupTools
+      return scheduledGroupSharedReader
     })
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
       sequence.push('notification_turn')
@@ -6597,7 +6583,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     const executionContext: AssistantExecutionContext = {
       hosted: {
-        createScheduledGroupTools,
+        createScheduledGroupSharedReader,
         memberId: 'member-linq-group-authority',
         resolveScheduledLinqRoute,
         userEnvKeys: [],
@@ -6621,7 +6607,7 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'thread',
       }),
     )
-    expect(createScheduledGroupTools).toHaveBeenCalledWith({
+    expect(createScheduledGroupSharedReader).toHaveBeenCalledWith({
       channel: 'linq',
       target: 'saved-group-chat',
       threadIsDirect: false,
@@ -6637,17 +6623,18 @@ describe('assistant cron runtime orchestration', () => {
         deliveryKind: 'thread',
         deliveryTarget: null,
         executionContext: {
-          hosted: expect.objectContaining(scheduledGroupTools),
+          hosted: expect.objectContaining({
+            groupSharedReader: scheduledGroupSharedReader,
+          }),
         },
         threadIsDirect: false,
       }),
     )
     const notificationInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0]
     expect(notificationInput?.executionContext).not.toBe(executionContext)
-    expect(notificationInput?.executionContext?.hosted?.createScheduledGroupTools)
+    expect(notificationInput?.executionContext?.hosted?.createScheduledGroupSharedReader)
       .toBeUndefined()
     expect(executionContext.hosted?.groupSharedReader).toBeUndefined()
-    expect(executionContext.hosted?.groupPermissionOfferTool).toBeUndefined()
   })
 
   it('records a retryable cron failure when Linq route authority fails before notification', async () => {
@@ -6663,7 +6650,7 @@ describe('assistant cron runtime orchestration', () => {
         { retryable: true },
       ),
     )
-    const createScheduledGroupTools = vi.fn()
+    const createScheduledGroupSharedReader = vi.fn()
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-authority-failure',
       continuityPolicy: 'fresh',
@@ -6712,7 +6699,7 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
-          createScheduledGroupTools,
+          createScheduledGroupSharedReader,
           memberId: 'member-linq-authority-failure',
           resolveScheduledLinqRoute,
           userEnvKeys: [],
@@ -6741,7 +6728,7 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'explicit',
       }),
     )
-    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(createScheduledGroupSharedReader).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
       reclaimStaleRunningClaims: false,

@@ -32,19 +32,16 @@ Choose the narrowest Vault Share projection scope that matches the agreed
 score. Use daily aggregate records only; never ask for routes, raw workouts,
 provider traces, or private 1:1 data for a group challenge.
 
-At kickoff, explicitly request the scoring scope and
-`device-sync-status.v0`. For a new group, pass the unique union of the
-group-chat skill's reusable core set, the exact scoring scope, and the device
-scope in the same permission-bearing creation request; never duplicate a scope
-that is already in the core. The device scope is not part of the universal core
-set. For an existing group, request the two challenge scopes in one additive
-permission offer. The
-device scope is diagnostic context, not scoring data: it shares only public
+At kickoff, identify the exact scoring scope and include it with
+`device-sync-status.v0` in the shared read. Do not create a hosted group or post
+a permission offer as a side effect of challenge kickoff or standings. Explain
+any missing group setup or challenge share in ordinary language inside the one
+normal reply. If an affected participant explicitly asks to enable it, follow
+`group-chat`'s interactive permission flow. The device scope is diagnostic
+context, not scoring data: it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
-participant may decline it and still join the challenge. Liking the
-server-owned offer grants only the disclosed Murph group shares. Pass the exact
-scopes only; Web owns the full canonical exact scope, Like-or-heart gesture,
-and first-party customize copy. Never author offer text. The offer cannot
+participant may decline it and still join the challenge. A later explicit
+permission offer grants only the disclosed Murph group shares; it cannot
 connect a source or grant Apple Health access.
 
 - Activity minutes for a specific recognized activity alias:
@@ -190,32 +187,23 @@ loses a reminder; it must never lose the challenge.
    withdraws, record that state in the same turn. Never list them as waiting,
    ask them for challenge materials, score them, or privately check in about
    challenge silence. Re-entry requires a new explicit affirmative response.
-4. **Collect sharing permissions and bind roster identities.** Follow the
-   group-chat rule to call `murph.group action="read_current"` before a
-   permission-bearing group action. Use that result only for current group,
-   membership, join-policy, and permission facts; never use it to bind a
-   challenge identity.
+4. **Inspect sharing permissions and bind roster identities.** Call
+   `murph.group action="read_current"` to inspect the current hosted group. Use
+   that result only for current group, membership, join-policy, and permission
+   facts; never use it to bind a challenge identity.
 
-   When `read_current` returns `status="none"`, create the hosted group with
-   one permission request containing the unique union of the group-chat core
-   set, the exact scoring scope, and `device-sync-status.v0`; never list a
-   scope twice. The device scope is not part of the universal core. When the
-   group already exists, do not add the core set;
-   use `murph.group action="post_join_offer"` with only the exact scoring scope
-   and `device-sync-status.v0`. Existing members like the server-owned message
-   to opt into that permission snapshot; the included first-party link is only
-   for someone who wants to customize what they share. Do not tell the room to
-   join again or make the link the primary action. Web owns the canonical offer
-   copy, including the exact scope disclosure, accepted Like or heart gestures,
-   and first-party customize link. Never author or pass offer text. Liking or
-   hearting grants only those Murph group shares; it does not grant HealthKit
-   access, connect a wearable, or prove that data has synced. Post an additive
-   offer once and do not retry or nag when someone declines or ignores it. Use
-   `action="create_join_link"` only when the group explicitly asks for a
-   standalone link. Never use data a member has not granted to this group.
+   Whether `read_current` returns `status="none"` or an existing group, do not
+   create a hosted group or post a permission offer as part of challenge setup.
+   Explain any missing group setup or share naturally in the normal group reply.
+   Tell the affected participant they can ask you to open the group permission
+   flow if they want to share it. Only that explicit later request may enter
+   `group-chat`'s existing permission flow. Do not tell the room to join again,
+   imply that reacting to an ordinary challenge message grants access, or retry
+   and nag when someone declines or ignores sharing. Never use data a member
+   has not granted to this group.
 
-   After the model turn has begun, after any required group creation, and
-   before writing the challenge roster, call
+   When the hosted group exists, after the model turn has begun and before
+   writing the challenge roster, call
    `murph.group action="read_shared"` exactly once with the exact scoring scope
    and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
    and diagnostic read; it must never become prompt preload or other pre-model
@@ -337,13 +325,13 @@ automation action rules with a `dailyLocal` schedule and
      challenge-metric data through the reporting cutoff: rank the participant.
      Do not override current metric evidence with a device status.
    - The scoring projection is `not_granted`: say that the participant has not
-     shared that challenge metric with this group and give the permission-card
-     next step below.
+     shared that challenge metric with this group and tell them they can
+     explicitly ask you to open that permission offer.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
      the metric share exists, but Murph cannot verify the source problem because
-     connection status was not shared. Give the diagnostic permission-card next
-     step below.
+     connection status was not shared. Tell them they can explicitly ask you to
+     open that diagnostic permission offer.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
      `device-sync-status.v0` record is `available`: use its literal source label,
@@ -383,37 +371,20 @@ automation action rules with a `dailyLocal` schedule and
    current evidence-backed reason, and give the smallest useful action. Never
    present a partial table as the full standings.
 
-   After `read_shared`, collect the exact scopes whose current evidence is
-   `not_granted`: use the exact scoring scope when that scope is not granted;
-   use `device-sync-status.v0` only when the scoring scope is granted but has
-   no current metric and the diagnostic scope is not granted. Deduplicate that
-   list. Never infer or request a scope from granted-but-missing or stale data.
+   When current evidence is `not_granted`, state the exact missing group share
+   in ordinary language in this same response. Address the affected participant
+   by their consented group name and say they can ask you to open the permission
+   offer if they want to share it. Never infer a missing permission from
+   granted-but-missing or stale data.
 
-   On a scheduled group turn, when that list is nonempty, call the narrow
-   `murph.group action="post_join_offer"` exactly once with only those exact
-   `projectionScopes`. The call stays inside this already-started model turn,
-   after `read_shared`. It synchronously reuses the Linq egress-route assertion
-   that scheduled delivery already completed; this feature adds no new
-   pre-model work. Web reauthorization, active-offer lookup, and provider work
-   begin only after the tool call. Do not call it when the list is empty. Web
-   suppresses the call when every current member already grants the scopes or
-   when a matching active offer exists, so never make a second call, repost,
-   or nag.
-
-   A `sent` result can mean either that Web delivered a new card or that a
-   matching active card was already available. If you mention success, keep it
-   delivery-neutral, such as "A separate permission card is available in the
-   chat." Never say that you posted or sent a new card.
-
-   The permission card is a separate server-owned message. It is the only
-   message members should Like or heart to grant the disclosed Murph group
-   scopes. Never imply that reacting to the standings message grants anything.
-   The card cannot connect a source, grant Apple Health or operating-system
-   Steps access, or fix granted-but-missing or stale data. If the narrow tool
-   is absent or returns `unavailable`, keep the diagnostic neutral, do not
-   claim that a card was posted, and do not send the room on a
-   manual debugging hunt. An interactive group turn may still post one
-   additive offer when the room asks for an exact missing scope.
+   Challenge kickoff and scheduled challenge turns never call
+   `murph.group action="post_join_offer"`, emit a separate permission card, or
+   ask the platform to send a second message. The scheduled tool surface is
+   read-only. Do not imply that reacting to the standings grants anything. If
+   the affected participant later explicitly asks to enable the missing share,
+   follow `group-chat`'s interactive permission flow in that later turn. A
+   permission offer cannot connect a source, grant Apple Health or
+   operating-system Steps access, or fix granted-but-missing or stale data.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does

@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
@@ -797,28 +796,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       sequence.push("assistant_lane");
       expect(request).not.toHaveBeenCalled();
       expect(laneInput.executionContext.hosted?.groupSharedReader).toBeUndefined();
-      const createScheduledGroupTools =
-        laneInput.executionContext.hosted?.createScheduledGroupTools;
-      expect(createScheduledGroupTools).toEqual(expect.any(Function));
-      if (!createScheduledGroupTools) {
-        throw new Error("Expected the scheduled group capability factory.");
+      const createScheduledGroupSharedReader =
+        laneInput.executionContext.hosted?.createScheduledGroupSharedReader;
+      expect(createScheduledGroupSharedReader).toEqual(expect.any(Function));
+      if (!createScheduledGroupSharedReader) {
+        throw new Error("Expected the scheduled group reader factory.");
       }
-      expect(createScheduledGroupTools({
+      expect(createScheduledGroupSharedReader({
         channel: "linq",
         target: "chat_direct",
         threadIsDirect: true,
       })).toBeNull();
-      const scheduledGroupTools = createScheduledGroupTools({
+      const scheduledGroupSharedReader = createScheduledGroupSharedReader({
         channel: "linq",
         target: "chat_current_group",
         threadIsDirect: false,
       });
-      expect(scheduledGroupTools).not.toBeNull();
-      if (!scheduledGroupTools) {
-        throw new Error("Expected scheduled group capabilities.");
+      expect(scheduledGroupSharedReader).not.toBeNull();
+      if (!scheduledGroupSharedReader) {
+        throw new Error("Expected the scheduled group reader.");
       }
       expect(request).not.toHaveBeenCalled();
-      await expect(scheduledGroupTools.groupSharedReader.request({
+      await expect(scheduledGroupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
       return {
@@ -836,190 +835,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(sequence).toEqual(["assistant_lane", "read_shared"]);
       expect(request).toHaveBeenCalledTimes(1);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("gates a scheduled permission offer on exact read evidence and one attempt", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-scheduled-group-tools-"));
-    const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
-    const request: NonNullable<
-      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
-    >["request"] = vi.fn(async (groupToolRequest) => {
-      groupToolRequests.push(groupToolRequest);
-      if (groupToolRequest.action === "read_shared") {
-        return {
-          action: "read_shared" as const,
-          result: {
-            members: [{
-              currentTurnHandles: [],
-              displayName: "Ada",
-              memberId: "member_shared_current",
-              participantId: "participant_shared_current",
-              projections: [{
-                dataStatus: "missing" as const,
-                grantStatus: "not_granted" as const,
-                projectionScope: { projectionKind: "steps-days.v0" as const },
-                projectionScopeKey: "steps-days.v0",
-                records: [],
-              }],
-            }],
-            requestedProjectionScopeKeys: ["steps-days.v0"],
-            status: "ok" as const,
-          },
-        };
-      }
-      if (groupToolRequest.action === "post_join_offer") {
-        return {
-          action: "post_join_offer" as const,
-          result: {
-            group: null,
-            status: "unavailable" as const,
-            unavailableReason: "synthetic_web_unavailable",
-          },
-        };
-      }
-      throw new Error(`Unexpected group action: ${groupToolRequest.action}`);
-    });
-
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
-      const createScheduledGroupTools =
-        laneInput.executionContext.hosted?.createScheduledGroupTools;
-      if (!createScheduledGroupTools) {
-        throw new Error("Expected the scheduled group capability factory.");
-      }
-      expect(createScheduledGroupTools({
-        channel: "email",
-        target: "chat_current_group",
-        threadIsDirect: false,
-      })).toBeNull();
-      expect(createScheduledGroupTools({
-        channel: "linq",
-        target: "chat_current_direct",
-        threadIsDirect: true,
-      })).toBeNull();
-
-      const createTools = () => {
-        const scheduledGroupTools = createScheduledGroupTools({
-          channel: "linq",
-          target: "chat_current_group",
-          threadIsDirect: false,
-        });
-        if (!scheduledGroupTools) {
-          throw new Error("Expected scheduled group capabilities.");
-        }
-        return scheduledGroupTools;
-      };
-      const offerRequest = {
-        projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
-      };
-      const readSteps = async (
-        scheduledGroupTools: ReturnType<typeof createTools>,
-      ) => {
-        await expect(scheduledGroupTools.groupSharedReader.request({
-          projectionScopes: [{ projectionKind: "steps-days.v0" }],
-        })).resolves.toMatchObject({ status: "ok" });
-      };
-
-      const beforeRead = createTools();
-      await expect(
-        beforeRead.groupPermissionOfferTool.request(offerRequest),
-      ).resolves.toMatchObject({
-        action: "post_join_offer",
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-
-      const invalid = createTools();
-      await readSteps(invalid);
-      await expect(
-        invalid.groupPermissionOfferTool.request({ projectionScopes: [] }),
-      ).resolves.toMatchObject({
-        action: "post_join_offer",
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-      await expect(
-        invalid.groupPermissionOfferTool.request(offerRequest),
-      ).resolves.toMatchObject({
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-
-      const duplicate = createTools();
-      await readSteps(duplicate);
-      await expect(duplicate.groupPermissionOfferTool.request({
-        projectionScopes: [
-          { projectionKind: "steps-days.v0" },
-          { projectionKind: "steps-days.v0" },
-        ],
-      })).resolves.toMatchObject({
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-
-      const unobserved = createTools();
-      await readSteps(unobserved);
-      await expect(unobserved.groupPermissionOfferTool.request({
-        projectionScopes: [{ projectionKind: "device-sync-status.v0" }],
-      })).resolves.toMatchObject({
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-
-      const allowed = createTools();
-      await readSteps(allowed);
-      await expect(
-        allowed.groupPermissionOfferTool.request(offerRequest),
-      ).resolves.toMatchObject({
-        result: { unavailableReason: "synthetic_web_unavailable" },
-      });
-      await expect(
-        allowed.groupPermissionOfferTool.request(offerRequest),
-      ).resolves.toMatchObject({
-        result: {
-          unavailableReason: "scheduled_group_permission_offer_unavailable",
-        },
-      });
-
-      return {
-        assistantAutomationProgressed: false,
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      };
-    });
-
-    try {
-      await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        runtimeGroupToolPort: { request },
-        vaultRoot,
-      }));
-      expect(groupToolRequests.filter((request) => request.action === "read_shared"))
-        .toHaveLength(4);
-      expect(groupToolRequests.filter((request) => request.action === "post_join_offer"))
-        .toEqual([{
-          action: "post_join_offer",
-          joinOffer: {
-            messageTemplate:
-              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-            projectionScopes: [{ projectionKind: "steps-days.v0" }],
-          },
-          linqThread: {
-            authority: {
-              channel: "linq",
-              containerMemberId: "member_synthetic_phase",
-              threadId: "chat_current_group",
-            },
-            chatId: "chat_current_group",
-          },
-        }]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -5974,7 +5789,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.automationTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupSharedReader).toBeUndefined();
-    expect(assistantLaneCall?.executionContext.hosted?.createScheduledGroupTools)
+    expect(assistantLaneCall?.executionContext.hosted?.createScheduledGroupSharedReader)
       .toEqual(expect.any(Function));
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),

@@ -714,8 +714,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.subscriptionTool != null,
         groupAvailable:
           input.hostedToolContext?.groupTool != null,
-        groupPermissionOfferAvailable:
-          input.hostedToolContext?.groupPermissionOfferTool != null,
         groupSharedReadAvailable:
           input.hostedToolContext?.groupSharedReader != null,
         newsletterAvailable:

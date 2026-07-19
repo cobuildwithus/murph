@@ -1378,7 +1378,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('plans a scheduled turn with only lazy shared reads and permission offers', async () => {
+  it('plans a scheduled turn with only the lazy shared read', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1390,18 +1390,8 @@ describe('assistant Codex turn planning', () => {
       status: 'none' as const,
     }))
     const groupSharedReader = { request: groupSharedRead }
-    const groupPermissionOfferRequest = vi.fn(async () => ({
-      action: 'post_join_offer' as const,
-      result: {
-        group: null,
-        status: 'unavailable' as const,
-        unavailableReason: 'test_unavailable',
-      },
-    }))
-    const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
-      groupPermissionOfferTool,
       groupSharedReader,
       groupTool: null,
     }
@@ -1409,7 +1399,6 @@ describe('assistant Codex turn planning', () => {
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: {
         hosted: {
-          groupPermissionOfferTool,
           groupSharedReader,
           memberId: 'member-group-container',
           progressDeliveryDependencies: {},
@@ -1442,11 +1431,10 @@ describe('assistant Codex turn planning', () => {
     expect(groupTools[0]).toMatchObject({
       inputSchema: {
         properties: {
-          action: { enum: ['read_shared', 'post_join_offer'] },
+          action: { enum: ['read_shared'] },
         },
       },
     })
-    expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
   })
 

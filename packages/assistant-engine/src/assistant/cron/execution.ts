@@ -708,7 +708,7 @@ export async function executeClaimedAssistantCronJob(
                 target: claimedJob.target,
               })
           const notificationExecutionContext =
-            scopeAssistantCronScheduledGroupTools({
+            scopeAssistantCronScheduledGroupSharedReader({
               channel: claimedJob.target.channel,
               executionContext: automationTurn.executionContext,
               route: deliveryRoute,
@@ -2026,7 +2026,7 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   return isHostedExecution ? 'hosted' : 'local'
 }
 
-function scopeAssistantCronScheduledGroupTools(input: {
+function scopeAssistantCronScheduledGroupSharedReader(input: {
   channel: string | null
   executionContext: AssistantExecutionContext | null | undefined
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
@@ -2043,26 +2043,26 @@ function scopeAssistantCronScheduledGroupTools(input: {
   }
 
   const {
-    createScheduledGroupTools,
-    groupPermissionOfferTool: _unscopedGroupPermissionOfferTool,
+    createScheduledGroupSharedReader,
     groupSharedReader: _unscopedGroupSharedReader,
-    ...hostedWithoutScheduledGroupTools
+    ...hostedWithoutScheduledGroupSharedReader
   } = hosted
-  void _unscopedGroupPermissionOfferTool
   void _unscopedGroupSharedReader
   const unscopedExecutionContext: AssistantExecutionContext = {
-    hosted: hostedWithoutScheduledGroupTools,
+    hosted: hostedWithoutScheduledGroupSharedReader,
   }
   const target = normalizeNullableString(
     input.route.bindingDelivery?.target ?? input.route.deliveryTarget,
   )
-  if (!target || typeof createScheduledGroupTools !== 'function') {
+  if (!target || typeof createScheduledGroupSharedReader !== 'function') {
     return unscopedExecutionContext
   }
 
-  let scheduledGroupTools: ReturnType<typeof createScheduledGroupTools>
+  let scheduledGroupSharedReader: ReturnType<
+    typeof createScheduledGroupSharedReader
+  >
   try {
-    scheduledGroupTools = createScheduledGroupTools({
+    scheduledGroupSharedReader = createScheduledGroupSharedReader({
       channel: 'linq',
       target,
       threadIsDirect: false,
@@ -2070,13 +2070,13 @@ function scopeAssistantCronScheduledGroupTools(input: {
   } catch {
     return unscopedExecutionContext
   }
-  if (!scheduledGroupTools) {
+  if (!scheduledGroupSharedReader) {
     return unscopedExecutionContext
   }
   return {
     hosted: {
-      ...hostedWithoutScheduledGroupTools,
-      ...scheduledGroupTools,
+      ...hostedWithoutScheduledGroupSharedReader,
+      groupSharedReader: scheduledGroupSharedReader,
     },
   }
 }

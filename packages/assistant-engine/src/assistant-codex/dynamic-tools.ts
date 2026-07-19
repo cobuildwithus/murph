@@ -666,35 +666,6 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   },
 } as const
 
-/**
- * Scheduled group turns can read shared facts and post a server-authored
- * additive permission card, but cannot access the broader group mutation API.
- */
-export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
-  namespace: 'murph',
-  name: 'group',
-  description:
-    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. The read result participantId is scoped to the group membership and carries no account, device, provider, or route identity; scheduled reads have empty currentTurnHandles. Use action="post_join_offer" only for scopes members still need to grant; existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_shared', 'post_join_offer'],
-      },
-      projectionScopes: {
-        type: 'array',
-        minItems: 1,
-        maxItems: ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
-        uniqueItems: true,
-        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
-      },
-    },
-    required: ['action', 'projectionScopes'],
-  },
-} as const
-
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
@@ -1137,7 +1108,6 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
   | typeof MURPH_GROUP_SHARED_READ_TOOL
-  | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
 
 export interface MurphDynamicToolAvailability {
   assistantStyleSettingsAvailable?: boolean | null
@@ -1155,7 +1125,6 @@ export interface MurphDynamicToolAvailability {
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
-  groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   messageTargetingAvailable?: boolean | null
@@ -1226,11 +1195,7 @@ export function resolveMurphDynamicTools(
     availability.groupAvailable !== true &&
     availability.groupSharedReadAvailable === true
   ) {
-    tools.push(
-      availability.groupPermissionOfferAvailable === true
-        ? MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
-        : MURPH_GROUP_SHARED_READ_TOOL,
-    )
+    tools.push(MURPH_GROUP_SHARED_READ_TOOL)
   }
   return tools
 }
@@ -3306,12 +3271,6 @@ async function executeGroupTool(input: {
     })
   }
   const groupTool = input.hostedToolContext?.groupTool ?? null
-  if (input.request.action === 'post_join_offer' && !groupTool) {
-    return executeGroupPermissionOffer({
-      hostedToolContext: input.hostedToolContext,
-      request: input.request,
-    })
-  }
   if (!groupTool) {
     return toolTextResult(false, 'group tools are unavailable for this turn')
   }
@@ -3414,51 +3373,6 @@ async function executeGroupTool(input: {
       ...toolTextResult(false, 'group tool request failed'),
       ...(usageDraft ? { usageDraft } : {}),
     }
-  }
-}
-
-async function executeGroupPermissionOffer(input: {
-  hostedToolContext: AssistantHostedToolContext | null
-  request: Extract<MurphGroupToolRequest, { action: 'post_join_offer' }>
-}): Promise<MurphDynamicToolExecutionResult> {
-  const permissionOfferTool =
-    input.hostedToolContext?.groupPermissionOfferTool ?? null
-  const projectionScopes = input.request.joinOffer?.projectionScopes ?? null
-  if (
-    !permissionOfferTool
-    || input.request.joinOffer?.displayName !== undefined
-    || !projectionScopes
-    || projectionScopes.length === 0
-    || projectionScopes.length
-      > ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
-    || new Set(
-      projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-    ).size !== projectionScopes.length
-  ) {
-    return toolTextResult(false, 'group tools are unavailable for this turn')
-  }
-
-  try {
-    const result = await permissionOfferTool.request({ projectionScopes })
-    const sanitized = z.object({
-      action: z.literal('post_join_offer'),
-      result: z.discriminatedUnion('status', [
-        z.object({ status: z.literal('sent') }),
-        z.object({
-          status: z.literal('unavailable'),
-          unavailableReason: z.string()
-            .trim()
-            .min(1)
-            .transform((reason) => reason.slice(0, 256)),
-        }),
-      ]),
-    }).safeParse(result)
-    if (!sanitized.success) {
-      return toolTextResult(false, 'group tool request failed')
-    }
-    return toolTextResult(true, safeToolPayloadText(sanitized.data))
-  } catch {
-    return toolTextResult(false, 'group tool request failed')
   }
 }
 

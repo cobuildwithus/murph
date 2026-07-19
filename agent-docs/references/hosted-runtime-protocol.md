@@ -292,7 +292,7 @@ This protocol is a consumer-first hard cut:
    new-group permission set omits `device-sync-status.v0`; challenge setup adds
    that scope explicitly and remains unavailable until Web supports it. No
    retry, legacy wire widening, or broader fallback is introduced. Remove the
-   legacy scheduled offer-template compatibility field after Web convergence.
+   legacy permission-offer template compatibility field after Web convergence.
 3. Once Web can write the new column or serve the direct read, the new
    Cloudflare consumer is the hard rollback floor. Disable the Web producer/read
    path and forward-fix; do not roll back to a consumer that restores or reads

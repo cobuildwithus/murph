@@ -70,7 +70,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'After the model turn has begun, after any required group creation, and before writing the challenge roster',
+      'When the hosted group exists, after the model turn has begun and before writing the challenge roster',
     )
     expect(challenge).toContain(
       'This is the only kickoff attribution, scoring, and diagnostic read',
@@ -165,90 +165,60 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
   })
 
-  it('posts one bounded scheduled permission card for current missing grants', async () => {
+  it('keeps challenge permission guidance in one natural-language response', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'At kickoff, explicitly request the scoring scope and `device-sync-status.v0`.',
+      'At kickoff, identify the exact scoring scope and include it with `device-sync-status.v0` in the shared read.',
     )
     expect(challenge).toContain(
-      'the unique union of the group-chat core set, the exact scoring scope, and `device-sync-status.v0`; never list a scope twice',
+      'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff or standings.',
     )
     expect(challenge).toContain(
-      'Liking the server-owned offer grants only the disclosed Murph group shares.',
+      'Explain any missing group setup or challenge share in ordinary language inside the one normal reply.',
     )
     expect(challenge).toContain(
-      'The offer cannot connect a source or grant Apple Health access.',
+      'If an affected participant explicitly asks to enable it, follow `group-chat`\'s interactive permission flow.',
     )
     expect(challenge).toContain(
-      'Post an additive offer once and do not retry or nag',
+      'do not create a hosted group or post a permission offer as part of challenge setup.',
     )
     expect(challenge).toContain(
-      'After `read_shared`, collect the exact scopes whose current evidence is',
+      'Tell the affected participant they can ask you to open the group permission flow if they want to share it.',
     )
     expect(challenge).toContain(
-      'use the exact scoring scope when that scope is not granted',
+      'Only that explicit later request may enter `group-chat`\'s existing permission flow.',
     )
     expect(challenge).toContain(
-      'use `device-sync-status.v0` only when the scoring scope is granted but has no current metric and the diagnostic scope is not granted.',
+      'When current evidence is `not_granted`, state the exact missing group share in ordinary language in this same response.',
     )
     expect(challenge).toContain(
-      '`murph.group action="post_join_offer"` exactly once with only those exact `projectionScopes`',
+      'Never infer a missing permission from granted-but-missing or stale data.',
     )
     expect(challenge).toContain(
-      'Do not call it when the list is empty.',
+      'Challenge kickoff and scheduled challenge turns never call `murph.group action="post_join_offer"`, emit a separate permission card, or ask the platform to send a second message.',
     )
     expect(challenge).toContain(
-      'Never infer or request a scope from granted-but-missing or stale data.',
+      'The scheduled tool surface is read-only.',
     )
     expect(challenge).toContain(
-      'Web suppresses the call when every current member already grants the scopes or when a matching active offer exists',
+      'Do not imply that reacting to the standings grants anything.',
     )
     expect(challenge).toContain(
-      'A `sent` result can mean either that Web delivered a new card or that a matching active card was already available.',
+      'If the affected participant later explicitly asks to enable the missing share, follow `group-chat`\'s interactive permission flow in that later turn.',
     )
     expect(challenge).toContain(
-      'A separate permission card is available in the chat.',
+      'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
-    expect(challenge).toContain(
-      'Never say that you posted or sent a new card.',
-    )
-    expect(challenge).toContain(
-      'The permission card is a separate server-owned message.',
-    )
-    expect(challenge).toContain(
-      'It is the only message members should Like or heart',
-    )
-    expect(challenge).toContain(
-      'Never imply that reacting to the standings message grants anything.',
-    )
-    expect(challenge).toContain(
-      'cannot connect a source, grant Apple Health or operating-system Steps access',
-    )
-    expect(challenge).toContain(
-      'If the narrow tool is absent or returns `unavailable`',
-    )
-    expect(challenge).toContain(
-      'do not send the room on a manual debugging hunt.',
-    )
-    expect(challenge).toContain(
-      'synchronously reuses the Linq egress-route assertion that scheduled delivery already completed',
-    )
-    expect(challenge).toContain(
-      'this feature adds no new pre-model work.',
-    )
-    expect(challenge).toContain(
-      'Web reauthorization, active-offer lookup, and provider work begin only after the tool call.',
-    )
+    expect(challenge).not.toContain('A separate permission card is available')
+    expect(challenge).not.toContain('Web suppresses the call')
+    expect(challenge).not.toContain('one-offer budget')
     expect(challenge).not.toContain('Gap disclosure log')
     expect(challenge).not.toContain('gapState')
     expect(challenge).not.toContain('episodePublicGapDate')
     expect(challenge).toContain(
       'state the current evidence-backed reason, and give the smallest useful action.',
-    )
-    expect(challenge).toContain(
-      'never make a second call, repost, or nag.',
     )
     expect(challenge).not.toContain('belong in the affected participant\'s private thread')
     expect(groupChat).toContain(
