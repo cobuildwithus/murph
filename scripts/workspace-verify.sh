@@ -1111,6 +1111,10 @@ run_test_diff_package_tests() {
   done
 }
 
+run_test_diff_repo_tools_tests() {
+  MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" pnpm test:repo-tools
+}
+
 run_test_diff_app_verification() {
   local app_dirs=("$@")
   local app_dir
@@ -1392,7 +1396,7 @@ run_test_diff() {
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
     if [[ "$run_repo_tools_tests" == "1" ]]; then
-      run_timed_step "Repo tools tests" pnpm test:repo-tools
+      run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests
     fi
     run_timed_step "Dependency policy" run_dependency_policy_check
     return 0
@@ -1419,7 +1423,7 @@ run_test_diff() {
   fi
 
   if [[ "$run_repo_tools_tests" == "1" ]]; then
-    run_timed_step "Repo tools tests" pnpm test:repo-tools
+    run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests
   fi
 
   if [[ "${#typecheck_dirs[@]}" -gt 0 ]]; then

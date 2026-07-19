@@ -142,6 +142,49 @@ resolve_test_diff_vitest_max_workers_default
     expect(result.stdout).toBe("1\n1\n8\n4\n2\n50%\n");
   });
 
+  it("passes the scoped worker budget to every repo-tools diff route", () => {
+    const resolveVitestDefault = extractWorkspaceVerifyFunction(
+      "resolve_test_diff_vitest_max_workers_default",
+    );
+    const runRepoTools = extractWorkspaceVerifyFunction(
+      "run_test_diff_repo_tools_tests",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+local_worker_budget_default() { printf '4\\n'; }
+pnpm() {
+  printf 'workers=%s command=%s\\n' "\${MURPH_VITEST_MAX_WORKERS:-}" "$*"
+}
+
+${resolveVitestDefault}
+${runRepoTools}
+
+CI=
+CODEX_THREAD_ID=test-thread
+shared_host_mode=1
+test_diff_workspace_concurrency=1
+test_diff_vitest_max_workers="$(resolve_test_diff_vitest_max_workers_default)"
+run_test_diff_repo_tools_tests
+
+MURPH_VERIFY_SHARED_HOST=0
+shared_host_mode="$MURPH_VERIFY_SHARED_HOST"
+test_diff_workspace_concurrency=4
+test_diff_vitest_max_workers="$(resolve_test_diff_vitest_max_workers_default)"
+run_test_diff_repo_tools_tests
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "workers=1 command=test:repo-tools\nworkers=4 command=test:repo-tools\n",
+    );
+    expect(
+      workspaceVerify.match(
+        /run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests/gu,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("acquires checkout artifact locks before shared-host admission", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
@@ -224,6 +267,13 @@ resolve_test_diff_vitest_max_workers_default
     );
     expect(cloudflareWorkersConfig).toContain(
       "maxWorkers: resolveMurphAppVitestMaxWorkers()",
+    );
+    const repoToolsConfig = readFileSync(
+      path.join(repoRoot, "scripts", "vitest.config.ts"),
+      "utf8",
+    );
+    expect(repoToolsConfig).toContain(
+      "maxWorkers: resolveMurphVitestMaxWorkers()",
     );
   });
 

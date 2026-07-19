@@ -76,7 +76,9 @@ slot; it would reserve shared capacity indefinitely.
 Direct package and app Vitest commands do not claim the heavyweight lane, but
 Codex/shared-host mode defaults them to one worker. Direct TypeScript commands
 use the lane-specific shared budgets below. Prefer `pnpm test:diff` for normal
-iteration; reserve full verification for the completion gate.
+iteration; reserve full verification for the completion gate. Tooling-focused
+`test:diff` routes pass the same scoped worker budget into `test:repo-tools`,
+which remains outside the heavyweight lane so fast feedback is not convoyed.
 
 ## TypeScript Budgets
 
