@@ -152,6 +152,12 @@ export const ASSISTANT_SKILLS = [
       'Use when stress or overload is the immediate bottleneck: acute activation, trouble winding down, possible occupational burnout, symptom or pain fear, stress-linked eating or training avoidance, or stress-driven low motivation on a hard day. Offer one brief state- or load-shifting action, then hand off recurring, domain-specific, clinical, urgent, or crisis work.',
   },
   {
+    slug: 'automatic-meal-capture',
+    name: 'automatic-meal-capture',
+    triggerHint:
+      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive nutrition turns when calorie or macro tracking is explicitly active.',
+  },
+  {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:

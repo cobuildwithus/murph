@@ -255,6 +255,138 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("preserves unqualified laboratory reference ranges", async () => {
+    const laboratoryCategory = [{
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/observation-category",
+        code: "laboratory",
+      }],
+    }];
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 2,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "glucose-with-reference-range",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            category: laboratoryCategory,
+            code: { text: "Glucose" },
+            valueQuantity: {
+              value: 91,
+              system: "http://unitsofmeasure.org",
+              code: "mg/dL",
+            },
+            referenceRange: [{
+              low: {
+                value: 70,
+                system: "http://unitsofmeasure.org",
+                code: "mg/dL",
+              },
+              high: {
+                value: 99,
+                system: "http://unitsofmeasure.org",
+                code: "mg/dL",
+              },
+              text: "70-99",
+            }],
+          },
+          {
+            resourceType: "Observation",
+            id: "qualitative-panel-with-reference-range",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:06:00.000Z",
+            category: laboratoryCategory,
+            code: { text: "Qualitative panel" },
+            component: [{
+              code: { text: "Ketones" },
+              valueString: "Negative",
+              referenceRange: [{ text: "Negative" }],
+            }],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan).map((candidate) =>
+      candidate.kind === "test" ? candidate.results : []
+    )).toEqual([
+      [expect.objectContaining({
+        analyte: "Glucose",
+        referenceRange: { high: 99, low: 70, text: "70-99" },
+        unit: "mg/dL",
+        value: 91,
+      })],
+      [expect.objectContaining({
+        analyte: "Ketones",
+        referenceRange: { text: "Negative" },
+        textValue: "Negative",
+      })],
+    ]);
+  });
+
+  it("holds ambiguous or unit-incompatible laboratory reference ranges for review", async () => {
+    const laboratoryCategory = [{
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/observation-category",
+        code: "laboratory",
+      }],
+    }];
+    const observation = (id: string, referenceRange: unknown) => ({
+      resourceType: "Observation",
+      id,
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z",
+      category: laboratoryCategory,
+      code: { text: "Glucose" },
+      valueQuantity: { value: 91, unit: "mg/dL" },
+      referenceRange,
+    });
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 5,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          observation("lab-multiple-ranges", [
+            { low: { value: 70, unit: "mg/dL" } },
+            { high: { value: 99, unit: "mg/dL" } },
+          ]),
+          observation("lab-age-qualified-range", [{
+            low: { value: 70, unit: "mg/dL" },
+            age: { low: { value: 18, unit: "years" } },
+          }]),
+          observation("lab-unit-mismatched-range", [{
+            low: { value: 3.9, unit: "mmol/L" },
+          }]),
+          observation("lab-inverted-range", [{
+            low: { value: 100, unit: "mg/dL" },
+            high: { value: 70, unit: "mg/dL" },
+          }]),
+          observation("lab-malformed-range", [{
+            low: { value: "seventy", unit: "mg/dL" },
+          }]),
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toHaveLength(5);
+    expect(reviews(plan).every((decision) =>
+      decision.reason === "laboratory observation result is not importable"
+    )).toBe(true);
+  });
+
   it("accepts UCUM per-minute codes for supported rate vitals", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [{
@@ -3606,13 +3738,72 @@ describe("buildClinicalImportPlan", () => {
       .rejects.toThrow("declared resource type");
   });
 
+  it("counts but does not import a formally marked search outcome entry", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 2,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          type: "searchset",
+          entry: [
+            { resource: heartRateResource("heart-rate-with-search-outcome") },
+            {
+              search: { mode: "outcome" },
+              resource: {
+                resourceType: "OperationOutcome",
+                issue: [{ severity: "warning", code: "informational" }],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
+      "heart-rate-with-search-outcome",
+    ]);
+    expect(reviews(plan)).toEqual([]);
+  });
+
+  it("rejects an unmarked outcome resource in an Observation family", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          type: "searchset",
+          entry: [{
+            resource: {
+              resourceType: "OperationOutcome",
+              issue: [{ severity: "warning", code: "informational" }],
+            },
+          }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("declared resource type");
+  });
+
   it("rejects unresolved FHIR pagination before emitting no-known allergies", async () => {
+    const nextPageUrl = "https://ehr.example.test/fhir/AllergyIntolerance?page=2";
     const unresolvedPaginationRoot = await writeClinicalFixture({
       resourceFiles: [
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
           count: 1,
+          nextPageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
         },
         {
           resourceType: "Condition",
@@ -3623,7 +3814,7 @@ describe("buildClinicalImportPlan", () => {
       pages: {
         "AllergyIntolerance/page-1.json": {
           resourceType: "Bundle",
-          link: [{ relation: "next", url: "https://ehr.example.test/fhir/AllergyIntolerance?page=2" }],
+          link: [{ relation: "next", url: nextPageUrl }],
           entry: [{
             resource: {
               resourceType: "AllergyIntolerance",
@@ -3661,7 +3852,7 @@ describe("buildClinicalImportPlan", () => {
     })).rejects.toThrow("unresolved pagination");
   });
 
-  it("rejects FHIR pagination cycles before emitting no-known allergies", async () => {
+  it("rejects FHIR pagination without exactly one root", async () => {
     const firstPageUrl = "https://ehr.example.test/fhir/AllergyIntolerance?page=1";
     const secondPageUrl = "https://ehr.example.test/fhir/AllergyIntolerance?page=2";
     const vaultRoot = await writeClinicalFixture({
@@ -3671,12 +3862,14 @@ describe("buildClinicalImportPlan", () => {
           relativePath: "AllergyIntolerance/page-1.json",
           count: 1,
           pageUrlHash: hashClinicalFhirPageUrl(firstPageUrl),
+          nextPageUrlHash: hashClinicalFhirPageUrl(secondPageUrl),
         },
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-2.json",
           count: 0,
           pageUrlHash: hashClinicalFhirPageUrl(secondPageUrl),
+          nextPageUrlHash: hashClinicalFhirPageUrl(firstPageUrl),
         },
         {
           resourceType: "Condition",
@@ -3700,10 +3893,10 @@ describe("buildClinicalImportPlan", () => {
     });
 
     await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
-      .rejects.toThrow("cyclic pagination");
+      .rejects.toThrow("exactly one pagination root");
   });
 
-  it("accepts a hash-only FHIR pagination chain after raw navigation URLs are stripped", async () => {
+  it("accepts a FHIR pagination chain only when raw evidence matches the manifest hash", async () => {
     const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
     const observation = (id: string, value: number) => ({
       resourceType: "Observation",
@@ -3733,6 +3926,7 @@ describe("buildClinicalImportPlan", () => {
       pages: {
         "Observation/page-1.json": {
           resourceType: "Bundle",
+          link: [{ relation: "next", url: nextPageUrl }],
           entry: [{ resource: observation("page-1-heart-rate", 70) }],
         },
         "Observation/page-2.json": {
@@ -3747,6 +3941,91 @@ describe("buildClinicalImportPlan", () => {
       "page-1-heart-rate",
       "page-2-heart-rate",
     ]);
+  });
+
+  it("rejects a manifest pagination hash without the matching raw Bundle link", async () => {
+    const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+          nextPageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-2.json",
+          count: 1,
+          pageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: heartRateResource("missing-raw-next-page") }],
+        },
+        "Observation/page-2.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: heartRateResource("unproved-next-page") }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("does not match its manifest hash");
+  });
+
+  it("rejects a same-base next link for another resource family", async () => {
+    const nextPageUrl = "https://ehr.example.test/fhir/Condition?page=2";
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+        nextPageUrlHash: hashClinicalFhirPageUrl(nextPageUrl),
+      }],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Bundle",
+          link: [{ relation: "next", url: nextPageUrl }],
+          entry: [{ resource: heartRateResource("cross-family-next-page") }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("declared resource family");
+  });
+
+  it("rejects multiple independent roots for one whole-family snapshot", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/root-one.json",
+          count: 1,
+        },
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/root-two.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/root-one.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: heartRateResource("root-one") }],
+        },
+        "Observation/root-two.json": {
+          resourceType: "Bundle",
+          entry: [{ resource: heartRateResource("root-two") }],
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("exactly one pagination root");
   });
 
   it("rejects pagination that leaves the manifest FHIR base", async () => {

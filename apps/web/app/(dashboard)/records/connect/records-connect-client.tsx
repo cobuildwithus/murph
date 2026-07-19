@@ -30,7 +30,10 @@ import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Spinner } from "@/src/components/ui/spinner";
-import { takeClinicalRecordsConnectIntentFromBrowser } from "@/src/lib/clinical-records/browser-connect-intent";
+import {
+  clearClinicalRecordsConnectIntentFromBrowser,
+  takeClinicalRecordsConnectIntentFromBrowser,
+} from "@/src/lib/clinical-records/browser-connect-intent";
 import {
   CLINICAL_RECORD_CONNECT_START_PATH,
   parseClinicalProviderSearchResponse,
@@ -52,7 +55,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
   useLayoutEffect(() => {
     if (capturedIntentRef.current === undefined) {
       capturedIntentRef.current = takeClinicalRecordsConnectIntentFromBrowser({
-        preserveForAuthReload: !authenticated,
+        preserveForAuthReload: true,
       });
     }
     const capturedIntent = capturedIntentRef.current;
@@ -233,6 +236,8 @@ function ProviderSearch({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
+  const startCommittedRef = useRef(false);
+  const operationGenerationRef = useRef(0);
   const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
     searchInputRef.current = node;
     if (!node) {
@@ -249,10 +254,14 @@ function ProviderSearch({
       if (!event.persisted) {
         return;
       }
+      operationGenerationRef.current += 1;
       searchInFlightRef.current = false;
       startInFlightRef.current = false;
       setSearchPending(false);
       setStartingProviderId(null);
+      if (startCommittedRef.current) {
+        setIntentUnavailable(true);
+      }
     }
 
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
@@ -273,6 +282,8 @@ function ProviderSearch({
     }
 
     searchInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setSearchPending(true);
     setSearchError(null);
     setStartError(null);
@@ -284,16 +295,24 @@ function ProviderSearch({
         url: PROVIDER_SEARCH_PATH,
       });
       const parsed = parseClinicalProviderSearchResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setProviders(parsed.providers);
       setHasSearched(true);
       requestAnimationFrame(() => resultsHeadingRef.current?.focus());
     } catch {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setProviders([]);
       setHasSearched(false);
       setSearchError("Hospitals and clinics could not be searched right now. Try again.");
     } finally {
-      searchInFlightRef.current = false;
-      setSearchPending(false);
+      if (operationGenerationRef.current === operationGeneration) {
+        searchInFlightRef.current = false;
+        setSearchPending(false);
+      }
     }
   }
 
@@ -303,25 +322,52 @@ function ProviderSearch({
     }
 
     startInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setStartingProviderId(provider.id);
     setStartError(null);
+
+    const markStartCommitted = () => {
+      if (startCommittedRef.current) {
+        return;
+      }
+      startCommittedRef.current = true;
+      if (operationGenerationRef.current !== operationGeneration) {
+        setIntentUnavailable(true);
+      }
+      clearClinicalRecordsConnectIntentFromBrowser();
+    };
 
     try {
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
+        onSuccessfulResponseHeaders: markStartCommitted,
         payload: {
           claim: intentClaim,
           providerDirectoryEntryId: provider.id,
         },
         url: CLINICAL_RECORD_CONNECT_START_PATH,
       });
+      markStartCommitted();
       const parsed = parseClinicalRecordConnectStartResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       const authorizationUrl = new URL(parsed.authorizationUrl);
       if (authorizationUrl.protocol !== "https:") {
         throw new TypeError("Clinical Records authorization URL must use HTTPS.");
       }
       window.location.assign(parsed.authorizationUrl);
     } catch (error) {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
+      if (startCommittedRef.current) {
+        startInFlightRef.current = false;
+        setIntentUnavailable(true);
+        setStartingProviderId(null);
+        return;
+      }
       if (isConsentRequiredError(error)) {
         startInFlightRef.current = false;
         setStartingProviderId(null);
@@ -330,6 +376,7 @@ function ProviderSearch({
       }
       if (isUnavailableIntentError(error)) {
         startInFlightRef.current = false;
+        clearClinicalRecordsConnectIntentFromBrowser();
         setIntentUnavailable(true);
         setStartingProviderId(null);
         return;
@@ -558,7 +605,12 @@ function AuthRequiredState({ onSignIn }: { onSignIn: () => void }) {
 
 function UnavailableIntentState() {
   return (
-    <section className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8">
+    <section
+      aria-atomic="true"
+      aria-live="polite"
+      className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8"
+      role="status"
+    >
       <h2 className="font-serif text-2xl font-medium text-foreground">Connection link unavailable</h2>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
         This private link is missing, expired, or already used. Start a new connection from Medical records.

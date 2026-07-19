@@ -60,6 +60,7 @@ export function RecordsPageClient({
   const connectInFlightRef = useRef(false);
   const disconnectInFlightRef = useRef(false);
   const disconnectNoticeRef = useRef<HTMLDivElement>(null);
+  const operationGenerationRef = useRef(0);
   const [refreshPending, startRefreshTransition] = useTransition();
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -77,8 +78,11 @@ export function RecordsPageClient({
       if (!event.persisted) {
         return;
       }
+      operationGenerationRef.current += 1;
       connectInFlightRef.current = false;
+      disconnectInFlightRef.current = false;
       setConnectPending(false);
+      setDisconnectPending(false);
     }
 
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
@@ -115,6 +119,8 @@ export function RecordsPageClient({
     }
 
     connectInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setConnectPending(true);
     setConnectError(null);
 
@@ -125,11 +131,17 @@ export function RecordsPageClient({
         url: CONNECT_INTENT_PATH,
       });
       const intent = parseClinicalRecordConnectIntentResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       const fragment = new URLSearchParams({
         clinicalRecordsIntent: intent.claim,
       }).toString();
       window.location.assign(`/records/connect#${fragment}`);
     } catch {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       connectInFlightRef.current = false;
       setConnectError("Murph could not get the records connection ready. Try again.");
       setConnectPending(false);
@@ -143,6 +155,8 @@ export function RecordsPageClient({
     }
 
     disconnectInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setDisconnectPending(true);
     setDisconnectError(null);
 
@@ -152,6 +166,9 @@ export function RecordsPageClient({
         url: `/api/clinical-records/connections/${encodeURIComponent(target.connectionId)}/disconnect`,
       });
       const disconnected = parseClinicalRecordDisconnectResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setDisconnectedConnectionIds((current) => [
         ...current,
         disconnected.connectionId,
@@ -162,10 +179,15 @@ export function RecordsPageClient({
       );
       requestAnimationFrame(() => disconnectNoticeRef.current?.focus());
     } catch {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setDisconnectError(`Could not disconnect ${target.displayName}. Try again.`);
     } finally {
-      disconnectInFlightRef.current = false;
-      setDisconnectPending(false);
+      if (operationGenerationRef.current === operationGeneration) {
+        disconnectInFlightRef.current = false;
+        setDisconnectPending(false);
+      }
     }
   }
 
