@@ -10,7 +10,9 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -306,6 +308,20 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
         );
       }
+      if (request.action === "read_shared") {
+        const sharedReadRequest = {
+          action: request.action,
+          projectionScopes: request.projectionScopes,
+        };
+        const linqSenderHandles = emailIngressPresent
+          ? []
+          : resolveHostedGroupToolLinqSenderHandles(input.linqDeliveryContexts);
+        return await input.groupToolPort.request(
+          linqSenderHandles.length > 0
+            ? { ...sharedReadRequest, linqSenderHandles }
+            : sharedReadRequest,
+        );
+      }
       if (
         request.action !== "read_chat_participants"
         && request.action !== "update_display_name"
@@ -388,6 +404,41 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
   }
 
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
+}
+
+function resolveHostedGroupToolLinqSenderHandles(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): string[] {
+  // Use only route-authorized Linq group inputs. Hosted email reply aliases
+  // authenticate a route, not the human From header, and never enter here.
+  const linqThread = resolveHostedGroupToolLinqThreadContext(contexts);
+  if (!linqThread) {
+    return [];
+  }
+  const eligible = new Set<string>();
+  for (const context of contexts) {
+    const authority = context.routeAuthority;
+    if (
+      !authority
+      || authority.channel !== linqThread.authority.channel
+      || authority.containerMemberId !== linqThread.authority.containerMemberId
+      || authority.threadId !== linqThread.authority.threadId
+      || context.service?.trim().toLowerCase() !== "imessage"
+      || context.threadIsDirect !== false
+    ) {
+      continue;
+    }
+    const senderHandle = context.directRecipientPhoneNumber?.trim();
+    if (
+      !senderHandle
+      || [...senderHandle].length
+        > HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+    ) {
+      continue;
+    }
+    eligible.add(senderHandle);
+  }
+  return [...eligible].slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
 }
 
 function resolveHostedGroupToolLinqThreadContext(
@@ -590,23 +641,26 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): AssistantExecutionContext {
+  const scopedGroupToolPort = input.groupToolPort
+    ? createHostedGroupToolWithLinqThreadContext({
+        emailDeliveryContexts: input.emailDeliveryContexts,
+        groupEmailIngress: input.groupEmailIngress,
+        groupToolPort: input.groupToolPort,
+        linqDeliveryContexts: input.linqDeliveryContexts,
+      })
+    : null;
   const sharedScopedExecutionContext = scopeHostedGroupSharedReaderToAssistantOperation({
     executionContext: input.executionContext,
     groupSharedReadAvailable: input.groupSharedReadAvailable,
-    groupToolPort: input.groupToolPort,
+    groupToolPort: scopedGroupToolPort,
   });
-  if (!sharedScopedExecutionContext.hosted || !input.groupToolPort) {
+  if (!sharedScopedExecutionContext.hosted || !scopedGroupToolPort) {
     return sharedScopedExecutionContext;
   }
   return {
     hosted: {
       ...sharedScopedExecutionContext.hosted,
-      groupTool: createHostedGroupToolWithLinqThreadContext({
-        emailDeliveryContexts: input.emailDeliveryContexts,
-        groupEmailIngress: input.groupEmailIngress,
-        groupToolPort: input.groupToolPort,
-        linqDeliveryContexts: input.linqDeliveryContexts,
-      }),
+      groupTool: scopedGroupToolPort,
     },
   };
 }

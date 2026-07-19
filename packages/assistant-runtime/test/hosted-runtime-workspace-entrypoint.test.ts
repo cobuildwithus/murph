@@ -980,6 +980,7 @@ describe("hosted workspace runtime entrypoint", () => {
         });
         assert.deepEqual(shared, {
           members: [{
+            currentTurnHandles: [],
             displayName: null,
             memberId: "member_shared_regrant",
             participantId: "participant_shared_regrant",
@@ -1049,6 +1050,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     action: "read_shared",
                     result: {
                       members: [{
+                        currentTurnHandles: [],
                         displayName: null,
                         memberId: "member_shared_regrant",
                         participantId: "participant_shared_regrant",

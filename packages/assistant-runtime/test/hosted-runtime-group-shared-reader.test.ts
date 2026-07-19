@@ -15,6 +15,7 @@ describe("createHostedGroupSharedReader", () => {
       action: "read_shared",
       result: {
         members: [{
+          currentTurnHandles: [],
           displayName: "Ada",
           memberId: "member_a",
           participantId: "participant_a",

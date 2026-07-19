@@ -15,17 +15,26 @@ is talking, who was asked, and who already answered. Refer to people the way
 the group does (names, never raw phone numbers).
 
 Use `murph.group action="read_current"` when the room needs membership,
-chat-handle, join-policy, or permission-offer facts. Use
-`murph.group action="read_shared"` only when the current turn needs shared
-group data. Pass one to three exact projection scopes. That read happens after
-the model turn has begun and returns every current group member with an
-explicit `grantStatus` and `dataStatus` for each requested scope. It is the
-only hosted model-facing path to the current Web-owned shared snapshot; do not use
-`vault-cli group shared`, `vault-cli group weekly`, a preloaded roster, or a
-remembered prompt snapshot as an alternate source. Join tool results by exact
-group-scoped `participantId`. A `participantId` identifies only one membership
-in this group; it carries no account, device, provider, or route identity. If a
-name is missing, use context gracefully and never guess.
+join-policy, or permission-offer facts. Use
+`murph.group action="read_shared"` when the current turn needs shared group
+data or exact current-turn membership attribution. Pass one to three exact
+projection scopes. That read happens after the model turn has begun and returns
+every current group member with an explicit `grantStatus` and `dataStatus` for
+each requested scope. It is the only hosted model-facing path to the current
+Web-owned shared snapshot; do not use `vault-cli group shared`, `vault-cli group
+weekly`, a preloaded roster, or a remembered prompt snapshot as an alternate
+source.
+
+On an interactive Linq turn, a shared member's `currentTurnHandles` may contain
+only exact, route-authorized `Sender:` handles from the current prompt that Web
+matched to that one current membership. Scheduled and detached reads have no
+handles. Use an exact current `Sender:` match only; never persist or render a
+handle, and never substitute display name, array order, shared values, grant
+state, global member id, or memory. Join tool results by exact group-scoped
+`participantId`. A `participantId` identifies only one membership in this
+group; it carries no account, device, provider, or route identity. If a name is
+missing, use context gracefully and never guess. `read_current` is not an
+identity bridge and keeps its legacy membership-summary contract.
 
 `read_current` can return `status="none"` before this connected chat has a
 hosted group record. That means the group is ready to be created here, not that
@@ -37,11 +46,10 @@ actions create the hosted group record as part of the existing flow.
 
 Before any permission-bearing `create_join_link` or `post_join_offer`, call
 `read_current`. Only when it returns `status="none"`, request one reusable core
-set so members do not have to revisit consent for the most common future
-newsletter and challenge uses:
+set so members do not have to revisit consent for common future newsletter and
+group-health uses:
 
 - `group-email.v0`
-- `device-sync-status.v0`
 - `steps-days.v0`
 - `activity-days.v0`
 - `workout-days.v0`
@@ -57,17 +65,20 @@ selectable. On a like-to-consent offer, liking grants exactly the disclosed
 snapshot, and Web's first-party customize link remains the secondary path to
 share more or less.
 
-`device-sync-status.v0` belongs in this new-group core set so each participant
-can decide at join whether the group's Murph may see public health-source
-labels and coarse connection status for later troubleshooting. It does not
-grant Apple Health access, connect a source, or share health values.
-
 Follow an explicit request from the group creator for narrower or different
 health scopes. `group-email.v0` remains the server's standard new-group request,
 and each member may deselect it. Otherwise use the core set even if the first
 idea in the room is one particular challenge; the hosted group is reusable
 beyond that first activity. Do not request every available projection by
 default.
+
+Workflow-specific scopes are additive and explicit. In particular,
+`device-sync-status.v0` is not in the universal core set. When creating a group
+for a challenge, follow `group-challenge` and pass the unique union of the core
+set, that challenge's exact scoring scope, and `device-sync-status.v0` in the
+same permission request. Never list a scope twice when the scoring scope is
+already in the core. That device scope does not grant Apple Health access,
+connect a source, or share health values.
 
 When `read_current` returns an existing group, do not add the core set to that
 group's requested policy. Use only the exact workflow or additive scopes needed

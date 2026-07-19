@@ -120,6 +120,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
@@ -981,11 +982,19 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "projectionScopes"]),
+      new Set(["action", "linqSenderHandles", "projectionScopes"]),
       "Hosted runtime group tool read_shared request",
     );
     return {
       action,
+      ...(record.linqSenderHandles === undefined
+          || record.linqSenderHandles === null
+        ? {}
+        : {
+            linqSenderHandles: parseHostedRuntimeGroupLinqSenderHandles(
+              record.linqSenderHandles,
+            ),
+          }),
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
@@ -1286,6 +1295,50 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   };
 }
 
+function parseHostedRuntimeGroupLinqSenderHandles(value: unknown): string[] {
+  return parseHostedRuntimeGroupBoundedHandles(value, {
+    allowEmpty: false,
+    label: "Hosted runtime group tool read_shared request linqSenderHandles",
+  });
+}
+
+function parseHostedRuntimeGroupCurrentTurnHandles(
+  value: unknown,
+  label: string,
+): string[] {
+  return parseHostedRuntimeGroupBoundedHandles(value, {
+    allowEmpty: true,
+    label,
+  });
+}
+
+function parseHostedRuntimeGroupBoundedHandles(
+  value: unknown,
+  options: { allowEmpty: boolean; label: string },
+): string[] {
+  const { allowEmpty, label } = options;
+  const entries = requireArray(value, label);
+  if (
+    (!allowEmpty && entries.length === 0)
+    || entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} must contain between ${allowEmpty ? 0 : 1} and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const handles = entries.map((entry, index) =>
+    parseHostedRuntimeGroupAskBoundedText({
+      label: `${label}[${index}]`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+      value: entry,
+    })
+  );
+  if (new Set(handles).size !== handles.length) {
+    throw new TypeError(`${label} must contain unique entries.`);
+  }
+  return handles;
+}
+
 function parseHostedRuntimeGroupCreateJoinLinkRequest(
   value: unknown,
 ): HostedRuntimeGroupCreateJoinLinkRequest {
@@ -1419,6 +1472,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   const seenMemberIds = new Set<string>();
   const seenParticipantIds = new Set<string>();
+  const seenCurrentTurnHandles = new Set<string>();
   const members = rawMembers.map((rawMember, index) => {
     const member = parseHostedRuntimeGroupSharedMember(
       rawMember,
@@ -1437,6 +1491,22 @@ function parseHostedRuntimeGroupSharedReadResult(
       );
     }
     seenParticipantIds.add(member.participantId);
+    for (const handle of member.currentTurnHandles) {
+      if (seenCurrentTurnHandles.has(handle)) {
+        throw new TypeError(
+          "Hosted runtime group tool read_shared response currentTurnHandles must be unique across members.",
+        );
+      }
+      seenCurrentTurnHandles.add(handle);
+      if (
+        seenCurrentTurnHandles.size
+        > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+      ) {
+        throw new TypeError(
+          `Hosted runtime group tool read_shared response currentTurnHandles must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries across all members.`,
+        );
+      }
+    }
     return member;
   });
 
@@ -1495,7 +1565,13 @@ function parseHostedRuntimeGroupSharedMember(
   const member = requireObject(value, label);
   assertAllowedObjectKeys(
     member,
-    new Set(["displayName", "memberId", "participantId", "projections"]),
+    new Set([
+      "currentTurnHandles",
+      "displayName",
+      "memberId",
+      "participantId",
+      "projections",
+    ]),
     label,
   );
 
@@ -1516,6 +1592,10 @@ function parseHostedRuntimeGroupSharedMember(
         maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
         value: member.displayName,
       });
+  const currentTurnHandles = parseHostedRuntimeGroupCurrentTurnHandles(
+    member.currentTurnHandles,
+    `${label}.currentTurnHandles`,
+  );
   const rawProjections = requireArray(member.projections, `${label}.projections`);
   if (rawProjections.length !== requestedScopes.length) {
     throw new TypeError(
@@ -1555,7 +1635,13 @@ function parseHostedRuntimeGroupSharedMember(
     return projection;
   });
 
-  return { displayName, memberId, participantId, projections };
+  return {
+    currentTurnHandles,
+    displayName,
+    memberId,
+    participantId,
+    projections,
+  };
 }
 
 function parseHostedRuntimeGroupSharedProjection(
@@ -2678,8 +2764,7 @@ function parseHostedRuntimeGroupSummary(value: unknown) {
 const HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES = 200;
 
 // Optional for deploy skew: a runner updated before web tolerates summaries
-// without a roster; the reverse order is rejected by the allowed-keys check
-// above, so Cloudflare deploys before web when this shape widens.
+// without a roster.
 function parseHostedRuntimeGroupMemberSummaries(
   value: unknown,
 ): HostedRuntimeGroupMemberSummary[] {

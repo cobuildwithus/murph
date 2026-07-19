@@ -11,14 +11,16 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedEmailLookupKey,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
-  readHostedMemberPhoneNumberSnapshots: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
@@ -46,11 +48,6 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   revokeHostedVaultSharesTx: mocks.revokeHostedVaultSharesTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  readHostedMemberPhoneNumberSnapshots:
-    mocks.readHostedMemberPhoneNumberSnapshots,
-}));
-
 import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
@@ -61,6 +58,7 @@ import {
   leaveHostedGroupMemberTx,
   prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
+  readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -1279,18 +1277,231 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 });
 
+describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+  });
+
+  it("keeps each exact verified handle on its one current membership", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const dualPhoneHandle = "+15551110001";
+    const dualEmailHandle = "dual@example.test";
+    const emailHandle = "email-only@example.test";
+    const unverifiedEmailHandle = "unverified@example.test";
+    const ambiguousMemberEmailHandle = "ambiguous-a@example.test";
+    const priorKeyPhoneHandle = "+15551110003";
+    const rotatedAmbiguousPhoneHandle = "+15551110004";
+    const dualPhoneLookupKey = createHostedPhoneLookupKey(dualPhoneHandle);
+    const dualEmailLookupKey = createHostedEmailLookupKey(dualEmailHandle);
+    const emailLookupKey = createHostedEmailLookupKey(emailHandle);
+    const unverifiedEmailLookupKey = createHostedEmailLookupKey(
+      unverifiedEmailHandle,
+    );
+    const ambiguousMemberEmailLookupKey = createHostedEmailLookupKey(
+      ambiguousMemberEmailHandle,
+    );
+    const priorKeyPhoneLookupKey = createHostedPhoneLookupKeyReadCandidates(
+      priorKeyPhoneHandle,
+    ).find((lookupKey) => lookupKey.startsWith("hbidx:phone:v1:"));
+    const rotatedAmbiguousPhoneLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates(rotatedAmbiguousPhoneHandle);
+    const rotatedAmbiguousPhoneLookupKeyV1 =
+      rotatedAmbiguousPhoneLookupKeys.find((lookupKey) =>
+        lookupKey.startsWith("hbidx:phone:v1:")
+      );
+    const rotatedAmbiguousPhoneLookupKeyV2 =
+      rotatedAmbiguousPhoneLookupKeys.find((lookupKey) =>
+        lookupKey.startsWith("hbidx:phone:v2:")
+      );
+    if (
+      !dualPhoneLookupKey
+      || !dualEmailLookupKey
+      || !emailLookupKey
+      || !unverifiedEmailLookupKey
+      || !ambiguousMemberEmailLookupKey
+      || !priorKeyPhoneLookupKey
+      || !rotatedAmbiguousPhoneLookupKeyV1
+      || !rotatedAmbiguousPhoneLookupKeyV2
+    ) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const verifiedAt = new Date("2026-07-01T00:00:00.000Z");
+    const members = [
+      {
+        id: "group_member_dual",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: dualEmailLookupKey,
+            verifiedEmailVerifiedAt: verifiedAt,
+          },
+          identity: {
+            phoneLookupKey: dualPhoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: "member_dual",
+      },
+      {
+        id: "group_member_email",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: emailLookupKey,
+            verifiedEmailVerifiedAt: verifiedAt,
+          },
+          identity: null,
+        },
+        memberId: "member_email",
+      },
+      {
+        id: "group_member_unverified",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: unverifiedEmailLookupKey,
+            verifiedEmailVerifiedAt: null,
+          },
+          identity: null,
+        },
+        memberId: "member_unverified",
+      },
+      {
+        id: "group_member_prior_key",
+        member: {
+          emailAuthorization: null,
+          identity: {
+            phoneLookupKey: priorKeyPhoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: "member_prior_key",
+      },
+      ...[
+        ["v1", rotatedAmbiguousPhoneLookupKeyV1],
+        ["v2", rotatedAmbiguousPhoneLookupKeyV2],
+      ].map(([version, phoneLookupKey]) => ({
+        id: `group_member_rotated_ambiguous_${version}`,
+        member: {
+          emailAuthorization: version === "v1"
+            ? {
+                verifiedEmailLookupKey: ambiguousMemberEmailLookupKey,
+                verifiedEmailVerifiedAt: verifiedAt,
+              }
+            : null,
+          identity: {
+            phoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: `member_rotated_ambiguous_${version}`,
+      })),
+    ];
+    const hostedGroupFindUnique = vi.fn(async () => ({ members }));
+    const hostedVaultShareFindMany = vi.fn(async () => []);
+    const deviceConnectionFindMany = vi.fn(async () => []);
+    const tx = {
+      deviceConnection: { findMany: deviceConnectionFindMany },
+      hostedGroup: { findUnique: hostedGroupFindUnique },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    };
+    const transaction = vi.fn(async (
+      callback: (client: typeof tx) => Promise<unknown>,
+    ) => callback(tx));
+    const prisma = createPrismaStub({ $transaction: transaction });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      linqSenderHandles: [
+        dualPhoneHandle,
+        dualPhoneHandle,
+        dualEmailHandle,
+        emailHandle,
+        unverifiedEmailHandle,
+        ambiguousMemberEmailHandle,
+        priorKeyPhoneHandle,
+        rotatedAmbiguousPhoneHandle,
+        "unknown@example.test",
+      ],
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [dualPhoneHandle, dualEmailHandle],
+        memberId: "member_dual",
+        participantId: "group_member_dual",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [emailHandle],
+        memberId: "member_email",
+        participantId: "group_member_email",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_unverified",
+        participantId: "group_member_unverified",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [priorKeyPhoneHandle],
+        memberId: "member_prior_key",
+        participantId: "group_member_prior_key",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [ambiguousMemberEmailHandle],
+        memberId: "member_rotated_ambiguous_v1",
+        participantId: "group_member_rotated_ambiguous_v1",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_rotated_ambiguous_v2",
+        participantId: "group_member_rotated_ambiguous_v2",
+      }),
+    ]);
+    expect(hostedGroupFindUnique).toHaveBeenCalledWith({
+      select: {
+        members: expect.objectContaining({
+          select: {
+            id: true,
+            member: {
+              select: {
+                emailAuthorization: {
+                  select: {
+                    verifiedEmailLookupKey: true,
+                    verifiedEmailVerifiedAt: true,
+                  },
+                },
+                identity: {
+                  select: {
+                    phoneLookupKey: true,
+                    phoneNumberVerifiedAt: true,
+                  },
+                },
+              },
+            },
+            memberId: true,
+          },
+        }),
+      },
+      where: { runtimeMemberId: "member_group_runtime" },
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.readHostedMemberPhoneNumberSnapshots.mockImplementation(
-      async (input: { memberIds: readonly string[] }) =>
-        input.memberIds.map((memberId) => ({
-          memberId,
-          phoneNumber: "+15551110000",
-        })),
-    );
   });
 
   it("requires the signed-in actor to own the thread container", async () => {
@@ -1428,7 +1639,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
           {
             grantedVaultShareProjectionKinds: ["profile-name.v0"],
             grantedVaultShareProjectionScopes: [PROFILE_SCOPE],
-            handle: "+15551110000",
+            handle: null,
             memberId: "member_owner",
             role: "owner",
           },
@@ -1454,11 +1665,6 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         groupId: "group_1",
         revokedAt: null,
       },
-    });
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledWith({
-      memberIds: ["member_owner"],
-      prisma: tx,
     });
   });
 
@@ -2197,7 +2403,6 @@ describe("readHostedGroupMembershipsForMember", () => {
         status: "granted",
       },
     }));
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).not.toHaveBeenCalled();
   });
 
   it("returns at most 25 memberships and reports when more exist", async () => {

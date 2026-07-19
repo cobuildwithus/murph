@@ -26,6 +26,7 @@ import {
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
+  type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeNewsletterParticipantSummary,
@@ -644,7 +645,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read current consent-aware shared group facts after the turn has started. Request one to three unique exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Its participantId is scoped to the group membership and carries no account, device, provider, or route identity. The trusted host resolves current authority; never supply member, share, group, runtime, mailbox, session, or route identifiers.',
+    'Read current consent-aware shared group facts after the turn has started. Request one to three unique exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Its participantId is scoped to the group membership and carries no account, device, provider, or route identity. Detached reads have empty currentTurnHandles. The trusted host resolves current authority; never supply member, share, group, runtime, mailbox, session, or route identifiers.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -673,7 +674,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. The read result participantId is scoped to the group membership and carries no account, device, provider, or route identity. Use action="post_join_offer" only for scopes members still need to grant; existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
+    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. The read result participantId is scoped to the group membership and carries no account, device, provider, or route identity; scheduled reads have empty currentTurnHandles. Use action="post_join_offer" only for scopes members still need to grant; existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -699,7 +700,7 @@ export const MURPH_GROUP_TOOL = {
   name: 'group',
   description:
     'Use action="ask" only from a personal direct conversation when the member wants an answer from one of their joined group Murphs. Supply the bounded natural-language question and, only when useful for choosing among multiple groups, the visible groupLabel the member would recognize. For this action, the runtime resolves membership and every internal target automatically; never supply or ask the member for membership, group, runtime, mailbox, session, callback, or route identifiers. The result is asynchronous, so an accepted request will return to the personal conversation later. ' +
-    'Use action="read_shared" only when current group standings or diagnostics need exact consent-aware shared facts. Request one to three exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Each participantId is scoped to this group membership and carries no account, device, provider, or route identity. It resolves current authority only after this tool call; never supply member, share, runtime, group, or route identifiers. ' +
+    'Use action="read_shared" only when current group standings or diagnostics need exact consent-aware shared facts. Request one to three exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Each participantId is scoped to this group membership and carries no account, device, provider, or route identity. On an interactive iMessage turn, currentTurnHandles may identify the exact current prompt Sender on that same row; never infer identity from names, order, data, or a global id. It resolves current authority only after this tool call; never supply sender handles, member, share, runtime, group, or route identifiers. ' +
     'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data is available in the current Web-owned snapshot. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Use action="read_current" only for membership, group creation, join, and permission-offer operations; its roster or grant fields are not authority to read or score shared records. Request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, pass the exact projectionScopes and, only when chosen by the group, displayName. Web owns the full canonical consent copy: the exact scope disclosure, accepted Like-or-heart gestures, and first-party customize link. Never supply offer text. Liking or hearting grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
@@ -3193,16 +3194,62 @@ function groupSharedUnavailableToolResult(
 function groupSharedModelResult(
   result: AssistantHostedGroupSharedReadResponse,
 ) {
-  if (result.status !== 'ok') {
-    return result
+  if (result.status === 'unavailable') {
+    return {
+      status: result.status,
+      unavailableReason: result.unavailableReason,
+    }
+  }
+  if (result.status === 'none') {
+    return {
+      members: [],
+      requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
+      status: result.status,
+    }
   }
   return {
-    ...result,
     members: result.members.map((member) => ({
+      currentTurnHandles: member.currentTurnHandles,
       displayName: member.displayName,
       participantId: member.participantId,
       projections: member.projections,
     })),
+    requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
+    status: result.status,
+  }
+}
+
+function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
+  return {
+    displayName: group.displayName,
+    id: group.id,
+    kind: group.kind,
+    memberCount: group.memberCount,
+    members: group.members.map((member) => ({
+      grantedVaultShareProjectionKinds:
+        member.grantedVaultShareProjectionKinds,
+      grantedVaultShareProjectionScopes:
+        member.grantedVaultShareProjectionScopes,
+      role: member.role,
+    })),
+    requestedVaultShareProjectionKinds:
+      group.requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes:
+      group.requestedVaultShareProjectionScopes,
+    status: group.status,
+  }
+}
+
+function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
+  if (!('group' in response.result) || response.result.group === null) {
+    return response
+  }
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      group: groupSummaryModelResult(response.result.group),
+    },
   }
 }
 
@@ -3354,9 +3401,10 @@ async function executeGroupTool(input: {
 
   try {
     const result = await groupTool.request(request)
+    const modelResult = groupToolModelResult(result)
     const payload = generatedAvatarCapture
-      ? { ...result, generatedImage: generatedAvatarCapture }
-      : result
+      ? { ...modelResult, generatedImage: generatedAvatarCapture }
+      : modelResult
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
       ...(usageDraft ? { usageDraft } : {}),

@@ -48,10 +48,25 @@ authenticated group join page or route-bound group-chat offer flow.
 
 `murph.group action="read_shared"` is the only hosted assistant path for group
 standings, shared facts, and diagnostics. Its runtime adapter is synchronous and
-performs no I/O when constructed. Foreground, scheduled, notification, and
-detached read-only model turns start without a roster, grant, snapshot, device,
-filesystem, projection, sandbox, or configuration read; Web is contacted only
-after the model invokes the tool.
+performs no I/O when constructed. This path adds no pre-model roster, grant,
+snapshot, device, projection, configuration, or attribution read; existing
+accepted-input and route-binding work is unchanged. Web is contacted only after
+the model invokes the tool.
+
+Challenge kickoff and later interactive identity repair stay inside that same
+model-triggered `read_shared` request. At request time, the runtime adds only
+the bounded, route-authorized current-turn Linq sender handles already visible
+in the prompt. Web matches those handles against verified phone and email blind
+indexes selected by the existing group query. A handle appears only in the
+matching member's bounded `currentTurnHandles` array and only when it resolves
+to exactly one current membership; the same row carries the group-scoped
+`participantId`. The model may bind a challenge participant only when an exact
+current `Sender:` handle appears in one row. Scheduled and detached reads carry
+no handles. Handles are never persisted, and this adds no pre-model work,
+standalone query, decrypted contact roster, or compatibility branch. The
+legacy `read_current` wire is unchanged, and assistant-engine still removes the
+global member id and legacy roster handle before any group summary reaches the
+model.
 
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member

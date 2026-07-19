@@ -360,6 +360,77 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: { action: "read_current" },
     });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_current",
+      linqSenderHandles: ["member@example.test"],
+    }))?.kind).toBe("invalid-group-arguments");
+  });
+
+  it("redacts member identity from a successful read_current result", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "read_current",
+      result: {
+        group: {
+          displayName: "Challenge group",
+          id: "group_challenge",
+          kind: "friends",
+          memberCount: 1,
+          members: [{
+            grantedVaultShareProjectionKinds: ["steps-days.v0"],
+            grantedVaultShareProjectionScopes: [{ projectionKind: "steps-days.v0" }],
+            handle: "+15551110003",
+            memberId: "global_member_id",
+            role: "owner",
+          }],
+          requestedVaultShareProjectionKinds: ["steps-days.v0"],
+          requestedVaultShareProjectionScopes: [{ projectionKind: "steps-days.v0" }],
+          status: "active",
+        },
+        status: "ok",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_current",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "read_current",
+      result: {
+        group: {
+          displayName: "Challenge group",
+          id: "group_challenge",
+          kind: "friends",
+          memberCount: 1,
+          members: [{
+            grantedVaultShareProjectionKinds: ["steps-days.v0"],
+            grantedVaultShareProjectionScopes: [{ projectionKind: "steps-days.v0" }],
+            role: "owner",
+          }],
+          requestedVaultShareProjectionKinds: ["steps-days.v0"],
+          requestedVaultShareProjectionScopes: [{ projectionKind: "steps-days.v0" }],
+          status: "active",
+        },
+        status: "ok",
+      },
+    });
+    const modelPayload = JSON.stringify(readGroupToolPayload(result));
+    expect(modelPayload).not.toContain("global_member_id");
+    expect(modelPayload).not.toContain("memberId");
+    expect(modelPayload).not.toContain("+15551110003");
+    expect(modelPayload).not.toContain("handle");
   });
 
   it("parses a bounded exact shared-data read without model-supplied authority", () => {
@@ -404,6 +475,11 @@ describe("murph.group dynamic tool", () => {
       },
       {
         action: "read_shared",
+        linqSenderHandles: ["member@example.test"],
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      },
+      {
+        action: "read_shared",
         memberId: "member_hijack",
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       },
@@ -427,9 +503,11 @@ describe("murph.group dynamic tool", () => {
     const response = {
       members: [
         {
+          currentTurnHandles: ["+15551110001"],
           displayName: "Alex",
           memberId: "member_a",
           participantId: "participant_a",
+          trustedOnlyMemberField: "shared_member_internal",
           projections: [
             {
               dataStatus: "available" as const,
@@ -457,6 +535,7 @@ describe("murph.group dynamic tool", () => {
           ],
         },
         {
+          currentTurnHandles: ["member-b@example.test"],
           displayName: "Alex",
           memberId: "member_b",
           participantId: "participant_b",
@@ -490,6 +569,7 @@ describe("murph.group dynamic tool", () => {
         "device-sync-status.v0",
       ],
       status: "ok" as const,
+      trustedOnlyResultField: "shared_result_internal",
     };
     const groupSharedReadRequest = vi.fn(async () => response);
     const request = readMurphDynamicToolRequest(groupToolCall({
@@ -530,6 +610,8 @@ describe("murph.group dynamic tool", () => {
     expect(toolText.text).not.toContain("member_a");
     expect(toolText.text).not.toContain("member_b");
     expect(toolText.text).not.toContain("memberId");
+    expect(toolText.text).not.toContain("shared_member_internal");
+    expect(toolText.text).not.toContain("shared_result_internal");
     expect(toolText.text).toContain('"participantId":"participant_a"');
     expect(toolText.text).toContain('"participantId":"participant_b"');
     const payload = readGroupToolPayload(result);
@@ -538,6 +620,7 @@ describe("murph.group dynamic tool", () => {
       result: {
         members: [
           {
+            currentTurnHandles: ["+15551110001"],
             displayName: "Alex",
             participantId: "participant_a",
             projections: [
@@ -554,6 +637,7 @@ describe("murph.group dynamic tool", () => {
             ],
           },
           {
+            currentTurnHandles: ["member-b@example.test"],
             displayName: "Alex",
             participantId: "participant_b",
             projections: [
@@ -567,9 +651,97 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("strips global member ids from every group-summary mutation result", async () => {
+    const group = {
+      displayName: "Challenge group",
+      id: "group_challenge",
+      kind: "friends",
+      memberCount: 2,
+      members: [
+        {
+          grantedVaultShareProjectionKinds: [],
+          grantedVaultShareProjectionScopes: [],
+          handle: null,
+          memberId: "global_member_id",
+          role: "owner",
+          trustedOnlyMemberField: "summary_member_internal",
+        },
+        {
+          grantedVaultShareProjectionKinds: [],
+          grantedVaultShareProjectionScopes: [],
+          handle: "+15551110003",
+          memberId: "legacy_global_member_id",
+          role: "member",
+        },
+      ],
+      requestedVaultShareProjectionKinds: [],
+      requestedVaultShareProjectionScopes: [],
+      status: "active",
+      trustedOnlyGroupField: "summary_group_internal",
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+      if (request.action === "create_join_link") {
+        return {
+          action: request.action,
+          result: { group, joinUrl: "https://example.test/join/code", status: "ok" },
+        };
+      }
+      if (request.action === "update_display_name") {
+        return {
+          action: request.action,
+          result: { group, status: "ok" },
+        };
+      }
+      if (request.action === "post_join_offer") {
+        return {
+          action: request.action,
+          result: { group, joinUrl: "https://example.test/join/code", status: "sent" },
+        };
+      }
+      throw new Error(`Unexpected group action ${request.action}.`);
+    });
+    const modelRequests = [
+      { action: "create_join_link" },
+      { action: "update_display_name", displayName: "Challenge group" },
+      {
+        action: "post_join_offer",
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      },
+    ];
+
+    for (const modelRequest of modelRequests) {
+      const request = readMurphDynamicToolRequest(groupToolCall(modelRequest));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group mutation request.");
+      }
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+      const resultText = result.rpcResult.contentItems[0];
+      if (!resultText || resultText.type !== "inputText") {
+        throw new Error("Expected group mutation text payload.");
+      }
+      expect(resultText.text).not.toContain("global_member_id");
+      expect(resultText.text).not.toContain("legacy_global_member_id");
+      expect(resultText.text).not.toContain("memberId");
+      expect(resultText.text).not.toContain("+15551110003");
+      expect(resultText.text).not.toContain("handle");
+      expect(resultText.text).not.toContain("summary_group_internal");
+      expect(resultText.text).not.toContain("summary_member_internal");
+      expect(resultText.text).toContain("group_challenge");
+    }
+  });
+
   it("fails the whole shared read closed when its bounded result is too large", async () => {
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
       members: [{
+        currentTurnHandles: [],
         displayName: `Member ${"x".repeat(49_000)}`,
         memberId: "member_oversized",
         participantId: "participant_oversized",
@@ -2019,6 +2191,7 @@ describe("murph.newsletter dynamic tool", () => {
           return {
             members: [
               {
+                currentTurnHandles: [],
                 displayName: "Ada",
                 memberId: "member_a",
                 participantId: "participant_a",
@@ -2040,6 +2213,7 @@ describe("murph.newsletter dynamic tool", () => {
                 }],
               },
               {
+                currentTurnHandles: [],
                 displayName: "Opted out",
                 memberId: "member_opted_out",
                 participantId: "participant_opted_out",
@@ -2061,6 +2235,7 @@ describe("murph.newsletter dynamic tool", () => {
                 }],
               },
               {
+                currentTurnHandles: [],
                 displayName: "No current data",
                 memberId: "member_stale_grant",
                 participantId: "participant_stale_grant",

@@ -1275,20 +1275,20 @@ describe('assistant codex runtime', () => {
     const threadId = 'thread-group-shared-lazy-read'
     const boundaryObservations: Array<{
       providerStarts: number
-      readerCalls: number
       rpcMethod: 'thread/start' | 'thread/resume' | 'turn/start'
+      sharedReaderCalls: number
     }> = []
     const executionOrder: string[] = []
     let providerStartOrdinal = 0
-    let readerOrdinal = 0
+    let sharedReaderOrdinal = 0
     let turnStartOrdinal = 0
     const onProviderRequestStarted = vi.fn(() => {
       providerStartOrdinal += 1
       executionOrder.push(`provider-started:${providerStartOrdinal}`)
     })
     const groupSharedRead = vi.fn(async () => {
-      readerOrdinal += 1
-      executionOrder.push(`shared-reader:${readerOrdinal}`)
+      sharedReaderOrdinal += 1
+      executionOrder.push(`shared-reader:${sharedReaderOrdinal}`)
       return {
         members: [] as const,
         requestedProjectionScopeKeys: ['steps-days.v0'],
@@ -1309,8 +1309,8 @@ describe('assistant codex runtime', () => {
     ) => {
       boundaryObservations.push({
         providerStarts: onProviderRequestStarted.mock.calls.length,
-        readerCalls: groupSharedRead.mock.calls.length,
         rpcMethod,
+        sharedReaderCalls: groupSharedRead.mock.calls.length,
       })
     }
 
@@ -1460,10 +1460,26 @@ describe('assistant codex runtime', () => {
     })
 
     expect(boundaryObservations).toEqual([
-      { providerStarts: 0, readerCalls: 0, rpcMethod: 'thread/start' },
-      { providerStarts: 0, readerCalls: 0, rpcMethod: 'turn/start' },
-      { providerStarts: 1, readerCalls: 1, rpcMethod: 'thread/resume' },
-      { providerStarts: 1, readerCalls: 1, rpcMethod: 'turn/start' },
+      {
+        providerStarts: 0,
+        rpcMethod: 'thread/start',
+        sharedReaderCalls: 0,
+      },
+      {
+        providerStarts: 0,
+        rpcMethod: 'turn/start',
+        sharedReaderCalls: 0,
+      },
+      {
+        providerStarts: 1,
+        rpcMethod: 'thread/resume',
+        sharedReaderCalls: 1,
+      },
+      {
+        providerStarts: 1,
+        rpcMethod: 'turn/start',
+        sharedReaderCalls: 1,
+      },
     ])
     expect(executionOrder).toEqual([
       'turn-start:1',

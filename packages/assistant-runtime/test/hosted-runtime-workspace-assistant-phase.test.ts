@@ -776,6 +776,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         action: "read_shared" as const,
         result: {
           members: [{
+            currentTurnHandles: [],
             displayName: "Ada",
             memberId: "member_shared_current",
             participantId: "participant_shared_current",
@@ -852,6 +853,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           action: "read_shared" as const,
           result: {
             members: [{
+              currentTurnHandles: [],
               displayName: "Ada",
               memberId: "member_shared_current",
               participantId: "participant_shared_current",
@@ -3750,14 +3752,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const vaultRoot = path.join(parentRoot, "vault");
     const emailInputId = "ain_00000000000000000000000000000001";
     const linqInputId = "ain_00000000000000000000000000000002";
-    const groupRequestMock = vi.fn(async () => ({
-      action: "update_display_name" as const,
-      result: {
-        group: null,
-        status: "unavailable" as const,
-        unavailableReason: "test_backend_unavailable",
-      },
-    }));
+    const groupRequestMock = vi.fn(async (request: HostedRuntimeGroupToolRequest) =>
+      request.action === "read_shared"
+        ? {
+            action: request.action,
+            result: {
+              members: [] as const,
+              requestedProjectionScopeKeys: ["steps-days.v0"] as const,
+              status: "none" as const,
+            },
+          }
+        : {
+            action: "update_display_name" as const,
+            result: {
+              group: null,
+              status: "unavailable" as const,
+              unavailableReason: "test_backend_unavailable",
+            },
+          });
     const groupRequest: NonNullable<
       HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
     >["request"] = groupRequestMock;
@@ -3858,6 +3870,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect(executionContext.hosted?.groupSharedReader).toEqual(
             expect.objectContaining({ request: expect.any(Function) }),
           );
+          await expect(executionContext.hosted?.groupSharedReader?.request({
+            projectionScopes: [{ projectionKind: "steps-days.v0" }],
+          })).resolves.toMatchObject({ status: "none" });
           const saved = await executionContext.hosted?.automationTool?.request({
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
@@ -3942,6 +3957,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "active",
       }));
+      expect(groupRequestMock).toHaveBeenCalledWith({
+        action: "read_shared",
+        linqSenderHandles: ["+15555550123"],
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "update_display_name",
         updateDisplayName: { displayName: "Linq can rename" },

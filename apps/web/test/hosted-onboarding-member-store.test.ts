@@ -43,7 +43,6 @@ import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,
-  readHostedMemberPhoneNumberSnapshots,
   type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
@@ -336,41 +335,6 @@ describe("hosted-member-store", () => {
         verifiedEmailAddressEncrypted: true,
         verifiedEmailLookupKey: true,
         verifiedEmailVerifiedAt: true,
-      },
-    });
-  });
-
-  it("reads roster phone handles for a member set with one narrow query", async () => {
-    const memberId = "member_phone_batch";
-    const findMany = vi.fn().mockResolvedValue([{
-      memberId,
-      phoneNumberEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.phone-number",
-        memberId,
-        value: "+12125550111",
-      }),
-    }]);
-    const prisma = {
-      hostedMemberIdentity: { findMany },
-    } as never;
-
-    await expect(readHostedMemberPhoneNumberSnapshots({
-      memberIds: [memberId, memberId, "member_missing"],
-      prisma,
-    })).resolves.toEqual([{
-      memberId,
-      phoneNumber: "+12125550111",
-    }]);
-    expect(findMany).toHaveBeenCalledTimes(1);
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        memberId: {
-          in: [memberId, "member_missing"],
-        },
-      },
-      select: {
-        memberId: true,
-        phoneNumberEncrypted: true,
       },
     });
   });

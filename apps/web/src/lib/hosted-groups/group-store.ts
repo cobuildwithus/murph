@@ -30,7 +30,11 @@ import {
 } from "../device-sync/provider-label";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
-import { createHostedLinqMessageLookupKey } from "../hosted-onboarding/contact-privacy";
+import {
+  createHostedEmailLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
@@ -41,7 +45,6 @@ import {
   generateHostedGroupJoinCode,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import { readHostedMemberPhoneNumberSnapshots } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -364,11 +367,30 @@ interface HostedGroupSharedDeviceConnectionSnapshot {
   userId: string;
 }
 
+interface HostedGroupSharedMemberSource {
+  id: string;
+  member: {
+    emailAuthorization: {
+      verifiedEmailLookupKey: string | null;
+      verifiedEmailVerifiedAt: Date | null;
+    } | null;
+    identity: {
+      phoneLookupKey: string | null;
+      phoneNumberVerifiedAt: Date | null;
+    } | null;
+  };
+  memberId: string;
+}
+
 type HostedGroupSharedReadCapture =
   | {
       status: "ok";
       connections: HostedGroupSharedDeviceConnectionSnapshot[];
-      members: Array<{ memberId: string; participantId: string }>;
+      members: Array<{
+        currentTurnHandles: string[];
+        memberId: string;
+        participantId: string;
+      }>;
       shares: HostedVaultShareProjectionSnapshotEntry[];
     }
   | { status: "none" }
@@ -381,6 +403,7 @@ type HostedGroupSharedReadCapture =
  * access cannot extend the database authority window.
  */
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
+  linqSenderHandles?: readonly string[];
   prisma?: PrismaClient;
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   runtimeMemberId: string;
@@ -406,7 +429,26 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           members: {
             orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             take: HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
-            select: { id: true, memberId: true },
+            select: {
+              id: true,
+              member: {
+                select: {
+                  emailAuthorization: {
+                    select: {
+                      verifiedEmailLookupKey: true,
+                      verifiedEmailVerifiedAt: true,
+                    },
+                  },
+                  identity: {
+                    select: {
+                      phoneLookupKey: true,
+                      phoneNumberVerifiedAt: true,
+                    },
+                  },
+                },
+              },
+              memberId: true,
+            },
           },
         },
       });
@@ -417,16 +459,23 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         return { status: "unavailable", unavailableReason: "runtime_inactive" };
       }
 
-      const members = group.members.map((member) => ({
-        memberId: member.memberId,
-        participantId: member.id,
-      }));
-      if (members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
+      if (group.members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
         return {
           status: "unavailable",
           unavailableReason: "shared_data_snapshot_too_large",
         };
       }
+      const currentTurnHandlesByParticipantId =
+        matchHostedGroupLinqSenderHandles(
+          group.members,
+          input.linqSenderHandles ?? [],
+        );
+      const members = group.members.map((member) => ({
+        currentTurnHandles:
+          currentTurnHandlesByParticipantId.get(member.id) ?? [],
+        memberId: member.memberId,
+        participantId: member.id,
+      }));
 
       const memberIds = members.map((member) => member.memberId);
       const grantRows = memberIds.length === 0
@@ -594,7 +643,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       connectionsByMember.set(connection.userId, connections);
     }
 
-    const members = capture.members.map(({ memberId, participantId }) => {
+    const members = capture.members.map(({
+      currentTurnHandles,
+      memberId,
+      participantId,
+    }) => {
       const memberGrants = grantsByMember.get(memberId);
       const storedRecords = recordsByMemberAndScope.get(memberId);
       const profileRecords = storedRecords?.get(
@@ -603,6 +656,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       const displayName = readHostedGroupSharedProfileName(profileRecords);
 
       return {
+        currentTurnHandles,
         displayName,
         memberId,
         participantId,
@@ -2035,10 +2089,9 @@ async function readHostedGroupSummaryById(
 }
 
 /**
- * Server-derived roster that joins the group's three identity namespaces for the
- * runtime: membership (member id + role), the chat layer (the member's verified
- * phone handle), and data sharing (which projection kinds this member currently
- * grants to this group's runtime). Derived on read; no new persisted state.
+ * Server-derived roster that joins group membership and current data-sharing
+ * grants. Chat attribution is intentionally confined to the lazy read_shared
+ * operation, so this legacy summary never reads or reveals member handles.
  */
 async function readHostedGroupMemberRoster(
   prisma: HostedGroupsReadClient,
@@ -2052,9 +2105,8 @@ async function readHostedGroupMemberRoster(
   }
 
   const memberIds = input.members.map((member) => member.memberId);
-  const [grants, phoneNumberSnapshots] = await Promise.all([
-    input.runtimeMemberId
-      ? prisma.hostedVaultShare.findMany({
+  const grants = input.runtimeMemberId
+    ? await prisma.hostedVaultShare.findMany({
         where: {
           destinationMemberId: input.runtimeMemberId,
           grantorMemberId: { in: memberIds },
@@ -2067,9 +2119,7 @@ async function readHostedGroupMemberRoster(
           projectionScopeKey: true,
         },
       })
-      : Promise.resolve([]),
-    readHostedMemberPhoneNumberSnapshots({ memberIds, prisma }),
-  ]);
+    : [];
   const grantsByMemberId = new Map<string, HostedVaultShareProjectionScope[]>();
   for (const grant of grants) {
     const scope = parseHostedVaultShareRowProjectionScope(grant);
@@ -2080,11 +2130,6 @@ async function readHostedGroupMemberRoster(
     scopes.push(scope);
     grantsByMemberId.set(grant.grantorMemberId, scopes);
   }
-  const phoneNumberByMemberId = new Map(
-    phoneNumberSnapshots.map((snapshot) =>
-      [snapshot.memberId, snapshot.phoneNumber] as const
-    ),
-  );
 
   return input.members.map((member) => {
     const grantedVaultShareProjectionScopes =
@@ -2094,11 +2139,52 @@ async function readHostedGroupMemberRoster(
         ...new Set(grantedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
       ],
       grantedVaultShareProjectionScopes,
-      handle: phoneNumberByMemberId.get(member.memberId) ?? null,
+      handle: null,
       memberId: member.memberId,
       role: member.role,
     };
   });
+}
+
+function matchHostedGroupLinqSenderHandles(
+  members: readonly HostedGroupSharedMemberSource[],
+  senderHandles: readonly string[],
+): Map<string, string[]> {
+  const matchedHandlesByParticipantId = new Map<string, string[]>();
+  for (const senderHandle of new Set(senderHandles)) {
+    const emailLookupKeys = new Set(
+      createHostedEmailLookupKeyReadCandidates(senderHandle),
+    );
+    const phoneLookupKeys = new Set(
+      createHostedPhoneLookupKeyReadCandidates(senderHandle),
+    );
+    const matchedMembers = members.filter((member) => {
+      const emailAuthorization = member.member.emailAuthorization;
+      const identity = member.member.identity;
+      return Boolean(
+        emailAuthorization?.verifiedEmailVerifiedAt
+        && emailAuthorization.verifiedEmailLookupKey
+        && emailLookupKeys.has(emailAuthorization.verifiedEmailLookupKey),
+      ) || Boolean(
+        identity?.phoneNumberVerifiedAt
+        && identity.phoneLookupKey
+        && phoneLookupKeys.has(identity.phoneLookupKey),
+      );
+    });
+    if (matchedMembers.length !== 1) {
+      continue;
+    }
+    const participantId = matchedMembers[0]?.id;
+    if (!participantId) {
+      continue;
+    }
+    const matchedHandles =
+      matchedHandlesByParticipantId.get(participantId) ?? [];
+    matchedHandles.push(senderHandle);
+    matchedHandlesByParticipantId.set(participantId, matchedHandles);
+  }
+
+  return matchedHandlesByParticipantId;
 }
 
 async function assertHostedGroupRuntimeDestinationTx(

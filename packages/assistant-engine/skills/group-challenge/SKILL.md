@@ -32,15 +32,20 @@ Choose the narrowest Vault Share projection scope that matches the agreed
 score. Use daily aggregate records only; never ask for routes, raw workouts,
 provider traces, or private 1:1 data for a group challenge.
 
-At kickoff for an existing group, request the scoring scope and
-`device-sync-status.v0` together in the same additive permission offer. The
+At kickoff, explicitly request the scoring scope and
+`device-sync-status.v0`. For a new group, pass the unique union of the
+group-chat skill's reusable core set, the exact scoring scope, and the device
+scope in the same permission-bearing creation request; never duplicate a scope
+that is already in the core. The device scope is not part of the universal core
+set. For an existing group, request the two challenge scopes in one additive
+permission offer. The
 device scope is diagnostic context, not scoring data: it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
 participant may decline it and still join the challenge. Liking the
 server-owned offer grants only the disclosed Murph group shares. Pass the exact
-`projectionScopes` only; Web owns the full canonical exact scope, Like-or-heart
-gesture, and first-party customize copy. Never author offer text. The offer
-cannot connect a source or grant Apple Health access.
+scopes only; Web owns the full canonical exact scope, Like-or-heart gesture,
+and first-party customize copy. Never author offer text. The offer cannot
+connect a source or grant Apple Health access.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -185,33 +190,43 @@ loses a reminder; it must never lose the challenge.
    withdraws, record that state in the same turn. Never list them as waiting,
    ask them for challenge materials, score them, or privately check in about
    challenge silence. Re-entry requires a new explicit affirmative response.
-   After the model turn has begun and before writing a new challenge roster,
-   call `murph.group action="read_shared"` once with the exact scoring scope
-   and `device-sync-status.v0`. Record the returned group-scoped
-   `participantId` for each roster entry whose association is unambiguous.
-   This is the kickoff identity read; it must never become prompt preload or
-   other pre-model work. Do not attach an id from a matching display name,
-   array position, projection values, grant state, or remembered context.
-   When current attributable sender or reaction evidence does not establish
-   one exact association, record that roster identity as `unresolved` and do
-   not baseline, score, or diagnose that person until it is resolved.
-4. **Collect sharing permissions.** Read the current group first. When
-   `read_current` returns `status="none"`, the group-chat skill's Creating a
-   hosted group core set takes precedence. For an existing group, use
-   `murph.group action="post_join_offer"` with only the challenge's share
-   scopes: the exact scoring scope and `device-sync-status.v0`. Existing
-   members like the server-owned message to opt into that permission snapshot;
-   the included first-party link is only for someone who wants to customize
-   what they share. Do not tell the room to join again or make the link the
-   primary action. Pass only those exact `projectionScopes`; Web owns the
-   canonical offer copy, including the exact scope disclosure, accepted Like
-   or heart gestures, and first-party customize link. Never author or pass
-   offer text. Liking or hearting grants only those Murph group shares; it does
-   not grant HealthKit access, connect a wearable, or prove that data has
-   synced. Post an additive offer once and do not retry or nag when someone
-   declines or ignores it. Use
+4. **Collect sharing permissions and bind roster identities.** Follow the
+   group-chat rule to call `murph.group action="read_current"` before a
+   permission-bearing group action. Use that result only for current group,
+   membership, join-policy, and permission facts; never use it to bind a
+   challenge identity.
+
+   When `read_current` returns `status="none"`, create the hosted group with
+   one permission request containing the unique union of the group-chat core
+   set, the exact scoring scope, and `device-sync-status.v0`; never list a
+   scope twice. The device scope is not part of the universal core. When the
+   group already exists, do not add the core set;
+   use `murph.group action="post_join_offer"` with only the exact scoring scope
+   and `device-sync-status.v0`. Existing members like the server-owned message
+   to opt into that permission snapshot; the included first-party link is only
+   for someone who wants to customize what they share. Do not tell the room to
+   join again or make the link the primary action. Web owns the canonical offer
+   copy, including the exact scope disclosure, accepted Like or heart gestures,
+   and first-party customize link. Never author or pass offer text. Liking or
+   hearting grants only those Murph group shares; it does not grant HealthKit
+   access, connect a wearable, or prove that data has synced. Post an additive
+   offer once and do not retry or nag when someone declines or ignores it. Use
    `action="create_join_link"` only when the group explicitly asks for a
    standalone link. Never use data a member has not granted to this group.
+
+   After the model turn has begun, after any required group creation, and
+   before writing the challenge roster, call
+   `murph.group action="read_shared"` exactly once with the exact scoring scope
+   and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
+   and diagnostic read; it must never become prompt preload or other pre-model
+   work. On an interactive Linq turn, record a returned row's group-scoped
+   `participantId` only when an exact current prompt `Sender:` handle appears
+   in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
+   attach an id from a matching display name, array position, projection
+   values, grant state, global member id, or remembered context. When no exact
+   current-handle association exists, record that roster identity as
+   `unresolved` and do not baseline, score, or diagnose that person until it is
+   resolved. Scheduled and detached reads carry no handles and never guess.
 5. **Ask for introductions and photos.** Each participant gives a one-line
    intro or a fun fact about themselves, plus a photo if they're willing.
    Record every intro verbatim on the page — they are seed material for
@@ -282,7 +297,9 @@ automation action rules with a `dailyLocal` schedule and
    only that membership in this group; it carries no account, device, provider,
    or route identity. Left join those members to the challenge roster by exact
    `participantId`, never by display name. Duplicate or changed names do not
-   change that join. Never let an empty record set hide an opted-in
+   change that join. Leaving and rejoining creates a new `participantId`; do
+   not reuse or automatically replace the prior membership id without fresh
+   attributable evidence. Never let an empty record set hide an opted-in
    participant. A challenge participant absent from the current member result
    is no longer a current member; do not score or diagnose them from retained
    challenge history. `status="none"` means there is no current hosted group.
@@ -293,15 +310,18 @@ automation action rules with a `dailyLocal` schedule and
    any unrelated conversational help.
 
    For an active challenge page created before `participantId` was recorded,
-   use this same `read_shared` result for a one-time identity backfill; do not
-   add another read. Bind a legacy roster entry only when current attributable
-   sender or reaction evidence establishes exactly which returned membership
-   is that person. A unique or equal display name is not identity proof, and
-   array order, projection values, grant state, and remembered context are not
-   identity evidence. If the association is not exact, write
+   an interactive turn with new attributable evidence may use that turn's same
+   `read_shared` result for a one-time identity backfill; do not add another
+   identity read. Bind a legacy roster entry only when an exact current prompt
+   `Sender:` handle appears in one returned member's `currentTurnHandles`, then
+   store that row's `participantId`. A unique or equal display name is not
+   identity proof, and array order, projection values, grant state, global
+   member id, and remembered context are not identity evidence. If the
+   association is not exact, write
    `participantId: unresolved` on that roster entry in the same turn and do
-   not score or diagnose it. Do not retry on every scheduled run; reconsider
-   only after new attributable evidence makes that one association exact.
+   not score or diagnose it. Scheduled and detached reads expose no handles.
+   Do not retry on every scheduled run; reconsider only after new attributable
+   evidence makes that one association exact.
 
    Classify every `in` participant in a successful result before composing:
    `grantStatus="not_granted"` means the group share is not granted;

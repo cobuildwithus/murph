@@ -694,11 +694,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Before any permission-bearing `create_join_link` or `post_join_offer`, call')
     expect(raw).toContain('Only when it returns `status="none"`')
     expect(raw).toMatch(/one reusable core\s+set/u)
-    expect(raw).toMatch(
-      /`group-email\.v0`[\s\S]*`device-sync-status\.v0`[\s\S]*`steps-days\.v0`[\s\S]*`activity-days\.v0`[\s\S]*`workout-days\.v0`[\s\S]*`sleep-duration-days\.v0`[\s\S]*`sleep-times\.v0`[\s\S]*`resting-heart-rate-days\.v0`[\s\S]*`hrv-days\.v0`/u,
+    const coreSet = raw.match(
+      /one reusable core[\s\S]*?Pass the set/u,
+    )?.[0] ?? ''
+    expect(coreSet).toMatch(
+      /`group-email\.v0`[\s\S]*`steps-days\.v0`[\s\S]*`activity-days\.v0`[\s\S]*`workout-days\.v0`[\s\S]*`sleep-duration-days\.v0`[\s\S]*`sleep-times\.v0`[\s\S]*`resting-heart-rate-days\.v0`[\s\S]*`hrv-days\.v0`/u,
     )
-    expect(raw).toContain('`device-sync-status.v0` belongs in this new-group core set')
-    expect(raw).toContain('It does not\ngrant Apple Health access')
+    expect(coreSet).not.toContain('`device-sync-status.v0`')
+    expect(raw).toContain('`device-sync-status.v0` is not in the universal core set')
+    expect(raw).toMatch(/pass the unique union of the core\s+set/u)
+    expect(raw).toContain('Never list a scope twice')
+    expect(raw).toMatch(/That\s+device scope does not grant Apple Health access/u)
     expect(raw).toContain('`requestedVaultShareProjectionScopes` on `create_join_link`')
     expect(raw).toContain('`projectionScopes` when creation uses `post_join_offer`')
     expect(raw).toContain('This is a permission\nrequest, not automatic sharing')
@@ -877,12 +883,15 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
     expect(raw).toMatch(
-      /before writing a new challenge roster,\s+call `murph\.group action="read_shared"` once/u,
+      /after any required group creation, and\s+before writing the challenge roster, call\s+`murph\.group action="read_shared"` exactly once/u,
     )
     expect(raw).toMatch(
-      /same `read_shared` result for a one-time identity backfill; do not\s+add another read/u,
+      /exact current prompt `Sender:` handle appears\s+in that row's `currentTurnHandles`/u,
     )
-    expect(raw).toContain('A unique or equal display name is not identity proof')
+    expect(raw).toMatch(
+      /that turn's same\s+`read_shared` result for a one-time identity backfill; do not add another\s+identity read/u,
+    )
+    expect(raw).toMatch(/A unique or equal\s+display name is not\s+identity proof/u)
     expect(raw).toContain('`participantId: unresolved`')
     expect(raw).toContain('`grantStatus="not_granted"`')
     expect(raw).toContain('`dataStatus="missing"`')
@@ -930,11 +939,15 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --kind')
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
-    expect(raw).toContain('`murph.group action="post_join_offer"` with only the challenge\'s share')
-    expect(raw).toContain('the group-chat skill\'s Creating a\n   hosted group core set takes precedence')
-    expect(raw).toContain('For an existing group, use')
-    expect(raw).toMatch(/Existing\s+members like the server-owned message to opt into/)
-    expect(raw).toContain('Do not tell the room to join again')
+    expect(raw).toContain('one permission request containing the unique union of the group-chat core')
+    expect(raw).toContain('never list a\n   scope twice')
+    expect(raw).toMatch(/The device scope is not part of\s+the universal core/u)
+    expect(raw).toMatch(/When the\s+group already exists, do not add the core\s+set/u)
+    expect(raw).toContain('`murph.group action="post_join_offer"` with only the exact scoring scope')
+    expect(raw).toMatch(
+      /Existing\s+members like the server-owned message\s+to opt into/u,
+    )
+    expect(raw).toMatch(/Do not tell the room to\s+join again/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",

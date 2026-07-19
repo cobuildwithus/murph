@@ -1,6 +1,9 @@
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+} from "@murphai/hosted-execution/runtime-control";
 import { after } from "next/server";
 
 import {
@@ -22,11 +25,9 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-const BODY_LIMIT_BYTES = 8_192;
-
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
-    maxBodyBytes: BODY_LIMIT_BYTES,
+    maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
   const body = parseHostedRuntimeGroupToolRequest(payload);
   const supportedProjectionScopeKeys =

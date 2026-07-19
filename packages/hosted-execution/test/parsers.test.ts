@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
 } from "../src/contracts.ts";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+} from "../src/runtime-control.ts";
 
 import {
   parseHostedExecutionExternalThreadRouteAuthority,
@@ -749,6 +754,10 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "read_current",
     });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_current",
+      linqSenderHandles: ["+15551110001"],
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "list_memberships",
     })).toEqual({
@@ -1466,14 +1475,21 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
 
-    // Roster entries stay a closed shape: unknown member fields are rejected.
+    // The legacy roster stays closed and does not carry group-scoped IDs.
     expect(() =>
       parseHostedRuntimeGroupToolResponse({
         action: "read_current",
         result: {
           group: {
             ...GROUP_SUMMARY,
-            members: [{ id: "member_other" }],
+            members: [{
+              grantedVaultShareProjectionKinds: [],
+              grantedVaultShareProjectionScopes: [],
+              handle: null,
+              memberId: "member_other",
+              participantId: "participant_other",
+              role: "member",
+            }],
           },
           status: "ok",
         },
@@ -1492,8 +1508,49 @@ describe("parseHostedRuntimeGroupTool", () => {
     ];
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
+      linqSenderHandles: [" +15551110001 ", " member@example.test "],
       projectionScopes,
-    })).toEqual({ action: "read_shared", projectionScopes });
+    })).toEqual({
+      action: "read_shared",
+      linqSenderHandles: ["+15551110001", "member@example.test"],
+      projectionScopes,
+    });
+
+    for (const linqSenderHandles of [
+      [],
+      ["+15551110001", "+15551110001"],
+      [" "],
+      ["a".repeat(513)],
+      Array.from({ length: 33 }, (_, index) => `sender-${index}`),
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "read_shared",
+        linqSenderHandles,
+        projectionScopes,
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      linqSenderHandles: ["+15551110001"],
+      memberId: "member_hijack",
+      projectionScopes,
+    })).toThrow(/not allowed/u);
+
+    const maximallyEscapedRequest = {
+      action: "read_shared",
+      linqSenderHandles: Array.from(
+        { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
+        (_, index) => `${index}`.padStart(2, "0")
+          + "\0".repeat(
+            HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS - 2,
+          ),
+      ),
+      projectionScopes,
+    };
+    expect(new TextEncoder().encode(JSON.stringify(maximallyEscapedRequest)).byteLength)
+      .toBeLessThanOrEqual(HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES);
+    expect(parseHostedRuntimeGroupToolRequest(maximallyEscapedRequest))
+      .toEqual(maximallyEscapedRequest);
 
     for (const invalidProjectionScopes of [
       [],
@@ -1550,6 +1607,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         members: [
           {
+            currentTurnHandles: ["+15551110001", "member@example.test"],
             displayName: "Member One",
             memberId: "member_1",
             participantId: "participant_1",
@@ -1571,6 +1629,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             ],
           },
           {
+            currentTurnHandles: [],
             displayName: null,
             memberId: "member_2",
             participantId: "participant_2",
@@ -1665,6 +1724,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     };
     const result = {
       members: [{
+        currentTurnHandles: [],
         displayName: null,
         memberId: "member_1",
         participantId: "participant_1",
@@ -1678,7 +1738,17 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_shared",
       result: {
         ...result,
-        members: [{ ...result.members[0], handle: "+15550000000" }],
+        members: [{
+          ...result.members[0],
+          currentTurnHandles: undefined,
+        }],
+      },
+    })).toThrow(/currentTurnHandles/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{ ...result.members[0], phoneNumber: "+15550000000" }],
       },
     })).toThrow(/not allowed/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
@@ -1807,6 +1877,71 @@ describe("parseHostedRuntimeGroupTool", () => {
         ],
       },
     })).toThrow(/participantIds must be unique/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          currentTurnHandles: ["+15550000000", "+15550000000"],
+        }],
+      },
+    })).toThrow(/must contain unique entries/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          currentTurnHandles: Array.from(
+            { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX + 1 },
+            (_, index) => `sender-${index}`,
+          ),
+        }],
+      },
+    })).toThrow(/between 0 and 32 entries/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [
+          {
+            ...result.members[0],
+            currentTurnHandles: ["+15550000000"],
+          },
+          {
+            ...result.members[0],
+            currentTurnHandles: ["+15550000000"],
+            memberId: "member_2",
+            participantId: "participant_2",
+          },
+        ],
+      },
+    })).toThrow(/currentTurnHandles must be unique across members/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [
+          {
+            ...result.members[0],
+            currentTurnHandles: Array.from(
+              { length: 17 },
+              (_, index) => `sender-a-${index}`,
+            ),
+          },
+          {
+            ...result.members[0],
+            currentTurnHandles: Array.from(
+              { length: 16 },
+              (_, index) => `sender-b-${index}`,
+            ),
+            memberId: "member_2",
+            participantId: "participant_2",
+          },
+        ],
+      },
+    })).toThrow(/at most 32 entries across all members/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {

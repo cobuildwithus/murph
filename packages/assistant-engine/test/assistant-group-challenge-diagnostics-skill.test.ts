@@ -70,16 +70,27 @@ describe('assistant group challenge diagnostics guidance', () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'After the model turn has begun and before writing a new challenge roster',
+      'After the model turn has begun, after any required group creation, and before writing the challenge roster',
     )
     expect(challenge).toContain(
-      'Record the returned group-scoped `participantId`',
+      'This is the only kickoff attribution, scoring, and diagnostic read',
+    )
+    expect(challenge).toContain(
+      'an exact current prompt `Sender:` handle appears in that row\'s `currentTurnHandles`',
     )
     expect(challenge).toContain(
       'it must never become prompt preload or other pre-model work',
     )
     expect(challenge).toContain(
-      'use this same `read_shared` result for a one-time identity backfill; do not add another read',
+      'that turn\'s same `read_shared` result for a one-time identity backfill; do not add another identity read',
+    )
+    expect(challenge).toContain(
+      'Scheduled and detached reads expose no handles.',
+    )
+    expect(challenge).toContain('Do not persist or render a handle.')
+    expect(challenge).toContain('global member id')
+    expect(challenge).toContain(
+      'Leaving and rejoining creates a new `participantId`',
     )
     expect(challenge).toContain(
       'A unique or equal display name is not identity proof',
@@ -94,6 +105,9 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(groupChat).toContain(
       'current member results by exact group-scoped `participantId`, never by display name',
+    )
+    expect(groupChat).toContain(
+      '`read_current` is not an identity bridge and keeps its legacy membership-summary contract.',
     )
   })
 
@@ -156,7 +170,10 @@ describe('assistant group challenge diagnostics guidance', () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'request the scoring scope and `device-sync-status.v0` together',
+      'At kickoff, explicitly request the scoring scope and `device-sync-status.v0`.',
+    )
+    expect(challenge).toContain(
+      'the unique union of the group-chat core set, the exact scoring scope, and `device-sync-status.v0`; never list a scope twice',
     )
     expect(challenge).toContain(
       'Liking the server-owned offer grants only the disclosed Murph group shares.',

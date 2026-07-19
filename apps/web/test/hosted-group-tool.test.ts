@@ -215,7 +215,7 @@ function groupSummaryWithOwnerEmailGrant() {
     ...GROUP_SUMMARY,
     members: [{
       grantedVaultShareProjectionKinds: ["profile-name.v0" as const, "group-email.v0" as const],
-      handle: "+15551110000",
+      handle: null,
       memberId: "member_owner",
       role: "owner",
     }],
@@ -492,6 +492,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "read_shared",
+        linqSenderHandles: ["+15551110001", "member@example.test"],
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       },
     })).resolves.toEqual({
@@ -504,6 +505,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).toHaveBeenCalledWith({
+      linqSenderHandles: ["+15551110001", "member@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
       runtimeMemberId: "member_group_runtime",
     });
@@ -948,7 +950,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
         RUNNING_DISTANCE_SCOPE.projectionKind,
       ],
       grantedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
-      handle: "+15551234567",
+      handle: null,
       memberId: "member_runner",
       role: "member",
     }],

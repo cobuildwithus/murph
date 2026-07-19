@@ -55,12 +55,12 @@ Four facts remain separate:
    `device-sync-status.v0` grant is captured. Device status is not written into
    the share snapshot column.
 
-The runtime constructs the `read_shared` adapter synchronously and performs no
-group, grant, snapshot, device, filesystem, projection, sandbox, or configuration
-work before the model turn starts. Foreground, scheduled, notification, and
-detached read-only turns all contact Web only if the model invokes
-`read_shared`. Scheduled turns do not receive a preloaded roster or grant
-snapshot.
+The runtime constructs the `read_shared` adapter synchronously. This path adds
+no pre-model group, grant, snapshot, device, projection, configuration, or
+attribution read; existing accepted-input and route-binding work is unchanged.
+Foreground, scheduled, notification, and detached read-only turns contact Web
+only if the model invokes `read_shared`. Scheduled turns do not receive a
+preloaded roster or grant snapshot.
 
 Web answers one model-triggered read with every current member and every
 requested scope. Each cell distinguishes `not_granted`, `granted` plus
@@ -76,7 +76,25 @@ or route identity. Duplicate display names and later name changes therefore do
 not make challenge joins ambiguous. The trusted Web-to-runtime response retains
 the global member id only for existing newsletter authorization composition;
 the assistant-engine model boundary removes it and exposes only
-`participantId`, the consented display name, and requested projections.
+`participantId`, the consented display name, bounded `currentTurnHandles`, and
+requested projections.
+
+On an interactive Linq turn, the runtime adds the bounded, deduplicated
+route-authorized `Sender:` handles already present in the current prompt only
+when the model invokes `read_shared`. The same Web query selects current member
+phone and verified-email blind indexes. It retains an input handle only when it
+matches exactly one current membership and returns it in that row's
+`currentTurnHandles` beside the membership-scoped `participantId`; ambiguous,
+unknown, unverified, and stale-membership matches are omitted. Scheduled,
+notification, and detached reads have empty handle arrays.
+
+This is a current-turn join aid, not a contact roster. The model may associate
+only an exact current prompt `Sender:` handle that appears in one returned
+member's array. It must not persist or render a handle. The request adds no
+state owner, standalone query, decrypted contact roster, or pre-model work.
+The legacy `read_current` wire remains unchanged, and the model projection
+removes global member ids and legacy roster handles from every group-summary
+action.
 
 Health projection delivery replaces the complete bounded encrypted snapshot on
 the exact active share row. An encrypted empty record set means the projection
@@ -99,20 +117,21 @@ from members that happen to have data. Only an exact canonical scope key is
 grant authority; a selector projection kind is not a broad selector grant.
 
 New challenge kickoff performs one post-model-start `read_shared` call with the
-exact scoring scope and `device-sync-status.v0` before writing the roster, and
-records the returned group-scoped `participantId` wherever current attributable
-sender or reaction evidence makes the association exact. This is not prompt
-preload and adds no pre-model work. Display-name equality or uniqueness, array
-position, projection values, grant state, and remembered context are not
-identity evidence.
+exact scoring scope and `device-sync-status.v0` before writing the roster. It
+records a row's `participantId` only when an exact current prompt `Sender:`
+handle appears in that row's `currentTurnHandles`. This is not prompt preload
+and adds no pre-model work. Display-name equality or uniqueness, array
+position, projection values, grant state, global member id, and remembered
+context are not identity evidence.
 
-For an active legacy challenge page without those keys, the normal daily
-`read_shared` call also provides one backfill attempt; there is no extra read or
-new state owner. An exact current attributed association may fill the key.
-Otherwise the page records that identity as unresolved and excludes that entry
-from scoring and diagnostics. Scheduled runs do not repeat the guess; only new
-attributable evidence can reopen that one mapping. Participation state remains
-unchanged throughout this identity migration.
+For an active legacy challenge page without those keys, a later interactive
+turn with new attributable evidence may use that turn's normal `read_shared`
+result for one backfill attempt; there is no extra identity read. Scheduled and
+detached reads carry no handles and never guess. Otherwise the page records
+that identity as unresolved and excludes that entry from scoring and
+diagnostics. Only a later exact current-handle match can reopen that one
+mapping. Participation state remains unchanged throughout this identity
+migration.
 
 ## Diagnostic decision order
 
@@ -202,14 +221,16 @@ data or proves the cause of a missing metric.
 
 ## Permission behavior
 
-When `read_current` returns `status="none"`, the group-chat core-set creation
-flow takes precedence; challenge scopes can be added afterward. For an existing
-group at challenge kickoff, the route-bound group turn requests the exact
-scoring scope and `device-sync-status.v0` together through one additive
-`post_join_offer`. Existing members do not rejoin. Web, not the model, writes
-the causal Like-or-heart sentence, exact frozen scope disclosure, and
-first-party customize link. Liking or hearting adds only that disclosed
-snapshot; the first-party page remains the customize path.
+At challenge kickoff, the exact scoring scope and `device-sync-status.v0` are
+workflow-specific requests. For a new group, add both to the reusable
+group-chat core set as one unique union in the same permission-bearing creation
+request; a scoring scope already in the core appears only once. The device scope
+is not part of the universal core set. For an existing group, request only
+those challenge scopes through one additive `post_join_offer`; existing members
+do not rejoin. Web, not the model, writes the causal Like-or-heart sentence,
+exact frozen scope disclosure, and first-party customize link. Liking or
+hearting adds only that disclosed snapshot; the first-party page remains the
+customize path.
 
 An interactive group turn may post one new additive offer when the room asks
 for a missing scope. A scheduled challenge turn may also post one offer, but
@@ -246,10 +267,14 @@ This is a consumer-first hard cut:
    `HostedVaultShare.projectionSnapshotCiphertext` migration and deploy Web's
    encrypted snapshot replacement, direct `read_shared`, and consent-gated live
    device derivation. Before this step, a new runtime calling an old Web fails
-   closed with typed shared-data unavailability. The runtime continues sending
-   the ignored legacy permission-offer template field only so old Web accepts
-   scheduled offer requests during this consumer-first window; delete that
-   field after new Web is deployed and the Cloudflare rollback floor is set.
+   closed with typed shared-data unavailability. The universal new-group core
+   omits `device-sync-status.v0`, so ordinary group creation remains compatible
+   during this interval. Challenge setup requests that new scope explicitly and
+   remains unavailable until Web supports it; there is no retry or widened
+   fallback. The runtime continues sending the ignored legacy permission-offer
+   template field only so old Web accepts scheduled offer requests during this
+   consumer-first window; delete that field after new Web is deployed and the
+   Cloudflare rollback floor is set.
 3. Verify complete member/scope matrices, empty-snapshot behavior, stale-writer
    rejection, revoke/regrant clearing, device privacy, and the challenge output
    against the deployed route.

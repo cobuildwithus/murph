@@ -242,11 +242,28 @@ or stored in the share snapshot column.
 
 The runtime's shared reader is a synchronous no-I/O adapter. Constructing it,
 starting or resuming App Server, and admitting foreground, scheduled,
-notification, or detached read-only model work performs no group, grant,
-snapshot, device, filesystem, sandbox, or configuration read. The only Web read
-occurs inside the adapter's request method after the model invokes
-`read_shared`. No roster or authority snapshot is preloaded into scheduled
-context.
+notification, or detached read-only model work adds no group, grant, snapshot,
+device, projection, configuration, or attribution read before the model starts;
+existing accepted-input and route-binding work is unchanged. The only Web read
+occurs inside the adapter's request method after the model invokes `read_shared`.
+No roster or authority snapshot is preloaded into scheduled context.
+
+Interactive `read_shared` requests may carry only bounded, deduplicated
+route-authorized Linq sender handles from the current prompt. Web matches them
+against current membership phone and verified-email blind indexes selected by
+the same group query. A handle is returned only in the matching member's
+bounded `currentTurnHandles` array and only when it resolves to exactly one
+current membership; that row also carries its group-scoped `participantId`.
+Scheduled, notification, and detached requests carry no handles. The runtime
+drops overlong handles before transport, and the signed group-tool body limit
+covers the declared worst-case JSON expansion for all 32 bounded inputs.
+
+The assistant may join only an exact current prompt `Sender:` handle present in
+one returned row. It never persists or renders handles. The model boundary
+strips global member ids and legacy roster handles from every group-summary
+action. This adds no state, pre-model work, standalone query, or decrypted
+contact roster, and the legacy `read_current` request and response wire stay
+unchanged.
 
 Legacy `vault-share.delivery` and `vault-share.revoke` mailbox rows are
 terminally skipped from their plaintext kind/route metadata before payload fetch
@@ -264,7 +281,11 @@ This protocol is a consumer-first hard cut:
 2. Apply the nullable snapshot-column migration, then deploy Web's encrypted
    replacement writer, direct `read_shared` handler, and live consent-gated
    device derivation. A new consumer against old Web fails closed as typed
-   shared-data unavailability during this bounded interval.
+   shared-data unavailability during this bounded interval. The universal
+   new-group permission set omits `device-sync-status.v0`; challenge setup adds
+   that scope explicitly and remains unavailable until Web supports it. No
+   retry, legacy wire widening, or broader fallback is introduced. Remove the
+   legacy scheduled offer-template compatibility field after Web convergence.
 3. Once Web can write the new column or serve the direct read, the new
    Cloudflare consumer is the hard rollback floor. Disable the Web producer/read
    path and forward-fix; do not roll back to a consumer that restores or reads
