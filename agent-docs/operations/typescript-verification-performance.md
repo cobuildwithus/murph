@@ -1,6 +1,6 @@
 # TypeScript Verification Performance
 
-Last verified: 2026-07-14
+Last verified: 2026-07-19
 
 ## Purpose
 
@@ -11,7 +11,8 @@ method.
 The design stays deliberately small:
 
 - Normal verification keeps TypeScript's worker defaults.
-- A shared-host profile is explicit and opt-in.
+- Codex verification automatically uses a conservative shared-host profile;
+  other local callers can opt in explicitly.
 - One root runner selects the canonical TypeScript 7 compiler and adds only the
   lane's configured worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
@@ -37,27 +38,25 @@ check. Next's TypeScript 5 contract check is never skipped by this reuse.
 
 ## Shared-Host Profile
 
-Use the profile when several worktrees are running finite verification or build
-commands on the same machine:
+Canonical verification and build entrypoints automatically use the profile
+when `CODEX_THREAD_ID` is present outside CI. Other local callers can opt in:
 
 ```bash
 MURPH_VERIFY_SHARED_HOST=1 pnpm verify:acceptance
 ```
 
-`MURPH_VERIFY_SHARED_HOST` accepts `0` or `1` and defaults to `0`. Every
-participating worktree must opt in; normal commands do not wait on shared-host
-slots.
+`MURPH_VERIFY_SHARED_HOST` accepts `0` or `1`. An explicit value wins over
+automatic Codex detection, so `MURPH_VERIFY_SHARED_HOST=0` is the local escape
+hatch. CI retains its existing explicit budgets and never inherits Codex-local
+defaults.
 
-The profile admits a bounded number of top-level finite commands at once.
-`MURPH_VERIFY_HOST_CONCURRENCY` is a positive integer and defaults to `1`:
+The profile has one exclusive heavyweight lane. Full workspace verification,
+app verification, builds, and benchmarks claim it. `test:diff` does not: it
+keeps its per-worktree artifact lock while limiting workspace fan-out and
+Vitest to one worker. If a diff requires app verification, that app phase
+claims the heavyweight lane itself.
 
-```bash
-MURPH_VERIFY_SHARED_HOST=1 \
-MURPH_VERIFY_HOST_CONCURRENCY=2 \
-pnpm verify:acceptance
-```
-
-Each admitted command atomically claims one directory beneath the operating
+Each heavyweight command atomically claims one directory beneath the operating
 system's temporary directory. Nested commands inherit the claim and do not
 queue again. Dead claims can be reclaimed from process-liveness evidence. The
 state is disposable and contains no product data or command output. Admission
@@ -73,6 +72,11 @@ then acquire the host slot. The two controls have separate jobs:
 Admission is for finite verification, build, and benchmark entrypoints only.
 Never put `dev`, TypeScript watch, or another long-lived process behind a host
 slot; it would reserve shared capacity indefinitely.
+
+Direct package and app Vitest commands do not claim the heavyweight lane, but
+Codex/shared-host mode defaults them to one worker. Direct TypeScript commands
+use the lane-specific shared budgets below. Prefer `pnpm test:diff` for normal
+iteration; reserve full verification for the completion gate.
 
 ## TypeScript Budgets
 

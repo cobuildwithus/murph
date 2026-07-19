@@ -50,6 +50,7 @@ describe("shared-host verification slots", () => {
     const command = [process.execPath, "--input-type=module", "-e", "process.stdout.write('ran')"];
 
     const disabled = runSync("disabled", command, stateRoot, {
+      CODEX_THREAD_ID: "test-thread",
       MURPH_VERIFY_SHARED_HOST: "0",
     });
     expect(disabled.status, disabled.stderr).toBe(0);
@@ -64,28 +65,59 @@ describe("shared-host verification slots", () => {
     expect(reentrant.stdout).toBe("ran");
     expect(readdirSync(stateRoot)).toEqual([]);
 
-    const invalidConcurrency = runSync("invalid", command, stateRoot, {
-      MURPH_VERIFY_HOST_CONCURRENCY: "0",
+    const invalidMode = runSync("invalid", command, stateRoot, {
+      MURPH_VERIFY_SHARED_HOST: "true",
     });
-    expect(invalidConcurrency.status).toBe(1);
-    expect(invalidConcurrency.stderr).toContain(
-      "MURPH_VERIFY_HOST_CONCURRENCY must be a positive integer",
+    expect(invalidMode.status).toBe(1);
+    expect(invalidMode.stderr).toContain(
+      "MURPH_VERIFY_SHARED_HOST must be 0 or 1",
     );
   });
 
-  it("waits without a deadline when one slot is configured", async () => {
+  it("automatically admits Codex commands and propagates the normalized mode", () => {
     const stateRoot = makeTempRoot();
-    const first = startHolder("first", stateRoot, 1);
+    const source = `
+      const { existsSync } = require("node:fs");
+      const { join } = require("node:path");
+      process.stdout.write(
+        process.env.MURPH_VERIFY_SHARED_HOST + ":" +
+        existsSync(join(${JSON.stringify(stateRoot)}, "slot-1")),
+      );
+    `;
+    const result = runSync(
+      "automatic Codex admission",
+      [process.execPath, "-e", source],
+      stateRoot,
+      { CODEX_THREAD_ID: "test-thread" },
+      false,
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("1:true");
+
+    const ciResult = runSync(
+      "Codex CI bypass",
+      [process.execPath, "-e", source],
+      stateRoot,
+      { CI: "1", CODEX_THREAD_ID: "test-thread" },
+      false,
+    );
+    expect(ciResult.status, ciResult.stderr).toBe(0);
+    expect(ciResult.stdout).toBe("0:false");
+  });
+
+  it("waits without a deadline for the exclusive slot", async () => {
+    const stateRoot = makeTempRoot();
+    const first = startHolder("first", stateRoot);
     await waitForLine(first, "ready");
 
     const second = startCommand(
       "second",
       stateRoot,
-      1,
       "process.stdout.write('started\\n')",
       { MURPH_VERIFY_SHARED_HOST_TIMEOUT_MS: "40" },
     );
-    await waitForStderrLine(second, "Waiting continues until a slot is available");
+    await waitForStderrLine(second, "Waiting continues until the slot is available");
     await expectNoLine(second, "started", 120);
     expect(second.exitCode).toBeNull();
 
@@ -93,23 +125,6 @@ describe("shared-host verification slots", () => {
     await waitForExit(first);
     await waitForLine(second, "started");
     expect(await waitForExit(second)).toBe(0);
-  });
-
-  it("allows two commands to overlap while a third waits", async () => {
-    const stateRoot = makeTempRoot();
-    const first = startHolder("first", stateRoot, 2);
-    const second = startHolder("second", stateRoot, 2);
-    await Promise.all([waitForLine(first, "ready"), waitForLine(second, "ready")]);
-
-    const third = startCommand("third", stateRoot, 2, "process.stdout.write('started\\n')");
-    await expectNoLine(third, "started", 120);
-
-    first.stdin?.end();
-    await waitForExit(first);
-    await waitForLine(third, "started");
-    expect(await waitForExit(third)).toBe(0);
-    second.stdin?.end();
-    await waitForExit(second);
   });
 
   it("reclaims a slot whose recorded owner has exited", () => {
@@ -141,7 +156,7 @@ describe("shared-host verification slots", () => {
 
   it("does not expose absolute working paths in owner metadata", async () => {
     const stateRoot = makeTempRoot();
-    const holder = startHolder(repoRoot, stateRoot, 1);
+    const holder = startHolder(repoRoot, stateRoot);
     await waitForLine(holder, "ready");
 
     const ownerText = readFileSync(path.join(stateRoot, "slot-1", "owner.json"), "utf8");
@@ -154,16 +169,15 @@ describe("shared-host verification slots", () => {
 
   it("exits promptly when signaled while waiting without disturbing the live owner", async () => {
     const stateRoot = makeTempRoot();
-    const holder = startHolder("holder", stateRoot, 1);
+    const holder = startHolder("holder", stateRoot);
     await waitForLine(holder, "ready");
 
     const waiter = startCommand(
       "waiter",
       stateRoot,
-      1,
       "process.stdout.write('unexpected-start\\n')",
     );
-    await waitForStderrLine(waiter, "waiting for one of 1 shared-host slot(s)");
+    await waitForStderrLine(waiter, "waiting for the exclusive shared-host slot");
 
     expect(waiter.kill("SIGTERM")).toBe(true);
     expect(await waitForExit(waiter)).toBe(143);
@@ -184,7 +198,6 @@ describe("shared-host verification slots", () => {
     const active = startCommand(
       "active command",
       stateRoot,
-      1,
       `
         const { spawn } = await import("node:child_process");
         const { writeFileSync } = await import("node:fs");
@@ -289,15 +302,19 @@ function makeTempRoot(): string {
 
 function slotEnv(
   stateRoot: string,
-  slots: number,
   overrides: NodeJS.ProcessEnv = {},
+  explicitMode = true,
 ): NodeJS.ProcessEnv {
+  const {
+    CODEX_THREAD_ID: _codexThreadId,
+    MURPH_VERIFY_SHARED_HOST: _sharedHostMode,
+    ...baseEnv
+  } = process.env;
   return {
-    ...process.env,
+    ...baseEnv,
     NODE_ENV: "test",
-    MURPH_VERIFY_SHARED_HOST: "1",
+    ...(explicitMode ? { MURPH_VERIFY_SHARED_HOST: "1" } : {}),
     MURPH_VERIFY_SHARED_HOST_POLL_INTERVAL_MS: "10",
-    MURPH_VERIFY_HOST_CONCURRENCY: String(slots),
     MURPH_VERIFY_SHARED_HOST_STALE_METADATA_GRACE_MS: "0",
     MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT: stateRoot,
     ...overrides,
@@ -309,22 +326,22 @@ function runSync(
   command: string[],
   stateRoot: string,
   overrides: NodeJS.ProcessEnv = {},
+  explicitMode = true,
 ) {
   return spawnSync(process.execPath, [wrapperPath, label, "--", ...command], {
     cwd: repoRoot,
     encoding: "utf8",
-    env: slotEnv(stateRoot, 1, overrides),
+    env: slotEnv(stateRoot, overrides, explicitMode),
   });
 }
 
-function startHolder(label: string, stateRoot: string, slots: number): ChildProcess {
-  return startCommand(label, stateRoot, slots, holderSource);
+function startHolder(label: string, stateRoot: string): ChildProcess {
+  return startCommand(label, stateRoot, holderSource);
 }
 
 function startCommand(
   label: string,
   stateRoot: string,
-  slots: number,
   source: string,
   overrides: NodeJS.ProcessEnv = {},
 ): ChildProcess {
@@ -341,7 +358,7 @@ function startCommand(
     ],
     {
       cwd: repoRoot,
-      env: slotEnv(stateRoot, slots, overrides),
+      env: slotEnv(stateRoot, overrides),
       stdio: ["pipe", "pipe", "pipe"],
     },
   );

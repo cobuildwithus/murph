@@ -57,7 +57,7 @@ export function buildTypeScriptInvocation(lane, callerArgs, env = {}) {
   }
 
   rejectCallerBudgetFlags(callerArgs);
-  const sharedProfile = readSharedProfile(env.MURPH_VERIFY_SHARED_HOST);
+  const sharedProfile = readSharedProfile(env);
   const profile = sharedProfile ? "shared" : "default";
   const args = [...callerArgs];
   let mode = "checkers";
@@ -199,13 +199,19 @@ function rejectCallerBudgetFlags(args) {
   }
 }
 
-/** @param {string | undefined} value */
-function readSharedProfile(value) {
-  if (value === undefined || value === "0") {
+/** @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env */
+function readSharedProfile(env) {
+  const value = env.MURPH_VERIFY_SHARED_HOST;
+  if (value === "0") {
     return false;
   }
   if (value === "1") {
     return true;
+  }
+  if (value === undefined) {
+    return !env.CI
+      && typeof env.CODEX_THREAD_ID === "string"
+      && env.CODEX_THREAD_ID.trim().length > 0;
   }
   throw new Error("MURPH_VERIFY_SHARED_HOST must be 0 or 1 when set.");
 }
