@@ -187,6 +187,78 @@ describe("hosted preference handoff sweeper", () => {
       mailboxItemId: "mailbox_group_preference",
     });
   });
+
+  it("selects exact current Clinical Records wakes in the shared mailbox sweep", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{
+      mailboxItemId: "mailbox_clinical_current",
+      userId: "member_clinical_current",
+    }]);
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+
+    await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+    });
+
+    const query = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const sql = query?.strings?.join("?") ?? "";
+    expect(sql).toContain('"pending_handoff_candidates"');
+    expect(sql).toContain('SELECT DISTINCT ON ("userId")');
+    expect(sql).toContain('"connection"."retrieval_generation" = "run"."generation"');
+    expect(sql).toContain('"connection"."status" = \'active\'');
+    expect(sql).toContain('"run"."status" = \'queued\'');
+    expect(sql).toContain('"run"."completed_at" IS NULL');
+    expect(sql).toContain('"item"."kind" = \'clinical-records.sync-requested\'');
+    expect(sql).toContain('"item"."lane" = \'system\'');
+    expect(sql).toContain('"item"."dedupe_key" = (');
+    expect(sql).toContain(
+      '\'clinical-records:sync:v1:\' || "run"."id" || \':\' || "run"."generation"::text',
+    );
+    expect(sql).toContain('"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)');
+    expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
+    expect(requestHandoff).toHaveBeenCalledWith({
+      expectedUserId: "member_clinical_current",
+      mailboxItemId: "mailbox_clinical_current",
+    });
+  });
+
+  it("requests one wake per user when multiple pending mailbox kinds exist", async () => {
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+    const hasActiveAccess = vi.fn(async () => true);
+
+    const result = await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess,
+      logger: buildLogger(),
+      requestHandoff,
+      store: buildStore([
+        {
+          mailboxItemId: "mailbox_preference_shared",
+          userId: "member_shared",
+        },
+        {
+          mailboxItemId: "mailbox_clinical_shared",
+          userId: "member_shared",
+        },
+      ]),
+    });
+
+    expect(hasActiveAccess).toHaveBeenCalledTimes(1);
+    expect(requestHandoff).toHaveBeenCalledTimes(1);
+    expect(requestHandoff).toHaveBeenCalledWith({
+      expectedUserId: "member_shared",
+      mailboxItemId: "mailbox_preference_shared",
+    });
+    expect(result.candidateUsers).toBe(1);
+  });
 });
 
 function buildStore(rows: Array<{

@@ -134,6 +134,7 @@ export async function finishClinicalRecordAuthorization(input: {
   code: string | null;
   fetchImpl?: typeof fetch;
   providerDenied: boolean;
+  providerError: boolean;
   request: Request;
   state: string;
 }): Promise<{ connectionId: string; retrievalRunId: string }> {
@@ -141,16 +142,20 @@ export async function finishClinicalRecordAuthorization(input: {
   const session = await consumeClinicalOauthSession({ auth, state: input.state });
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma: getPrisma() });
 
-  if (input.providerDenied || !input.code) {
+  if (input.providerDenied || input.providerError || !input.code) {
     await completeClinicalRecordConnectIntent({
       claimHash: session.connectIntentClaimHash,
       memberId: auth.member.id,
       now: new Date(),
     });
     throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_AUTHORIZATION_DECLINED",
-      httpStatus: 400,
-      message: "The provider did not authorize Clinical Records access.",
+      code: input.providerDenied
+        ? "CLINICAL_RECORD_AUTHORIZATION_DECLINED"
+        : "CLINICAL_RECORD_AUTHORIZATION_FAILED",
+      httpStatus: input.providerDenied ? 400 : 502,
+      message: input.providerDenied
+        ? "The provider did not authorize Clinical Records access."
+        : "The provider could not complete Clinical Records authorization.",
     });
   }
 

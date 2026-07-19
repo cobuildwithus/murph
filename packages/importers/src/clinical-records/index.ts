@@ -32,6 +32,7 @@ import {
   hashClinicalFhirPatientId,
   hasWholeFamilyClinicalFhirRetrievalScope,
   isClinicalFhirUrlWithinBase,
+  isClinicalFhirUrlWithinBaseResourceType,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
   type ClinicalImportDecision,
@@ -71,6 +72,7 @@ type FhirResourceContext<TResource extends Resource = Resource> = {
 };
 
 type FhirResourcePage = {
+  isBundle: boolean;
   nextPageUrlHash?: string;
   rawRef: string;
   resourceFile: ClinicalRawManifestResourceFile;
@@ -157,6 +159,7 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
 type BloodTestResultFlag = NonNullable<BloodTestResultRecord["flag"]>;
+type BloodTestReferenceRange = NonNullable<BloodTestResultRecord["referenceRange"]>;
 type QuantityValue = {
   comparator?: QuantityComparator;
   system?: string;
@@ -170,6 +173,9 @@ type ResultInterpretation = {
   flag?: BloodTestResultFlag;
   status: ParsedResultStatus;
 };
+type BloodTestReferenceRangeDecision =
+  | { referenceRange?: BloodTestReferenceRange; status: "supported" }
+  | { status: "unsupported" };
 const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
 const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
@@ -241,7 +247,7 @@ export function buildClinicalImportPlanFromSnapshot(
     });
     resourcePages.push(page);
   }
-  assertResolvedFhirPagination(resourcePages);
+  assertResolvedFhirPagination({ manifest, resourcePages });
   const resourceContexts = resourcePages.flatMap((page) =>
     page.resources.map((resource): FhirResourceContext => ({
       manifest,
@@ -530,11 +536,16 @@ function parseClinicalResourcePage(input: {
   });
   assertRawResourceFileHash({ rawRef, resourceFile: input.resourceFile, text: input.pageText });
   const page = JSON.parse(input.pageText);
-  const resources = extractFhirResources(page, {
+  const extracted = extractFhirResources(page, {
     maxResources: input.resourceFile.count,
     rawRef,
   });
-  assertRawResourceFileCount({ actualCount: resources.length, rawRef, resourceFile: input.resourceFile });
+  const resources = extracted.resources;
+  assertRawResourceFileCount({
+    actualCount: extracted.rawResourceCount,
+    rawRef,
+    resourceFile: input.resourceFile,
+  });
   assertDeclaredResourceFamily({ rawRef, resourceFile: input.resourceFile, resources });
   assertManifestPatientBinding({ manifest: input.manifest, rawRef, resources });
   const nextPageUrlHash = readFhirNextPageUrlHash({
@@ -544,6 +555,7 @@ function parseClinicalResourcePage(input: {
     resourceFile: input.resourceFile,
   });
   return {
+    isBundle: isFhirBundle(page),
     ...(nextPageUrlHash ? { nextPageUrlHash } : {}),
     rawRef,
     resourceFile: input.resourceFile,
@@ -656,24 +668,34 @@ function readFhirNextPageUrlHash(input: {
       })) {
         throw new Error(`Clinical FHIR raw Bundle next link is outside the manifest FHIR base for ${input.rawRef}.`);
       }
+      if (!isClinicalFhirUrlWithinBaseResourceType({
+        fhirBaseUrlHash: input.fhirBaseUrlHash,
+        resourceType: input.resourceFile.resourceType,
+        url: nextUrl,
+      })) {
+        throw new Error(`Clinical FHIR raw Bundle next link does not match its declared resource family for ${input.rawRef}.`);
+      }
       rawNextPageUrlHash = hashClinicalFhirPageUrl(nextUrl);
     }
   }
 
   const declaredNextPageUrlHash = input.resourceFile.nextPageUrlHash;
-  if (
-    rawNextPageUrlHash
-    && declaredNextPageUrlHash
-    && rawNextPageUrlHash !== declaredNextPageUrlHash
-  ) {
+  if (rawNextPageUrlHash !== declaredNextPageUrlHash) {
     throw new Error(`Clinical FHIR raw Bundle next link does not match its manifest hash for ${input.rawRef}.`);
   }
-  return declaredNextPageUrlHash ?? rawNextPageUrlHash;
+  return rawNextPageUrlHash;
 }
 
-function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]): void {
+function assertResolvedFhirPagination(input: {
+  manifest: ClinicalRawManifest;
+  resourcePages: readonly FhirResourcePage[];
+}): void {
+  const pagesByResourceType = new Map<string, FhirResourcePage[]>();
   const pagesByResourceTypeAndUrl = new Map<string, Map<string, FhirResourcePage>>();
-  for (const page of resourcePages) {
+  for (const page of input.resourcePages) {
+    const pages = pagesByResourceType.get(page.resourceFile.resourceType) ?? [];
+    pages.push(page);
+    pagesByResourceType.set(page.resourceFile.resourceType, pages);
     const pageUrlHash = page.resourceFile.pageUrlHash;
     if (!pageUrlHash) {
       continue;
@@ -687,8 +709,7 @@ function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]
   }
 
   const nextPageByRawRef = new Map<string, FhirResourcePage>();
-  const targetedRawRefs = new Set<string>();
-  for (const page of resourcePages) {
+  for (const page of input.resourcePages) {
     if (!page.nextPageUrlHash) {
       continue;
     }
@@ -699,24 +720,37 @@ function assertResolvedFhirPagination(resourcePages: readonly FhirResourcePage[]
       throw new Error(`Clinical FHIR raw manifest has unresolved pagination for ${page.rawRef}.`);
     }
     nextPageByRawRef.set(page.rawRef, nextPage);
-    targetedRawRefs.add(nextPage.rawRef);
   }
 
-  for (const page of resourcePages) {
-    if (page.resourceFile.pageUrlHash && !targetedRawRefs.has(page.rawRef)) {
-      throw new Error(`Clinical FHIR raw manifest has unreachable pagination for ${page.rawRef}.`);
+  for (const [resourceType, pages] of pagesByResourceType) {
+    const hasPaginationMetadata = pages.some((page) =>
+      page.resourceFile.pageUrlHash !== undefined
+      || page.nextPageUrlHash !== undefined
+    );
+    const graphPages = hasPaginationMetadata
+      ? pages
+      : hasWholeFamilyClinicalFhirRetrievalScope(input.manifest, resourceType)
+        ? pages.filter((page) => page.isBundle)
+        : [];
+    if (graphPages.length === 0) {
+      continue;
     }
-  }
-
-  for (const page of resourcePages) {
+    const roots = graphPages.filter((page) => !page.resourceFile.pageUrlHash);
+    if (roots.length !== 1) {
+      throw new Error(`Clinical FHIR raw manifest must have exactly one pagination root for ${resourceType}.`);
+    }
     const seenRawRefs = new Set<string>();
-    let currentPage: FhirResourcePage | undefined = page;
+    let currentPage: FhirResourcePage | undefined = roots[0];
     while (currentPage) {
       if (seenRawRefs.has(currentPage.rawRef)) {
         throw new Error(`Clinical FHIR raw manifest has cyclic pagination for ${currentPage.rawRef}.`);
       }
       seenRawRefs.add(currentPage.rawRef);
       currentPage = nextPageByRawRef.get(currentPage.rawRef);
+    }
+    if (seenRawRefs.size !== graphPages.length) {
+      const unreachable = graphPages.find((page) => !seenRawRefs.has(page.rawRef));
+      throw new Error(`Clinical FHIR raw manifest has unreachable pagination for ${unreachable?.rawRef ?? resourceType}.`);
     }
   }
 }
@@ -1301,11 +1335,18 @@ function buildBloodTestResult(
   const quantity = readQuantityValue(resource.valueQuantity);
   const slugFields = clinicalSlugFields(analyte);
   if (quantity) {
+    const referenceRange = decideBloodTestReferenceRange(resource, quantity);
+    if (referenceRange.status === "unsupported") {
+      return null;
+    }
     return {
       analyte,
       ...slugFields,
       comparator: quantity.comparator,
       ...(flag ? { flag } : {}),
+      ...(referenceRange.referenceRange
+        ? { referenceRange: referenceRange.referenceRange }
+        : {}),
       unit: quantity.unit,
       value: quantity.value,
     };
@@ -1316,16 +1357,117 @@ function buildBloodTestResult(
     if (textValue.length > LAB_RESULT_TEXT_MAX_LENGTH) {
       return null;
     }
+    const referenceRange = decideBloodTestReferenceRange(resource, null);
+    if (referenceRange.status === "unsupported") {
+      return null;
+    }
 
     return {
       analyte,
       ...slugFields,
       ...(flag ? { flag } : {}),
+      ...(referenceRange.referenceRange
+        ? { referenceRange: referenceRange.referenceRange }
+        : {}),
       textValue,
     };
   }
 
   return null;
+}
+
+function decideBloodTestReferenceRange(
+  resource: Observation | ObservationComponent,
+  resultQuantity: QuantityValue | null,
+): BloodTestReferenceRangeDecision {
+  if (resource.referenceRange === undefined) {
+    return { status: "supported" };
+  }
+  if (!Array.isArray(resource.referenceRange) || resource.referenceRange.length !== 1) {
+    return { status: "unsupported" };
+  }
+  const range = resource.referenceRange[0];
+  if (
+    !range
+    || range.type !== undefined
+    || range.age !== undefined
+    || hasFhirArrayContentOrInvalidShape(range.appliesTo)
+  ) {
+    return { status: "unsupported" };
+  }
+
+  const low = readReferenceRangeBoundary(range.low, resultQuantity);
+  const high = readReferenceRangeBoundary(range.high, resultQuantity);
+  if (low.status === "unsupported" || high.status === "unsupported") {
+    return { status: "unsupported" };
+  }
+  const text = range.text === undefined ? undefined : readText(range.text);
+  if (
+    (range.text !== undefined && !text)
+    || (text !== undefined && text.length > LAB_RESULT_TEXT_MAX_LENGTH)
+    || (
+      low.value !== undefined
+      && high.value !== undefined
+      && low.value > high.value
+    )
+  ) {
+    return { status: "unsupported" };
+  }
+  if (low.value !== undefined) {
+    return {
+      referenceRange: {
+        low: low.value,
+        ...(high.value === undefined ? {} : { high: high.value }),
+        ...(text === undefined ? {} : { text }),
+      },
+      status: "supported",
+    };
+  }
+  if (high.value !== undefined) {
+    return {
+      referenceRange: {
+        high: high.value,
+        ...(text === undefined ? {} : { text }),
+      },
+      status: "supported",
+    };
+  }
+  if (text !== undefined) {
+    return { referenceRange: { text }, status: "supported" };
+  }
+  return { status: "unsupported" };
+}
+
+function readReferenceRangeBoundary(
+  boundary: Quantity | undefined,
+  resultQuantity: QuantityValue | null,
+): { status: "supported"; value?: number } | { status: "unsupported" } {
+  if (boundary === undefined) {
+    return { status: "supported" };
+  }
+  const quantity = readQuantityValue(boundary);
+  if (
+    !quantity
+    || quantity.comparator !== undefined
+    || resultQuantity === null
+    || !hasCompatibleReferenceRangeUnit(quantity, resultQuantity)
+  ) {
+    return { status: "unsupported" };
+  }
+  return { status: "supported", value: quantity.value };
+}
+
+function hasCompatibleReferenceRangeUnit(
+  boundary: QuantityValue,
+  result: QuantityValue,
+): boolean {
+  if (boundary.system !== undefined && boundary.system !== result.system) {
+    return false;
+  }
+  if (boundary.unit !== undefined && boundary.unit !== result.unit) {
+    return false;
+  }
+  return true;
 }
 
 function clinicalSlugFields(value: string): Pick<BloodTestResultRecord, "biomarkerSlug" | "slug"> {
@@ -1367,14 +1509,16 @@ function evidenceForResource(context: FhirResourceContext, resourceId?: string) 
 function extractFhirResources(
   value: unknown,
   input: { maxResources: number; rawRef: string },
-): Resource[] {
+): { rawResourceCount: number; resources: Resource[] } {
   const resources: Resource[] = [];
+  let rawResourceCount = 0;
   const appendResource = (resource: unknown): void => {
     if (!isFhirResource(resource)) {
       throw new Error(`Clinical FHIR raw page contains an invalid resource for ${input.rawRef}.`);
     }
+    rawResourceCount += 1;
     resources.push(resource);
-    if (resources.length > input.maxResources) {
+    if (rawResourceCount > input.maxResources) {
       throw new Error(`Clinical FHIR raw resource count exceeds declared count for ${input.rawRef}.`);
     }
   };
@@ -1383,11 +1527,11 @@ function extractFhirResources(
     for (const resource of value) {
       appendResource(resource);
     }
-    return resources;
+    return { rawResourceCount, resources };
   }
   if (isFhirResource(value) && !isFhirBundle(value)) {
     appendResource(value);
-    return resources;
+    return { rawResourceCount, resources };
   }
   if (!isFhirBundle(value)) {
     throw new Error(`Clinical FHIR raw page has an invalid shape for ${input.rawRef}.`);
@@ -1397,16 +1541,32 @@ function extractFhirResources(
   }
 
   if (value.entry === undefined) {
-    return resources;
+    return { rawResourceCount, resources };
   }
   if (!Array.isArray(value.entry)) {
     throw new Error(`Clinical FHIR raw Bundle entries are invalid for ${input.rawRef}.`);
   }
   for (const entry of value.entry) {
-    appendResource(isRecord(entry) ? entry.resource : undefined);
+    if (!isRecord(entry) || !isFhirResource(entry.resource)) {
+      throw new Error(`Clinical FHIR raw page contains an invalid resource for ${input.rawRef}.`);
+    }
+    rawResourceCount += 1;
+    if (rawResourceCount > input.maxResources) {
+      throw new Error(`Clinical FHIR raw resource count exceeds declared count for ${input.rawRef}.`);
+    }
+    if (!isMarkedFhirSearchOutcomeEntry(entry)) {
+      resources.push(entry.resource);
+    }
   }
 
-  return resources;
+  return { rawResourceCount, resources };
+}
+
+function isMarkedFhirSearchOutcomeEntry(entry: Record<string, unknown>): boolean {
+  return isRecord(entry.resource)
+    && entry.resource.resourceType === "OperationOutcome"
+    && isRecord(entry.search)
+    && entry.search.mode === "outcome";
 }
 
 function vitalDecisionForCodeableConcept(value: CodeableConcept | undefined): VitalConceptDecision {

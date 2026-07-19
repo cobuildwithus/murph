@@ -174,7 +174,6 @@ export async function completeClinicalRecordConnectIntent(
     where: {
       claimHash: input.claimHash,
       completedAt: null,
-      expiresAt: { gt: input.now },
       memberId: input.memberId,
       startedAt: { not: null },
     },
