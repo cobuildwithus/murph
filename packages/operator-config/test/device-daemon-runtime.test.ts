@@ -29,6 +29,9 @@ import {
   stopManagedDeviceSyncDaemon,
 } from '../src/device-daemon.ts'
 import {
+  resolveExistingManagedDeviceSyncControlPlane,
+} from '../src/device-daemon-control-plane.ts'
+import {
   defaultSpawnDeviceDaemonProcess,
   defaultIsProcessAlive,
   isDeviceDaemonHealthy,
@@ -764,6 +767,162 @@ test('resolveInstalledDeviceSyncPackageEntry does not require a valid file-url b
   assert.equal(
     module.resolveInstalledDeviceSyncPackageEntry(),
     '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+})
+
+test('existing managed device-sync control-plane lookup stays on its read-only owner surface', async () => {
+  await assert.rejects(
+    () => resolveExistingManagedDeviceSyncControlPlane({ vault: '   ' }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_VAULT_REQUIRED',
+  )
+
+  const vault = await createTempVault('operator-config-existing-control-plane-')
+  const paths = resolveDeviceDaemonPaths(vault)
+  const baseUrl = 'http://127.0.0.1:4318'
+  const remoteBaseUrl = 'https://device-sync.invalid'
+  let healthRequestCount = 0
+  const dependencies = {
+    fetchImpl: async (_input: RequestInfo | URL, init?: RequestInit) => {
+      healthRequestCount += 1
+      return new Response(null, {
+        ...deviceSyncAuthResponse(
+          new Headers(init?.headers).get('Authorization') ===
+            'Bearer managed-token'
+            ? 200
+            : 401,
+        ),
+      })
+    },
+    isProcessAlive: (pid: number) => pid === 8123,
+  }
+
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies,
+    }),
+    null,
+  )
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl: remoteBaseUrl,
+      dependencies,
+    }),
+    null,
+  )
+  assert.equal(healthRequestCount, 0)
+
+  await writeDeviceDaemonState(
+    paths,
+    {
+      pid: 8123,
+      baseUrl: 'http://127.0.0.1:4319',
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies,
+    }),
+    null,
+  )
+
+  await writeDeviceDaemonState(
+    paths,
+    {
+      pid: 8123,
+      baseUrl,
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies,
+    }),
+    null,
+  )
+
+  await writeManagedControlToken(
+    paths,
+    'managed-token',
+    createFileDependencies(),
+  )
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies: {
+        ...dependencies,
+        isProcessAlive: () => false,
+      },
+    }),
+    null,
+  )
+
+  await writeDeviceDaemonState(
+    paths,
+    {
+      pid: 8123,
+      baseUrl: remoteBaseUrl,
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  await assert.rejects(
+    () =>
+      resolveExistingManagedDeviceSyncControlPlane({
+        vault,
+        baseUrl: remoteBaseUrl,
+        dependencies,
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
+  )
+  assert.equal(healthRequestCount, 0)
+
+  await writeDeviceDaemonState(
+    paths,
+    {
+      pid: 8123,
+      baseUrl,
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  assert.deepEqual(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies,
+    }),
+    {
+      baseUrl,
+      controlToken: 'managed-token',
+      managed: true,
+    },
+  )
+  assert.equal(healthRequestCount, 1)
+  assert.equal(
+    await resolveExistingManagedDeviceSyncControlPlane({
+      vault,
+      baseUrl,
+      dependencies: {
+        ...dependencies,
+        fetchImpl: async () => new Response(null, { status: 503 }),
+      },
+    }),
+    null,
   )
 })
 

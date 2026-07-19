@@ -736,9 +736,18 @@ test('device provider and account operations reuse a healthy managed daemon with
         ...actual,
         ensureManagedDeviceSyncControlPlane: ensureManagedDeviceSyncControlPlaneMock,
         getManagedDeviceSyncDaemonStatus: getManagedDeviceSyncDaemonStatusMock,
+        startManagedDeviceSyncDaemon: startManagedDeviceSyncDaemonMock,
+      }
+    })
+    vi.doMock('@murphai/operator-config/device-daemon-control-plane', async () => {
+      const actual = await vi.importActual<
+        typeof import('@murphai/operator-config/device-daemon-control-plane')
+      >('@murphai/operator-config/device-daemon-control-plane')
+
+      return {
+        ...actual,
         resolveExistingManagedDeviceSyncControlPlane:
           resolveExistingManagedDeviceSyncControlPlaneMock,
-        startManagedDeviceSyncDaemon: startManagedDeviceSyncDaemonMock,
       }
     })
     vi.doMock('@murphai/operator-config/device-sync-client', async () => {

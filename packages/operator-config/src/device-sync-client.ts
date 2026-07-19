@@ -165,10 +165,15 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
             : false,
       }
     },
-    async listAccounts(input: {
-      provider?: string
-      sourceProvider?: string
-    } = {}): Promise<{ accounts: DeviceSyncAccountRecord[] }> {
+    async listAccounts(
+      input: {
+        provider?: string
+        sourceProvider?: string
+      } = {},
+      request: {
+        signal?: AbortSignal
+      } = {},
+    ): Promise<{ accounts: DeviceSyncAccountRecord[] }> {
       const search = new URLSearchParams()
 
       if (input.provider) {
@@ -180,7 +185,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
 
       const path =
         search.size > 0 ? `/accounts?${search.toString()}` : '/accounts'
-      return await requestJson(path)
+      return await requestJson(path, { signal: request.signal })
     },
     async showAccount(accountId: string): Promise<{ account: DeviceSyncAccountRecord }> {
       return await requestJson(`/accounts/${encodeURIComponent(accountId)}`)

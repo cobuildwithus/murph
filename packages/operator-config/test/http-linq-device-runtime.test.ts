@@ -1747,7 +1747,12 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
 })
 
 test('device sync client covers list, begin, and browser open paths', async () => {
-  const seenRequests: Array<{ method: string; url: string; body: string | null }> = []
+  const seenRequests: Array<{
+    method: string
+    url: string
+    body: string | null
+    signal: AbortSignal | null
+  }> = []
   const openBrowser = vi.fn(async () => true)
   const client = createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
@@ -1757,6 +1762,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
       seenRequests.push({
         body: init?.body ? String(init.body) : null,
         method: init?.method ?? 'GET',
+        signal: init?.signal ?? null,
         url,
       })
 
@@ -1817,9 +1823,17 @@ test('device sync client covers list, begin, and browser open paths', async () =
       state: 'state-1',
     },
   )
-  assert.deepEqual(await client.listAccounts({ provider: 'oura' }), {
-    accounts: [{ accountId: 'acct-1' }],
-  })
+  const listAccountsAbort = new AbortController()
+  assert.deepEqual(
+    await client.listAccounts(
+      { provider: 'oura' },
+      { signal: listAccountsAbort.signal },
+    ),
+    {
+      accounts: [{ accountId: 'acct-1' }],
+    },
+  )
+  assert.equal(seenRequests[2]?.signal, listAccountsAbort.signal)
   assert.deepEqual(await client.showAccount('acct-1'), {
     account: { accountId: 'acct-1' },
   })

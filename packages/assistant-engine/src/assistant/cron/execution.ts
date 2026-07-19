@@ -21,8 +21,6 @@ import {
   type AssistantOnboardingResumeContextResult,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { resolveExistingManagedDeviceSyncControlPlane } from '@murphai/operator-config/device-daemon'
-import { createDeviceSyncClient } from '@murphai/operator-config/device-sync-client'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   sendAssistantNotificationLocal,
@@ -144,6 +142,7 @@ const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
+const ASSISTANT_CRON_ONBOARDING_DEVICE_ACCOUNTS_TIMEOUT_MS = 5_000
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
   'murph-managed:weekly-improvement-coach',
@@ -1445,18 +1444,32 @@ async function readAssistantCronOnboardingDeviceAccounts(input: {
   if (input.executionContext?.hosted) {
     return []
   }
-  const controlPlane = await resolveExistingManagedDeviceSyncControlPlane({
-    vault: input.vault,
-  })
+  const [controlPlaneModule, clientModule] = await Promise.all([
+    import('@murphai/operator-config/device-daemon-control-plane'),
+    import('@murphai/operator-config/device-sync-client'),
+  ])
+  const controlPlane =
+    await controlPlaneModule.resolveExistingManagedDeviceSyncControlPlane({
+      vault: input.vault,
+    })
   if (!controlPlane) {
     return []
   }
   input.signal.throwIfAborted()
-  const client = createDeviceSyncClient({
+  const client = clientModule.createDeviceSyncClient({
     baseUrl: controlPlane.baseUrl,
     controlToken: controlPlane.controlToken,
   })
-  return (await client.listAccounts()).accounts
+  const requestSignal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(ASSISTANT_CRON_ONBOARDING_DEVICE_ACCOUNTS_TIMEOUT_MS),
+  ])
+  try {
+    return (await client.listAccounts({}, { signal: requestSignal })).accounts
+  } catch (error) {
+    input.signal.throwIfAborted()
+    throw error
+  }
 }
 
 function buildAssistantCronSupportScopeInstructions(

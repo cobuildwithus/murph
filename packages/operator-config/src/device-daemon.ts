@@ -6,7 +6,6 @@ import {
   rm,
 } from 'node:fs/promises'
 import {
-  isLoopbackHostname,
   writeTextFileAtomic,
 } from '@murphai/runtime-state/node'
 
@@ -23,7 +22,9 @@ import {
   resolveDeviceSyncControlToken,
 } from './device-sync-client.js'
 import {
+  assertManagedDeviceSyncLoopbackBaseUrl,
   buildManagedDeviceSyncEnvironment,
+  requireManagedDeviceSyncVaultRoot,
   resolveDeviceDaemonPaths,
   resolveDeviceSyncDaemonBinPath,
   resolveInstalledDeviceSyncPackageEntry,
@@ -88,7 +89,7 @@ export async function ensureManagedDeviceSyncControlPlane(input: {
   }
 
   const startResult = await startManagedDeviceSyncDaemon({
-    vault: requireManagedVault(input.vault),
+    vault: requireManagedDeviceSyncVaultRoot(input.vault),
     baseUrl: input.baseUrl,
     env,
     dependencies: input.dependencies,
@@ -105,50 +106,12 @@ export async function ensureManagedDeviceSyncControlPlane(input: {
 
   return {
     baseUrl: startResult.baseUrl,
-    controlToken: readManagedControlToken(requireManagedVault(input.vault)),
+    controlToken: readManagedControlToken(
+      requireManagedDeviceSyncVaultRoot(input.vault),
+    ),
     managed: true,
     started: startResult.started,
   }
-}
-
-export async function resolveExistingManagedDeviceSyncControlPlane(input: {
-  vault: string
-  baseUrl?: string | null
-  env?: NodeJS.ProcessEnv
-  dependencies?: DeviceDaemonDependencyOverrides
-}): Promise<{
-  baseUrl: string
-  controlToken: string
-  managed: true
-} | null> {
-  const dependencies = createDeviceDaemonDependencies(input.dependencies)
-  const vault = requireManagedVault(input.vault)
-  const paths = resolveDeviceDaemonPaths(vault)
-  const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
-  const state = await readDeviceDaemonState(paths, dependencies)
-
-  if (state === null || state.baseUrl !== baseUrl) {
-    return null
-  }
-
-  const controlToken = readManagedControlToken(vault)
-  if (!controlToken || !dependencies.isProcessAlive(state.pid)) {
-    return null
-  }
-
-  const healthy = await isDeviceDaemonHealthy(
-    baseUrl,
-    dependencies.fetchImpl,
-    controlToken,
-  )
-
-  return healthy
-    ? {
-        baseUrl,
-        controlToken,
-        managed: true,
-      }
-    : null
 }
 
 export async function getManagedDeviceSyncDaemonStatus(input: {
@@ -158,7 +121,7 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
   dependencies?: DeviceDaemonDependencyOverrides
 }): Promise<DeviceDaemonStatusResult> {
   const dependencies = createDeviceDaemonDependencies(input.dependencies)
-  const vault = requireManagedVault(input.vault)
+  const vault = requireManagedDeviceSyncVaultRoot(input.vault)
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
@@ -209,9 +172,9 @@ export async function startManagedDeviceSyncDaemon(input: {
 }): Promise<DeviceDaemonStartResult> {
   const dependencies = createDeviceDaemonDependencies(input.dependencies)
   const env = input.env ?? process.env
-  const vault = requireManagedVault(input.vault)
+  const vault = requireManagedDeviceSyncVaultRoot(input.vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, env)
-  assertLoopbackBaseUrl(baseUrl)
+  assertManagedDeviceSyncLoopbackBaseUrl(baseUrl)
 
   const paths = resolveDeviceDaemonPaths(vault)
   const state = await readDeviceDaemonState(paths, dependencies)
@@ -431,7 +394,7 @@ export async function stopManagedDeviceSyncDaemon(input: {
   dependencies?: DeviceDaemonDependencyOverrides
 }): Promise<DeviceDaemonStopResult> {
   const dependencies = createDeviceDaemonDependencies(input.dependencies)
-  const vault = requireManagedVault(input.vault)
+  const vault = requireManagedDeviceSyncVaultRoot(input.vault)
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
@@ -592,17 +555,6 @@ function hasExplicitControlPlaneTarget(
   )
 }
 
-function requireManagedVault(vault: string | null | undefined): string {
-  if (typeof vault === 'string' && vault.trim().length > 0) {
-    return vault.trim()
-  }
-
-  throw new VaultCliError(
-    'DEVICE_SYNC_VAULT_REQUIRED',
-    'Device sync daemon management needs a vault path. Pass `--vault <path>` or configure a default Murph vault first.',
-  )
-}
-
 async function recoverUnmanagedReachableDeviceDaemon(input: {
   baseUrl: string
   dependencies: DeviceDaemonDependencies
@@ -646,19 +598,6 @@ function canStartDeviceSyncDaemonFromEnv(env: NodeJS.ProcessEnv): boolean {
   } catch {
     return false
   }
-}
-
-function assertLoopbackBaseUrl(baseUrl: string): void {
-  const url = new URL(baseUrl)
-  if (isLoopbackHostname(url.hostname)) {
-    return
-  }
-
-  throw new VaultCliError(
-    'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
-    'Murph can only manage loopback device sync daemons. Use a localhost base URL or manage remote control planes explicitly.',
-    { baseUrl },
-  )
 }
 
 async function isDeviceDaemonControlPlaneReachable(

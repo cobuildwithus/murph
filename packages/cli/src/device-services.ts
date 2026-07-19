@@ -1,10 +1,12 @@
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
-  resolveExistingManagedDeviceSyncControlPlane,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
 } from '@murphai/operator-config/device-daemon'
+import {
+  resolveExistingManagedDeviceSyncControlPlane,
+} from '@murphai/operator-config/device-daemon-control-plane'
 import {
   createDeviceSyncClient,
   DEVICE_SYNC_BASE_URL_ENV,

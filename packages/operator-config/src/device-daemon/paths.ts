@@ -6,6 +6,7 @@ import {
   DEVICE_SYNC_SECRET_ENV,
 } from '@murphai/device-syncd/client'
 import {
+  isLoopbackHostname,
   resolveDeviceSyncRuntimePaths,
 } from '@murphai/runtime-state/node'
 import {
@@ -21,6 +22,33 @@ import {
   type DeviceDaemonPaths,
 } from './types.js'
 import { readEnvValue } from '../env-values.js'
+import { VaultCliError } from '../vault-cli-errors.js'
+
+export function requireManagedDeviceSyncVaultRoot(
+  vault: string | null | undefined,
+): string {
+  if (typeof vault === 'string' && vault.trim().length > 0) {
+    return vault.trim()
+  }
+
+  throw new VaultCliError(
+    'DEVICE_SYNC_VAULT_REQUIRED',
+    'Device sync daemon management needs a vault path. Pass `--vault <path>` or configure a default Murph vault first.',
+  )
+}
+
+export function assertManagedDeviceSyncLoopbackBaseUrl(baseUrl: string): void {
+  const url = new URL(baseUrl)
+  if (isLoopbackHostname(url.hostname)) {
+    return
+  }
+
+  throw new VaultCliError(
+    'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
+    'Murph can only manage loopback device sync daemons. Use a localhost base URL or manage remote control planes explicitly.',
+    { baseUrl },
+  )
+}
 
 export function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
   const runtimePaths = resolveDeviceSyncRuntimePaths(vaultRoot)

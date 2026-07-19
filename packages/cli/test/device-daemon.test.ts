@@ -9,10 +9,12 @@ import { parseVersionedJsonStateEnvelope } from '@murphai/runtime-state/node'
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
-  resolveExistingManagedDeviceSyncControlPlane,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
 } from '@murphai/operator-config/device-daemon'
+import {
+  resolveExistingManagedDeviceSyncControlPlane,
+} from '@murphai/operator-config/device-daemon-control-plane'
 
 const DEVICE_DAEMON_STATE_SCHEMA = 'murph.device-daemon-launcher-state.v1'
 const DEVICE_DAEMON_STATE_SCHEMA_VERSION = 1

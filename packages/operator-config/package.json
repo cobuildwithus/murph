@@ -69,6 +69,11 @@
       "import": "./dist/device-daemon.js",
       "default": "./dist/device-daemon.js"
     },
+    "./device-daemon-control-plane": {
+      "types": "./dist/device-daemon-control-plane.d.ts",
+      "import": "./dist/device-daemon-control-plane.js",
+      "default": "./dist/device-daemon-control-plane.js"
+    },
     "./device-sync-client": {
       "types": "./dist/device-sync-client.d.ts",
       "import": "./dist/device-sync-client.js",
