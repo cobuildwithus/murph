@@ -141,7 +141,7 @@ test("workspace clean build preserves importers dist until the safe build refres
   for (const scriptName of ["build:workspace:clean", "build:workspace:incremental", "build:test-runtime"]) {
     assert.match(
       rootPackageManifest.scripts?.[scriptName] ?? "",
-      /&& pnpm --dir packages\/importers build$/u,
+      /&& pnpm --dir packages\/importers build'$/u,
     );
   }
   assert.equal(importersTsConfig.compilerOptions?.outDir, "./dist");
