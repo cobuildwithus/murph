@@ -73,12 +73,14 @@ Admission is for finite verification, build, and benchmark entrypoints only.
 Never put `dev`, TypeScript watch, or another long-lived process behind a host
 slot; it would reserve shared capacity indefinitely.
 
-Direct package and app Vitest commands do not claim the heavyweight lane, but
-Codex/shared-host mode defaults them to one worker. Direct TypeScript commands
-use the lane-specific shared budgets below. Prefer `pnpm test:diff` for normal
-iteration; reserve full verification for the completion gate. Tooling-focused
-`test:diff` routes pass the same scoped worker budget into `test:repo-tools`,
-which remains outside the heavyweight lane so fast feedback is not convoyed.
+Direct package, app, and repo-tools Vitest commands do not claim the heavyweight
+lane, but Codex/shared-host mode defaults them to one worker. Direct
+`pnpm test:repo-tools` uses the same resolver's ordinary-local 75% and CI 50%
+defaults, including in the host-support release check. Its config owns this
+budget so tooling-focused `test:diff` can pass its scoped override while keeping
+repo-tools outside the heavyweight lane. Direct TypeScript commands use the
+lane-specific shared budgets below. Prefer `pnpm test:diff` for normal iteration;
+reserve full verification for the completion gate.
 
 ## TypeScript Budgets
 
