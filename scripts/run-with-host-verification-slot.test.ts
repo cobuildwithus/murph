@@ -306,6 +306,7 @@ function slotEnv(
   explicitMode = true,
 ): NodeJS.ProcessEnv {
   const {
+    CI: _ci,
     CODEX_THREAD_ID: _codexThreadId,
     MURPH_VERIFY_SHARED_HOST: _sharedHostMode,
     ...baseEnv
