@@ -23,6 +23,7 @@ type Harness = {
   primary: string
   root: string
   state: string
+  tempRoot: string
 }
 
 function runGit(cwd: string, args: string[]): string {
@@ -44,9 +45,11 @@ function createHarness(): Harness {
   const primary = path.join(root, 'primary')
   const fakeBin = path.join(root, 'bin')
   const state = path.join(root, 'guard-state')
+  const tempRoot = path.join(root, 'temp')
   mkdirSync(path.join(primary, 'scripts'), { recursive: true })
   mkdirSync(path.join(primary, '.githooks'), { recursive: true })
   mkdirSync(fakeBin, { recursive: true })
+  mkdirSync(tempRoot)
   for (const name of ['worktree-storage-guard', 'create-worktree', 'install-git-hooks']) {
     executable(
       path.join(primary, 'scripts', name),
@@ -70,7 +73,7 @@ printf 'testfs 100000000 10000000 90000000 10%% /\\n'
   runGit(primary, ['config', 'user.email', 'worktree-guard@users.noreply.github.com'])
   runGit(primary, ['add', '.'])
   runGit(primary, ['commit', '-m', 'baseline'])
-  return { fakeBin, primary, root, state }
+  return { fakeBin, primary, root, state, tempRoot }
 }
 
 function runScript(
@@ -89,6 +92,7 @@ function runScript(
       MURPH_WORKTREE_MAX_LIVE: '2',
       MURPH_WORKTREE_MIN_FREE_GIB: '1',
       MURPH_WORKTREE_MIN_FREE_PERCENT: '20',
+      MURPH_WORKTREE_TEMP_ROOTS: harness.tempRoot,
       ...overrides,
     },
   })
@@ -202,6 +206,79 @@ describe('worktree storage guard', () => {
     const growth = runScript(harness, 'worktree-storage-guard')
     expect(growth.status).toBe(1)
     expect(growth.stderr).toContain('exceeds the ratcheted ceiling of 2')
+  })
+
+  it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {
+    const harness = createHarness()
+    const origin = 'https://example.test/example/murph.git'
+    runGit(harness.primary, ['remote', 'add', 'origin', origin])
+    const legacyClone = path.join(harness.tempRoot, 'murph-legacy-clone')
+    runGit(harness.root, ['clone', harness.primary, legacyClone])
+
+    const baseline = runScript(harness, 'worktree-storage-guard')
+    expect(baseline.status, baseline.stderr).toBe(0)
+    expect(baseline.stdout).toContain('unmanaged_temp=1')
+
+    rmSync(legacyClone, { force: true, recursive: true })
+    const ratcheted = runScript(harness, 'worktree-storage-guard')
+    expect(ratcheted.status, ratcheted.stderr).toBe(0)
+    expect(ratcheted.stdout).toContain('unmanaged_temp=0')
+
+    runGit(harness.root, ['clone', harness.primary, legacyClone])
+    const growth = runScript(harness, 'worktree-storage-guard')
+    expect(growth.status).toBe(1)
+    expect(growth.stderr).toContain('new unmanaged temporary checkout')
+  })
+
+  it('fails closed when unmanaged-checkout fingerprinting fails', () => {
+    const harness = createHarness()
+    runGit(harness.primary, [
+      'remote',
+      'add',
+      'origin',
+      'https://example.test/example/murph.git',
+    ])
+    runGit(harness.root, [
+      'clone',
+      harness.primary,
+      path.join(harness.tempRoot, 'murph-hash-failure'),
+    ])
+    executable(path.join(harness.fakeBin, 'node'), '#!/bin/sh\nexit 23\n')
+
+    const result = runScript(harness, 'worktree-storage-guard')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('could not fingerprint unmanaged temporary checkouts')
+    expect(existsSync(path.join(harness.state, 'unmanaged-temp-checkouts'))).toBe(false)
+  })
+
+  it('rejects standalone temporary pnpm stores', () => {
+    const harness = createHarness()
+    mkdirSync(path.join(harness.tempRoot, 'murph-task-pnpm-store'))
+
+    const result = runScript(harness, 'worktree-storage-guard')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('standalone temporary pnpm store')
+  })
+
+  it('does not classify a registered temporary worktree as unmanaged', () => {
+    const harness = createHarness()
+    runGit(harness.primary, [
+      'remote',
+      'add',
+      'origin',
+      'https://example.test/example/murph.git',
+    ])
+    const target = path.join(harness.tempRoot, 'murph-pnpm-store-hardening')
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'registered-temp-task',
+      target,
+    ])
+    expect(creation.status, creation.stderr).toBe(0)
+
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status, guard.stderr).toBe(0)
+    expect(guard.stdout).toContain('unmanaged_temp=0')
   })
 
   it.each([

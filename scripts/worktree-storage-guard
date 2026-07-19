@@ -44,6 +44,7 @@ fi
 common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
 state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
 state_file="$state_dir/regular-worktree-ceiling"
+unmanaged_state_file="$state_dir/unmanaged-temp-checkouts"
 authorization_initialized="$state_dir/authorization-initialized"
 lock_file="$state_dir/lock"
 if [[ -n "${MURPH_WORKTREE_MAX_LIVE+x}" && -z "${MURPH_WORKTREE_GUARD_STATE_DIR+x}" ]]; then
@@ -77,13 +78,16 @@ regular_count=0
 data_count=0
 unauthorized_count=0
 admin_dirs=()
+registered_paths=()
 disk_paths=("$repo_root")
 record_path=''
 record_locked=''
 
 count_record() {
-  local gitdir_line gitdir_value admin_dir
+  local gitdir_line gitdir_value admin_dir canonical_record_path
   [[ -n "$record_path" && -d "$record_path" ]] || return 0
+  canonical_record_path="$(cd "$record_path" 2>/dev/null && pwd -P)" || return 0
+  registered_paths+=("$canonical_record_path")
   if [[ -d "$record_path/.git" ]]; then
     return 0
   fi
@@ -143,6 +147,194 @@ if [[ ! -f "$authorization_initialized" ]]; then
   fi
   : >"$authorization_initialized"
 fi
+
+normalize_remote() {
+  local remote="$1"
+  remote="${remote%.git}"
+  case "$remote" in
+    git@*:* )
+      remote="${remote#git@}"
+      remote="${remote/:/\/}"
+      ;;
+    ssh://git@*) remote="${remote#ssh://git@}" ;;
+    https://*) remote="${remote#https://}" ;;
+    http://*) remote="${remote#http://}" ;;
+  esac
+  printf '%s' "$remote"
+}
+
+local_remote_points_to_current_repo() {
+  local remote="$1" remote_path remote_common_dir
+  case "$remote" in
+    file://*) remote_path="${remote#file://}" ;;
+    /*) remote_path="$remote" ;;
+    *) return 1 ;;
+  esac
+  [[ -d "$remote_path" ]] || return 1
+  remote_common_dir="$(git -C "$remote_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || return 1
+  remote_common_dir="$(cd "$remote_common_dir" 2>/dev/null && pwd -P)" || return 1
+  [[ "$remote_common_dir" == "$common_dir" ]]
+}
+
+read_origin_from_config() {
+  local config_path="$1" line in_origin=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in
+      "[remote \"origin\"]")
+        in_origin=1
+        ;;
+      '['*)
+        in_origin=0
+        ;;
+      url\ =\ *)
+        if (( in_origin == 1 )); then
+          printf '%s' "${line#url = }"
+          return 0
+        fi
+        ;;
+    esac
+  done <"$config_path"
+  return 1
+}
+
+is_registered_path() {
+  local candidate="$1" registered
+  for registered in "${registered_paths[@]}"; do
+    [[ "$candidate" == "$registered" ]] && return 0
+  done
+  return 1
+}
+
+temp_roots=()
+if [[ -n "${MURPH_WORKTREE_TEMP_ROOTS+x}" ]]; then
+  IFS=':' read -r -a temp_roots <<<"${MURPH_WORKTREE_TEMP_ROOTS:-}"
+else
+  temp_roots=(/private/tmp /tmp)
+fi
+
+canonical_temp_roots=()
+for temp_root in "${temp_roots[@]}"; do
+  [[ -n "$temp_root" && -d "$temp_root" ]] || continue
+  canonical_temp_root="$(cd "$temp_root" 2>/dev/null && pwd -P)" || continue
+  duplicate_root=0
+  if (( ${#canonical_temp_roots[@]} > 0 )); then
+    for existing_root in "${canonical_temp_roots[@]}"; do
+      [[ "$existing_root" == "$canonical_temp_root" ]] && duplicate_root=1
+    done
+  fi
+  (( duplicate_root == 0 )) && canonical_temp_roots+=("$canonical_temp_root")
+done
+
+primary_remote="$(git -C "$repo_root" config --get remote.origin.url 2>/dev/null || true)"
+normalized_primary_remote=''
+[[ -n "$primary_remote" ]] && normalized_primary_remote="$(normalize_remote "$primary_remote")"
+unmanaged_fingerprints=()
+unmanaged_candidates=()
+temporary_pnpm_store_count=0
+repo_fingerprint_identity="${normalized_primary_remote:-local:$common_dir}"
+if (( ${#canonical_temp_roots[@]} > 0 )); then
+  shopt -s nullglob
+  for temp_root in "${canonical_temp_roots[@]}"; do
+    for candidate in "$temp_root"/murph-*; do
+      [[ -d "$candidate" && ! -L "$candidate" ]] || continue
+      candidate_git_dir="$candidate/.git"
+      if [[ ! -e "$candidate_git_dir" ]]; then
+        case "${candidate##*/}" in
+          *pnpm*store*) temporary_pnpm_store_count=$((temporary_pnpm_store_count + 1)) ;;
+        esac
+      fi
+      [[ -d "$candidate_git_dir" ]] || continue
+      canonical_candidate="$(cd "$candidate" 2>/dev/null && pwd -P)" || continue
+      is_registered_path "$canonical_candidate" && continue
+      candidate_remote="$(read_origin_from_config "$candidate_git_dir/config" 2>/dev/null || true)"
+      [[ -n "$candidate_remote" ]] || continue
+      normalized_candidate_remote="$(normalize_remote "$candidate_remote")"
+      if [[ -z "$normalized_primary_remote" \
+        || "$normalized_candidate_remote" != "$normalized_primary_remote" ]]; then
+        local_remote_points_to_current_repo "$candidate_remote" || continue
+      fi
+      unmanaged_candidates+=("$canonical_candidate")
+    done
+  done
+  shopt -u nullglob
+fi
+if (( temporary_pnpm_store_count > 0 )); then
+  printf 'worktree storage guard: %d standalone temporary pnpm store(s) must use the ordinary shared store\n' \
+    "$temporary_pnpm_store_count" >&2
+  exit 1
+fi
+if (( ${#unmanaged_candidates[@]} > 0 )); then
+  unmanaged_hash_output=''
+  if ! unmanaged_hash_output="$(
+    printf '%s\0' "${unmanaged_candidates[@]}" |
+      MURPH_GUARD_REMOTE="$repo_fingerprint_identity" node -e '
+        const crypto = require("node:crypto");
+        const remote = process.env.MURPH_GUARD_REMOTE ?? "";
+        const input = require("node:fs").readFileSync(0);
+        for (const item of input.toString("utf8").split("\0")) {
+          if (!item) continue;
+          let stats;
+          try {
+            stats = require("node:fs").statSync(item + "/.git", { bigint: true });
+          } catch {
+            process.exit(1);
+          }
+          process.stdout.write(
+            crypto.createHash("sha256")
+              .update(remote).update("\0")
+              .update(item).update("\0")
+              .update(String(stats.dev)).update("\0")
+              .update(String(stats.ino)).update("\0")
+              .update(String(stats.birthtimeNs))
+              .digest("hex") + "\n",
+          );
+        }
+      '
+  )"; then
+    printf 'worktree storage guard: could not fingerprint unmanaged temporary checkouts\n' >&2
+    exit 1
+  fi
+  while IFS= read -r fingerprint; do
+    [[ -z "$fingerprint" ]] && continue
+    [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || {
+      printf 'worktree storage guard: invalid unmanaged-checkout fingerprint\n' >&2
+      exit 1
+    }
+    unmanaged_fingerprints+=("$fingerprint")
+  done <<<"$unmanaged_hash_output"
+  if (( ${#unmanaged_fingerprints[@]} != ${#unmanaged_candidates[@]} )); then
+    printf 'worktree storage guard: incomplete unmanaged-checkout fingerprint inventory\n' >&2
+    exit 1
+  fi
+fi
+
+new_unmanaged=0
+if [[ -f "$unmanaged_state_file" ]]; then
+  if grep -Evq '^([0-9a-f]{40}|[0-9a-f]{64})$|^$' "$unmanaged_state_file"; then
+    printf 'worktree storage guard: invalid unmanaged-checkout state\n' >&2
+    exit 1
+  fi
+  if (( ${#unmanaged_fingerprints[@]} > 0 )); then
+    for fingerprint in "${unmanaged_fingerprints[@]}"; do
+      grep -Fxq "$fingerprint" "$unmanaged_state_file" || new_unmanaged=$((new_unmanaged + 1))
+    done
+  fi
+fi
+if (( new_unmanaged > 0 )); then
+  printf 'worktree storage guard: %d new unmanaged temporary checkout(s) bypassed scripts/create-worktree\n' \
+    "$new_unmanaged" >&2
+  exit 1
+fi
+
+tmp_unmanaged_state="$unmanaged_state_file.tmp.$$"
+if (( ${#unmanaged_fingerprints[@]} > 0 )); then
+  printf '%s\n' "${unmanaged_fingerprints[@]}" | LC_ALL=C sort -u >"$tmp_unmanaged_state"
+else
+  : >"$tmp_unmanaged_state"
+fi
+mv "$tmp_unmanaged_state" "$unmanaged_state_file"
 
 if [[ -n "$target_path" ]]; then
   if [[ "$target_path" != /* ]]; then
@@ -234,5 +426,5 @@ tmp_state="$state_file.tmp.$$"
 printf '%d\n' "$ratcheted" >"$tmp_state"
 mv "$tmp_state" "$state_file"
 
-printf 'worktree storage guard: regular=%d data=%d ceiling=%d free=%d%%\n' \
-  "$regular_count" "$data_count" "$ratcheted" "$available_percent"
+printf 'worktree storage guard: regular=%d data=%d ceiling=%d free=%d%% unmanaged_temp=%d\n' \
+  "$regular_count" "$data_count" "$ratcheted" "$available_percent" "${#unmanaged_fingerprints[@]}"

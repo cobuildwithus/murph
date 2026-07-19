@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../config/vitest-timeouts.js";
+import { murphVitestTempGlobalSetup } from "../config/vitest-temp-lifecycle.js";
 import {
   createVitestWorkspaceRuntimeAliases,
   resolveHostedWebWorkspaceSourceEntries,
@@ -27,6 +28,7 @@ export default defineConfig({
     ...murphVitestNoTimeouts,
     name: "repo-tools",
     environment: "node",
+    globalSetup: [murphVitestTempGlobalSetup],
     ...resolveMurphVitestConcurrency(),
     include: ["scripts/**/*.test.ts"],
     exclude: ["scripts/murph-age/**/*.test.ts"],
