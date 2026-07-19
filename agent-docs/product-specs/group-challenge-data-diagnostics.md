@@ -79,14 +79,22 @@ the assistant-engine model boundary removes it and exposes only
 `participantId`, the consented display name, bounded `currentTurnHandles`, and
 requested projections.
 
-On an interactive Linq turn, the runtime adds the bounded, deduplicated
-route-authorized `Sender:` handles already present in the current prompt only
-when the model invokes `read_shared`. The same Web query selects current member
-phone and verified-email blind indexes. It retains an input handle only when it
-matches exactly one current membership and returns it in that row's
-`currentTurnHandles` beside the membership-scoped `participantId`; ambiguous,
-unknown, unverified, and stale-membership matches are omitted. Scheduled,
-notification, and detached reads have empty handle arrays.
+Interactive Linq group turns are actor-scoped. Import derives the blinded
+`actorId` from the same trimmed Linq sender value stored for the prompt;
+initial batching splits when that actor changes, and both pre-provider and live
+admission stop at a foreign group actor. Attribution authority therefore stays
+bound to the scanner-selected durable operation contexts instead of being
+widened by active steering. A later message from another participant remains
+pending for its own model turn.
+
+When the model invokes `read_shared`—and only then—the runtime adds the bounded,
+deduplicated route-authorized iMessage handles from that operation scope. The
+same Web query selects current member phone and verified-email blind indexes.
+It retains an input handle only when it matches exactly one current membership
+and returns it in that row's `currentTurnHandles` beside the
+membership-scoped `participantId`; ambiguous, unknown, unverified, and
+stale-membership matches are omitted. Scheduled, notification, and detached
+reads have empty handle arrays.
 
 This is a current-turn join aid, not a contact roster. The model may associate
 only an exact current prompt `Sender:` handle that appears in one returned
