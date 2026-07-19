@@ -235,12 +235,14 @@ and pending-name update. Once people are in, use the shared data playfully.
 In an interactive turn, read it with `vault-cli group shared`. It returns each
 member (by name once their name has landed, otherwise by member id) with the
 recent records for every kind they granted. Add `--kind <kind>` for a
-single-metric leaderboard, for example `--kind steps-days.v0`. During an
-authorized scheduled group-challenge run, use `murph.scheduled_read` action
-`group_shared` with no selectors: `{"action":"group_shared"}`. The trusted
-parent supplies the current group vault and the automation's exact immutable
-projection, so never pass a room, route, participant, member, scope, kind, or
-record limit. That scheduled result omits raw member ids; attribute standings
+single-metric leaderboard, for example `--kind steps-days.v0`. A scheduled
+`group_health_update` or `group_challenge` uses `murph.scheduled_read` action
+`group_shared` with no selectors: `{"action":"group_shared"}`. A health update
+receives all currently consented server-approved health projections except group
+email; a challenge receives only its exact immutable projection. A
+`group_notification` has no `group_shared` access. Never pass a room, route,
+participant, member, scope, kind, or record limit. The scheduled result omits
+raw member ids; attribute standings
 only by a returned display name. If a display name has not landed, treat
 attribution as unknown and do not score or guess the person. It is empty until
 members have connected the relevant data and their runtime has next woken;
@@ -282,6 +284,27 @@ messages are expected; send them on schedule with confidence. Etiquette:
 
 - Batch each update into one message at a predictable time. Never split a
   digest across messages.
+- Except for the reserved `group-health-newsletter` email automation, every new
+  scheduled non-direct Linq automation must include exactly one immutable
+  `scheduledTask` when `murph.automation` creates it:
+  - use `{ "kind": "group_notification" }` for an ordinary group message that
+    needs only the normal bounded generic scheduled reads;
+  - use `{ "kind": "group_health_update" }` when the message must read all
+  current consented health projections through
+  zero-selector `murph.scheduled_read` action `group_shared`;
+  - follow the `group-challenge` skill and use its exact page/projection binding
+    plus a finite `activeUntil` for `{ "kind": "group_challenge", ... }`.
+- Every group task uses a time-driven schedule. For `group_notification` and
+  `group_health_update`, choose `continuityPolicy: "fresh"` for a self-contained
+  digest or roundup and `continuityPolicy: "preserve"` only when later
+  occurrences need the prior task conversation. A `group_challenge` always
+  uses `continuityPolicy: "preserve"` and a finite `activeUntil`.
+- Never use `group_notification` as a path to shared health data. Never fall
+  back to a shell, direct file read, or CLI in any scheduled group task.
+- Group tasks run only through the current hosted non-direct Linq route. A
+  local route cannot run them. If an older untyped group automation is paused,
+  archive it and recreate it from the current group with the intended binding;
+  never infer the task from its instructions.
 - Celebrate by name; nudge laggards privately in their own thread, not in
   front of the room.
 - If an update or nudge gets no engagement, do not follow up on it. On
@@ -334,8 +357,9 @@ default. Tone and any custom notes belong in the automation instructions.
 If the group wants the recurring update in the chat instead of email, do not
 create the `group-health-newsletter` email automation and do not use the
 newsletter email tool. Set up a normal scheduled group-chat update automation
-under the Scheduled updates and automations rules above; it reads the same
-shared vault projections and needs no email grant.
+under the Scheduled updates and automations rules above with
+`scheduledTask: { "kind": "group_health_update" }`; it reads the same current
+consented health projections and needs no email grant.
 
 Create a new newsletter under the developer prompt's shared automation action
 rules using:

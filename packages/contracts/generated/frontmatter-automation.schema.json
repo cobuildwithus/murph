@@ -272,28 +272,58 @@
       "additionalProperties": false
     },
     "scheduledTask": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "group_challenge"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "group_notification"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         },
-        "knowledgeSlug": {
-          "type": "string",
-          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "group_health_update"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         },
-        "projectionScopeKey": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "group_challenge"
+            },
+            "knowledgeSlug": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "projectionScopeKey": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "kind",
+            "knowledgeSlug",
+            "projectionScopeKey"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "kind",
-        "knowledgeSlug",
-        "projectionScopeKey"
-      ],
-      "additionalProperties": false
+      ]
     },
     "assistantTargetOverride": {
       "type": "object",

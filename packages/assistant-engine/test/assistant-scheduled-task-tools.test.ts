@@ -40,6 +40,7 @@ import {
   type AssistantScheduledTaskAuthority,
   type AssistantScheduledTaskSourceCurrentAssertion,
 } from '../src/assistant/scheduled-task-authority.js'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import {
   ASSISTANT_SCHEDULED_PRODUCT_SOURCES,
 } from '../src/assistant-codex/dynamic-tools/scheduled-sources.js'
@@ -57,6 +58,21 @@ const groupNewsletterAuthority = {
   automationId: 'automation_group_newsletter',
   expectedUpdatedAt: TEST_SOURCE_UPDATED_AT,
   kind: 'group_newsletter',
+} as const satisfies AssistantScheduledTaskAuthority
+const genericNotificationAuthority = {
+  automationId: 'automation_personal_update',
+  expectedUpdatedAt: TEST_SOURCE_UPDATED_AT,
+  kind: 'generic_notification',
+} as const satisfies AssistantScheduledTaskAuthority
+const genericGroupAuthority = {
+  automationId: 'automation_group_update',
+  expectedUpdatedAt: TEST_SOURCE_UPDATED_AT,
+  kind: 'group_health_update',
+} as const satisfies AssistantScheduledTaskAuthority
+const groupNotificationAuthority = {
+  automationId: 'automation_group_notification',
+  expectedUpdatedAt: TEST_SOURCE_UPDATED_AT,
+  kind: 'group_notification',
 } as const satisfies AssistantScheduledTaskAuthority
 const memoryMaintenanceAuthority = {
   automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -89,6 +105,15 @@ describe('scheduled task dynamic tools', () => {
       automationId: groupChallengeAuthority.automationId,
       continuityPolicy: 'preserve',
       instructions: 'Run the bound group challenge.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'challenge-group',
+        threadIsDirect: false,
+      },
       schedule: { kind: 'dailyLocal', localTime: '08:30' },
       scheduledTask: {
         kind: 'group_challenge',
@@ -114,13 +139,6 @@ describe('scheduled task dynamic tools', () => {
     expect(resolveAssistantScheduledTaskAuthorityFromSource({
       ...source,
       activeUntil: 'not-an-instant',
-    })).toEqual({ kind: 'none' })
-    expect(resolveAssistantScheduledTaskAuthorityFromSource({
-      ...source,
-      scheduledTask: {
-        kind: 'group_challenge',
-        knowledgeSlug: groupChallengeAuthority.slug,
-      },
     })).toEqual({ kind: 'none' })
     expect(resolveAssistantScheduledTaskAuthorityFromSource({
       ...source,
@@ -192,6 +210,7 @@ describe('scheduled task dynamic tools', () => {
       'scheduled_knowledge',
       'product_source',
     ])
+    expect(namesFor(genericGroupAuthority)).toEqual(['scheduled_read'])
     expect(namesFor(groupChallengeAuthority)).toEqual([
       'scheduled_read',
       'generate_scheduled_image',
@@ -289,6 +308,14 @@ describe('scheduled task dynamic tools', () => {
     expect(readResultPayload(wrongTask)).toEqual({
       code: 'scheduled_read_action_unauthorized',
     })
+    const personalTask = await executeTool(groupShared, {
+      authority: genericNotificationAuthority,
+      vaultRoot,
+    })
+    expect(personalTask.rpcResult.success).toBe(false)
+    expect(readResultPayload(personalTask)).toEqual({
+      code: 'scheduled_read_action_unauthorized',
+    })
 
     const sourceCurrentAssertion = vi.fn<AssistantScheduledTaskSourceCurrentAssertion>(
       async (authority) => {
@@ -299,8 +326,33 @@ describe('scheduled task dynamic tools', () => {
         return resolved
       },
     )
+    const missingRouteOwner = await executeTool(groupShared, {
+      authority: genericGroupAuthority,
+      sourceCurrentAssertion,
+      vaultRoot,
+    })
+    expect(missingRouteOwner.rpcResult.success).toBe(false)
+    expect(readResultPayload(missingRouteOwner)).toEqual({
+      code: 'scheduled_group_route_unavailable',
+    })
+
+    const assertScheduledGroupRouteCurrent = vi.fn(async () => undefined)
+    const hostedGroupRead = await executeTool(groupShared, {
+      authority: genericGroupAuthority,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertScheduledGroupRouteCurrent,
+      ),
+      sourceCurrentAssertion,
+      vaultRoot,
+    })
+    expect(hostedGroupRead.rpcResult.success).toBe(true)
+    expect(assertScheduledGroupRouteCurrent).toHaveBeenCalledTimes(1)
+
     const groupRead = await executeTool(groupShared, {
       authority: groupChallengeAuthority,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertScheduledGroupRouteCurrent,
+      ),
       sourceCurrentAssertion,
       vaultRoot,
     })
@@ -311,7 +363,8 @@ describe('scheduled task dynamic tools', () => {
       members: [],
       status: 'empty',
     })
-    expect(sourceCurrentAssertion).toHaveBeenCalledTimes(1)
+    expect(sourceCurrentAssertion).toHaveBeenCalledTimes(3)
+    expect(assertScheduledGroupRouteCurrent).toHaveBeenCalledTimes(2)
 
     const knowledgeRead = requireRequest(readToolRequest('scheduled_read', {
       action: 'knowledge_list',
@@ -333,12 +386,67 @@ describe('scheduled task dynamic tools', () => {
       }))
       const skillResult = await executeTool(skillRead, {
         authority: groupChallengeAuthority,
+        hostedToolContext: createScheduledGroupToolContext(
+          assertScheduledGroupRouteCurrent,
+        ),
       })
       expect(skillResult.rpcResult.success).toBe(true)
       expect(readResultPayload(skillResult)).toMatchObject({
         action: 'skill_get',
         slug,
       })
+    }
+  })
+
+  it('revalidates the current route for every typed group scheduled read', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const cases = [
+      {
+        authority: groupNotificationAuthority,
+        request: requireRequest(readToolRequest('scheduled_read', {
+          action: 'knowledge_list',
+          limit: 1,
+        })),
+      },
+      {
+        authority: genericGroupAuthority,
+        request: requireRequest(readToolRequest('scheduled_read', {
+          action: 'knowledge_list',
+          limit: 1,
+        })),
+      },
+      {
+        authority: groupChallengeAuthority,
+        request: requireRequest(readToolRequest('scheduled_read', {
+          action: 'skill_get',
+          slug: 'group-chat',
+        })),
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const sourceCurrentAssertion = vi.fn(async () => testCase.authority)
+      const withoutRoute = await executeTool(testCase.request, {
+        authority: testCase.authority,
+        sourceCurrentAssertion,
+        vaultRoot,
+      })
+      expect(readResultPayload(withoutRoute)).toEqual({
+        code: 'scheduled_group_route_unavailable',
+      })
+
+      const assertScheduledGroupRouteCurrent = vi.fn(async () => undefined)
+      const withRoute = await executeTool(testCase.request, {
+        authority: testCase.authority,
+        hostedToolContext: createScheduledGroupToolContext(
+          assertScheduledGroupRouteCurrent,
+        ),
+        sourceCurrentAssertion,
+        vaultRoot,
+      })
+      expect(withRoute.rpcResult.success).toBe(true)
+      expect(sourceCurrentAssertion).toHaveBeenCalledTimes(2)
+      expect(assertScheduledGroupRouteCurrent).toHaveBeenCalledOnce()
     }
   })
 
@@ -671,6 +779,7 @@ async function executeTool(
     claimScheduledResearchScoutBatch?: (() => boolean) | null
     env?: NodeJS.ProcessEnv
     fetchImpl?: typeof fetch
+    hostedToolContext?: AssistantHostedToolContext | null
     publicFetchImpl?: typeof fetch
     scheduledOccurrenceAt?: string
     sourceCurrentAssertion?: AssistantScheduledTaskSourceCurrentAssertion
@@ -693,6 +802,7 @@ async function executeTool(
         : overrides.claimScheduledResearchScoutBatch,
     env: overrides.env ?? {},
     fetchImpl: overrides.fetchImpl ?? fetch,
+    hostedToolContext: overrides.hostedToolContext ?? null,
     nextUsageOrdinal: () => 0,
     progressDelivery: null,
     publicFetchImpl: overrides.publicFetchImpl ?? null,
@@ -708,6 +818,21 @@ async function executeTool(
     }),
     vaultRoot: overrides.vaultRoot ?? null,
   })
+}
+
+function createScheduledGroupToolContext(
+  assertScheduledGroupRouteCurrent: () => Promise<void>,
+): AssistantHostedToolContext {
+  return {
+    assertScheduledGroupRouteCurrent,
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    sendVaultFile: async () => {
+      throw new Error('Vault file delivery is unavailable in this test.')
+    },
+    vaultFileSendAvailable: false,
+  }
 }
 
 function readResultPayload(

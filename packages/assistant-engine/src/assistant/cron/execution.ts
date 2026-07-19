@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
@@ -69,6 +70,9 @@ import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
+import {
+  assertAmbiguousLinqAutomationNotClaimable,
+} from '../ambiguous-linq-automation-cutover.js'
 import {
   buildAssistantCronHostedDeliveryIdempotency,
   buildAssistantCronNotificationDedupeToken,
@@ -241,6 +245,10 @@ export async function claimResolvedAssistantCronJob(input: {
       kind: 'local',
       job: claimed,
     }
+  }
+
+  if (input.job.source.kind === 'automation') {
+    assertAmbiguousLinqAutomationNotClaimable(input.job.source)
   }
 
   const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
@@ -741,19 +749,6 @@ export async function executeClaimedAssistantCronJob(
           executionContext: input.executionContext ?? null,
           job: claimedJob,
         })
-        const automationTurn = buildAssistantAutomationTurnEnvelope({
-          assistantTargetOverride:
-            resolveAssistantCronAutomationTargetOverride(input.job) ??
-            deviceActivityAuthority.assistantTargetOverride,
-          deliveryDispatchMode,
-          executionContext: input.executionContext,
-          scheduledOccurrenceAt: occurrenceAt,
-          scheduledTaskAuthority,
-          serviceTier,
-          signal: yieldCancellation.signal,
-          turnEnvironment: input.turnEnvironment ?? null,
-          turnTrigger: 'automation-cron',
-        })
         if (lifecycleSkipReason !== null) {
           outcome = 'skipped_gate'
           reason = 'lifecycle_precondition'
@@ -769,7 +764,7 @@ export async function executeClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
-          if (scheduledTaskAuthority.kind === 'group_challenge') {
+          if (assistantScheduledTaskAuthorityUsesGroupRoute(scheduledTaskAuthority)) {
             await assertAssistantScheduledTaskSourceCurrent({
               authority: scheduledTaskAuthority,
               vault: input.vault,
@@ -782,9 +777,64 @@ export async function executeClaimedAssistantCronJob(
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
+          const turnScheduledTaskAuthority = scheduledTaskAuthority
+          if (
+            assistantScheduledTaskAuthorityUsesGroupRoute(
+              turnScheduledTaskAuthority,
+            ) &&
+            (
+              assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
+              deliveryRoute.threadIsDirect !== false
+            )
+          ) {
+            throw new VaultCliError(
+              'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+              'Scheduled group tasks require current hosted group authority before provider work.',
+              { retryable: true },
+            )
+          }
+          const assertScheduledGroupRouteCurrent =
+            assistantScheduledTaskAuthorityUsesGroupRoute(
+                turnScheduledTaskAuthority,
+              )
+              ? async () => {
+                  const currentRoute =
+                    await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                      executionContext: input.executionContext ?? null,
+                      signal: yieldCancellation.signal,
+                      target: claimedJob.target,
+                    })
+                  if (
+                    currentRoute.threadIsDirect !== false ||
+                    !isDeepStrictEqual(currentRoute, deliveryRoute)
+                  ) {
+                    throw new VaultCliError(
+                      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+                      'The scheduled Linq group route changed before use.',
+                      { retryable: true },
+                    )
+                  }
+                }
+              : null
+          const automationTurn = buildAssistantAutomationTurnEnvelope({
+            assistantTargetOverride:
+              resolveAssistantCronAutomationTargetOverride(input.job) ??
+              deviceActivityAuthority.assistantTargetOverride,
+            deliveryDispatchMode,
+            executionContext: input.executionContext,
+            scheduledOccurrenceAt: occurrenceAt,
+            scheduledTaskAuthority: turnScheduledTaskAuthority,
+            serviceTier,
+            signal: yieldCancellation.signal,
+            turnEnvironment: input.turnEnvironment ?? null,
+            turnTrigger: 'automation-cron',
+          })
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
+            ...(assertScheduledGroupRouteCurrent
+              ? { assertScheduledGroupRouteCurrent }
+              : {}),
             // Replay barrier: once the provider was admitted, a yielded
             // maintenance turn may already have committed memory writes, so
             // the occurrence must be consumed, not retried.
@@ -814,12 +864,15 @@ export async function executeClaimedAssistantCronJob(
                 job: input.job,
                 vault: input.vault,
               })
-              if (scheduledTaskAuthority.kind === 'group_challenge') {
+              if (assistantScheduledTaskAuthorityUsesGroupRoute(
+                turnScheduledTaskAuthority,
+              )) {
                 await assertAssistantScheduledTaskSourceCurrent({
-                  authority: scheduledTaskAuthority,
+                  authority: turnScheduledTaskAuthority,
                   vault: input.vault,
                 })
               }
+              await assertScheduledGroupRouteCurrent?.()
             },
             beforeCommit: async (context) => {
               await assertAssistantCronDeviceActivityParentStillAuthorized({
@@ -840,9 +893,11 @@ export async function executeClaimedAssistantCronJob(
                 job: input.job,
                 vault: input.vault,
               })
-              if (scheduledTaskAuthority.kind === 'group_challenge') {
+              if (assistantScheduledTaskAuthorityUsesGroupRoute(
+                turnScheduledTaskAuthority,
+              )) {
                 await assertAssistantScheduledTaskSourceCurrent({
-                  authority: scheduledTaskAuthority,
+                  authority: turnScheduledTaskAuthority,
                   vault: input.vault,
                 })
               }
@@ -2288,6 +2343,14 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   return isHostedExecution ? 'hosted' : 'local'
 }
 
+function assistantScheduledTaskAuthorityUsesGroupRoute(
+  authority: AssistantScheduledTaskAuthority,
+): boolean {
+  return authority.kind === 'group_notification' ||
+    authority.kind === 'group_health_update' ||
+    authority.kind === 'group_challenge'
+}
+
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
   signal: AbortSignal
@@ -2336,6 +2399,16 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     throw new VaultCliError(
       'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       'Hosted Linq delivery requires direct or group authority before provider work.',
+      { retryable: true },
+    )
+  }
+  if (
+    typeof route.threadIsDirect === 'boolean' &&
+    route.threadIsDirect !== authority.threadIsDirect
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      'Hosted Linq delivery authority no longer matches the saved audience.',
       { retryable: true },
     )
   }
@@ -2556,13 +2629,20 @@ function resolveNextDueAssistantCronCandidate(input: {
   }
 }
 
-// Background maintenance is hosted-only; everything else runs anywhere.
+// Group routes and background maintenance have hosted effect owners. Local
+// runtimes cannot prove current non-direct Linq audience authority.
 function canonicalAssistantCronSourceCanRunInRuntime(input: {
   hostedRuntimeProcess: boolean
   source: CanonicalAssistantCronJobRecord
 }): boolean {
-  return !canonicalAssistantCronSourceIsBackgroundMaintenance(input.source) ||
-    input.hostedRuntimeProcess
+  const hostedOnly = canonicalAssistantCronSourceIsBackgroundMaintenance(
+    input.source,
+  ) || (
+    input.source.kind === 'automation' &&
+    input.source.route.channel === 'linq' &&
+    input.source.route.threadIsDirect !== true
+  )
+  return !hostedOnly || input.hostedRuntimeProcess
 }
 
 export function canonicalAssistantCronSourceIsBackgroundMaintenance(

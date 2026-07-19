@@ -49,8 +49,12 @@ import {
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   automationRouteSchema,
   buildAutomationSupportSeriesTag,
-  resolveAutomationScheduledTaskConstraintViolation,
+  type AutomationContinuityPolicy,
   type AutomationRoute,
+  type AutomationSchedule,
+  type AutomationScheduledTask,
+  type AutomationStatus,
+  type AutomationSupportKind,
 } from "@murphai/contracts";
 import {
   patchAutomation,
@@ -61,7 +65,9 @@ import {
 } from "@murphai/core";
 import { getKnowledgePage } from "@murphai/assistant-engine/knowledge";
 import {
+  ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
   findAssistantAutoReplyDeliveryIntentIds,
+  isExactAssistantGroupNewsletterAutomationDefinition,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   resolveDeliveryCandidates,
@@ -666,14 +672,38 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
+        const requestedSlug = resolveAutomationUpsertSlug({
+          slug: request.slug,
+          title: request.title,
+        });
+        const existing = await showAutomation({
+          ...(request.automationId
+            ? { automationId: request.automationId }
+            : {}),
+          slug: requestedSlug,
+          vaultRoot: input.vaultRoot,
+        });
+        context?.signal?.throwIfAborted();
         if (request.scheduledTask) {
-          await assertHostedGroupChallengeScheduledTaskCreate({
-            currentRoute,
-            request,
+          await assertHostedScheduledTaskCreate({
+            existing: existing !== null,
+            scheduledTask: request.scheduledTask,
             vaultRoot: input.vaultRoot,
           });
           context?.signal?.throwIfAborted();
         }
+        assertHostedGroupAutomationResultDefinition({
+          continuityPolicy: request.continuityPolicy ?? "preserve",
+          existing,
+          route: currentRoute,
+          schedule: request.schedule,
+          scheduledTask: request.scheduledTask ?? existing?.scheduledTask ?? null,
+          slug: existing?.slug ?? requestedSlug,
+          status: request.status ?? "active",
+          supportKind: request.supportKind === undefined
+            ? existing?.supportKind ?? null
+            : request.supportKind,
+        });
         assertActiveHostedAutomationRoute({
           route: currentRoute,
           status: request.status ?? "active",
@@ -734,6 +764,19 @@ function createHostedAssistantAutomationTool(input: {
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
         : existing.route;
+      assertHostedGroupAutomationResultDefinition({
+        continuityPolicy:
+          request.continuityPolicy ?? existing.continuityPolicy,
+        existing,
+        route,
+        schedule: request.schedule ?? existing.schedule,
+        scheduledTask: existing.scheduledTask,
+        slug: request.slug ?? existing.slug,
+        status: request.status ?? existing.status,
+        supportKind: request.supportKind === undefined
+          ? existing.supportKind
+          : request.supportKind,
+      });
       assertActiveHostedAutomationRoute({
         route,
         status: request.status ?? existing.status,
@@ -787,33 +830,23 @@ function createHostedAssistantAutomationTool(input: {
   };
 }
 
-async function assertHostedGroupChallengeScheduledTaskCreate(input: {
-  currentRoute: AutomationRoute;
-  request: Extract<
-    Parameters<HostedAssistantAutomationTool["request"]>[0],
-    { action: "save" }
-  >;
+async function assertHostedScheduledTaskCreate(input: {
+  existing: boolean;
+  scheduledTask: AutomationScheduledTask;
   vaultRoot: string;
 }): Promise<void> {
-  const lifecycleViolation = resolveAutomationScheduledTaskConstraintViolation({
-    activeUntil: input.request.activeUntil,
-    continuityPolicy: input.request.continuityPolicy ?? "preserve",
-    route: input.currentRoute,
-    schedule: input.request.schedule,
-    scheduledTask: input.request.scheduledTask,
-  });
-  if (lifecycleViolation) {
-    const message = lifecycleViolation.code === "continuity_policy"
-      ? "A group-challenge scheduled task must preserve conversation continuity."
-      : lifecycleViolation.code === "non_direct_route"
-        ? "A group-challenge scheduled task requires the current non-direct group route."
-        : lifecycleViolation.message;
+  if (input.existing) {
     throw new VaultCliError(
       "invalid_option",
-      message,
+      "A scheduled-task binding can be set only while creating a new automation.",
     );
   }
-  const projectionScopeKey = input.request.scheduledTask?.projectionScopeKey;
+
+  if (input.scheduledTask.kind !== "group_challenge") {
+    return;
+  }
+
+  const projectionScopeKey = input.scheduledTask.projectionScopeKey;
   if (!HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.some(
     (scope) => scope.projectionKind !== "group-email.v0"
       && buildHostedVaultShareProjectionScopeKey(scope) === projectionScopeKey,
@@ -824,25 +857,8 @@ async function assertHostedGroupChallengeScheduledTaskCreate(input: {
     );
   }
 
-  const existing = await showAutomation({
-    ...(input.request.automationId
-      ? { automationId: input.request.automationId }
-      : {}),
-    slug: resolveAutomationUpsertSlug({
-      slug: input.request.slug,
-      title: input.request.title,
-    }),
-    vaultRoot: input.vaultRoot,
-  });
-  if (existing) {
-    throw new VaultCliError(
-      "invalid_option",
-      "A scheduled-task binding can be set only while creating a new automation.",
-    );
-  }
-
   const page = (await getKnowledgePage({
-    slug: input.request.scheduledTask?.knowledgeSlug ?? "",
+    slug: input.scheduledTask.knowledgeSlug,
     vault: input.vaultRoot,
   })).page;
   if (page.pageType !== "challenge" || page.status !== "active") {
@@ -851,6 +867,63 @@ async function assertHostedGroupChallengeScheduledTaskCreate(input: {
       "A group-challenge scheduled task requires the exact active challenge page.",
     );
   }
+}
+
+function assertHostedGroupAutomationResultDefinition(input: {
+  continuityPolicy: AutomationContinuityPolicy;
+  existing: Awaited<ReturnType<typeof showAutomation>>;
+  route: AutomationRoute;
+  schedule: AutomationSchedule;
+  scheduledTask: AutomationScheduledTask | null;
+  slug: string;
+  status: AutomationStatus;
+  supportKind: AutomationSupportKind | null;
+}): void {
+  if (input.status === "archived") {
+    return;
+  }
+
+  const resultHasAmbiguousLinqAudience =
+    normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "linq"
+    && input.route.threadIsDirect !== true;
+  const existingRequiresRecreation = resultHasAmbiguousLinqAudience
+    && input.existing !== null
+    && normalizeAssistantRouteString(input.existing.route.channel)?.toLowerCase()
+      === "linq"
+    && input.existing.route.threadIsDirect !== true
+    && input.existing.scheduledTask === null
+    && !isExactAssistantGroupNewsletterAutomationDefinition(input.existing);
+  if (existingRequiresRecreation) {
+    throw new VaultCliError(
+      "invalid_option",
+      "An active or paused Linq automation without explicit direct-audience evidence requires recreation with explicit current-route authority and, for a group, an immutable scheduledTask; archive the legacy record before recreating it.",
+    );
+  }
+
+  const reservedNewsletterSlug =
+    input.slug === ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG;
+  if (reservedNewsletterSlug) {
+    if (isExactAssistantGroupNewsletterAutomationDefinition(input)) {
+      return;
+    }
+    throw new VaultCliError(
+      "invalid_option",
+      "The reserved group-health-newsletter slug accepts only the exact untyped fresh cron newsletter definition on an explicit non-direct Linq route.",
+    );
+  }
+
+  if (!resultHasAmbiguousLinqAudience) {
+    return;
+  }
+
+  if (input.scheduledTask !== null) {
+    return;
+  }
+
+  throw new VaultCliError(
+    "invalid_option",
+    "An active or paused Linq automation without explicit direct-audience evidence requires recreation with explicit current-route authority and, for a group, an immutable scheduledTask; archive the legacy record before recreating it.",
+  );
 }
 
 function normalizeHostedAutomationSupportTags(input: {

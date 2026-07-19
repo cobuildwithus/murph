@@ -10,7 +10,10 @@ import {
 } from '@murphai/contracts'
 import { getMemoryRecord, readMemoryDocument } from '@murphai/core'
 import {
+  buildHostedVaultShareProjectionScopeKey,
   flattenSharedVaultShareProjectionStore,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
 } from '@murphai/hosted-execution/vault-share'
 import {
   readSharedVaultShareProjectionStore,
@@ -55,6 +58,11 @@ const BOUNDED_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 const KNOWLEDGE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const REGISTERED_SKILL_SLUGS = new Set<string>(
   ASSISTANT_SKILLS.map((skill) => skill.slug),
+)
+const GROUP_HEALTH_PROJECTION_SCOPE_KEYS = new Set(
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+    .filter((scope) => scope.projectionKind !== 'group-email.v0')
+    .map(buildHostedVaultShareProjectionScopeKey),
 )
 const GROUP_CHALLENGE_SCHEDULED_SECTION_HEADINGS = {
   baselines: 'Baselines',
@@ -101,6 +109,20 @@ const GROUP_CHALLENGE_SCHEDULED_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
 const GROUP_CHALLENGE_SCHEDULED_SHA256_PATTERN = /^[0-9a-f]{64}$/iu
 const GROUP_CHALLENGE_SCHEDULED_WINDOWS_PATH_PATTERN = /^[A-Za-z]:[\\/]/u
+const GENERIC_SCHEDULED_READ_ACTIONS = [
+  'knowledge_list',
+  'knowledge_get',
+  'knowledge_search',
+  'search',
+  'recent_records',
+  'latest',
+  'metric_latest',
+  'metric_trend',
+  'drift',
+  'sources',
+  'record',
+  'skill_get',
+] as const satisfies readonly ScheduledReadAction[]
 const dateSchema = z.string().regex(ISO_DATE_PATTERN)
 const boundedTokenSchema = z
   .string()
@@ -318,6 +340,7 @@ export function readScheduledReadDynamicToolRequest(input: {
 }
 
 export async function executeScheduledReadDynamicTool(input: {
+  assertCurrentGroupRoute?: (() => Promise<void>) | null
   assertSourceCurrent: AssistantScheduledTaskSourceCurrentAssertion
   authority: AssistantScheduledTaskAuthority | null
   request: Extract<ScheduledReadDynamicToolRequest, { kind: 'scheduled-read' }>
@@ -356,6 +379,19 @@ export async function executeScheduledReadDynamicTool(input: {
   }
   try {
     await input.assertSourceCurrent(input.authority)
+    if (
+      authority.kind === 'group_notification' ||
+      authority.kind === 'group_health_update' ||
+      authority.kind === 'group_challenge'
+    ) {
+      if (!input.assertCurrentGroupRoute) {
+        throw new VaultCliError(
+          'scheduled_group_route_unavailable',
+          'The current scheduled group route could not be verified.',
+        )
+      }
+      await input.assertCurrentGroupRoute()
+    }
     const payload = action === 'skill_get'
       ? await readRegisteredSkill(input.request.request.slug)
       : action === 'group_challenge_context'
@@ -363,12 +399,23 @@ export async function executeScheduledReadDynamicTool(input: {
           ? await readBoundGroupChallengeContext(input.vaultRoot, authority.slug)
           : null
       : action === 'group_shared'
-        ? input.vaultRoot && authority.kind === 'group_challenge'
-          ? await readGroupSharedProjection(
-              input.vaultRoot,
-              input.request.request,
-              authority.projectionScopeKey,
-            )
+        ? input.vaultRoot
+          ? authority.kind === 'group_challenge'
+            ? await readGroupSharedProjection(
+                input.vaultRoot,
+                input.request.request,
+                {
+                  kind: 'exact',
+                  projectionScopeKey: authority.projectionScopeKey,
+                },
+              )
+            : authority.kind === 'group_health_update'
+              ? await readGroupSharedProjection(
+                  input.vaultRoot,
+                  input.request.request,
+                  { kind: 'all_health' },
+                )
+              : null
           : null
       : input.vaultRoot
         ? await executeVaultRead(input.vaultRoot, input.request.request)
@@ -413,23 +460,13 @@ function resolveScheduledReadActions(
       return ['knowledge_get']
     case 'group_challenge':
       return ['group_challenge_context', 'group_shared', 'skill_get']
+    case 'group_health_update':
+      return [...GENERIC_SCHEDULED_READ_ACTIONS, 'group_shared']
     case 'generic_notification':
+    case 'group_notification':
     case 'managed_knowledge_ledger':
     case 'research_ledger':
-      return [
-        'knowledge_list',
-        'knowledge_get',
-        'knowledge_search',
-        'search',
-        'recent_records',
-        'latest',
-        'metric_latest',
-        'metric_trend',
-        'drift',
-        'sources',
-        'record',
-        'skill_get',
-      ]
+      return GENERIC_SCHEDULED_READ_ACTIONS
   }
 }
 
@@ -439,6 +476,8 @@ function scheduledKnowledgeSlugIsAuthorized(
 ): boolean {
   switch (authority.kind) {
     case 'generic_notification':
+    case 'group_notification':
+    case 'group_health_update':
       return true
     case 'managed_knowledge_ledger':
       return slug === authority.slug ||
@@ -486,6 +525,8 @@ function scheduledSkillSlugIsAuthorized(
     case 'memory_maintenance':
       return false
     case 'generic_notification':
+    case 'group_notification':
+    case 'group_health_update':
     case 'managed_knowledge_ledger':
     case 'research_ledger':
       return true
@@ -659,7 +700,9 @@ async function executeVaultRead(
 async function readGroupSharedProjection(
   vaultRoot: string,
   request: z.infer<typeof groupSharedSchema>,
-  projectionScopeKey: string,
+  scope:
+    | { kind: 'all_health' }
+    | { kind: 'exact'; projectionScopeKey: string },
 ): Promise<unknown> {
   const read = await readSharedVaultShareProjectionStore(vaultRoot)
   if (read.status === 'corrupt' || read.status === 'read_failed') {
@@ -679,19 +722,28 @@ async function readGroupSharedProjection(
         displayName: member.displayName,
         shares: member.shares
           .filter((share) =>
-            share.projectionScopeKey === projectionScopeKey)
+            scope.kind === 'exact'
+              ? share.projectionScopeKey === scope.projectionScopeKey
+              : GROUP_HEALTH_PROJECTION_SCOPE_KEYS.has(
+                  share.projectionScopeKey,
+                ))
           .map((share) => ({
             projectionKind: share.projectionKind,
             projectionScope: share.projectionScope,
             projectionScopeKey: share.projectionScopeKey,
-            records: share.records.slice(0, 14).map((record) => ({
-              data: record.data,
-              occurredAt: record.occurredAt,
-              recordKey: record.recordKey,
-              ...(record.sourceRevision !== undefined
-                ? { sourceRevision: record.sourceRevision }
-                : {}),
-            })),
+            records: share.records
+              .slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS)
+              .map((record) => ({
+                data: record.data,
+                occurredAt: record.occurredAt,
+                ...(scope.kind === 'exact'
+                  ? { recordKey: record.recordKey }
+                  : {}),
+                ...(scope.kind === 'exact' &&
+                    record.sourceRevision !== undefined
+                  ? { sourceRevision: record.sourceRevision }
+                  : {}),
+              })),
           })),
       }))
       .filter((member) => member.shares.length > 0)

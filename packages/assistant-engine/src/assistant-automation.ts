@@ -4,3 +4,7 @@ export {
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
 } from './assistant/automation/runtime-lock.js'
+export {
+  ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+  isExactAssistantGroupNewsletterAutomationDefinition,
+} from './assistant/scheduled-task-authority.js'

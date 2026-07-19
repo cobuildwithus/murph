@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
+  automationGroupChallengeScheduledTaskSchema,
   automationScaffoldPayloadSchema,
   buildAutomationSupportSeriesTag,
   parseAutomationSupportSeriesTag,
@@ -103,7 +104,23 @@ describe("automation lifecycle contracts", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only the canonical group-challenge scheduled task binding", () => {
+  it("accepts only the three canonical group scheduled-task bindings", () => {
+    expect(automationGroupChallengeScheduledTaskSchema.safeParse({
+      kind: "group_health_update",
+    }).success).toBe(false);
+
+    for (const kind of ["group_notification", "group_health_update"] as const) {
+      const parsed = automationScaffoldPayloadSchema.parse({
+        ...automationPayload(),
+        route: {
+          ...automationPayload().route,
+          threadIsDirect: false,
+        },
+        scheduledTask: { kind },
+      });
+      expect(parsed.scheduledTask).toEqual({ kind });
+    }
+
     const parsed = automationScaffoldPayloadSchema.parse({
       ...automationPayload(),
       activeUntil: "2026-07-20T23:00:00.000-04:00",
@@ -123,6 +140,28 @@ describe("automation lifecycle contracts", () => {
       knowledgeSlug: "morning-mobility",
       projectionScopeKey: "steps-days.v0",
     });
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_notification",
+        projectionScopeKey: "steps-days.v0",
+      },
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      route: {
+        ...automationPayload().route,
+        threadIsDirect: false,
+      },
+      scheduledTask: {
+        kind: "group_health_update",
+        knowledgeSlug: "morning-mobility",
+      },
+    }).success).toBe(false);
     expect(automationScaffoldPayloadSchema.safeParse({
       ...automationPayload(),
       activeUntil: "2026-07-20T23:00:00.000-04:00",
@@ -226,5 +265,42 @@ describe("automation lifecycle contracts", () => {
         projectionScopeKey: "steps-days.v0",
       },
     })).toThrow(/requires a time-driven schedule/u);
+    for (const kind of ["group_notification", "group_health_update"] as const) {
+      const fresh = automationScaffoldPayloadSchema.parse({
+        ...automationPayload(),
+        continuityPolicy: "fresh",
+        route: {
+          ...automationPayload().route,
+          threadIsDirect: false,
+        },
+        scheduledTask: { kind },
+      });
+      expect(fresh.continuityPolicy).toBe("fresh");
+      expect(() => automationScaffoldPayloadSchema.parse({
+        ...automationPayload(),
+        scheduledTask: { kind },
+      })).toThrow(/requires an explicit non-direct Linq group route/u);
+      expect(() => automationScaffoldPayloadSchema.parse({
+        ...automationPayload(),
+        route: {
+          ...automationPayload().route,
+          channel: "telegram",
+          threadIsDirect: false,
+        },
+        scheduledTask: { kind },
+      })).toThrow(/requires an explicit non-direct Linq group route/u);
+      expect(() => automationScaffoldPayloadSchema.parse({
+        ...automationPayload(),
+        route: {
+          ...automationPayload().route,
+          threadIsDirect: false,
+        },
+        schedule: {
+          kind: "deviceActivity",
+          after: "2026-07-18T12:00:00.000Z",
+        },
+        scheduledTask: { kind },
+      })).toThrow(/requires a time-driven schedule/u);
+    }
   });
 });

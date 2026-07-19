@@ -14,6 +14,7 @@ import {
   resolveSlugMarkdownDocumentTarget,
   writeCanonicalMarkdownDocument,
 } from "../src/markdown-documents.ts";
+import { resolveAuditShardPath } from "../src/audit.ts";
 import {
   advanceAutomationDeviceActivityCursor,
   archiveAutomationIfActiveUntilElapsed,
@@ -21,6 +22,7 @@ import {
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
+  pauseAutomationsIfExactSnapshots,
   readAutomation,
   readAutomationMarkdown,
   reconcileAutomationSupportSeriesNamespace,
@@ -67,6 +69,21 @@ function stableAutomationArchiveFields(
     ...stable
   } = record;
   return stable;
+}
+
+async function countAuditRecords(vaultRoot: string, occurredAt: string): Promise<number> {
+  try {
+    const content = await fs.readFile(
+      path.join(vaultRoot, resolveAuditShardPath(occurredAt)),
+      "utf8",
+    );
+    return content.split("\n").filter(Boolean).length;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return 0;
+    }
+    throw error;
+  }
 }
 
 afterEach(async () => {
@@ -442,6 +459,137 @@ describe("markdown document primitives", () => {
       code: "VAULT_AUTOMATION_MISSING",
       message: "Automation was not found.",
     });
+  });
+
+  it("atomically pauses one exact snapshot batch with one audit", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const initialNow = new Date("2026-07-18T12:00:00.000Z");
+    const route = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "group_chat",
+      identityId: "linq_identity",
+      participantId: null,
+      threadId: "group_chat",
+      threadIsDirect: false,
+    } as const;
+    const first = await upsertAutomation({
+      ...createAutomationPayload({
+        continuityPolicy: "preserve",
+        route,
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        slug: "legacy-group-update-one",
+        title: "Legacy group update one",
+      }),
+      now: initialNow,
+      vaultRoot,
+    });
+    const second = await upsertAutomation({
+      ...createAutomationPayload({
+        continuityPolicy: "preserve",
+        route,
+        schedule: { kind: "dailyLocal", localTime: "09:00" },
+        slug: "legacy-group-update-two",
+        title: "Legacy group update two",
+      }),
+      now: initialNow,
+      vaultRoot,
+    });
+    const auditCountBeforeStaleAttempts = await countAuditRecords(
+      vaultRoot,
+      initialNow.toISOString(),
+    );
+
+    const wrongPath = await pauseAutomationsIfExactSnapshots({
+      snapshots: [{
+        ...first.record,
+        relativePath: "bank/automations/different-path.md",
+      }, second.record],
+      now: new Date("2026-07-19T12:00:00.000Z"),
+      vaultRoot,
+    });
+    expect(wrongPath).toEqual({ paused: false });
+
+    const sameTimestampEdit = await patchAutomation({
+      vaultRoot,
+      lookup: second.record.automationId,
+      instructions: "This edit keeps the same updatedAt timestamp.",
+      now: initialNow,
+    });
+    expect(sameTimestampEdit.record.updatedAt).toBe(second.record.updatedAt);
+    expect(sameTimestampEdit.record.markdown).not.toBe(second.record.markdown);
+
+    const staleBatch = await pauseAutomationsIfExactSnapshots({
+      snapshots: [first.record, second.record],
+      now: new Date("2026-07-19T12:00:00.000Z"),
+      vaultRoot,
+    });
+    expect(staleBatch).toEqual({ paused: false });
+    expect((await readAutomation({
+      automationId: first.record.automationId,
+      vaultRoot,
+    })).status).toBe("active");
+    expect((await readAutomation({
+      automationId: second.record.automationId,
+      vaultRoot,
+    })).status).toBe("active");
+    expect(await countAuditRecords(vaultRoot, initialNow.toISOString()))
+      .toBe(auditCountBeforeStaleAttempts + 1);
+
+    const currentFirst = await readAutomation({
+      automationId: first.record.automationId,
+      vaultRoot,
+    });
+    const currentSecond = await readAutomation({
+      automationId: second.record.automationId,
+      vaultRoot,
+    });
+    const pauseNow = new Date("2026-07-19T12:00:00.000Z");
+    const auditCountBeforePause = await countAuditRecords(vaultRoot, pauseNow.toISOString());
+    const paused = await pauseAutomationsIfExactSnapshots({
+      snapshots: [currentSecond, currentFirst],
+      now: pauseNow,
+      vaultRoot,
+    });
+    expect(paused).toEqual({ paused: true });
+
+    const pausedFirst = await readAutomation({
+      automationId: first.record.automationId,
+      vaultRoot,
+    });
+    const pausedSecond = await readAutomation({
+      automationId: second.record.automationId,
+      vaultRoot,
+    });
+    expect([pausedFirst.status, pausedSecond.status]).toEqual(["paused", "paused"]);
+    expect([pausedFirst.updatedAt, pausedSecond.updatedAt]).toEqual([
+      pauseNow.toISOString(),
+      pauseNow.toISOString(),
+    ]);
+    expect(stableAutomationArchiveFields(pausedFirst)).toEqual(
+      stableAutomationArchiveFields(currentFirst),
+    );
+    expect(stableAutomationArchiveFields(pausedSecond)).toEqual(
+      stableAutomationArchiveFields(currentSecond),
+    );
+    expect(parseFrontmatterDocument(pausedFirst.markdown).attributes.status).toBe("paused");
+    expect(parseFrontmatterDocument(pausedSecond.markdown).attributes.status).toBe("paused");
+    expect(await countAuditRecords(vaultRoot, pauseNow.toISOString()))
+      .toBe(auditCountBeforePause + 1);
+
+    await expect(pauseAutomationsIfExactSnapshots({
+      snapshots: [pausedFirst, pausedSecond],
+      now: new Date(Number.NaN),
+      vaultRoot,
+    })).rejects.toThrow(/now must be a valid Date/u);
+    await expect(pauseAutomationsIfExactSnapshots({
+      snapshots: [pausedFirst, pausedSecond],
+      vaultRoot,
+    })).resolves.toEqual({ paused: false });
+    await expect(pauseAutomationsIfExactSnapshots({
+      snapshots: [],
+      vaultRoot,
+    })).resolves.toEqual({ paused: false });
   });
 
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
@@ -893,6 +1041,79 @@ describe("markdown document primitives", () => {
     })).rejects.toMatchObject({
       code: "VAULT_AUTOMATION_SCHEDULED_TASK_CREATE_ONLY",
     });
+  });
+
+  it("keeps notification and health-update task kinds distinct and immutable", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const route = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "group_chat",
+      identityId: "linq_identity",
+      participantId: null,
+      threadId: "group_chat",
+      threadIsDirect: false,
+    } as const;
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        continuityPolicy: "fresh",
+        route: { ...route, channel: "telegram" },
+        slug: "non-linq-group-notification",
+        title: "Non-Linq group notification",
+      }),
+      scheduledTask: { kind: "group_notification" },
+    })).rejects.toThrow(/requires an explicit non-direct Linq group route/u);
+
+    for (const kind of ["group_notification", "group_health_update"] as const) {
+      const created = await upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          continuityPolicy: "fresh",
+          route,
+          slug: `${kind.replaceAll("_", "-")}-dispatch`,
+          title: `${kind} dispatch`,
+        }),
+        scheduledTask: { kind },
+      });
+
+      expect(created.record.activeUntil).toBeNull();
+      expect(created.record.continuityPolicy).toBe("fresh");
+      expect(created.record.scheduledTask).toEqual({ kind });
+      expect(parseFrontmatterDocument(created.record.markdown).attributes.scheduledTask)
+        .toEqual({ kind });
+
+      const sameIdentity = await upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          automationId: created.record.automationId,
+          continuityPolicy: "fresh",
+          route,
+          slug: created.record.slug,
+          title: created.record.title,
+        }),
+        scheduledTask: { kind },
+      });
+      expect(sameIdentity.record.scheduledTask).toEqual({ kind });
+
+      const differentKind = kind === "group_notification"
+        ? "group_health_update"
+        : "group_notification";
+      await expect(upsertAutomation({
+        vaultRoot,
+        ...createAutomationPayload({
+          automationId: created.record.automationId,
+          continuityPolicy: "fresh",
+          route,
+          slug: created.record.slug,
+          title: created.record.title,
+        }),
+        scheduledTask: { kind: differentKind },
+      })).rejects.toMatchObject({
+        code: "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
+      });
+    }
   });
 
   it("advances only the device activity cursor and refuses stale matcher expectations", async () => {

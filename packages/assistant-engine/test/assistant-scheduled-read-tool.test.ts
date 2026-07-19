@@ -2,13 +2,14 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   appendJournal,
   initializeVault,
   upsertMemory,
 } from '@murphai/core'
+import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from '@murphai/hosted-execution/vault-share'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -19,6 +20,7 @@ import {
 } from '../src/assistant/managed-automations.js'
 import {
   resolveAssistantScheduledTaskAuthority,
+  type AssistantScheduledTaskAuthority,
 } from '../src/assistant/scheduled-task-authority.js'
 import {
   buildAssistantNotificationDecisionSystemPromptLayers,
@@ -241,6 +243,7 @@ describe('scheduled read dynamic tool', () => {
         projectionScopeKey: 'profile-name.v0',
         slug: 'summer-steps',
       },
+      async () => undefined,
     )
     expect(nonSelectable).toMatchObject({
       payload: { code: 'scheduled_read_action_unauthorized' },
@@ -259,6 +262,7 @@ describe('scheduled read dynamic tool', () => {
         projectionScopeKey: 'steps-days.v0',
         slug: 'summer-steps',
       },
+      async () => undefined,
     )
     expect(result).toMatchObject({
       payload: {
@@ -282,6 +286,170 @@ describe('scheduled read dynamic tool', () => {
     expect(result.text).not.toContain(vaultRoot)
     expect(result.text).not.toContain('member_a')
     expect(result.text).not.toContain('sleep-duration-days.v0')
+  })
+
+  it('reads all consented health projections only for a current typed health-update route', async () => {
+    const vaultRoot = await makeVaultRoot()
+    await writeGroupProjectionFixture(vaultRoot, { stepRecordCount: 15 })
+    const assertCurrentGroupRoute = vi.fn(async () => undefined)
+    const authority = genericGroupAuthority()
+
+    const result = await execute(
+      vaultRoot,
+      { action: 'group_shared' },
+      authority,
+      assertCurrentGroupRoute,
+    )
+
+    expect(result).toMatchObject({
+      payload: {
+        action: 'group_shared',
+        memberCount: 1,
+        members: [{
+          shares: [
+            {
+              projectionKind: 'sleep-duration-days.v0',
+              projectionScopeKey: 'sleep-duration-days.v0',
+            },
+            {
+              projectionKind: 'steps-days.v0',
+              projectionScopeKey: 'steps-days.v0',
+            },
+            {
+              projectionKind: 'activity-minutes-days.v1',
+              projectionScope: {
+                projectionKind: 'activity-minutes-days.v1',
+                selector: { activityKind: 'running' },
+              },
+              projectionScopeKey:
+                'activity-minutes-days.v1.activityKind.running',
+              records: [{
+                data: {
+                  activityKind: 'running',
+                  date: '2026-07-18',
+                  sessionCount: 1,
+                  sessionMinutes: 30,
+                },
+              }],
+            },
+          ],
+        }],
+        status: 'ok',
+      },
+      success: true,
+    })
+    expect(assertCurrentGroupRoute).toHaveBeenCalledTimes(1)
+    expect(result.text.match(/"metricKey":"steps"/gu) ?? []).toHaveLength(
+      HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+    )
+    expect(result.text).not.toContain('"recordKey"')
+    expect(result.text).not.toContain('opaqueSourceRevision')
+    for (const privateValue of [
+      'group-email.v0',
+      'member_a',
+      'share_member_a',
+      'event_member_a',
+    ]) {
+      expect(result.text).not.toContain(privateValue)
+    }
+
+    const changedRoute = vi.fn(async () => {
+      throw new Error('current group route changed')
+    })
+    const denied = await execute(
+      vaultRoot,
+      { action: 'group_shared' },
+      genericGroupAuthority(),
+      changedRoute,
+    )
+    expect(denied).toMatchObject({
+      payload: { code: 'scheduled_read_unavailable' },
+      success: false,
+    })
+    expect(changedRoute).toHaveBeenCalledTimes(1)
+
+    const missingRouteOwner = await execute(
+      vaultRoot,
+      { action: 'group_shared' },
+      genericGroupAuthority(),
+      null,
+    )
+    expect(missingRouteOwner).toMatchObject({
+      payload: { code: 'scheduled_group_route_unavailable' },
+      success: false,
+    })
+  })
+
+  it('denies shared projections to typed group notifications', async () => {
+    const vaultRoot = await makeVaultRoot()
+    await writeGroupProjectionFixture(vaultRoot)
+    const assertCurrentGroupRoute = vi.fn(async () => undefined)
+
+    const result = await execute(
+      vaultRoot,
+      { action: 'group_shared' },
+      groupNotificationAuthority(),
+      assertCurrentGroupRoute,
+    )
+
+    expect(result).toMatchObject({
+      payload: { code: 'scheduled_read_action_unauthorized' },
+      success: false,
+    })
+    expect(assertCurrentGroupRoute).not.toHaveBeenCalled()
+  })
+
+  it('keeps ordinary knowledge and registered skill reads available to typed group turns', async () => {
+    const vaultRoot = await makeVaultRoot()
+    await upsertKnowledgePage({
+      body: 'Running consistency improved during the current week.',
+      pageType: 'insight',
+      slug: 'weekly-health-insights',
+      status: 'active',
+      title: 'Weekly health insights',
+      vault: vaultRoot,
+    })
+    const skillsRoot = await makeTempRoot('murph-scheduled-health-skills-')
+    await mkdir(path.join(skillsRoot, 'group-chat'), { recursive: true })
+    await writeFile(
+      path.join(skillsRoot, 'group-chat', 'SKILL.md'),
+      '# Group chat\n\nUse room-owned state only.',
+      'utf8',
+    )
+    process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = skillsRoot
+
+    for (const authority of [
+      genericGroupAuthority(),
+      groupNotificationAuthority(),
+    ]) {
+      const knowledge = await execute(vaultRoot, {
+        action: 'knowledge_get',
+        slug: 'weekly-health-insights',
+      }, authority)
+      const skill = await execute(vaultRoot, {
+        action: 'skill_get',
+        slug: 'group-chat',
+      }, authority)
+
+      expect(knowledge).toMatchObject({
+        payload: {
+          action: 'knowledge_get',
+          page: {
+            body: expect.stringContaining('Running consistency improved'),
+            slug: 'weekly-health-insights',
+          },
+        },
+        success: true,
+      })
+      expect(skill).toMatchObject({
+        payload: {
+          action: 'skill_get',
+          content: '# Group chat\n\nUse room-owned state only.',
+          slug: 'group-chat',
+        },
+        success: true,
+      })
+    }
   })
 
   it('projects only exact scheduled-safe group challenge sections', async () => {
@@ -602,6 +770,15 @@ describe('scheduled read dynamic tool', () => {
     expect(scheduled.stableRouteCapabilityPrompt).toContain(
       'action `skill_get`',
     )
+    const scheduledGroup = buildAssistantSystemPromptLayers({
+      ...scheduledInput,
+      conversationScope: 'group',
+      onboardingGuidance: false,
+      turnTrigger: 'automation-cron',
+    })
+    expect(scheduledGroup.stableRouteCapabilityPrompt).toContain(
+      'typed `group_health_update` receives all currently consented',
+    )
     expect(scheduled.stableRouteCapabilityPrompt).not.toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT',
     )
@@ -676,9 +853,20 @@ async function execute(
     expectedUpdatedAt: '2026-07-18T00:00:00.000Z',
     kind: 'generic_notification',
   },
+  assertCurrentGroupRoute: (() => Promise<void>) | null | undefined = undefined,
 ): Promise<{ payload: unknown; success: boolean; text: string }> {
   const resolvedAuthority = resolveAssistantScheduledTaskAuthority(authority)
+  // Hosted group turns always supply the current-route owner. Positive group
+  // fixtures inherit that production context; pass null to test its absence.
+  const resolvedCurrentGroupRoute = assertCurrentGroupRoute === undefined && (
+    resolvedAuthority.kind === 'group_notification' ||
+    resolvedAuthority.kind === 'group_health_update' ||
+    resolvedAuthority.kind === 'group_challenge'
+  )
+    ? async () => undefined
+    : assertCurrentGroupRoute ?? null
   const result = await executeScheduledReadDynamicTool({
+    assertCurrentGroupRoute: resolvedCurrentGroupRoute,
     assertSourceCurrent: async () => resolvedAuthority,
     authority,
     request: requireValidRequest(argumentsValue),
@@ -714,6 +902,22 @@ function groupChallengeAuthority(
     kind: 'group_challenge',
     projectionScopeKey: 'steps-days.v0',
     slug,
+  }
+}
+
+function genericGroupAuthority(): AssistantScheduledTaskAuthority {
+  return {
+    automationId: 'automation_group_update',
+    expectedUpdatedAt: '2026-07-18T00:00:00.000Z',
+    kind: 'group_health_update',
+  }
+}
+
+function groupNotificationAuthority(): AssistantScheduledTaskAuthority {
+  return {
+    automationId: 'automation_group_notification',
+    expectedUpdatedAt: '2026-07-18T00:00:00.000Z',
+    kind: 'group_notification',
   }
 }
 
@@ -761,33 +965,80 @@ async function makeTempRoot(prefix: string): Promise<string> {
   return root
 }
 
-async function writeGroupProjectionFixture(vaultRoot: string): Promise<void> {
+async function writeGroupProjectionFixture(
+  vaultRoot: string,
+  input?: { stepRecordCount?: number },
+): Promise<void> {
   const projectionDirectory = path.join(vaultRoot, 'derived', 'vault-share')
   await mkdir(projectionDirectory, { recursive: true })
+  const stepRecordCount = input?.stepRecordCount ?? 1
   await writeFile(
     path.join(projectionDirectory, 'projections.json'),
     JSON.stringify({
       projections: {
-        'steps-days.v0': {
+        'activity-minutes-days.v1.activityKind.running': {
           grantors: {
             member_a: {
               grantorMemberId: 'member_a',
-              projectionKind: 'steps-days.v0',
+              projectionKind: 'activity-minutes-days.v1',
+              projectionScope: {
+                projectionKind: 'activity-minutes-days.v1',
+                selector: { activityKind: 'running' },
+              },
+              projectionScopeKey:
+                'activity-minutes-days.v1.activityKind.running',
               records: [{
-                receivedEventId: 'event_member_a_steps',
+                receivedEventId: 'event_member_a_running_minutes',
                 record: {
                   data: {
+                    activityKind: 'running',
                     date: '2026-07-18',
-                    metricKey: 'steps',
-                    unit: 'count',
-                    value: 7_000,
+                    sessionCount: 1,
+                    sessionMinutes: 30,
                   },
                   occurredAt: '2026-07-18T00:00:00.000Z',
                   recordKey: '2026-07-18',
                 },
                 schema: 'murph.vault-share.delivery.v1',
-                shareId: 'share_member_a_steps',
+                shareId: 'share_member_a_running_minutes',
               }],
+              shareId: 'share_member_a_running_minutes',
+              updatedAt: '2026-07-18T12:00:00.000Z',
+            },
+          },
+          projectionScope: {
+            projectionKind: 'activity-minutes-days.v1',
+            selector: { activityKind: 'running' },
+          },
+          projectionScopeKey:
+            'activity-minutes-days.v1.activityKind.running',
+        },
+        'steps-days.v0': {
+          grantors: {
+            member_a: {
+              grantorMemberId: 'member_a',
+              projectionKind: 'steps-days.v0',
+              records: Array.from({ length: stepRecordCount }, (_, index) => {
+                const day = stepRecordCount === 1
+                  ? '18'
+                  : String(index + 1).padStart(2, '0')
+                return {
+                  receivedEventId: `event_member_a_steps_${index}`,
+                  record: {
+                    data: {
+                      date: `2026-07-${day}`,
+                      metricKey: 'steps',
+                      unit: 'count',
+                      value: 7_000 + index,
+                    },
+                    occurredAt: `2026-07-${day}T00:00:00.000Z`,
+                    recordKey: `2026-07-${day}`,
+                    sourceRevision: `opaqueSourceRevision${index}`,
+                  },
+                  schema: 'murph.vault-share.delivery.v1',
+                  shareId: 'share_member_a_steps',
+                }
+              }),
               shareId: 'share_member_a_steps',
               updatedAt: '2026-07-18T12:00:00.000Z',
             },

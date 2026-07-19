@@ -44,11 +44,13 @@ const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   getAssistantChannelAdapter: vi.fn(),
+  listAutomations: vi.fn(),
   listCanonicalAutomations: vi.fn(),
   loadImporterRuntime: vi.fn(),
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
+  pauseAutomationsIfExactSnapshots: vi.fn(),
   renderAutoLoggedFoodMealNote: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
@@ -68,6 +70,9 @@ vi.mock('@murphai/core', () => ({
     error.code.startsWith('VAULT_'),
   ),
   loadVault: cronMocks.loadVault,
+  listAutomations: cronMocks.listAutomations,
+  pauseAutomationsIfExactSnapshots:
+    cronMocks.pauseAutomationsIfExactSnapshots,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
 
@@ -227,6 +232,24 @@ beforeEach(() => {
     metadata: {
       timezone: 'UTC',
     },
+  })
+  cronMocks.listAutomations.mockReset().mockImplementation(
+    async (input: {
+      limit?: number
+      status?: MockAutomationRecord['status']
+      vaultRoot: string
+    }) => {
+      const records = getVaultAutomationStore(input.vaultRoot).filter(
+        (record) => input.status === undefined || record.status === input.status,
+      )
+      return {
+        count: records.length,
+        items: records.slice(0, input.limit),
+      }
+    },
+  )
+  cronMocks.pauseAutomationsIfExactSnapshots.mockReset().mockResolvedValue({
+    paused: true,
   })
   cronMocks.sendAssistantMessageLocal.mockReset().mockResolvedValue({
     response: 'Completed scheduled check-in.',
@@ -640,7 +663,9 @@ describe('assistant cron runtime threshold coverage', () => {
     cronMocks.withAssistantCronWriteLock.mockImplementation(
       async (paths, action: () => Promise<unknown>) => {
         lockInvocationCount += 1
-        if (lockInvocationCount === 2) {
+        // The first lock is the legacy cutover preflight, the second claims
+        // the job, and the third finalizes it.
+        if (lockInvocationCount === 3) {
           const store = await readAssistantCronStore(paths)
           store.jobs = store.jobs.filter((entry) => entry.jobId !== job.jobId)
           await writeAssistantCronStore(paths, store)

@@ -56,10 +56,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // The total ceiling stays a fixed backstop rather than tracking routine
 // dynamic-chunk jitter. PR #784 adds the typed scheduled-turn read/effect
 // owners needed to replace unrestricted native-shell authority; the exact
-// local macOS assembly grew from 9,239,215B on its base to 9,533,375B. Advance
-// the ceiling to 9.55 MB for that reviewed capability graph while preserving
-// a narrow margin and the independent forbidden-input boot guard below.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_550_000;
+// final local macOS assembly measures 9,551,513B. Advance the ceiling to
+// 9.555 MB for that reviewed capability graph while preserving a narrow
+// margin and the independent forbidden-input boot guard below. Lazy-splitting
+// experiments increased total output and added an async failure seam, so the
+// effect owner remains statically linked.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_555_000;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
@@ -94,10 +96,11 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // local macOS runs ~40 KB heavier than the CI Linux measurement — use a round
 // 7.5 MB baseline. The variance tolerance and operational allowance below
 // provide the headroom. This intentionally loosens the boot-surface creep
-// guard; the forbidden-input markers below and fixed 9.55 MB total ceiling
-// remain the hard backstops. Re-tighten to a measured value if boot-closure
-// creep needs active policing again.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_500_000;
+// guard; the forbidden-input markers below and fixed total ceiling remain the
+// hard backstops. PR #784's final typed effect-owner graph measures 7,852,899B
+// locally, 6,899B above the previous combined cap. Advance the round baseline
+// by 10KB and retain the existing tolerance and headroom.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_510_000;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.

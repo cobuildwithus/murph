@@ -332,6 +332,7 @@ describe('group challenge terminal sent commit', () => {
       slug: 'summer-steps',
     }
     const projection = await executeScheduledReadDynamicTool({
+      assertCurrentGroupRoute: async () => undefined,
       assertSourceCurrent: async () => authority,
       authority,
       request,

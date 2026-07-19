@@ -2573,6 +2573,65 @@ test('sendAssistantNotificationLocal withholds device authority from all unatten
   expect(observedHostedToolContexts[1]).toBeNull()
 })
 
+test('sendAssistantNotificationLocal keeps the scheduled group route assertion runtime-local', async () => {
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+  })
+  const assertScheduledGroupRouteCurrent = vi.fn(async () => undefined)
+  let providerMessageInput: AssistantMessageInput | null = null
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      providerMessageInput = providerInput.input
+      expect(
+        providerInput.hostedToolContext
+          ?.assertScheduledGroupRouteCurrent,
+      ).toBe(assertScheduledGroupRouteCurrent)
+      expect(providerInput.hostedToolContext?.beforeToolExecution).toBeUndefined()
+      expect(providerInput.hostedToolContext?.newsletterTool).toBeNull()
+      expect(providerInput.hostedToolContext?.deviceTool).toBeNull()
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    turnId: 'turn-notification-group-route-assertion',
+  })
+
+  await sendAssistantNotificationLocal({
+    assertScheduledGroupRouteCurrent,
+    executionContext: {
+      hosted: {
+        memberId: 'member-notification-group-route-assertion',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Check the current group health update.',
+    scheduledTaskAuthority: {
+      automationId: 'automation_group_update',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'group_health_update',
+    },
+    vault: '/vaults/notification-group-route-assertion',
+  })
+
+  expect(assertScheduledGroupRouteCurrent).not.toHaveBeenCalled()
+  expect(providerMessageInput).toMatchObject({
+    scheduledTaskAuthority: {
+      automationId: 'automation_group_update',
+      expectedUpdatedAt: '2026-07-18T12:00:00.000Z',
+      kind: 'group_health_update',
+    },
+  })
+  expect(Object.prototype.hasOwnProperty.call(
+    providerMessageInput,
+    'assertScheduledGroupRouteCurrent',
+  )).toBe(false)
+  expect(JSON.stringify(providerMessageInput)).not.toContain(
+    'assertScheduledGroupRouteCurrent',
+  )
+})
+
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({

@@ -354,18 +354,35 @@ export const automationAssistantTargetOverrideSchema = z
   .strict();
 
 /**
- * Immutable identity for the one scheduled product task that currently needs
- * task-bound authority. This is deliberately not a generic capability list:
- * the task kind, canonical knowledge owner, and one projection scope are
- * fixed when the automation is created.
+ * Immutable identity for scheduled product tasks that need task-bound
+ * authority. This is deliberately not a generic capability list: each task
+ * kind carries only the canonical identity fields its owning effect requires.
  */
-export const automationScheduledTaskSchema = z
+const automationGroupNotificationScheduledTaskSchema = z
+  .object({
+    kind: z.literal("group_notification"),
+  })
+  .strict();
+
+const automationGroupHealthUpdateScheduledTaskSchema = z
+  .object({
+    kind: z.literal("group_health_update"),
+  })
+  .strict();
+
+export const automationGroupChallengeScheduledTaskSchema = z
   .object({
     kind: z.literal("group_challenge"),
     knowledgeSlug: z.string().regex(slugPattern),
     projectionScopeKey: z.string().min(1).max(200),
   })
   .strict();
+
+export const automationScheduledTaskSchema = z.discriminatedUnion("kind", [
+  automationGroupNotificationScheduledTaskSchema,
+  automationGroupHealthUpdateScheduledTaskSchema,
+  automationGroupChallengeScheduledTaskSchema,
+]);
 
 export const automationFrontmatterSchema = withContractMetadata(
   z
@@ -458,21 +475,27 @@ export interface AutomationScheduledTaskConstraintViolation {
 export function resolveAutomationScheduledTaskConstraintViolation(input: {
   activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
-  route?: Pick<AutomationRoute, "threadIsDirect"> | null;
+  route?: Pick<AutomationRoute, "channel" | "threadIsDirect"> | null;
   schedule: Pick<AutomationSchedule, "kind">;
   scheduledTask?: AutomationScheduledTask | null;
 }): AutomationScheduledTaskConstraintViolation | null {
   if (!input.scheduledTask) {
     return null;
   }
-  if (input.continuityPolicy !== "preserve") {
+  if (
+    input.scheduledTask.kind === "group_challenge" &&
+    input.continuityPolicy !== "preserve"
+  ) {
     return {
       code: "continuity_policy",
-      message: "A scheduled task must preserve conversation continuity.",
+      message: "A group-challenge scheduled task must preserve conversation continuity.",
       path: ["continuityPolicy"],
     };
   }
-  if (!input.activeUntil || !Number.isFinite(Date.parse(input.activeUntil))) {
+  if (
+    input.scheduledTask.kind === "group_challenge" &&
+    (!input.activeUntil || !Number.isFinite(Date.parse(input.activeUntil)))
+  ) {
     return {
       code: "finite_active_until",
       message: "A group-challenge scheduled task requires a finite activeUntil.",
@@ -482,14 +505,17 @@ export function resolveAutomationScheduledTaskConstraintViolation(input: {
   if (input.schedule.kind === "deviceActivity") {
     return {
       code: "time_driven_schedule",
-      message: "A group-challenge scheduled task requires a time-driven schedule.",
+      message: "A scheduled task requires a time-driven schedule.",
       path: ["schedule"],
     };
   }
-  if (input.route?.threadIsDirect !== false) {
+  if (
+    input.route?.channel !== "linq" ||
+    input.route.threadIsDirect !== false
+  ) {
     return {
       code: "non_direct_route",
-      message: "A scheduled task requires an explicit non-direct group route.",
+      message: "A scheduled task requires an explicit non-direct Linq group route.",
       path: ["route", "threadIsDirect"],
     };
   }

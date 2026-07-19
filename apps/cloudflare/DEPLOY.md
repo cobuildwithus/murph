@@ -151,10 +151,36 @@ require all of these gates for the exact bundle:
    `thread/start`; a real stdio sentinel proves an enabled user MCP server is
    rejected without starting its child process.
 3. Managed-container smoke reports the exact new runner-bundle fingerprint.
-4. After convergence, run one personal scheduled reminder, one group scheduled
-   action, and one ordinary attended reply. Confirm the scheduled occurrences
-   delivered only through their typed effects and the attended turn retained
-   its normal tool surface.
+4. After convergence, run one personal scheduled reminder, one typed ordinary
+   group notification, one typed group health update, one typed group
+   challenge, and one ordinary attended reply. Confirm that the ordinary group
+   notification cannot call `group_shared`, the health update receives only the
+   selector-free current consented health projection, the challenge stays bound
+   to its exact page and projection, and the attended turn retains its normal
+   tool surface.
+
+Except for the separately exact-owned newsletter, the restricted runner
+requires every new non-direct Linq automation to persist one immutable task:
+`group_notification`, `group_health_update`, or `group_challenge`. Each task
+also requires a time-driven schedule and the explicit current
+non-direct Linq route. Notifications and health updates may use `fresh` or
+`preserve` continuity; challenges require `preserve` and a finite
+`activeUntil`. Historical untyped Linq records without explicit direct-audience
+evidence cannot be classified safely from instructions. Before any scheduled or manual cron claim, the
+cutover validates one bounded batch of exact canonical snapshots and
+atomically pauses every active ambiguous record. Claim and queued-delivery
+paths reject both active and paused ambiguous records. For a canonically linked
+authorityless pending intent, the provider-entry path requires its current
+source and saved intent to prove a matching supported non-group audience;
+missing, unknown, mismatched, or group evidence fails closed. Legacy direct
+work may be explicitly retargeted to a trusted current direct conversation.
+Group use must be archived and recreated from the current group with the
+intended typed binding; never infer a task from saved text.
+
+Remove this denial bridge only after the restricted runner is the rollback
+floor, every rollback-eligible old runner has been retired, and a complete
+supported-vault inventory taken afterward reports zero active or paused
+ambiguous untyped Linq records and zero linked authorityless pending intents.
 
 The Web compatibility reader is the rollback floor while any deployed or
 rollback-eligible runner can still send `groupId`; remove it only after every
@@ -646,8 +672,9 @@ retry window and let an occurrence expire. Keep the new Web response as the
 rollback floor while the new runner is active. If rollback is unavoidable,
 roll back Cloudflare first, prove the old runner fingerprint, and only then roll
 back Web; this restores the prior cron failure risk, so a forward fix is
-preferred. After convergence, smoke one personal scheduled reminder and one
-group automation, and confirm there are no new
+preferred. After convergence, smoke one personal scheduled reminder and all
+three typed group task variants. Confirm that local execution rejects group
+tasks and there are no new
 `ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE` or
 `ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE` failures.
 

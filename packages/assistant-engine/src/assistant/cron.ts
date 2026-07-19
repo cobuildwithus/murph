@@ -88,6 +88,9 @@ import {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
+import {
+  pauseAmbiguousLinqAutomationsBeforeClaim,
+} from './ambiguous-linq-automation-cutover.ts'
 
 export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
 export {
@@ -519,6 +522,9 @@ export async function runAssistantCronJobNow(
 ): Promise<AssistantCronRunExecutionResult> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
+  await withAssistantCronWriteLock(paths, () =>
+    pauseAmbiguousLinqAutomationsBeforeClaim({ vault: input.vault })
+  )
   await repairPendingAssistantCronDeliveries({
     paths,
     vault: input.vault,
@@ -592,6 +598,9 @@ export async function processDueAssistantCronJobsLocal(
     return summary
   }
 
+  await withAssistantCronWriteLock(paths, () =>
+    pauseAmbiguousLinqAutomationsBeforeClaim({ vault: input.vault })
+  )
   await repairPendingAssistantCronDeliveries({
     paths,
     vault: input.vault,

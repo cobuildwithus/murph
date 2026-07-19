@@ -111,6 +111,9 @@ describe('assistant scheduled-turn capability parity', () => {
       '`murph.scheduled_read` action `skill_get`',
     )
     expect(layers.prompt).toContain(
+      'typed `group_health_update` receives all currently consented',
+    )
+    expect(layers.prompt).toContain(
       'Assistant personality preferences for this group room:',
     )
     expect(layers.prompt).toContain('Humor 8/10')

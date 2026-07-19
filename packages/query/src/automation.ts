@@ -170,7 +170,7 @@ function normalizeAutomationScheduledTask(value: unknown): AutomationScheduledTa
 
   const parsed = automationScheduledTaskSchema.safeParse(value);
   if (!parsed.success) {
-    throw new Error("scheduledTask must be a canonical group-challenge task binding.");
+    throw new Error("scheduledTask must be a canonical typed group task binding.");
   }
 
   return parsed.data;

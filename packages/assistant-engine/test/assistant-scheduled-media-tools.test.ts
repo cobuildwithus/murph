@@ -28,6 +28,9 @@ import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 
 const GROUP_AUTHORITY = {
   automationId: 'automation_group_challenge',
@@ -169,8 +172,12 @@ describe('scheduled media tool boundary', () => {
     }
 
     const assertSourceCurrent = vi.fn(async () => GROUP_AUTHORITY)
+    const assertGroupRouteCurrent = vi.fn(async () => undefined)
     const uploadGeneratedImage = vi.fn(async (input: { alt: string | null }) => {
       expect(assertSourceCurrent).toHaveBeenCalledTimes(
+        uploadGeneratedImage.mock.calls.length * 2 + 2,
+      )
+      expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(
         uploadGeneratedImage.mock.calls.length * 2 + 2,
       )
       return {
@@ -182,6 +189,7 @@ describe('scheduled media tool boundary', () => {
     })
     const fetchImpl = vi.fn<typeof fetch>(async () => {
       expect(assertSourceCurrent).toHaveBeenCalledTimes(2)
+      expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(2)
       return jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
         usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
@@ -192,6 +200,9 @@ describe('scheduled media tool boundary', () => {
       claimScheduledMediaGeneration: async () => 'claimed',
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertGroupRouteCurrent,
+      ),
       hostedGeneratedImageUploader: { uploadGeneratedImage },
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -215,6 +226,9 @@ describe('scheduled media tool boundary', () => {
       claimScheduledMediaGeneration: async () => 'claimed',
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertGroupRouteCurrent,
+      ),
       hostedGeneratedImageUploader: { uploadGeneratedImage },
       nextUsageOrdinal: () => 2,
       progressDelivery: null,
@@ -234,6 +248,7 @@ describe('scheduled media tool boundary', () => {
     expect(fetchImpl).toHaveBeenCalledOnce()
     expect(uploadGeneratedImage).toHaveBeenCalledTimes(2)
     expect(assertSourceCurrent).toHaveBeenCalledTimes(6)
+    expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(6)
   })
 
   it('rechecks voice authority at every turn-time provider boundary', async () => {
@@ -252,16 +267,19 @@ describe('scheduled media tool boundary', () => {
       MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
     }
     const assertSourceCurrent = vi.fn(async () => GROUP_AUTHORITY)
+    const assertGroupRouteCurrent = vi.fn(async () => undefined)
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
         expect(assertSourceCurrent).toHaveBeenCalledTimes(2)
+        expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(2)
         return new Response(mp3Bytes, {
           headers: { 'content-type': 'audio/mpeg' },
         })
       }
       if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
         expect(assertSourceCurrent).toHaveBeenCalledTimes(3)
+        expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(3)
         return jsonResponse({
           attachment_id: 'attachment_scheduled_voice',
           download_url: 'https://cdn.example.test/scheduled-voice.mp3',
@@ -273,6 +291,7 @@ describe('scheduled media tool boundary', () => {
       }
       if (url === 'https://uploads.example.test/scheduled-voice') {
         expect(assertSourceCurrent).toHaveBeenCalledTimes(4)
+        expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(4)
         return new Response(null, { status: 204 })
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -282,6 +301,9 @@ describe('scheduled media tool boundary', () => {
       claimScheduledMediaGeneration: async () => 'claimed',
       env,
       fetchImpl,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertGroupRouteCurrent,
+      ),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
       request,
@@ -299,6 +321,169 @@ describe('scheduled media tool boundary', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(fetchImpl).toHaveBeenCalledTimes(3)
     expect(assertSourceCurrent).toHaveBeenCalledTimes(4)
+    expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    {
+      argumentsValue: {
+        alt: 'Panel one',
+        outputFormat: 'webp',
+        prompt: 'Draw a square newspaper-comic panel.',
+        quality: 'medium',
+        size: '1024x1024',
+      },
+      tool: 'generate_scheduled_image',
+    },
+    {
+      argumentsValue: {
+        text: 'Today\'s standings are official.',
+      },
+      tool: 'generate_scheduled_voice_memo',
+    },
+    {
+      argumentsValue: {
+        durationSeconds: 30,
+        instrumental: false,
+        prompt: 'A short standings song.',
+      },
+      tool: 'generate_scheduled_song',
+    },
+  ])('prevents $tool provider cost when the current group route was revoked', async ({
+    argumentsValue,
+    tool,
+  }) => {
+    const request = readToolRequest(tool, argumentsValue)
+    if (!request) {
+      throw new Error(`scheduled media request was not parsed: ${tool}`)
+    }
+    const env = {
+      ELEVENLABS_API_KEY: 'elevenlabs-key',
+      LINQ_API_TOKEN: 'linq-token',
+      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+      MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      OPENAI_API_KEY: 'openai-test-key',
+    }
+    const assertSourceCurrent = vi.fn(async () => GROUP_AUTHORITY)
+    const assertGroupRouteCurrent = vi.fn(async () => {
+      throw new Error('group route revoked')
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+    const uploadGeneratedImage = vi.fn()
+    const claimScheduledMediaGeneration = vi.fn(async () => 'claimed' as const)
+
+    const execution = executeMurphDynamicToolRequest({
+      claimScheduledMediaGeneration,
+      env,
+      fetchImpl,
+      hostedGeneratedImageUploader: { uploadGeneratedImage },
+      hostedToolContext: createScheduledGroupToolContext(
+        assertGroupRouteCurrent,
+      ),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      requireHostedGeneratedImageUploader: true,
+      scheduledOccurrenceAt: SCHEDULED_OCCURRENCE_AT,
+      scheduledTaskAuthority: GROUP_AUTHORITY,
+      scheduledTaskSourceCurrentAssertion: assertSourceCurrent,
+      voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
+        env,
+        fetchImpl,
+        publicFetchImpl: fetchImpl,
+        voiceMemoDeliveryChannel: 'linq',
+      }),
+    })
+
+    await expect(execution).rejects.toThrow('group route revoked')
+    expect(assertSourceCurrent).toHaveBeenCalledOnce()
+    expect(assertGroupRouteCurrent).toHaveBeenCalledOnce()
+    expect(claimScheduledMediaGeneration).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(uploadGeneratedImage).not.toHaveBeenCalled()
+  })
+
+  it('rechecks song authority after claiming before provider cost', async () => {
+    const request = readToolRequest('generate_scheduled_song', {
+      durationSeconds: 30,
+      instrumental: false,
+      prompt: 'A short standings song.',
+    })
+    if (!request) {
+      throw new Error('scheduled song request was not parsed')
+    }
+    const env = {
+      ELEVENLABS_API_KEY: 'elevenlabs-key',
+      LINQ_API_TOKEN: 'linq-token',
+      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+      MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+    }
+    const claimScheduledMediaGeneration = vi.fn(async () => 'claimed' as const)
+    const assertSourceCurrent = vi.fn(async () => GROUP_AUTHORITY)
+    const assertGroupRouteCurrent = vi.fn(async () => {
+      if (claimScheduledMediaGeneration.mock.calls.length > 0) {
+        throw new Error('group route revoked after claim')
+      }
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    const result = await executeMurphDynamicToolRequest({
+      claimScheduledMediaGeneration,
+      env,
+      fetchImpl,
+      hostedToolContext: createScheduledGroupToolContext(
+        assertGroupRouteCurrent,
+      ),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      scheduledOccurrenceAt: SCHEDULED_OCCURRENCE_AT,
+      scheduledTaskAuthority: GROUP_AUTHORITY,
+      scheduledTaskSourceCurrentAssertion: assertSourceCurrent,
+      voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
+        env,
+        fetchImpl,
+        publicFetchImpl: fetchImpl,
+        voiceMemoDeliveryChannel: 'linq',
+      }),
+    })
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(claimScheduledMediaGeneration).toHaveBeenCalledOnce()
+    expect(assertSourceCurrent).toHaveBeenCalledTimes(2)
+    expect(assertGroupRouteCurrent).toHaveBeenCalledTimes(2)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('fails closed before claiming when the group route check is unavailable', async () => {
+    const request = readToolRequest('generate_scheduled_song', {
+      durationSeconds: 30,
+      instrumental: false,
+      prompt: 'A short standings song.',
+    })
+    if (!request) {
+      throw new Error('scheduled song request was not parsed')
+    }
+    const assertSourceCurrent = vi.fn(async () => GROUP_AUTHORITY)
+    const claimScheduledMediaGeneration = vi.fn(async () => 'claimed' as const)
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(executeMurphDynamicToolRequest({
+      claimScheduledMediaGeneration,
+      env: {},
+      fetchImpl,
+      hostedToolContext: createScheduledGroupToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      scheduledOccurrenceAt: SCHEDULED_OCCURRENCE_AT,
+      scheduledTaskAuthority: GROUP_AUTHORITY,
+      scheduledTaskSourceCurrentAssertion: assertSourceCurrent,
+    })).rejects.toThrow('Scheduled group route is unavailable.')
+
+    expect(assertSourceCurrent).toHaveBeenCalledOnce()
+    expect(claimScheduledMediaGeneration).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('fails closed when the dispatcher refuses another media generation', async () => {
@@ -313,6 +498,9 @@ describe('scheduled media tool boundary', () => {
       claimScheduledMediaGeneration: async () => 'limit_reached',
       env: {},
       fetchImpl: vi.fn<typeof fetch>(),
+      hostedToolContext: createScheduledGroupToolContext(
+        async () => undefined,
+      ),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
       request,
@@ -489,6 +677,9 @@ describe('scheduled media tool boundary', () => {
       claimScheduledMediaGeneration: async () => 'occurrence_reserved',
       env: {},
       fetchImpl: providerFetch,
+      hostedToolContext: createScheduledGroupToolContext(
+        async () => undefined,
+      ),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
       request,
@@ -536,4 +727,21 @@ function jsonResponse(body: unknown): Response {
     headers: { 'content-type': 'application/json' },
     status: 200,
   })
+}
+
+function createScheduledGroupToolContext(
+  assertScheduledGroupRouteCurrent?: () => Promise<void>,
+): AssistantHostedToolContext {
+  return {
+    ...(assertScheduledGroupRouteCurrent
+      ? { assertScheduledGroupRouteCurrent }
+      : {}),
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    sendVaultFile: async () => {
+      throw new Error('Vault file delivery is unavailable in this test.')
+    },
+    vaultFileSendAvailable: false,
+  }
 }

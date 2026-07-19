@@ -84,6 +84,28 @@ Last verified: 2026-07-18
   validate the bound page while holding its canonical mutation lock, so a
   concurrent automation, status, route, or content change cannot be overwritten
   from a stale snapshot.
+- Except for the separately exact-owned group newsletter, every new non-direct
+  Linq automation has one immutable task binding, a time-driven schedule, and
+  an explicit current group route. `group_notification` has the normal bounded
+  generic reads and no group-shared read; `group_health_update` adds
+  selector-free current consented health projections; and either may use fresh
+  or preserved continuity. `group_challenge` fixes its page and projection and
+  requires preserved continuity plus a finite lifecycle. Web revalidates the
+  current non-direct route before model work, each group-shared read, and
+  delivery. A changed or unavailable route aborts the occurrence, and local
+  runtimes cannot execute group tasks.
+- The pre-binding Linq cutover never infers intent from instructions. Under
+  the canonical automation lock, it validates a bounded batch of exact record
+  snapshots before atomically pausing every active ambiguous untyped Linq
+  automation without explicit direct-audience evidence. Any stale snapshot
+  aborts the batch instead of leaving a partial cutover. Claim and
+  queued-delivery checks reject active or
+  paused ambiguous records. For a linked authorityless pending intent, provider
+  entry requires matching supported non-group audience evidence from both the
+  current canonical source and saved intent; otherwise it rejects. Legacy
+  direct work may be explicitly retargeted to a trusted current direct
+  conversation; group use must be archived and recreated from the current
+  group with a task binding.
 - Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Exact-message targeting must preserve existing effect owners. Reply selection is side-effect free until normal delivery, while reactions keep the existing `message-reaction` operation and retry policy. The local service re-resolves the accepted input before either effect. For a reaction followed by `finish_without_reply`, the provider's already-recorded reaction patch—not a later mutable eligibility check—defers suppression evidence until the delivery outcome is known. A marked normal message persists `nativeReplyRequested: true` with its provider target, and both fields participate in outbox fingerprinting, equality, dedupe, and retry. Every `---` bubble from one response segment copies that same pair; unmarked automatic replies remain flat. Invalid or stale refs fail as recoverable tool results before any effect. A marked Linq send may not create a replacement direct chat, and a selected Linq voice-only response must fail before sending because the voice-memo endpoint cannot carry the reply target.

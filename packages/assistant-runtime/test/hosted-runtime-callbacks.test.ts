@@ -307,6 +307,19 @@ async function assertLinqEngagementWithExistingProviderClaim(request: {
   });
 }
 
+function createLinqEngagementWithExistingProviderClaimForAudience(
+  threadIsDirect: boolean | null,
+) {
+  return async (request: { authorityCheckOnly: boolean }) => {
+    if (request.authorityCheckOnly === true) {
+      return typeof threadIsDirect === "boolean"
+        ? { threadIsDirect }
+        : {};
+    }
+    return await assertLinqEngagementWithExistingProviderClaim(request);
+  };
+}
+
 async function flushHostedRuntimeCallbackTestMicrotasks(): Promise<void> {
   for (let index = 0; index < 8; index += 1) {
     await Promise.resolve();
@@ -7937,6 +7950,173 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      currentThreadIsDirect: true,
+      expectedThreadIsDirect: false,
+      kind: "text" as const,
+      label: "pre-model group route becomes direct",
+    },
+    {
+      currentThreadIsDirect: false,
+      expectedThreadIsDirect: true,
+      kind: "text" as const,
+      label: "pre-model direct route becomes a group",
+    },
+    {
+      currentThreadIsDirect: true,
+      expectedThreadIsDirect: false,
+      kind: "voice" as const,
+      label: "pre-model group voice route becomes direct",
+    },
+  ])(
+    "blocks scheduled Linq $kind delivery when the $label at provider entry",
+    async ({ currentThreadIsDirect, expectedThreadIsDirect, kind }) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_scheduled",
+        channel: "linq",
+        explicitTarget: "linq_chat_scheduled",
+        threadIsDirect: expectedThreadIsDirect,
+        transportIdempotent: kind === "text",
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+        createMirrorState({
+          automationAuthority: {
+            automationId: "automation_scheduled",
+            expectedUpdatedAt: "2026-07-18T12:00:00.000Z",
+          },
+          delivery: null,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+          threadIsDirect: expectedThreadIsDirect,
+        }),
+      );
+      const assertRecentInbound = vi.fn(async () => ({
+        providerDispatchClaimed: true,
+        threadIsDirect: currentThreadIsDirect,
+      }));
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          if (kind === "voice") {
+            await dependencies.sendLinqVoiceMemo({
+              attachmentId: "attachment_scheduled",
+              target: "linq_chat_scheduled",
+              targetKind: "thread",
+            });
+          } else {
+            await dependencies.sendLinq({
+              idempotencyKey: "assistant-outbox:intent_123",
+              message: "Scheduled route update.",
+              target: "linq_chat_scheduled",
+              targetKind: "thread",
+            });
+          }
+          throw new Error("Provider dispatch unexpectedly remained reachable.");
+        },
+      );
+      const providerFetch = vi.fn<typeof fetch>();
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_MISMATCH",
+      });
+
+      expect(assertRecentInbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authorityCheckOnly: false,
+          target: "linq_chat_scheduled",
+          targetKind: "thread",
+        }),
+        { signal: null },
+      );
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+      expect(mocks.sendLinqVoiceMemoMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      currentThreadIsDirect: null,
+      expectedThreadIsDirect: false,
+      label: "provider-entry response omits current audience authority",
+    },
+    {
+      currentThreadIsDirect: false,
+      expectedThreadIsDirect: null,
+      label: "scheduled effect omits expected audience authority",
+    },
+  ])("fails closed when the $label", async ({
+    currentThreadIsDirect,
+    expectedThreadIsDirect,
+  }) => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_scheduled",
+      channel: "linq",
+      explicitTarget: "linq_chat_scheduled",
+      threadIsDirect: expectedThreadIsDirect,
+      transportIdempotent: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        automationAuthority: {
+          automationId: "automation_scheduled",
+          expectedUpdatedAt: "2026-07-18T12:00:00.000Z",
+        },
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+        threadIsDirect: expectedThreadIsDirect,
+      }),
+    );
+    const assertRecentInbound = vi.fn(async () => ({
+      providerDispatchClaimed: true,
+      ...(typeof currentThreadIsDirect === "boolean"
+        ? { threadIsDirect: currentThreadIsDirect }
+        : {}),
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Scheduled route update.",
+          target: "linq_chat_scheduled",
+          targetKind: "thread",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+    });
+
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
@@ -7998,6 +8178,169 @@ describe("hosted runtime callbacks", () => {
       expect.any(Object),
     );
   });
+
+  it.each([
+    { label: "group", threadIsDirect: false },
+    { label: "direct", threadIsDirect: true },
+  ])(
+    "re-enters scheduled $label Linq delivery only after rereading matching audience authority",
+    async ({ threadIsDirect }) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_scheduled",
+        channel: "linq",
+        explicitTarget: "linq_chat_scheduled",
+        threadIsDirect,
+        transportIdempotent: true,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+        createMirrorState({
+          automationAuthority: {
+            automationId: "automation_scheduled",
+            expectedUpdatedAt: "2026-07-18T12:00:00.000Z",
+          },
+          delivery: null,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+          threadIsDirect,
+        }),
+      );
+      const assertRecentInbound = vi.fn(
+        createLinqEngagementWithExistingProviderClaimForAudience(threadIsDirect),
+      );
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_scheduled",
+        target: "linq_chat_scheduled",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          const delivery = await dependencies.sendLinq({
+            idempotencyKey: "assistant-outbox:intent_123",
+            message: "Scheduled route update.",
+            target: "linq_chat_scheduled",
+            targetKind: "thread",
+          });
+          return createDispatchResult({
+            delivery: createDelivery({
+              channel: "linq",
+              providerMessageId: delivery.providerMessageId,
+              providerThreadId: delivery.providerThreadId,
+              target: delivery.target,
+              targetKind: delivery.targetKind,
+            }),
+            status: "sent",
+          });
+        },
+      );
+      const providerFetch = vi.fn<typeof fetch>(
+        async () => new Response(null, { status: 204 }),
+      );
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).resolves.toEqual([
+        expect.objectContaining({ deliveryStatus: "sent" }),
+      ]);
+
+      expect(assertRecentInbound.mock.calls.map(([request]) =>
+        request.authorityCheckOnly
+      )).toEqual([false, true]);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {
+      code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_MISMATCH",
+      currentThreadIsDirect: true,
+      expectedThreadIsDirect: false,
+      label: "group audience changed to direct",
+    },
+    {
+      code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_MISMATCH",
+      currentThreadIsDirect: false,
+      expectedThreadIsDirect: true,
+      label: "direct audience changed to group",
+    },
+    {
+      code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+      currentThreadIsDirect: null,
+      expectedThreadIsDirect: false,
+      label: "current audience is unknown",
+    },
+  ])(
+    "blocks re-entered scheduled Linq delivery when the $label",
+    async ({ code, currentThreadIsDirect, expectedThreadIsDirect }) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_scheduled",
+        channel: "linq",
+        explicitTarget: "linq_chat_scheduled",
+        threadIsDirect: expectedThreadIsDirect,
+        transportIdempotent: true,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+        createMirrorState({
+          automationAuthority: {
+            automationId: "automation_scheduled",
+            expectedUpdatedAt: "2026-07-18T12:00:00.000Z",
+          },
+          delivery: null,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+          threadIsDirect: expectedThreadIsDirect,
+        }),
+      );
+      const assertRecentInbound = vi.fn(
+        createLinqEngagementWithExistingProviderClaimForAudience(
+          currentThreadIsDirect,
+        ),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          await dependencies.sendLinq({
+            idempotencyKey: "assistant-outbox:intent_123",
+            message: "Scheduled route update.",
+            target: "linq_chat_scheduled",
+            targetKind: "thread",
+          });
+          throw new Error("Provider dispatch unexpectedly remained reachable.");
+        },
+      );
+      const providerFetch = vi.fn<typeof fetch>();
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({ code });
+
+      expect(assertRecentInbound.mock.calls.map(([request]) =>
+        request.authorityCheckOnly
+      )).toEqual([false, true]);
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["reaction", "voice"] as const)(
     "keeps an already-started non-idempotent Linq %s delivery confirmation-pending",

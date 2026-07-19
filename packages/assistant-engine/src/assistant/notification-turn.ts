@@ -210,6 +210,7 @@ export interface AssistantNotificationInput
       | 'turnTrigger'
       | 'workingDirectory'
     > {
+  assertScheduledGroupRouteCurrent?: (() => Promise<void>) | null
   deliveryDedupeToken?: string | null
   beforeDelivery?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
@@ -363,9 +364,16 @@ export async function sendAssistantNotificationLocal(
 
       const turnId = createAssistantTurnId()
       const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const assertScheduledGroupRouteCurrent =
+        input.assertScheduledGroupRouteCurrent ?? null
       const hostedToolContext =
-        hostedNewsletterTool
+        hostedNewsletterTool || assertScheduledGroupRouteCurrent
           ? createAssistantHostedToolContext({
+              ...(assertScheduledGroupRouteCurrent
+                ? {
+                    assertScheduledGroupRouteCurrent,
+                  }
+                : {}),
               deviceTool: null,
               newsletterTool: hostedNewsletterTool,
               messageInput,

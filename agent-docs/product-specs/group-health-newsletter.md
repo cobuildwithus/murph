@@ -105,14 +105,17 @@ share id no longer matches the final canonical grant result. The model never
 performs the authorization join and receives neither the grant snapshot nor its
 proof.
 
-Authorized newsletter cron turns keep the normal group conversation thread,
-native resume behavior, and shell/tool access. The automation instructions tell
-the assistant to read the newsletter skill and to use only the filtered
-`prepare.result.members` facts when writing that edition. This is an assistant
-instruction, not a provenance guarantee: conversation or tool context can still
-be visible to the model. The hard boundary is the late authorization proof,
-which constrains current preparation and recipients but does not prove that
-every model-authored sentence came only from the latest preparation.
+Authorized newsletter cron turns run in a separately owned one-shot scheduled
+App Server. They do not resume the attended provider thread and expose no
+native shell or operator CLI. The parent grants only the task-scoped
+`scheduled_read` access needed to load the registered newsletter skill and the
+one-shot newsletter prepare/send capability. The automation instructions tell
+the assistant to use only the filtered `prepare.result.members` facts when
+writing that edition. This is an assistant instruction, not a provenance
+guarantee: bounded committed conversation context can still be visible to the
+model. The hard boundary is the late authorization proof, which constrains
+current preparation and recipients but does not prove that every model-authored
+sentence came only from the latest preparation.
 
 Each scheduled turn owns a one-shot capability: exactly one preparation
 attempt and at most one send attempt. Any failure or send closes it, so a model

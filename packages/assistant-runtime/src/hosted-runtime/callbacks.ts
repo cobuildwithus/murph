@@ -2314,6 +2314,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
     vault: input.vaultRoot,
   });
+  const scheduledLinqThreadIsDirect =
+    mirrorState.intent?.automationAuthority != null
+      ? input.assistantDeliveryEffect.payload.threadIsDirect ?? null
+      : undefined;
   const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
@@ -2499,6 +2503,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          scheduledThreadIsDirect: scheduledLinqThreadIsDirect,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -2514,6 +2519,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          scheduledThreadIsDirect: scheduledLinqThreadIsDirect,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -2978,6 +2984,7 @@ function createHostedAssistantLinqSendDependency(input: {
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  scheduledThreadIsDirect?: boolean | null;
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
@@ -3061,20 +3068,25 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: async () => {
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            answeredMailboxItemIds: request.answeredMailboxItemIds,
-            authorityCheckOnly: false,
-            directRecipientPhoneNumber,
-            effectsPort: input.effectsPort ?? null,
-            fromPhoneNumber,
-            homeRouteFallbackAllowed: currentHomeRouteOnly,
-            idempotencyKey,
-            intentId: input.intentId ?? null,
-            replyToMessageId: request.replyToMessageId ?? null,
-            providerDispatchRetrySafe: true,
-            signal: signal ?? null,
-            target: providerTarget,
-            targetKind: providerTargetKind,
+          const authority =
+            await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+              answeredMailboxItemIds: request.answeredMailboxItemIds,
+              authorityCheckOnly: false,
+              directRecipientPhoneNumber,
+              effectsPort: input.effectsPort ?? null,
+              fromPhoneNumber,
+              homeRouteFallbackAllowed: currentHomeRouteOnly,
+              idempotencyKey,
+              intentId: input.intentId ?? null,
+              replyToMessageId: request.replyToMessageId ?? null,
+              providerDispatchRetrySafe: true,
+              signal: signal ?? null,
+              target: providerTarget,
+              targetKind: providerTargetKind,
+            });
+          assertHostedAssistantLinqScheduledAudienceCurrent({
+            currentThreadIsDirect: authority.threadIsDirect,
+            expectedThreadIsDirect: input.scheduledThreadIsDirect,
           });
           attemptedAt = new Date();
           input.onProviderDispatchEntered?.();
@@ -3303,6 +3315,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   providerFetch: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  scheduledThreadIsDirect?: boolean | null;
   threadIsDirect?: boolean | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
@@ -3350,21 +3363,26 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: async () => {
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            answeredMailboxItemIds: request.answeredMailboxItemIds,
-            authorityCheckOnly: false,
-            directRecipientPhoneNumber:
-              deliveryContext?.directRecipientPhoneNumber ?? null,
-            effectsPort: input.effectsPort ?? null,
-            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-            homeRouteFallbackAllowed: currentHomeRouteOnly,
-            idempotencyKey,
-            intentId: input.intentId ?? null,
-            replyToMessageId,
-            providerDispatchRetrySafe: false,
-            signal: signal ?? null,
-            target: providerTarget,
-            targetKind: "thread",
+          const authority =
+            await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+              answeredMailboxItemIds: request.answeredMailboxItemIds,
+              authorityCheckOnly: false,
+              directRecipientPhoneNumber:
+                deliveryContext?.directRecipientPhoneNumber ?? null,
+              effectsPort: input.effectsPort ?? null,
+              fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+              homeRouteFallbackAllowed: currentHomeRouteOnly,
+              idempotencyKey,
+              intentId: input.intentId ?? null,
+              replyToMessageId,
+              providerDispatchRetrySafe: false,
+              signal: signal ?? null,
+              target: providerTarget,
+              targetKind: "thread",
+            });
+          assertHostedAssistantLinqScheduledAudienceCurrent({
+            currentThreadIsDirect: authority.threadIsDirect,
+            expectedThreadIsDirect: input.scheduledThreadIsDirect,
           });
           attemptedAt = new Date();
           input.onProviderDispatchEntered?.();
@@ -3715,22 +3733,23 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     );
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
+  const request = {
+    ...(input.answeredMailboxItemIds?.length
+      ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
+      : {}),
+    authorityCheckOnly: input.authorityCheckOnly,
+    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+    fromPhoneNumber: input.fromPhoneNumber,
+    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
+    idempotencyKey: input.idempotencyKey,
+    intentId: input.intentId,
+    replyToMessageId: input.replyToMessageId,
+    target: input.target,
+    targetKind,
+  };
   let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
   try {
-    result = await assertRecentInbound({
-      ...(input.answeredMailboxItemIds?.length
-        ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
-        : {}),
-      authorityCheckOnly: input.authorityCheckOnly,
-      directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-      fromPhoneNumber: input.fromPhoneNumber,
-      homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
-      idempotencyKey: input.idempotencyKey,
-      intentId: input.intentId,
-      replyToMessageId: input.replyToMessageId,
-      target: input.target,
-      targetKind,
-    }, {
+    result = await assertRecentInbound(request, {
       signal: input.signal,
     });
   } catch (error) {
@@ -3743,7 +3762,18 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
         providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
         result: alreadyStarted,
       });
-      return alreadyStarted;
+      const currentAuthority = normalizeHostedAssistantLinqEngagementResult(
+        await assertRecentInbound({
+          ...request,
+          authorityCheckOnly: true,
+        }, {
+          signal: input.signal,
+        }),
+      );
+      return {
+        ...currentAuthority,
+        providerDispatchClaimed: false,
+      };
     }
     throw error;
   }
@@ -3794,6 +3824,9 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;
   }
+  if (typeof result?.threadIsDirect === "boolean") {
+    normalized.threadIsDirect = result.threadIsDirect;
+  }
   const targetOverride = result?.targetOverride ?? null;
   if (targetOverride?.target && targetOverride.targetKind === "thread") {
     normalized.targetOverride = {
@@ -3802,6 +3835,32 @@ function normalizeHostedAssistantLinqEngagementResult(
     };
   }
   return normalized;
+}
+
+function assertHostedAssistantLinqScheduledAudienceCurrent(input: {
+  currentThreadIsDirect?: boolean | null;
+  expectedThreadIsDirect?: boolean | null;
+}): void {
+  if (input.expectedThreadIsDirect === undefined) {
+    return;
+  }
+  if (
+    typeof input.currentThreadIsDirect !== "boolean"
+    || typeof input.expectedThreadIsDirect !== "boolean"
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+      "Scheduled Linq delivery requires current direct or group authority at provider entry.",
+      { retryable: true },
+    );
+  }
+  if (input.currentThreadIsDirect !== input.expectedThreadIsDirect) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_MISMATCH",
+      "Scheduled Linq delivery audience changed before provider entry.",
+      { retryable: true },
+    );
+  }
 }
 
 function normalizeHostedAssistantLinqTargetKind(

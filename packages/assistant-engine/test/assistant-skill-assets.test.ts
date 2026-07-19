@@ -710,6 +710,8 @@ describe('assistant skill assets', () => {
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )
     expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
+    expect(raw).toContain('all currently consented server-approved health projections')
+    expect(raw).toContain('zero-selector `murph.scheduled_read` action `group_shared`')
     expect(raw).toContain(
       "Create a new newsletter under the developer prompt's shared automation action",
     )

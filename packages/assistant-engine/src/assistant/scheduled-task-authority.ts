@@ -1,5 +1,10 @@
 import { isDeepStrictEqual } from 'node:util'
 
+import type {
+  AutomationRoute,
+  AutomationSchedule,
+  AutomationScheduledTask,
+} from '@murphai/contracts'
 import { showAutomation } from '@murphai/query'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -36,6 +41,16 @@ export type AssistantScheduledTaskAuthority =
       readonly automationId: string
       readonly expectedUpdatedAt: string
       readonly kind: 'generic_notification'
+    }
+  | {
+      readonly automationId: string
+      readonly expectedUpdatedAt: string
+      readonly kind: 'group_notification'
+    }
+  | {
+      readonly automationId: string
+      readonly expectedUpdatedAt: string
+      readonly kind: 'group_health_update'
     }
   | {
       readonly automationId: string
@@ -90,6 +105,16 @@ export type ResolvedAssistantScheduledTaskAuthority =
       readonly automationId: string
       readonly expectedUpdatedAt: string
       readonly kind: 'generic_notification'
+    }
+  | {
+      readonly automationId: string
+      readonly expectedUpdatedAt: string
+      readonly kind: 'group_notification'
+    }
+  | {
+      readonly automationId: string
+      readonly expectedUpdatedAt: string
+      readonly kind: 'group_health_update'
     }
   | {
       readonly automationId: string
@@ -193,8 +218,9 @@ export interface AssistantScheduledAutomationSource {
   automationId: string
   continuityPolicy: string
   instructions: string
-  schedule: unknown
-  scheduledTask: unknown
+  route: AutomationRoute
+  schedule: AutomationSchedule
+  scheduledTask: AutomationScheduledTask | null
   slug: string
   status: string
   summary: string | null
@@ -241,7 +267,12 @@ export function resolveAssistantScheduledTaskAuthorityFromSource(
   }
 
   const scheduledTask = source.scheduledTask
-  if (isExactGroupNewsletterScheduledTaskSource(source)) {
+  if (
+    source.status === 'active' &&
+    source.automationId.trim().length > 0 &&
+    Number.isFinite(Date.parse(source.updatedAt)) &&
+    isExactAssistantGroupNewsletterAutomationDefinition(source)
+  ) {
     return {
       automationId: source.automationId,
       expectedUpdatedAt: source.updatedAt,
@@ -253,37 +284,41 @@ export function resolveAssistantScheduledTaskAuthorityFromSource(
   }
 
   if (scheduledTask !== null && scheduledTask !== undefined) {
-    if (
-      source.status === 'active' &&
-      typeof source.activeUntil === 'string' &&
-      Number.isFinite(Date.parse(source.activeUntil)) &&
-      isTimeDrivenScheduledTaskSchedule(source.schedule) &&
-      typeof scheduledTask === 'object' &&
-      Reflect.get(scheduledTask, 'kind') === 'group_challenge' &&
-      typeof Reflect.get(scheduledTask, 'knowledgeSlug') === 'string' &&
-      typeof Reflect.get(scheduledTask, 'projectionScopeKey') === 'string'
-    ) {
-      const projectionScopeKey = Reflect.get(
-        scheduledTask,
-        'projectionScopeKey',
-      ) as string
-      if (!isGroupChallengeProjectionScopeKey(projectionScopeKey)) {
-        return NONE_SCHEDULED_TASK_AUTHORITY
-      }
-      return {
-        automationId: source.automationId,
-        expectedUpdatedAt: source.updatedAt,
-        kind: 'group_challenge',
-        projectionScopeKey,
-        slug: Reflect.get(scheduledTask, 'knowledgeSlug') as string,
-      }
+    if (!isExactTypedGroupScheduledTaskSource(source)) {
+      return NONE_SCHEDULED_TASK_AUTHORITY
     }
-    return NONE_SCHEDULED_TASK_AUTHORITY
+
+    const revision = {
+      automationId: source.automationId,
+      expectedUpdatedAt: source.updatedAt,
+    }
+    switch (scheduledTask.kind) {
+      case 'group_notification':
+        return { ...revision, kind: scheduledTask.kind }
+      case 'group_health_update':
+        return { ...revision, kind: scheduledTask.kind }
+      case 'group_challenge':
+        if (
+          source.continuityPolicy !== 'preserve' ||
+          typeof source.activeUntil !== 'string' ||
+          !Number.isFinite(Date.parse(source.activeUntil)) ||
+          !isGroupChallengeProjectionScopeKey(scheduledTask.projectionScopeKey)
+        ) {
+          return NONE_SCHEDULED_TASK_AUTHORITY
+        }
+        return {
+          ...revision,
+          kind: scheduledTask.kind,
+          projectionScopeKey: scheduledTask.projectionScopeKey,
+          slug: scheduledTask.knowledgeSlug,
+        }
+    }
   }
 
   if (
     source.status === 'active' &&
     source.scheduledTask == null &&
+    !sourceHasUntypedLinqRouteWithoutExplicitDirectAudience(source) &&
     source.automationId.trim().length > 0 &&
     Number.isFinite(Date.parse(source.updatedAt))
   ) {
@@ -297,17 +332,37 @@ export function resolveAssistantScheduledTaskAuthorityFromSource(
   return NONE_SCHEDULED_TASK_AUTHORITY
 }
 
-function isTimeDrivenScheduledTaskSchedule(
-  schedule: unknown,
+/**
+ * Identify pre-binding Linq automations without explicit direct-audience
+ * evidence. Their free text cannot distinguish a private notification from
+ * an ordinary group message, health update, or challenge. Exact managed
+ * owners are excluded by the same source resolver that grants their authority.
+ * Ambiguous records must be recreated with explicit current-route authority
+ * and, for a group, a typed task.
+ */
+export function assistantAutomationHasAmbiguousLinqAudience(
+  source: AssistantScheduledAutomationSource,
 ): boolean {
-  if (!schedule || typeof schedule !== 'object') {
+  if (
+    (source.status !== 'active' && source.status !== 'paused') ||
+    !sourceHasUntypedLinqRouteWithoutExplicitDirectAudience(source)
+  ) {
     return false
   }
-  const kind = Reflect.get(schedule, 'kind')
-  return kind === 'at' ||
-    kind === 'every' ||
-    kind === 'cron' ||
-    kind === 'dailyLocal'
+
+  return resolveAssistantScheduledTaskAuthorityFromSource({
+    ...source,
+    status: 'active',
+  }).kind === 'none'
+}
+
+function isTimeDrivenScheduledTaskSchedule(
+  schedule: AutomationSchedule,
+): boolean {
+  return schedule.kind === 'at' ||
+    schedule.kind === 'every' ||
+    schedule.kind === 'cron' ||
+    schedule.kind === 'dailyLocal'
 }
 
 export function resolveAssistantScheduledTaskAuthority(
@@ -323,6 +378,8 @@ export function resolveAssistantScheduledTaskAuthority(
 
   switch (authority.kind) {
     case 'generic_notification':
+    case 'group_notification':
+    case 'group_health_update':
     case 'group_newsletter':
       return authority
     case 'managed_knowledge_ledger':
@@ -395,7 +452,11 @@ export async function assertAssistantScheduledTaskSourceCurrent(input: {
     )
   }
 
-  if (authority.kind === 'group_challenge') {
+  if (
+    authority.kind === 'group_notification' ||
+    authority.kind === 'group_health_update' ||
+    authority.kind === 'group_challenge'
+  ) {
     if (!isDeepStrictEqual(
       resolveAssistantScheduledTaskAuthorityFromSource(current),
       authority,
@@ -405,7 +466,9 @@ export async function assertAssistantScheduledTaskSourceCurrent(input: {
         'The scheduled automation changed before the effect was attempted.',
       )
     }
+  }
 
+  if (authority.kind === 'group_challenge') {
     let page: Awaited<ReturnType<typeof getKnowledgePage>>['page']
     try {
       page = (await getKnowledgePage({
@@ -476,21 +539,48 @@ function scheduledSourceRevisionIsValid(
     Number.isFinite(Date.parse(authority.expectedUpdatedAt))
 }
 
-function isExactGroupNewsletterScheduledTaskSource(
+export function isExactAssistantGroupNewsletterAutomationDefinition(
+  source: Pick<
+    AssistantScheduledAutomationSource,
+    | 'continuityPolicy'
+    | 'route'
+    | 'schedule'
+    | 'scheduledTask'
+    | 'slug'
+    | 'supportKind'
+  >,
+): boolean {
+  return source.slug === ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG &&
+    routeChannelIsLinq(source.route.channel) &&
+    source.route.threadIsDirect === false &&
+    source.continuityPolicy === 'fresh' &&
+    source.schedule.kind === 'cron' &&
+    source.schedule.expression.trim().length > 0 &&
+    source.scheduledTask == null &&
+    source.supportKind == null
+}
+
+function isExactTypedGroupScheduledTaskSource(
   source: AssistantScheduledAutomationSource,
 ): boolean {
   return source.status === 'active' &&
-    source.slug === ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG &&
-    source.continuityPolicy === 'fresh' &&
-    typeof source.schedule === 'object' &&
-    source.schedule !== null &&
-    Reflect.get(source.schedule, 'kind') === 'cron' &&
-    typeof Reflect.get(source.schedule, 'expression') === 'string' &&
-    (Reflect.get(source.schedule, 'expression') as string).trim().length > 0 &&
-    source.scheduledTask == null &&
-    source.supportKind == null &&
+    routeChannelIsLinq(source.route.channel) &&
+    source.route.threadIsDirect === false &&
+    isTimeDrivenScheduledTaskSchedule(source.schedule) &&
     source.automationId.trim().length > 0 &&
     Number.isFinite(Date.parse(source.updatedAt))
+}
+
+function sourceHasUntypedLinqRouteWithoutExplicitDirectAudience(
+  source: AssistantScheduledAutomationSource,
+): boolean {
+  return source.scheduledTask == null &&
+    routeChannelIsLinq(source.route.channel) &&
+    source.route.threadIsDirect !== true
+}
+
+function routeChannelIsLinq(channel: string): boolean {
+  return channel.trim().toLowerCase() === 'linq'
 }
 
 function isGroupChallengeProjectionScopeKey(value: string): boolean {

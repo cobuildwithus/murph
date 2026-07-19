@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
@@ -12,8 +14,22 @@ import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
 import {
+  assistantAutomationHasAmbiguousLinqAudience,
   assertAssistantScheduledTaskSourceCurrent,
 } from '../scheduled-task-authority.js'
+import {
+  listCanonicalAssistantCronRecords,
+  resolveCanonicalAssistantCronJobId,
+  type CanonicalAutomationAssistantCronJobRecord,
+} from '../cron/canonical-jobs.js'
+import {
+  readAssistantCronCanonicalRuntimeStore,
+} from '../cron/runtime-state.js'
+import {
+  assistantCronTargetAudienceEquals,
+  resolveAssistantCronTargetBindingDelivery,
+} from '../cron/targets.js'
+import { resolveAssistantStatePaths } from '../store/paths.js'
 
 export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   intent: AssistantOutboxIntent
@@ -21,9 +37,15 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
 }): Promise<Error | null> {
   const authority = input.intent.automationAuthority
   if (!authority) {
-    return legacyNewsletterIntentRequiresAutomationAuthority(input.intent)
-      ? createAssistantOutboxAutomationAuthorityStaleError()
-      : null
+    if (legacyNewsletterIntentRequiresAutomationAuthority(input.intent)) {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
+
+    if (await authoritylessLinkedIntentRequiresAutomationAuthority(input)) {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
+
+    return null
   }
 
   const current = await readAssistantOutboxAuthorizedAutomation({
@@ -32,6 +54,9 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     vault: input.vault,
   })
   if (!current) {
+    return createAssistantOutboxAutomationAuthorityStaleError()
+  }
+  if (assistantAutomationHasAmbiguousLinqAudience(current.record)) {
     return createAssistantOutboxAutomationAuthorityStaleError()
   }
 
@@ -77,6 +102,84 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
       ? error
       : createAssistantOutboxAutomationAuthorityStaleError()
   }
+}
+
+async function authoritylessLinkedIntentRequiresAutomationAuthority(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<boolean> {
+  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+    resolveAssistantStatePaths(input.vault),
+    { reclaimStaleRunningClaims: false },
+  )
+  const pendingOwners = runtimeStore.jobs.filter(
+    (record) =>
+      record.state.pendingDeliveryIntentId === input.intent.intentId,
+  )
+  if (pendingOwners.length === 0) {
+    return false
+  }
+  if (pendingOwners.length !== 1) {
+    return true
+  }
+
+  const [pendingOwner] = pendingOwners
+  const canonicalSources = (await listCanonicalAssistantCronRecords(
+    input.vault,
+    ['active', 'paused'],
+  )).filter(
+    (source) =>
+      resolveCanonicalAssistantCronJobId(source) === pendingOwner?.jobId,
+  )
+  if (canonicalSources.length !== 1) {
+    return true
+  }
+
+  const [source] = canonicalSources
+  if (
+    !source ||
+    source.kind !== 'automation' ||
+    !assistantOutboxIntentMatchesCanonicalAutomationAudience(
+      input.intent,
+      source,
+    ) ||
+    assistantAutomationHasAmbiguousLinqAudience(source)
+  ) {
+    return true
+  }
+
+  return (
+    source.route.channel === 'linq' &&
+    source.route.threadIsDirect !== true
+  ) || (
+    input.intent.channel === 'linq' &&
+    input.intent.threadIsDirect !== true
+  )
+}
+
+function assistantOutboxIntentMatchesCanonicalAutomationAudience(
+  intent: AssistantOutboxIntent,
+  source: CanonicalAutomationAssistantCronJobRecord,
+): boolean {
+  if (intent.channel === null) {
+    return false
+  }
+
+  const intentAudience = {
+    channel: intent.channel,
+    deliverySource: intent.deliverySource,
+    deliveryTarget: intent.explicitTarget,
+    identityId: intent.identityId,
+    participantId: intent.actorId,
+    threadId: intent.threadId,
+    threadIsDirect: intent.threadIsDirect,
+  }
+
+  return assistantCronTargetAudienceEquals(source.route, intentAudience) &&
+    isDeepStrictEqual(
+      resolveAssistantCronTargetBindingDelivery(source.route),
+      intent.bindingDelivery ?? null,
+    )
 }
 
 function legacyNewsletterIntentRequiresAutomationAuthority(

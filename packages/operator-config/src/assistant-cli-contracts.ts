@@ -3,7 +3,7 @@ import { z } from 'zod'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,
-  automationScheduledTaskSchema,
+  automationGroupChallengeScheduledTaskSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
@@ -355,7 +355,7 @@ export const assistantGroupChallengeDispatchCommitSchema = z
     preparedBody: z.string().trim().min(1).max(
       ASSISTANT_GROUP_CHALLENGE_PREPARED_BODY_MAX_LENGTH,
     ),
-    scheduledTask: automationScheduledTaskSchema,
+    scheduledTask: automationGroupChallengeScheduledTaskSchema,
   })
   .strict()
 

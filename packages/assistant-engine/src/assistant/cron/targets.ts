@@ -190,8 +190,17 @@ export function buildAssistantCronTargetSnapshot(
   }
 }
 
+type AssistantCronBindingDeliveryTarget = Pick<
+  AssistantCronTarget | AutomationRoute,
+  | 'channel'
+  | 'deliverySource'
+  | 'deliveryTarget'
+  | 'participantId'
+  | 'threadId'
+>
+
 export function resolveAssistantCronTargetBindingDelivery(
-  target: AssistantCronTarget,
+  target: AssistantCronBindingDeliveryTarget,
 ): AssistantBindingDelivery | null {
   if (normalizeNullableString(target.deliveryTarget) !== null) {
     return null
@@ -236,8 +245,8 @@ function resolveAssistantCronNotificationThreadIsDirect(
 }
 
 function isLinqParticipantMaterializationTarget(
-  target: AssistantCronTarget,
-): target is AssistantCronTarget & {
+  target: AssistantCronBindingDeliveryTarget,
+): target is AssistantCronBindingDeliveryTarget & {
   deliverySource: { kind: 'linq'; fromPhoneNumber: string }
   participantId: string
 } {

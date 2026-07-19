@@ -22,7 +22,9 @@ import {
 } from '../src/assistant-codex/dynamic-tools/scheduled-onboarding.js'
 import {
   ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+  assistantAutomationHasAmbiguousLinqAudience,
   assertAssistantScheduledTaskSourceCurrent,
+  isExactAssistantGroupNewsletterAutomationDefinition,
   resolveAssistantScheduledTaskAuthorityFromSource,
   type AssistantScheduledAutomationSource,
 } from '../src/assistant/scheduled-task-authority.js'
@@ -37,6 +39,69 @@ afterEach(async () => {
 })
 
 describe('scheduled task source authority', () => {
+  it('denies every ambiguous unbound non-direct Linq automation without reading its instructions', () => {
+    const source: AssistantScheduledAutomationSource = {
+      activeUntil: '2026-07-30T00:00:00.000Z',
+      assistantTargetOverride: null,
+      automationId: 'automation_legacy_group_challenge',
+      continuityPolicy: 'preserve',
+      instructions: 'Prepare an ordinary group check-in.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'legacy-group',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '08:00' },
+      scheduledTask: null,
+      slug: 'legacy-group-challenge',
+      status: 'active',
+      summary: null,
+      supportKind: null,
+      tags: [],
+      title: 'Legacy group challenge',
+      updatedAt: '2026-07-18T12:00:00.000Z',
+    }
+
+    const {
+      threadIsDirect: _omittedThreadIsDirect,
+      ...routeWithoutThreadDirectness
+    } = source.route
+    void _omittedThreadIsDirect
+    for (const route of [
+      source.route,
+      { ...source.route, channel: 'Linq' },
+      { ...source.route, threadIsDirect: null },
+      routeWithoutThreadDirectness,
+    ]) {
+      const ambiguousSource = { ...source, route }
+      expect(resolveAssistantScheduledTaskAuthorityFromSource(ambiguousSource))
+        .toEqual({ kind: 'none' })
+      expect(assistantAutomationHasAmbiguousLinqAudience(ambiguousSource))
+        .toBe(true)
+    }
+    expect(resolveAssistantScheduledTaskAuthorityFromSource({
+      ...source,
+      route: { ...source.route, threadIsDirect: true },
+    })).toMatchObject({ kind: 'generic_notification' })
+    expect(assistantAutomationHasAmbiguousLinqAudience({
+      ...source,
+      route: { ...source.route, threadIsDirect: true },
+    })).toBe(false)
+    expect(resolveAssistantScheduledTaskAuthorityFromSource({
+      ...source,
+      scheduledTask: { kind: 'group_notification' },
+    })).toMatchObject({ kind: 'group_notification' })
+    expect(resolveAssistantScheduledTaskAuthorityFromSource({
+      ...source,
+      continuityPolicy: 'fresh',
+      scheduledTask: { kind: 'group_health_update' },
+    })).toMatchObject({ kind: 'group_health_update' })
+  })
+
   it('recognizes only the exact reserved newsletter definition', () => {
     const source: AssistantScheduledAutomationSource = {
       activeUntil: null,
@@ -44,6 +109,15 @@ describe('scheduled task source authority', () => {
       automationId: 'automation_group_newsletter',
       continuityPolicy: 'fresh',
       instructions: 'Compose the weekly group newsletter.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'newsletter-group',
+        threadIsDirect: false,
+      },
       schedule: { expression: '0 9 * * 1', kind: 'cron' },
       scheduledTask: null,
       slug: ASSISTANT_GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
@@ -60,8 +134,16 @@ describe('scheduled task source authority', () => {
       expectedUpdatedAt: source.updatedAt,
       kind: 'group_newsletter',
     })
+    expect(isExactAssistantGroupNewsletterAutomationDefinition(source)).toBe(true)
+    expect(isExactAssistantGroupNewsletterAutomationDefinition({
+      ...source,
+      route: { ...source.route, channel: 'LINQ' },
+    })).toBe(true)
     for (const mismatch of [
       { continuityPolicy: 'preserve' },
+      { route: { ...source.route, channel: 'telegram' } },
+      { route: { ...source.route, threadIsDirect: true } },
+      { route: { ...source.route, threadIsDirect: null } },
       { schedule: { kind: 'dailyLocal', localTime: '09:00' } },
       { supportKind: 'reminder' },
       { status: 'paused' },
@@ -72,12 +154,20 @@ describe('scheduled task source authority', () => {
           projectionScopeKey: 'steps-days.v0',
         },
       },
-    ]) {
+    ] as const) {
       expect(resolveAssistantScheduledTaskAuthorityFromSource({
         ...source,
         ...mismatch,
       })).toEqual({ kind: 'none' })
     }
+    expect(isExactAssistantGroupNewsletterAutomationDefinition({
+      ...source,
+      route: { ...source.route, threadIsDirect: true },
+    })).toBe(false)
+    expect(isExactAssistantGroupNewsletterAutomationDefinition({
+      ...source,
+      route: { ...source.route, threadIsDirect: null },
+    })).toBe(false)
   })
 
   it('mints group-challenge authority only for a bounded time schedule', () => {
@@ -87,6 +177,15 @@ describe('scheduled task source authority', () => {
       automationId: 'automation_group_challenge',
       continuityPolicy: 'preserve',
       instructions: 'Compose the next challenge dispatch.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'challenge-group',
+        threadIsDirect: false,
+      },
       schedule: { kind: 'dailyLocal', localTime: '08:00' },
       scheduledTask: {
         kind: 'group_challenge',
@@ -158,6 +257,74 @@ describe('scheduled task source authority', () => {
     vi.setSystemTime('2026-07-19T00:00:00.000Z')
     await expect(assertAssistantScheduledTaskSourceCurrent({ authority, vault }))
       .rejects.toMatchObject({ code: 'scheduled_task_source_changed' })
+  })
+
+  it('rechecks the canonical typed group task source', async () => {
+    const groupVault = await createVault()
+    const groupSource = (await upsertAutomation({
+      continuityPolicy: 'fresh',
+      instructions: 'Send one grounded group health update.',
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'group-thread',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      scheduledTask: { kind: 'group_health_update' },
+      status: 'active',
+      title: 'Group health update',
+      vaultRoot: groupVault,
+    })).record
+    const authority = resolveAssistantScheduledTaskAuthorityFromSource(groupSource)
+
+    await expect(assertAssistantScheduledTaskSourceCurrent({
+      authority,
+      vault: groupVault,
+    })).resolves.toMatchObject({ kind: 'group_health_update' })
+
+    await patchAutomation({
+      instructions: `${groupSource.instructions}\nChanged after preparation.`,
+      lookup: groupSource.automationId,
+      now: new Date('2026-07-18T12:01:00.000Z'),
+      vaultRoot: groupVault,
+    })
+    await expect(assertAssistantScheduledTaskSourceCurrent({
+      authority,
+      vault: groupVault,
+    })).rejects.toMatchObject({ code: 'scheduled_task_source_changed' })
+
+    const directVault = await createVault()
+    const directSource = (await upsertAutomation({
+      continuityPolicy: 'fresh',
+      instructions: 'Send one personal reminder.',
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'personal-thread',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      status: 'active',
+      title: 'Personal reminder',
+      vaultRoot: directVault,
+    })).record
+    await expect(assertAssistantScheduledTaskSourceCurrent({
+      authority: {
+        automationId: directSource.automationId,
+        expectedUpdatedAt: directSource.updatedAt,
+        kind: 'group_health_update',
+      },
+      vault: directVault,
+    })).rejects.toMatchObject({ code: 'scheduled_task_source_changed' })
   })
 
   it('requires the exact bound challenge page to remain active', async () => {

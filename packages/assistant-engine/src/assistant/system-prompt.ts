@@ -1215,7 +1215,7 @@ function buildAssistantScheduledVaultReadGuidanceText(
     ? "- The trusted parent binds `murph.scheduled_read` to this room's current group vault. Read only public references, group-owned state, recent room conversation, and server-approved shared projections. Never read a participant's personal vault, records, memory, settings, accounts, devices, or preferences from the room container."
     : "- Read only the private member state relevant to this automation's persisted purpose. Use targeted memory or knowledge reads and normalized health queries instead of scanning files or broad history.";
   const groupSharedLine = conversationScope === "group"
-    ? "- During an authorized group-challenge run, use zero-selector `group_shared` for the one exact projection scope immutably bound to the scheduled task. The parent supplies the current group vault; never pass a room, route, participant, member, scope, or projection id."
+    ? "- When zero-selector `group_shared` is available, use it for current shared health evidence. A typed `group_health_update` receives all currently consented server-approved health projections; a `group_challenge` receives only its one exact bound projection. A `group_notification` receives no shared health data. The parent supplies the current group vault; never pass a room, route, participant, member, scope, projection, or record id."
     : null;
 
   return `Scheduled vault reads:

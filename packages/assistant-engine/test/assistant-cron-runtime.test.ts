@@ -19,6 +19,11 @@ import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type {
+  AssistantNotificationCommitContext,
+  AssistantNotificationInput,
+} from '../src/assistant/notification-turn.js'
+
 type MockAutomationRecord = {
   activeUntil?: string | null
   automationId: string
@@ -573,6 +578,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const result = await executeClaimedAssistantCronJob({
+      executionContext: fixture.executionContext,
       job: fixture.claimed,
       paths: fixture.paths,
       trigger: 'scheduled',
@@ -609,6 +615,7 @@ describe('assistant cron runtime orchestration', () => {
     )
 
     const result = await executeClaimedAssistantCronJob({
+      executionContext: fixture.executionContext,
       job: fixture.claimed,
       paths: fixture.paths,
       trigger: 'scheduled',
@@ -638,6 +645,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const result = await executeClaimedAssistantCronJob({
+      executionContext: fixture.executionContext,
       job: fixture.claimed,
       paths: fixture.paths,
       trigger: 'scheduled',
@@ -690,6 +698,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const result = await executeClaimedAssistantCronJob({
+      executionContext: fixture.executionContext,
       job: fixture.claimed,
       paths: fixture.paths,
       trigger: 'scheduled',
@@ -711,6 +720,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const result = await executeClaimedAssistantCronJob({
+      executionContext: fixture.executionContext,
       job: fixture.claimed,
       paths: fixture.paths,
       trigger: 'scheduled',
@@ -1269,6 +1279,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: 'identity-1',
           participantId: 'participant-1',
           threadId: 'thread-1',
+          threadIsDirect: true,
         },
         schedule: {
           kind: 'dailyLocal',
@@ -1293,6 +1304,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: 'identity-1',
           participantId: 'participant-1',
           threadId: 'thread-1',
+          threadIsDirect: true,
         },
         schedule: {
           at: '2026-06-24T09:00:00-04:00',
@@ -3919,6 +3931,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -4021,6 +4034,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule,
         slug: 'group-health-newsletter',
@@ -4095,10 +4109,14 @@ describe('assistant cron runtime orchestration', () => {
       })
       await expect(
         runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
-      ).resolves.toBeNull()
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_AMBIGUOUS_LINQ_AUTOMATION_RECREATION_REQUIRED',
+      })
       await expect(
         runSchedule({ kind: 'every', everyMs: 3_600_000 }),
-      ).resolves.toBeNull()
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_AMBIGUOUS_LINQ_AUTOMATION_RECREATION_REQUIRED',
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -4176,6 +4194,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -4309,6 +4328,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -4587,6 +4607,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
       slug: 'revoked-progress-consent',
@@ -4638,6 +4659,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
       slug: 'progress-consent-revoked-during-provider',
@@ -4756,6 +4778,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
       slug: 'generic-support-revoked-before-commit',
@@ -6515,6 +6538,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: 'identity-1',
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -6672,7 +6696,7 @@ describe('assistant cron runtime orchestration', () => {
       currentRouteSnapshot: true,
       label: 'with the retired route marker',
     },
-  ] as const)('authorizes a legacy bare Linq target $label and records a successful cron run', async ({
+  ] as const)('rejects a legacy bare Linq target $label until its audience is explicit', async ({
     currentRouteSnapshot,
   }) => {
     vi.useFakeTimers()
@@ -6718,7 +6742,7 @@ describe('assistant cron runtime orchestration', () => {
 
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    const claimed = await claimResolvedAssistantCronJob({
+    await expect(claimResolvedAssistantCronJob({
       job: {
         kind: 'canonical',
         source,
@@ -6726,41 +6750,12 @@ describe('assistant cron runtime orchestration', () => {
         job: projectCanonicalAssistantCronJob({ source, runtimeState }),
       },
       paths,
-    })
-    const result = await executeClaimedAssistantCronJob({
-      executionContext: {
-        hosted: {
-          memberId: 'member-legacy-linq-authorized',
-          resolveScheduledLinqRoute,
-          userEnvKeys: [],
-        },
-      },
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
-      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AMBIGUOUS_LINQ_AUTOMATION_RECREATION_REQUIRED',
     })
 
-    expect(result.removedAfterRun).toBe(true)
-    expect(result.run).toMatchObject({
-      outcome: 'no_op',
-      status: 'succeeded',
-    })
-    expect(result.runErrorCode).toBeNull()
-    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        homeRouteFallbackAllowed: true,
-        target: 'saved-home-chat',
-        targetKind: 'explicit',
-      }),
-    )
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'current-home-chat',
-        deliveryTarget: 'current-home-chat',
-        threadIsDirect: true,
-      }),
-    )
+    expect(resolveScheduledLinqRoute).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
   it('resolves hosted Linq participant automations to the current home thread', async () => {
@@ -6784,6 +6779,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: 'hid_linq_identity_participant',
         participantId: '+15550002222',
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
@@ -6834,6 +6830,103 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('does not derive group-read authority from a local Linq routing hint', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-local-linq-group-authority-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-local-linq-group-authority',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'local-group-chat',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      scheduledTask: { kind: 'group_health_update' },
+      slug: 'local-linq-group-authority-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Local Linq group authority reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      status: 'failed',
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('keeps a Linq route with unknown directness out of local due scans', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-local-linq-unknown-audience-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-local-linq-unknown-audience',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the saved reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'unknown-audience-chat',
+        threadIsDirect: null,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      scheduledTask: null,
+      slug: 'local-linq-unknown-audience-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq unknown audience reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const localStatus = await getAssistantCronStatus(vaultRoot)
+    const hostedStatus = await getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+    })
+
+    expect(localStatus.dueJobs).toBe(0)
+    expect(localStatus.nextRunAt).toBeNull()
+    expect(hostedStatus.dueJobs).toBe(1)
+    expect(hostedStatus.nextRunAt).toBe('2026-04-08T10:00:00.000Z')
+  })
+
   it('does not fall back from a known Linq group route to the personal home chat', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -6858,6 +6951,7 @@ describe('assistant cron runtime orchestration', () => {
         at: '2026-04-08T10:00:00.000Z',
         kind: 'at',
       },
+      scheduledTask: { kind: 'group_health_update' },
       slug: 'linq-group-authority-reminder',
       status: 'active',
       summary: null,
@@ -6870,6 +6964,33 @@ describe('assistant cron runtime orchestration', () => {
       threadIsDirect: false,
     })
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    const commitContext: AssistantNotificationCommitContext = {
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Prepared the group reminder.',
+        text: 'Group reminder.',
+      },
+      deliveryOutcome: null,
+      response: 'Group reminder.',
+    }
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
+      input: AssistantNotificationInput,
+    ) => {
+      expect(input.scheduledTaskAuthority).toEqual({
+        automationId: 'automation-linq-group-authority',
+        expectedUpdatedAt: '2026-04-08T08:00:00.000Z',
+        kind: 'group_health_update',
+      })
+      expect(input.assertScheduledGroupRouteCurrent).toEqual(
+        expect.any(Function),
+      )
+      await input.assertScheduledGroupRouteCurrent?.()
+      await input.beforeDelivery?.(commitContext)
+      return {
+        response: commitContext.response,
+        session: { sessionId: 'session-linq-group-authority' },
+      }
+    })
 
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
@@ -6886,6 +7007,7 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(result.run.status).toBe('succeeded')
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(3)
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
         homeRouteFallbackAllowed: false,
@@ -6901,6 +7023,166 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: false,
       }),
     )
+  })
+
+  it('fails the whole occurrence when a saved Linq group resolves as direct', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-group-became-direct-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-group-became-direct',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'saved-group-chat',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      scheduledTask: { kind: 'group_health_update' },
+      slug: 'linq-group-became-direct-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq group became direct reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'saved-group-chat',
+      threadIsDirect: true,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-linq-group-became-direct',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+    )
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(1)
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('fails when the hosted group route changes between shared read and delivery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-group-route-race-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-group-route-race',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'saved-group-chat',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      scheduledTask: { kind: 'group_health_update' },
+      slug: 'linq-group-route-race-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq group route race reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn()
+      .mockResolvedValueOnce({
+        target: 'saved-group-chat',
+        threadIsDirect: false,
+      })
+      .mockResolvedValueOnce({
+        target: 'saved-group-chat',
+        threadIsDirect: false,
+      })
+      .mockResolvedValueOnce({
+        target: 'replacement-group-chat',
+        threadIsDirect: false,
+      })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    const commitContext: AssistantNotificationCommitContext = {
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Prepared the group reminder.',
+        text: 'Group reminder.',
+      },
+      deliveryOutcome: null,
+      response: 'Group reminder.',
+    }
+    let deliveryCompleted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
+      input: AssistantNotificationInput,
+    ) => {
+      await input.assertScheduledGroupRouteCurrent?.()
+      await input.beforeDelivery?.(commitContext)
+      deliveryCompleted = true
+      return {
+        response: commitContext.response,
+        session: { sessionId: 'session-linq-group-route-race' },
+      }
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-linq-group-route-race',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.removedAfterRun).toBe(false)
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      status: 'failed',
+    })
+    expect(result.runErrorCode).toBe(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+    )
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(3)
+    expect(deliveryCompleted).toBe(false)
   })
 
   it('records a retryable cron failure when Linq route authority fails before notification', async () => {
@@ -6928,6 +7210,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
@@ -8056,6 +8339,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -8203,6 +8487,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -8343,6 +8628,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -8449,6 +8735,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         at: '2026-04-08T09:00:00.000Z',
@@ -8760,6 +9047,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
       slug: 'required-final-boundary',
@@ -8834,6 +9122,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: 'participant-1',
         threadId: 'thread-1',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -9709,10 +9998,21 @@ async function createBoundGroupChallengeExecutionFixture(input: {
     },
     paths,
   })
+  const executionContext = {
+    hosted: {
+      memberId: 'member-group-challenge',
+      resolveScheduledLinqRoute: vi.fn().mockResolvedValue({
+        target: 'group-chat-1',
+        threadIsDirect: false,
+      }),
+      userEnvKeys: [],
+    },
+  }
 
   return {
     automationId,
     claimed,
+    executionContext,
     expectedUpdatedAt,
     mediaReservation,
     occurrenceAt,

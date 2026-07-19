@@ -2519,6 +2519,346 @@ describe('assistant outbox runtime', () => {
 
   it.each([
     {
+      channel: 'linq',
+      metadata: 'current Linq group metadata',
+      threadIsDirect: false,
+    },
+    {
+      channel: null,
+      metadata: 'null legacy route metadata',
+      threadIsDirect: null,
+    },
+    {
+      channel: 'linq',
+      metadata: 'stale direct-thread metadata',
+      threadIsDirect: true,
+    },
+  ] as const)(
+    'denies an authority-less scheduled intent linked with $metadata',
+    async ({ channel, threadIsDirect }) => {
+      const { paths, vaultRoot } = await createInitializedAssistantVault(
+        'assistant-outbox-linked-untyped-group-',
+      )
+      const automation = await upsertAutomation({
+        ...scaffoldAutomationPayload(),
+        continuityPolicy: 'preserve',
+        instructions: 'Share the typed scheduled note with this conversation.',
+        now: new Date('2026-07-18T12:00:00.000Z'),
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-thread',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-thread',
+          threadIsDirect: false,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '08:00' },
+        scheduledTask: { kind: 'group_health_update' },
+        slug: 'typed-group-note',
+        status: 'active',
+        title: 'Typed group note',
+        vaultRoot,
+      })
+      const queued = await deliverAssistantOutboxMessage({
+        channel: 'linq',
+        dispatchMode: 'queue-only',
+        explicitTarget: 'group-thread',
+        message: 'This authority-less scheduled group note must not send.',
+        sessionId: 'session-linked-untyped-group',
+        threadId: 'group-thread',
+        threadIsDirect: false,
+        turnId: 'turn-linked-untyped-group',
+        vault: vaultRoot,
+      })
+      const {
+        automationAuthority: ignoredAutomationAuthority,
+        ...authoritylessIntent
+      } = queued.intent
+      void ignoredAutomationAuthority
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...authoritylessIntent,
+        channel,
+        threadIsDirect,
+      })
+
+      const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+        jobId: automation.record.automationId,
+        now: automation.record.updatedAt,
+      })
+      runtimeRecord.state.pendingOccurrenceAt = '2026-07-18T12:00:00.000Z'
+      runtimeRecord.state.pendingDeliveryIntentId = queued.intent.intentId
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeRecord],
+        version: 1,
+      })
+
+      const dispatched = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: queued.intent.intentId,
+        now: new Date('2026-07-18T12:01:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('failed')
+      expect(dispatched.deliveryError).toMatchObject({
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      expect(runtimeStore.jobs).toEqual([
+        expect.objectContaining({
+          jobId: automation.record.automationId,
+          state: expect.not.objectContaining({
+            pendingDeliveryIntentId: queued.intent.intentId,
+          }),
+        }),
+      ])
+    },
+  )
+
+  it('denies an authority-less intent linked to a paused ambiguous Linq automation', async () => {
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-linked-paused-ambiguous-linq-',
+    )
+    const automation = await upsertAutomation({
+      ...scaffoldAutomationPayload(),
+      continuityPolicy: 'preserve',
+      instructions: 'Share the scheduled note with this group.',
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-thread',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-thread',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '08:00' },
+      slug: 'paused-ambiguous-group-note',
+      status: 'active',
+      title: 'Paused ambiguous group note',
+      vaultRoot,
+    })
+    const paused = await patchAutomation({
+      lookup: automation.record.automationId,
+      now: new Date('2026-07-18T12:01:00.000Z'),
+      status: 'paused',
+      vaultRoot,
+    })
+    expect(paused.record).toMatchObject({
+      scheduledTask: null,
+      status: 'paused',
+    })
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'group-thread',
+      message: 'This ambiguous legacy group note must not send.',
+      sessionId: 'session-linked-paused-ambiguous-linq',
+      threadId: 'group-thread',
+      threadIsDirect: false,
+      turnId: 'turn-linked-paused-ambiguous-linq',
+      vault: vaultRoot,
+    })
+    const {
+      automationAuthority: ignoredAutomationAuthority,
+      ...authoritylessIntent
+    } = queued.intent
+    void ignoredAutomationAuthority
+    await saveAssistantOutboxIntent(vaultRoot, authoritylessIntent)
+
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: paused.record.automationId,
+      now: paused.record.updatedAt,
+    })
+    runtimeRecord.state.pendingOccurrenceAt = '2026-07-18T12:00:00.000Z'
+    runtimeRecord.state.pendingDeliveryIntentId = queued.intent.intentId
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-18T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      bindingTarget: 'direct-thread',
+      intentThreadId: 'direct-thread',
+      shouldSend: true,
+      title: 'dispatches a matching paused direct reminder',
+    },
+    {
+      bindingTarget: 'different-direct-thread',
+      intentThreadId: 'different-direct-thread',
+      shouldSend: false,
+      title: 'denies a paused direct reminder queued for a different route',
+    },
+    {
+      bindingTarget: 'different-direct-thread',
+      intentThreadId: 'direct-thread',
+      shouldSend: false,
+      title: 'denies a paused direct reminder with a tampered binding route',
+    },
+  ] as const)('$title', async ({ bindingTarget, intentThreadId, shouldSend }) => {
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-linked-paused-direct-linq-',
+    )
+    const automation = await upsertAutomation({
+      ...scaffoldAutomationPayload(),
+      continuityPolicy: 'preserve',
+      instructions: 'Send the explicitly requested manual reminder.',
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'direct-thread',
+        threadIsDirect: true,
+      },
+      schedule: { kind: 'dailyLocal', localTime: '08:00' },
+      slug: 'paused-direct-manual-reminder',
+      status: 'paused',
+      title: 'Paused direct manual reminder',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      bindingDelivery: {
+        kind: 'thread',
+        target: bindingTarget,
+      },
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      message: 'Here is your manual reminder.',
+      sessionId: 'session-linked-paused-direct-linq',
+      threadId: intentThreadId,
+      threadIsDirect: true,
+      turnId: 'turn-linked-paused-direct-linq',
+      vault: vaultRoot,
+    })
+    const {
+      automationAuthority: ignoredAutomationAuthority,
+      ...authoritylessIntent
+    } = queued.intent
+    void ignoredAutomationAuthority
+    await saveAssistantOutboxIntent(vaultRoot, authoritylessIntent)
+
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.state.pendingOccurrenceAt = '2026-07-18T12:00:00.000Z'
+    runtimeRecord.state.pendingDeliveryIntentId = queued.intent.intentId
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-linked-paused-direct-linq',
+        sentAt: '2026-07-18T12:01:00.000Z',
+        target: bindingTarget,
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-18T12:01:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    if (shouldSend) {
+      expect(dispatched.intent.status).toBe('sent')
+      expect(dispatched.deliveryError).toBeNull()
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    } else {
+      expect(dispatched.intent.status).toBe('failed')
+      expect(dispatched.deliveryError).toMatchObject({
+        code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    }
+    await expect(showAutomation({
+      automationId: automation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({ status: 'paused' })
+  })
+
+  it('dispatches an unlinked authority-less non-direct Linq intent', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-unlinked-authorityless-group-',
+    )
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'group-thread',
+      message: 'Interactive group reply.',
+      sessionId: 'session-unlinked-authorityless-group',
+      threadId: 'group-thread',
+      threadIsDirect: false,
+      turnId: 'turn-unlinked-authorityless-group',
+      vault: vaultRoot,
+    })
+    const {
+      automationAuthority: ignoredAutomationAuthority,
+      ...authoritylessIntent
+    } = queued.intent
+    void ignoredAutomationAuthority
+    await saveAssistantOutboxIntent(vaultRoot, authoritylessIntent)
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-unlinked-authorityless-group',
+        sentAt: '2026-07-18T12:02:00.000Z',
+        target: 'group-thread',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.deliveryError).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    {
       expectedCode: 'scheduled_challenge_not_active',
       mode: 'archived-page' as const,
     },

@@ -86,6 +86,7 @@ export interface AssistantHostedToolContext {
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
+  assertScheduledGroupRouteCurrent?(): Promise<void>
   beforeToolExecution?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
@@ -141,6 +142,7 @@ export function createAssistantHostedToolContext(input: {
     vault: string
   } | null
   phoneCalls?: AssistantPhoneCallPort | null
+  assertScheduledGroupRouteCurrent?: () => Promise<void>
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
@@ -215,6 +217,12 @@ export function createAssistantHostedToolContext(input: {
     planUsageTool: input.planUsageTool ?? null,
     subscriptionTool: input.subscriptionTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
+    ...(input.assertScheduledGroupRouteCurrent
+      ? {
+          assertScheduledGroupRouteCurrent:
+            input.assertScheduledGroupRouteCurrent,
+        }
+      : {}),
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),

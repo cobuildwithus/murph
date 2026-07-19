@@ -3486,6 +3486,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const vaultRoot = path.join(parentRoot, "vault");
     const emailInputId = "ain_00000000000000000000000000000001";
     const linqInputId = "ain_00000000000000000000000000000002";
+    const telegramInputId = "ain_00000000000000000000000000000003";
     const groupRequestMock = vi.fn(async () => ({
       action: "update_display_name" as const,
       result: {
@@ -3518,52 +3519,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Archived mobility",
         vault: vaultRoot,
       });
-      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
-        inputId === emailInputId
-          ? {
-              conversation: {
-                accountId: "email_identity",
-                actorId: null,
-                actorIsSelf: false,
-                source: "email",
-                threadId: "email_thread",
-                threadIsDirect: false,
-              },
-              replyTarget: {
-                channel: "email",
-                messageId: "email_message",
-                threadId: "email_delivery_thread",
-              },
-            }
-          : {
-              conversation: {
-                accountId: "linq_identity",
-                actorId: "linq_participant",
-                actorIsSelf: false,
-                source: "linq",
-                threadId: "linq_thread",
-                threadIsDirect: false,
-              },
-              replyTarget: {
-                channel: "linq",
-                messageId: "linq_message",
-                threadId: "linq_group_chat",
-              },
-              sourceMetadata: {
-                externalThreadRouteAuthorityPresent: true,
-                kind: "linq",
-                partCount: 0,
-                reactionEligible: false,
-                replyToMessageId: null,
-                senderHandle: "+15555550123",
-                service: "imessage",
-              },
-            }
-      );
+      await upsertAutomation({
+        continuityPolicy: "preserve",
+        instructions: "Legacy untyped group reminder.",
+        route: {
+          channel: "linq",
+          deliveryTarget: "linq_group_chat",
+          identityId: "linq_identity",
+          participantId: "linq_participant",
+          threadId: "linq_thread",
+          threadIsDirect: false,
+        },
+        schedule: { kind: "dailyLocal", localTime: "08:20" },
+        slug: "legacy-untyped-group-reminder",
+        status: "paused",
+        title: "Legacy untyped group reminder",
+        vaultRoot,
+      });
+      await upsertAutomation({
+        continuityPolicy: "preserve",
+        instructions: "Legacy untyped reminder with unknown Linq audience.",
+        route: {
+          channel: "linq",
+          deliveryTarget: "linq_unknown_chat",
+          identityId: "linq_unknown_identity",
+          participantId: null,
+          threadId: "linq_unknown_thread",
+          threadIsDirect: null,
+        },
+        schedule: { kind: "dailyLocal", localTime: "08:19" },
+        slug: "legacy-untyped-unknown-audience-reminder",
+        status: "paused",
+        title: "Legacy untyped unknown-audience reminder",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => {
+        if (inputId === emailInputId) {
+          return {
+            conversation: {
+              accountId: "email_identity",
+              actorId: null,
+              actorIsSelf: false,
+              source: "email",
+              threadId: "email_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "email",
+              messageId: "email_message",
+              threadId: "email_delivery_thread",
+            },
+          };
+        }
+        if (inputId === telegramInputId) {
+          return {
+            conversation: {
+              accountId: "telegram_identity",
+              actorId: "telegram_participant",
+              actorIsSelf: false,
+              source: "telegram",
+              threadId: "telegram_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "telegram",
+              messageId: "telegram_message",
+              threadId: "telegram_group_chat",
+            },
+          };
+        }
+        return {
+          conversation: {
+            accountId: "linq_identity",
+            actorId: "linq_participant",
+            actorIsSelf: false,
+            source: "linq",
+            threadId: "linq_thread",
+            threadIsDirect: false,
+          },
+          replyTarget: {
+            channel: "linq",
+            messageId: "linq_message",
+            threadId: "linq_group_chat",
+          },
+          sourceMetadata: {
+            externalThreadRouteAuthorityPresent: true,
+            kind: "linq",
+            partCount: 0,
+            reactionEligible: false,
+            replyToMessageId: null,
+            senderHandle: "+15555550123",
+            service: "imessage",
+          },
+        };
+      });
 
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        assistantInputIds: [emailInputId, linqInputId],
-        importedCount: 2,
+        assistantInputIds: [emailInputId, linqInputId, telegramInputId],
+        importedCount: 3,
         runtimeGroupToolPort: { request: groupRequest },
         vaultRoot,
       }));
@@ -3599,16 +3652,138 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       expect(groupRequestMock).not.toHaveBeenCalled();
 
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [telegramInputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            instructions: "This must not bind a non-Linq group route.",
+            schedule: { kind: "dailyLocal", localTime: "08:29" },
+            scheduledTask: { kind: "group_notification" },
+            slug: "telegram-group-notification",
+            title: "Telegram group notification",
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "A scheduled task requires an explicit non-direct Linq group route.",
+      );
+
       const linqResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [linqInputId],
         operation: async (executionContext, turnEnvironment) => {
           expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          await expect(automationTool.request({
+            action: "save",
+            instructions: "This ambiguous group automation must not be created.",
+            schedule: { kind: "dailyLocal", localTime: "08:21" },
+            slug: "untyped-group-reminder",
+            title: "Untyped group reminder",
+          })).rejects.toThrow(
+            "without explicit direct-audience evidence requires recreation",
+          );
+          await expect(automationTool.request({
+            action: "save",
+            instructions: "This task must not collide with the reserved newsletter slug.",
+            schedule: { kind: "dailyLocal", localTime: "08:22" },
+            scheduledTask: { kind: "group_notification" },
+            slug: "group-health-newsletter",
+            title: "Reserved slug collision",
+          })).rejects.toThrow(
+            "The reserved group-health-newsletter slug accepts only the exact untyped fresh cron newsletter definition on an explicit non-direct Linq route.",
+          );
+          const newsletter = await automationTool.request({
+            action: "save",
+            continuityPolicy: "fresh",
+            instructions: "Compose the scheduled group health newsletter.",
+            schedule: { kind: "cron", expression: "0 9 * * 0" },
+            slug: "group-health-newsletter",
+            title: "Group health newsletter",
+          });
+          if (newsletter.action !== "save") {
+            throw new Error("Expected saved group newsletter automation.");
+          }
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "group-health-newsletter",
+            title: "Updated group health newsletter",
+          })).resolves.toEqual(expect.objectContaining({
+            action: "patch",
+            status: "active",
+          }));
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "legacy-untyped-group-reminder",
+            status: "active",
+          })).rejects.toThrow(
+            "without explicit direct-audience evidence requires recreation",
+          );
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "legacy-untyped-group-reminder",
+            title: "Still ambiguous",
+          })).rejects.toThrow(
+            "without explicit direct-audience evidence requires recreation",
+          );
+          await expect(automationTool.request({
+            action: "patch",
+            continuityPolicy: "fresh",
+            lookup: "legacy-untyped-group-reminder",
+            schedule: { kind: "cron", expression: "0 10 * * 0" },
+            slug: "group-health-newsletter",
+            status: "active",
+          })).rejects.toThrow(
+            "archive the legacy record before recreating it",
+          );
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "legacy-untyped-unknown-audience-reminder",
+            status: "active",
+          })).rejects.toThrow(
+            "without explicit direct-audience evidence requires recreation",
+          );
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "legacy-untyped-unknown-audience-reminder",
+            status: "archived",
+          })).resolves.toEqual(expect.objectContaining({
+            action: "patch",
+            status: "archived",
+          }));
+          await expect(automationTool.request({
+            action: "save",
+            instructions: "This must not retrofit a legacy group task.",
+            schedule: { kind: "dailyLocal", localTime: "08:20" },
+            scheduledTask: { kind: "group_notification" },
+            slug: "legacy-untyped-group-reminder",
+            title: "Legacy untyped group reminder",
+          })).rejects.toThrow(
+            "A scheduled-task binding can be set only while creating a new automation.",
+          );
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "legacy-untyped-group-reminder",
+            status: "archived",
+          })).resolves.toEqual(expect.objectContaining({
+            action: "patch",
+            status: "archived",
+          }));
           const saved = await executionContext.hosted?.automationTool?.request({
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
             instructions: "Ask for one lightweight group check-in.",
             schedule: { kind: "dailyLocal", localTime: "08:30" },
+            scheduledTask: { kind: "group_notification" },
             slug: "group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:group-check-in",
@@ -3616,6 +3791,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           });
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
+          }
+          await expect(automationTool.request({
+            action: "patch",
+            lookup: "group-check-in",
+            slug: "group-health-newsletter",
+          })).rejects.toThrow(
+            "The reserved group-health-newsletter slug accepts only the exact untyped fresh cron newsletter definition on an explicit non-direct Linq route.",
+          );
+          const freshNotification =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              continuityPolicy: "fresh",
+              instructions: "Send one self-contained group notification.",
+              schedule: { kind: "dailyLocal", localTime: "08:31" },
+              scheduledTask: { kind: "group_notification" },
+              slug: "fresh-group-notification",
+              title: "Fresh group notification",
+            });
+          if (!freshNotification || freshNotification.action !== "save") {
+            throw new Error("Expected saved fresh group notification.");
           }
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
@@ -3655,18 +3850,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               kind: "deviceActivity",
               after: "2026-07-18T12:00:00.000Z",
             },
-            scheduledTask: {
-              kind: "group_challenge",
-              knowledgeSlug: "morning-mobility",
-              projectionScopeKey: "steps-days.v0",
-            },
-            slug: "device-mobility-dispatch",
-            title: "Device mobility dispatch",
+            scheduledTask: { kind: "group_health_update" },
+            slug: "device-health-update",
+            title: "Device health update",
           })).rejects.toMatchObject({
-            code: "invalid_option",
-            message: "A group-challenge scheduled task requires a time-driven schedule.",
-            name: "VaultCliError",
+            code: "VAULT_INVALID_INPUT",
+            message: "A scheduled task requires a time-driven schedule.",
+            name: "VaultError",
           });
+          const invalidGroupNotificationTask = {
+            kind: "group_notification" as const,
+            projectionScopeKey: "steps-days.v0",
+          };
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "This must not add a scope to a group notification.",
+            schedule: { kind: "dailyLocal", localTime: "08:31" },
+            scheduledTask: invalidGroupNotificationTask,
+            slug: "scoped-group-notification",
+            title: "Scoped group notification",
+          })).rejects.toThrow(
+            "scheduledTask must be a canonical group task binding.",
+          );
+          const invalidGroupHealthUpdateTask = {
+            kind: "group_health_update" as const,
+            knowledgeSlug: "morning-mobility",
+            selector: "member-supplied",
+          };
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "This must not add a page or selector to a health update.",
+            schedule: { kind: "dailyLocal", localTime: "08:31" },
+            scheduledTask: invalidGroupHealthUpdateTask,
+            slug: "selected-group-health-update",
+            title: "Selected group health update",
+          })).rejects.toThrow(
+            "scheduledTask must be a canonical group task binding.",
+          );
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
             activeUntil: "2026-07-20T23:00:00.000-04:00",
@@ -3729,14 +3949,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           );
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
-            activeUntil: "2026-07-20T23:00:00.000-04:00",
             instructions: "This must not bind an existing automation.",
             schedule: { kind: "dailyLocal", localTime: "08:35" },
-            scheduledTask: {
-              kind: "group_challenge",
-              knowledgeSlug: "morning-mobility",
-              projectionScopeKey: "steps-days.v0",
-            },
+            scheduledTask: { kind: "group_health_update" },
             slug: "group-check-in",
             title: "Group check-in",
           })).rejects.toThrow(
@@ -3779,10 +3994,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           ) {
             throw new Error("Expected saved selector-scoped challenge automation.");
           }
+          const scheduledHealthUpdate =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              continuityPolicy: "fresh",
+              instructions: "Share a concise update from current group health context.",
+              schedule: { kind: "dailyLocal", localTime: "08:38" },
+              scheduledTask: { kind: "group_health_update" },
+              slug: "daily-group-health-update",
+              title: "Daily group health update",
+            });
+          if (!scheduledHealthUpdate || scheduledHealthUpdate.action !== "save") {
+            throw new Error("Expected saved group-health-update automation.");
+          }
           const stale = await executionContext.hosted?.automationTool?.request({
             action: "save",
             instructions: "Archive this stale group check-in.",
             schedule: { kind: "dailyLocal", localTime: "08:45" },
+            scheduledTask: { kind: "group_notification" },
             slug: "stale-group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:group-check-in",
@@ -3792,6 +4021,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             instructions: "Keep this user-paused group check-in paused.",
             schedule: { kind: "dailyLocal", localTime: "09:00" },
+            scheduledTask: { kind: "group_notification" },
             slug: "paused-group-check-in",
             status: "paused",
             supportKind: "check_in",
@@ -3802,6 +4032,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             instructions: "Keep this separate support series active.",
             schedule: { kind: "dailyLocal", localTime: "09:15" },
+            scheduledTask: { kind: "group_notification" },
             slug: "other-group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:other-group-check-in",
@@ -3830,6 +4061,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             instructions: "This request must fail before persistence.",
             schedule: { kind: "dailyLocal", localTime: "08:30" },
+            scheduledTask: { kind: "group_notification" },
             tags: ["system:support-series:habit:model-controlled"],
             title: "Invalid support tag",
           })).rejects.toThrow(
@@ -3863,6 +4095,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
       });
       await expect(showAutomation({
+        slug: "legacy-untyped-group-reminder",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
+      await expect(showAutomation({
+        slug: "group-health-newsletter",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        continuityPolicy: "fresh",
+        schedule: { kind: "cron", expression: "0 9 * * 0" },
+        scheduledTask: null,
+        status: "active",
+      }));
+      await expect(showAutomation({
         slug: "group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
@@ -3872,6 +4117,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           deliveryTarget: "linq_group_chat",
           threadIsDirect: false,
         }),
+        scheduledTask: { kind: "group_notification" },
         supportKind: "check_in",
         tags: expect.arrayContaining([
           "system:support-series:habit:group-check-in",
@@ -3907,6 +4153,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           knowledgeSlug: "morning-mobility",
           projectionScopeKey: "activity-minutes-days.v1.activityKind.running",
         },
+      }));
+      await expect(showAutomation({
+        slug: "daily-group-health-update",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        continuityPolicy: "fresh",
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_group_chat",
+          threadIsDirect: false,
+        }),
+        scheduledTask: { kind: "group_health_update" },
       }));
       await expect(showAutomation({
         slug: "paused-group-check-in",
@@ -3951,6 +4209,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Existing reminder",
         vaultRoot,
       });
+      await upsertAutomation({
+        continuityPolicy: "preserve",
+        instructions: "Legacy group reminder that can move to a private route.",
+        route: {
+          channel: "linq",
+          deliveryTarget: "linq_old_group_chat",
+          identityId: "linq_identity_old_group",
+          participantId: "linq_participant_old_group",
+          threadId: "linq_thread_old_group",
+          threadIsDirect: false,
+        },
+        schedule: { kind: "dailyLocal", localTime: "08:45" },
+        slug: "legacy-group-reminder-for-direct-retarget",
+        status: "paused",
+        title: "Legacy group reminder for direct retarget",
+        vaultRoot,
+      });
       mocks.readAssistantInputEvent.mockResolvedValue({
         conversation: {
           accountId: "linq_identity_current",
@@ -3990,22 +4265,73 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           return await automationTool.request({
             action: "save",
-            activeUntil: "2026-07-20T23:00:00.000-04:00",
             instructions: "This must not bind a direct conversation.",
             schedule: { kind: "dailyLocal", localTime: "08:30" },
-            scheduledTask: {
-              kind: "group_challenge",
-              knowledgeSlug: "morning-mobility",
-              projectionScopeKey: "steps-days.v0",
-            },
-            slug: "direct-challenge-dispatch",
-            title: "Direct challenge dispatch",
+            scheduledTask: { kind: "group_notification" },
+            slug: "direct-group-notification",
+            title: "Direct group notification",
           });
         },
         turnEnvironment: null,
       })).rejects.toThrow(
-        "A group-challenge scheduled task requires the current non-direct group route.",
+        "A scheduled task requires an explicit non-direct Linq group route.",
       );
+
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            continuityPolicy: "fresh",
+            instructions: "This direct route must not mint newsletter authority.",
+            schedule: { kind: "cron", expression: "0 9 * * 0" },
+            slug: "group-health-newsletter",
+            title: "Direct-route group newsletter",
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "exact untyped fresh cron newsletter definition on an explicit non-direct Linq route",
+      );
+
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            lookup: "legacy-group-reminder-for-direct-retarget",
+            retargetToCurrentConversation: true,
+            status: "active",
+          });
+        },
+        turnEnvironment: null,
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        routeBinding: "current_conversation",
+        status: "active",
+      }));
+      await expect(showAutomation({
+        slug: "legacy-group-reminder-for-direct-retarget",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_chat_current",
+          threadIsDirect: true,
+        }),
+        scheduledTask: null,
+        status: "active",
+      }));
 
       const patchThroughScope = async (retargetToCurrentConversation: boolean) =>
         await operationScope.runAutoReplyGroup({

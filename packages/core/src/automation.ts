@@ -223,6 +223,16 @@ export interface ArchiveAutomationIfExactRevisionInput {
 export type ArchiveAutomationIfExactRevisionResult =
   ArchiveAutomationIfActiveUntilElapsedResult;
 
+export interface PauseAutomationsIfExactSnapshotsInput {
+  now?: Date;
+  snapshots: readonly AutomationRecord[];
+  vaultRoot: string;
+}
+
+export interface PauseAutomationsIfExactSnapshotsResult {
+  paused: boolean;
+}
+
 export interface ReconcileAutomationSupportSeriesInput {
   desiredAutomationIds: readonly string[];
   now?: Date;
@@ -307,7 +317,7 @@ function normalizeAutomationScheduledTask(value: unknown): AutomationScheduledTa
   if (!parsed.success) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
-      "scheduledTask must be a canonical group-challenge task binding.",
+      "scheduledTask must be a canonical group task binding.",
     );
   }
 
@@ -689,12 +699,7 @@ function resolveAutomationScheduledTask(input: {
     );
   }
 
-  if (
-    requested === null ||
-    existing.kind !== requested.kind ||
-    existing.knowledgeSlug !== requested.knowledgeSlug ||
-    existing.projectionScopeKey !== requested.projectionScopeKey
-  ) {
+  if (requested === null || !automationScheduledTasksEqual(existing, requested)) {
     throw new VaultError(
       "VAULT_AUTOMATION_SCHEDULED_TASK_IMMUTABLE",
       "Automation scheduled-task identity cannot be changed or removed.",
@@ -702,6 +707,25 @@ function resolveAutomationScheduledTask(input: {
   }
 
   return existing;
+}
+
+function automationScheduledTasksEqual(
+  left: AutomationScheduledTask,
+  right: AutomationScheduledTask,
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+
+  switch (left.kind) {
+    case "group_notification":
+    case "group_health_update":
+      return true;
+    case "group_challenge":
+      return right.kind === "group_challenge" &&
+        left.knowledgeSlug === right.knowledgeSlug &&
+        left.projectionScopeKey === right.projectionScopeKey;
+  }
 }
 
 function assertAutomationScheduledTaskConstraints(input: {
@@ -1225,6 +1249,111 @@ export async function archiveAutomationIfExactRevision(
       }),
     };
   });
+}
+
+export async function pauseAutomationsIfExactSnapshots(
+  input: PauseAutomationsIfExactSnapshotsInput,
+): Promise<PauseAutomationsIfExactSnapshotsResult> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    if (input.snapshots.length === 0) {
+      return { paused: false };
+    }
+
+    const now = resolveAutomationArchiveNow(input.now);
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const exactRecords = resolveExactActiveAutomationSnapshots({
+      records,
+      snapshots: input.snapshots,
+    });
+    if (!exactRecords) {
+      return { paused: false };
+    }
+
+    const occurredAt = now.toISOString();
+    const pausedWrites = exactRecords.map((record) => ({
+      markdown: buildAutomationMarkdown({
+        ...record,
+        status: "paused",
+        updatedAt: occurredAt,
+        markdown: "",
+      }),
+      record,
+    }));
+    const targetIds = pausedWrites.map(({ record }) => record.automationId);
+
+    await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "automation_exact_snapshot_pause",
+      summary: `Pause ${pausedWrites.length} exact automation snapshot(s)`,
+      occurredAt,
+      audit: {
+        action: "automation_upsert",
+        commandName: "core.pauseAutomationsIfExactSnapshots",
+        summary: `Paused ${pausedWrites.length} exact automation snapshot(s).`,
+        targetIds,
+        occurredAt,
+      },
+      mutate: async ({ batch }) => {
+        const changes = [];
+        const files: string[] = [];
+        for (const { markdown, record } of pausedWrites) {
+          const write = await stageMarkdownDocumentWrite(
+            batch,
+            {
+              created: false,
+              relativePath: record.relativePath,
+            },
+            markdown,
+          );
+          changes.push(...write.changes);
+          files.push(write.relativePath);
+        }
+
+        return {
+          result: undefined,
+          changes,
+          files,
+          targetIds,
+        };
+      },
+    });
+
+    return { paused: true };
+  });
+}
+
+function resolveExactActiveAutomationSnapshots(input: {
+  records: readonly AutomationRecord[];
+  snapshots: readonly AutomationRecord[];
+}): AutomationRecord[] | null {
+  const currentByAutomationId = new Map(
+    input.records.map((record) => [record.automationId, record] as const),
+  );
+  const seenAutomationIds = new Set<string>();
+  const seenRelativePaths = new Set<string>();
+  const exactRecords: AutomationRecord[] = [];
+
+  for (const snapshot of input.snapshots) {
+    const current = currentByAutomationId.get(snapshot.automationId);
+    if (
+      !current ||
+      current.status !== "active" ||
+      seenAutomationIds.has(snapshot.automationId) ||
+      seenRelativePaths.has(snapshot.relativePath) ||
+      current.relativePath !== snapshot.relativePath ||
+      current.markdown !== snapshot.markdown
+    ) {
+      return null;
+    }
+
+    seenAutomationIds.add(snapshot.automationId);
+    seenRelativePaths.add(snapshot.relativePath);
+    exactRecords.push(current);
+  }
+
+  return exactRecords.sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath)
+  );
 }
 
 function resolveAutomationArchiveNow(now: Date | undefined): Date {

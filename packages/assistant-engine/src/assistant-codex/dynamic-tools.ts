@@ -1297,6 +1297,8 @@ export function resolveMurphScheduledDynamicTools(
   const taskTools: readonly MurphDynamicTool[] = (() => {
     switch (taskAuthority.kind) {
       case 'generic_notification':
+      case 'group_notification':
+      case 'group_health_update':
       case 'group_newsletter':
         return []
       case 'managed_knowledge_ledger':
@@ -2613,6 +2615,15 @@ export async function executeMurphDynamicToolRequest(input: {
             vault: input.vaultRoot,
           })
         : Promise.reject(new Error('Scheduled task source is unavailable.'))
+  const assertScheduledMediaEffectCurrent = async (): Promise<void> => {
+    await assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
+    const assertGroupRouteCurrent =
+      input.hostedToolContext?.assertScheduledGroupRouteCurrent
+    if (!assertGroupRouteCurrent) {
+      throw new Error('Scheduled group route is unavailable.')
+    }
+    await assertGroupRouteCurrent()
+  }
   const claimScheduledMediaGeneration = async (kind: 'audio' | 'image'): Promise<
     | 'scheduled_media_unauthorized'
     | 'scheduled_media_limit_reached'
@@ -2633,7 +2644,7 @@ export async function executeMurphDynamicToolRequest(input: {
     ) {
       return 'scheduled_media_unauthorized'
     }
-    await assertScheduledTaskSourceCurrent(authority)
+    await assertScheduledMediaEffectCurrent()
     const claim = await input.claimScheduledMediaGeneration?.({
       authority,
       kind,
@@ -2810,6 +2821,8 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'scheduled-read': {
       return await executeScheduledReadDynamicTool({
+        assertCurrentGroupRoute:
+          input.hostedToolContext?.assertScheduledGroupRouteCurrent ?? null,
         assertSourceCurrent: assertScheduledTaskSourceCurrent,
         authority: input.scheduledTaskAuthority ?? null,
         request: input.request,
@@ -3142,9 +3155,7 @@ export async function executeMurphDynamicToolRequest(input: {
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        beforeExternalEffect: () =>
-          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
-            .then(() => undefined),
+        beforeExternalEffect: assertScheduledMediaEffectCurrent,
         captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
           scope: 'scheduled-image',
           toolCallId: readGeneratedImageToolCallId(input.request),
@@ -3193,9 +3204,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeGenerateVoiceMemoDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        beforeExternalEffect: () =>
-          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
-            .then(() => undefined),
+        beforeExternalEffect: assertScheduledMediaEffectCurrent,
         currentResponseMedia: input.currentResponseMedia ?? [],
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
@@ -3213,9 +3222,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeGenerateSongDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        beforeExternalEffect: () =>
-          assertScheduledTaskSourceCurrent(input.scheduledTaskAuthority ?? null)
-            .then(() => undefined),
+        beforeExternalEffect: assertScheduledMediaEffectCurrent,
         currentResponseMedia: input.currentResponseMedia ?? [],
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })

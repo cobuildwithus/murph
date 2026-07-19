@@ -1413,11 +1413,11 @@ test("automation commands round-trip save, import-json, show, and list through t
         expression: "0 9 * * 1",
       },
       route: {
-        channel: "email",
-        deliveryTarget: "weekly-planning@example.invalid",
+        channel: "linq",
+        deliveryTarget: "weekly-planning-group",
         identityId: "weekly-planning-sender",
         participantId: null,
-        threadId: null,
+        threadId: "weekly-planning-group",
         threadIsDirect: false,
       },
       scheduledTask: {
