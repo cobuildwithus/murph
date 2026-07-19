@@ -112,10 +112,21 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
+    || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+  );
+}
+
+function shouldResumeCurrentClinicalRecordsIndexUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === "/records"
   );
 }
 

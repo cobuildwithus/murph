@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearClinicalRecordsConnectIntentFromBrowser,
   hasStagedClinicalRecordsConnectIntentForCurrentPath,
   takeClinicalRecordsConnectIntentFromBrowser,
 } from "@/src/lib/clinical-records/browser-connect-intent";
@@ -32,6 +33,25 @@ describe("Clinical Records browser connect intent", () => {
     })).toBe(CLAIM);
     expect(browser.history.state).toEqual({ __NA: true });
     expect(hasStagedClinicalRecordsConnectIntentForCurrentPath()).toBe(false);
+  });
+
+  it("keeps an authenticated reload resumable until SMART authorization starts", () => {
+    const browser = installBrowser(
+      `https://join.example.test/records/connect#clinicalRecordsIntent=${CLAIM}`,
+      { __NA: true },
+    );
+
+    expect(takeClinicalRecordsConnectIntentFromBrowser({
+      preserveForAuthReload: true,
+    })).toBe(CLAIM);
+    browser.setUrl("https://join.example.test/records/connect");
+    expect(takeClinicalRecordsConnectIntentFromBrowser({
+      preserveForAuthReload: true,
+    })).toBe(CLAIM);
+
+    clearClinicalRecordsConnectIntentFromBrowser();
+    expect(hasStagedClinicalRecordsConnectIntentForCurrentPath()).toBe(false);
+    expect(browser.history.state).toEqual({ __NA: true });
   });
 
   it("scrubs malformed claims and clears an older staged bearer", () => {

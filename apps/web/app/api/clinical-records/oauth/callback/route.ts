@@ -11,11 +11,13 @@ import type { ClinicalRecordCallbackMarker } from "@/src/lib/clinical-records/cl
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const state = url.searchParams.get("state") ?? "";
-  const providerDenied = Boolean(url.searchParams.get("error"));
+  const providerDenied = url.searchParams.get("error") === "access_denied";
+  const providerError = url.searchParams.has("error");
   try {
     await finishClinicalRecordAuthorization({
       code: url.searchParams.get("code"),
       providerDenied,
+      providerError,
       request,
       state,
     });
@@ -26,6 +28,7 @@ export async function GET(request: Request): Promise<Response> {
       code: diagnostic.code,
       errorType: diagnostic.errorType,
       providerDenied,
+      providerError,
     });
     return callbackRedirect(request, callbackFailureMarker(error));
   }

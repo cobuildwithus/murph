@@ -17,8 +17,8 @@ describe("Clinical Records provider directory", () => {
       "utf8",
     )));
 
-    expect(directory.entries).toHaveLength(1_244);
-    expect(directory.version).toMatch(/^2026-07-11\.epic-brands-r4-beta-v1$/u);
+    expect(directory.entries).toHaveLength(1_246);
+    expect(directory.version).toMatch(/^2026-07-18\.epic-brands-r4-beta-v1$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
     expect(directory.entries.every((entry) =>
       JSON.stringify(entry.resourceTypes) === JSON.stringify(EPIC_BETA_RESOURCE_TYPES)
@@ -27,6 +27,54 @@ describe("Clinical Records provider directory", () => {
       brandName: "Epic Sandbox (test data only)",
       clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
       fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+    });
+  });
+
+  it("matches compound organization and location searches across fields", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [["Downtown Clinic", "Atlanta", "GA", "30309"]],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Test Health, Atlanta, GA",
+    }).providers).toHaveLength(1);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta, GA",
+    }).providers[0]?.facilities[0]).toMatchObject({
+      city: "Atlanta",
+      state: "GA",
+    });
+  });
+
+  it("does not combine compound location tokens from different facilities", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [
+        ["Atlanta Clinic", "Atlanta", "GA", "30309"],
+        ["Austin Clinic", "Austin", "TX", "78701"],
+      ],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta TX",
+    }).providers).toEqual([]);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta IN",
+    }).providers).toEqual([]);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "IN",
+    }).providers).toEqual([]);
+  });
+
+  it("matches a standalone state abbreviation only as an exact word", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [["Indiana Clinic", "Indianapolis", "IN", "46202"]],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "IN",
+    }).providers[0]?.facilities[0]).toMatchObject({
+      city: "Indianapolis",
+      state: "IN",
     });
   });
 
