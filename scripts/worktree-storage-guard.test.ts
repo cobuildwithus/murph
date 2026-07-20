@@ -103,6 +103,12 @@ afterEach(() => {
 })
 
 describe('worktree storage guard', () => {
+  it('defaults the regular worktree ceiling to 100', () => {
+    expect(readFileSync(path.join(sourceRoot, 'scripts', 'worktree-storage-guard'), 'utf8')).toContain(
+      'MURPH_WORKTREE_MAX_LIVE:-100',
+    )
+  })
+
   it('runs from both repository commit entrypoints', () => {
     expect(readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8')).toContain(
       '"$guard_root/scripts/worktree-storage-guard"',
@@ -126,6 +132,19 @@ describe('worktree storage guard', () => {
     })
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('custom maximum requires isolated state')
+  })
+
+  it('fails closed on malformed local ceiling state', () => {
+    const harness = createHarness()
+    mkdirSync(harness.state, { recursive: true })
+    const stateFile = path.join(harness.state, 'regular-worktree-ceiling')
+    writeFileSync(stateFile, 'not-a-number\n')
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('invalid local ceiling state')
+    expect(readFileSync(stateFile, 'utf8')).toBe('not-a-number\n')
   })
 
   it('uses the primary checkout hook to reject commits from raw legacy worktrees', () => {
@@ -206,6 +225,34 @@ describe('worktree storage guard', () => {
     const growth = runScript(harness, 'worktree-storage-guard')
     expect(growth.status).toBe(1)
     expect(growth.stderr).toContain('exceeds the ratcheted ceiling of 2')
+  })
+
+  it('promotes an older local ceiling when the configured maximum increases', () => {
+    const harness = createHarness()
+    const paths = ['one', 'two', 'three'].map((name) => path.join(harness.root, name))
+
+    expect(runScript(harness, 'create-worktree', ['-b', 'task-one', paths[0]]).status).toBe(0)
+    expect(runScript(harness, 'create-worktree', ['-b', 'task-two', paths[1]]).status).toBe(0)
+    expect(readFileSync(path.join(harness.state, 'regular-worktree-ceiling'), 'utf8')).toBe(
+      '2\n',
+    )
+
+    const promoted = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'task-three', paths[2]],
+      { MURPH_WORKTREE_MAX_LIVE: '3' },
+    )
+    expect(promoted.status, promoted.stderr).toBe(0)
+    expect(readFileSync(path.join(harness.state, 'regular-worktree-ceiling'), 'utf8')).toBe(
+      '3\n',
+    )
+
+    const check = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '3',
+    })
+    expect(check.status, check.stderr).toBe(0)
+    expect(check.stdout).toContain('regular=3 data=0 ceiling=3')
   })
 
   it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {

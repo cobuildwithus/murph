@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-max_regular="${MURPH_WORKTREE_MAX_LIVE:-40}"
+max_regular="${MURPH_WORKTREE_MAX_LIVE:-100}"
 min_free_gib="${MURPH_WORKTREE_MIN_FREE_GIB:-20}"
 min_free_percent="${MURPH_WORKTREE_MIN_FREE_PERCENT:-15}"
 
@@ -395,10 +395,11 @@ fi
 
 if [[ -f "$state_file" ]]; then
   ceiling="$(tr -d '[:space:]' <"$state_file")"
-  if [[ ! "$ceiling" =~ ^[0-9]+$ || "$ceiling" -lt "$max_regular" ]]; then
+  if [[ ! "$ceiling" =~ ^[0-9]+$ ]]; then
     printf 'worktree storage guard: invalid local ceiling state\n' >&2
     exit 1
   fi
+  (( ceiling < max_regular )) && ceiling="$max_regular"
 else
   ceiling="$regular_count"
   (( ceiling < max_regular )) && ceiling="$max_regular"
