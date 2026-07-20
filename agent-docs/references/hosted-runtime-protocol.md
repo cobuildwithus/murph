@@ -457,16 +457,21 @@ discriminant owns what happens next: `accepted_input` bypasses the provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
 original group route, while `automation_occurrence` re-reads the active
 canonical automation and current non-direct Linq route before resuming the
-ordinary controlled group notification and outbox path. A completion-derived
-delivery key makes retries idempotent, and the continuation receives only tools
-independently authorized for the current scheduled group turn. Cannot-answer
-uses the fixed non-disclosing result. The original private-to-group continuation retains its
+   ordinary controlled group notification and outbox path. A completion-derived
+   delivery key makes retries idempotent. The same Web-owned completion predicate
+   runs before model work, before each tool call, and before delivery or skip
+   commit. The model decision uses an isolated one-shot notification thread with
+   memory disabled and persists no prompt, output, transcript, receipt, session,
+   or provider-resume state; the existing outbox is the durable delivery owner.
+   The continuation still receives tools independently authorized for the current
+   scheduled group turn. Cannot-answer uses the fixed non-disclosing result. The original private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
 produce new generations, so old work cannot cross either lifecycle boundary.
 For accepted-input delivery, if live authority disappears after an exact answer
 is queued, its existing outbox intent retains the completion id, deterministic
 delivery key, and authority expiry through terminal disposition. The runner
-rewrites that intent to the fixed cannot-answer copy before provider entry. At
+   rewrites that intent's text and media to the fixed text-only cannot-answer copy
+   before provider entry. At
 expiry it uses the outbox-owned deadline even if mailbox retention has already
 removed the request and completion rows; before expiry Web still owns live
 revocation revalidation. The final egress claim permits only the structurally

@@ -9,6 +9,7 @@ import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
 import type {
@@ -30,6 +31,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   sendAssistantNotificationLocal,
+  type AssistantNotificationInput,
   type AssistantNotificationResult,
   type AssistantNotificationTurnPolicy,
 } from '../../assistant-service.js'
@@ -259,8 +261,18 @@ export async function sendAssistantScheduledAutomationContinuation(
       executionContext: input.executionContext,
     }),
   )
+  const deliveryIdempotencyKey =
+    createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      input.answeredMailboxItemId,
+    )
+  const reviewedCompletion = {
+    answeredMailboxItemId: input.answeredMailboxItemId,
+    expiresAt: input.expiresAt,
+    idempotencyKey: deliveryIdempotencyKey,
+  }
   const route = await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
     executionContext: input.executionContext,
+    reviewedCompletion,
     signal: input.signal ?? new AbortController().signal,
     target: resolved.job.target,
   })
@@ -278,7 +290,7 @@ export async function sendAssistantScheduledAutomationContinuation(
     return null
   }
 
-  const assertLive = async (): Promise<void> => {
+  const assertSourceLive = async (): Promise<void> => {
     await input.assertLive?.()
     const current = await resolveAssistantCronCanonicalSourceAuthority({
       job: resolved,
@@ -294,19 +306,51 @@ export async function sendAssistantScheduledAutomationContinuation(
       vault: input.vault,
     })
   }
-  const deliveryIdempotencyKey =
-    createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
-      input.answeredMailboxItemId,
+  const assertCompletionLive = async (): Promise<void> => {
+    await assertSourceLive()
+    const currentRoute = await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+      executionContext: input.executionContext,
+      reviewedCompletion,
+      signal: input.signal ?? new AbortController().signal,
+      target: resolved.job.target,
+    })
+    if (currentRoute.assistantAskFallbackRequired === true) {
+      throw new AssistantScheduledAutomationCompletionFallbackRequiredError()
+    }
+    const expectedTarget = normalizeNullableString(
+      route.deliveryTarget ?? route.bindingDelivery?.target,
     )
-
-  return await sendAssistantNotificationLocal({
+    const currentTarget = normalizeNullableString(
+      currentRoute.deliveryTarget ?? currentRoute.bindingDelivery?.target,
+    )
+    if (
+      currentRoute.threadIsDirect !== false ||
+      !expectedTarget ||
+      currentTarget !== expectedTarget
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_ASK_COMPLETION_ROUTE_STALE',
+        'Reviewed Assistant Ask completion route changed before the next effect.',
+        { retryable: true },
+      )
+    }
+  }
+  const sendNotification = async (notification: {
+    beforeCommit: AssistantNotificationInput['beforeCommit']
+    beforeDelivery: AssistantNotificationInput['beforeDelivery']
+    beforeProviderAcceptedInputs?: AssistantNotificationInput['beforeProviderAcceptedInputs']
+    beforeToolExecution?: AssistantNotificationInput['beforeToolExecution']
+    responsePolicy: AssistantNotificationInput['responsePolicy']
+  }): Promise<AssistantNotificationResult> => await sendAssistantNotificationLocal({
     abortSignal: input.signal ?? undefined,
     alias: null,
     allowBindingRebind: false,
     answeredMailboxItemIds: [input.answeredMailboxItemId],
     approvalPolicy: 'never',
-    beforeCommit: assertLive,
-    beforeDelivery: assertLive,
+    beforeCommit: notification.beforeCommit,
+    beforeDelivery: notification.beforeDelivery,
+    beforeProviderAcceptedInputs: notification.beforeProviderAcceptedInputs,
+    beforeToolExecution: notification.beforeToolExecution,
     bindingDeliveryTarget:
       route.bindingDelivery?.target ?? route.deliveryTarget ?? undefined,
     channel: resolved.job.target.channel,
@@ -329,7 +373,7 @@ export async function sendAssistantScheduledAutomationContinuation(
       expectedUpdatedAt: source.updatedAt,
     },
     participantId: resolved.job.target.participantId,
-    responsePolicy: { kind: 'allow_send_or_skip' },
+    responsePolicy: notification.responsePolicy,
     reviewedAssistantAskCompletionExpiresAt: input.expiresAt,
     sandbox: 'workspace-write',
     scheduledInvocationAuthority: {
@@ -345,6 +389,43 @@ export async function sendAssistantScheduledAutomationContinuation(
     vault: input.vault,
     workingDirectory: input.vault,
   })
+
+  const sendFallback = async (): Promise<AssistantNotificationResult> =>
+    await sendNotification({
+      beforeCommit: assertSourceLive,
+      beforeDelivery: assertSourceLive,
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+      },
+    })
+
+  if (route.assistantAskFallbackRequired === true) {
+    return await sendFallback()
+  }
+
+  try {
+    return await sendNotification({
+      beforeCommit: async ({ deliveryOutcome }) => {
+        if (deliveryOutcome) {
+          await assertSourceLive()
+          return
+        }
+        await assertCompletionLive()
+      },
+      beforeDelivery: assertCompletionLive,
+      beforeProviderAcceptedInputs: async () => {
+        await assertCompletionLive()
+      },
+      beforeToolExecution: assertCompletionLive,
+      responsePolicy: { kind: 'allow_send_or_skip' },
+    })
+  } catch (error) {
+    if (!(error instanceof AssistantScheduledAutomationCompletionFallbackRequiredError)) {
+      throw error
+    }
+    return await sendFallback()
+  }
 }
 
 export async function claimResolvedAssistantCronJob(input: {
@@ -2280,9 +2361,18 @@ function scopeAssistantCronScheduledGroupTools(input: {
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
+  reviewedCompletion?: {
+    answeredMailboxItemId: string
+    expiresAt: string
+    idempotencyKey: string
+  } | null
   signal: AbortSignal
   target: AssistantCronJob['target']
-}): Promise<ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>> {
+}): Promise<
+  ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute> & {
+    assistantAskFallbackRequired?: true
+  }
+> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
   if (
     assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
@@ -2317,6 +2407,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   }
   const authority = await resolveScheduledLinqRoute({
     homeRouteFallbackAllowed: route.threadIsDirect !== false,
+    reviewedCompletion: input.reviewedCompletion ?? null,
     signal: input.signal,
     target,
     targetKind,
@@ -2340,6 +2431,9 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
+    ...(authority.assistantAskFallbackRequired === true
+      ? { assistantAskFallbackRequired: true as const }
+      : {}),
     bindingDelivery,
     deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
     threadIsDirect: authority.threadIsDirect,
@@ -2370,6 +2464,15 @@ class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
 class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
+  }
+}
+
+class AssistantScheduledAutomationCompletionFallbackRequiredError extends VaultCliError {
+  constructor() {
+    super(
+      'ASSISTANT_ASK_COMPLETION_FALLBACK_REQUIRED',
+      'Reviewed Assistant Ask completion must use its safe fallback.',
+    )
   }
 }
 

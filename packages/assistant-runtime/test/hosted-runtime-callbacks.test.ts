@@ -8008,12 +8008,19 @@ describe("hosted runtime callbacks", () => {
         completionId,
       );
     const privateAnswer = "Private answer that must never reach the provider.";
+    const privateMedia = [{
+      alt: "Private answer attachment",
+      kind: "image" as const,
+      source: "reviewed-private-answer",
+      url: "https://cdn.example.test/private/reviewed-answer.png",
+    }];
     const effect = createEffect({
       answeredMailboxItemIds: [completionId],
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
       idempotencyKey,
+      media: privateMedia,
       message: privateAnswer,
       transportIdempotent: true,
     });
@@ -8028,6 +8035,7 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: null,
       intentId: effect.effectId,
       lastAttemptAt: null,
+      media: privateMedia,
       message: privateAnswer,
       operation: null,
       preparedDispatchToken: null,
@@ -8064,6 +8072,7 @@ describe("hosted runtime callbacks", () => {
         sendLinq: (request: {
           answeredMailboxItemIds: string[];
           idempotencyKey: string;
+          media: AssistantOutboxIntent["media"];
           message: string;
           target: string;
           targetKind: "thread";
@@ -8085,6 +8094,7 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         answeredMailboxItemIds: [completionId],
         idempotencyKey,
+        media: storedIntent.media,
         message: storedIntent.message,
         target: "linq_chat_123",
         targetKind: "thread",
@@ -8123,6 +8133,7 @@ describe("hosted runtime callbacks", () => {
     });
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
     expect(storedIntent).toMatchObject({
+      media: [],
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       reviewedAssistantAskCompletionExpiresAt:
         "2099-04-08T00:15:00.000Z",
@@ -8140,6 +8151,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        media: [],
       }),
       expect.any(Object),
     );
@@ -8159,6 +8171,118 @@ describe("hosted runtime callbacks", () => {
     ).toBe(false);
   });
 
+  it("preserves reviewed completion media while completion authority remains live", async () => {
+    const completionId = "aask_done_live_with_media";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const media = [{
+      alt: "Consented group attachment",
+      kind: "image" as const,
+      source: "reviewed-completion",
+      url: "https://cdn.example.test/group/reviewed-completion.png",
+    }];
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      idempotencyKey,
+      media,
+      message: "Consented answer with an attachment.",
+      transportIdempotent: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      attemptCount: 0,
+      bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: effect.effectId,
+      lastAttemptAt: null,
+      media,
+      message: "Consented answer with an attachment.",
+      operation: null,
+      preparedDispatchToken: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    const assertRecentInbound = vi.fn(async (request: {
+      assistantAskFallback?: boolean | null;
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? {}
+      : { providerDispatchClaimed: true });
+    mocks.sendLinqMessage.mockResolvedValue({
+      providerMessageId: "linq_message_live_media",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        const delivery = await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          idempotencyKey,
+          media: storedIntent.media,
+          message: storedIntent.message,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            idempotencyKey,
+            providerMessageId: delivery.providerMessageId,
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () =>
+        new Response(null, { status: 204 })
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ media }),
+      expect.any(Object),
+    );
+    expect(assertRecentInbound).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        assistantAskFallback: false,
+        authorityCheckOnly: false,
+      }),
+      { signal: null },
+    );
+  });
+
   it("sends only the fixed completion when mailbox retention deleted an expired reviewed answer", async () => {
     const completionId = "aask_done_retention_deleted";
     const expiresAt = "2026-04-08T00:15:00.000Z";
@@ -8167,12 +8291,19 @@ describe("hosted runtime callbacks", () => {
         completionId,
       );
     const privateAnswer = "Private queued answer removed at the retention boundary.";
+    const privateMedia = [{
+      alt: "Expired private answer attachment",
+      kind: "image" as const,
+      source: "reviewed-private-answer",
+      url: "https://cdn.example.test/private/expired-reviewed-answer.png",
+    }];
     const effect = createEffect({
       answeredMailboxItemIds: [completionId],
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
       idempotencyKey,
+      media: privateMedia,
       message: privateAnswer,
       transportIdempotent: true,
     });
@@ -8187,6 +8318,7 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: null,
       intentId: effect.effectId,
       lastAttemptAt: "2026-04-08T00:10:00.000Z",
+      media: privateMedia,
       message: privateAnswer,
       operation: null,
       preparedDispatchToken: null,
@@ -8233,6 +8365,7 @@ describe("hosted runtime callbacks", () => {
         const delivery = await dependencies.sendLinq({
           answeredMailboxItemIds: [completionId],
           idempotencyKey,
+          media: storedIntent.media,
           message: storedIntent.message,
           target: "linq_chat_123",
           targetKind: "thread",
@@ -8269,10 +8402,12 @@ describe("hosted runtime callbacks", () => {
     expect(storedIntent.message).toBe(
       HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
     );
+    expect(storedIntent.media).toEqual([]);
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        media: [],
       }),
       expect.any(Object),
     );
@@ -8291,12 +8426,19 @@ describe("hosted runtime callbacks", () => {
         completionId,
       );
     const privateAnswer = "Private answer that expired after preflight.";
+    const privateMedia = [{
+      alt: "Private answer expiring at dispatch",
+      kind: "image" as const,
+      source: "reviewed-private-answer",
+      url: "https://cdn.example.test/private/expiring-reviewed-answer.png",
+    }];
     const effect = createEffect({
       answeredMailboxItemIds: [completionId],
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
       idempotencyKey,
+      media: privateMedia,
       message: privateAnswer,
       transportIdempotent: true,
     });
@@ -8311,6 +8453,7 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: null,
       intentId: effect.effectId,
       lastAttemptAt: null,
+      media: privateMedia,
       message: privateAnswer,
       operation: null,
       preparedDispatchToken: null,
@@ -8341,6 +8484,7 @@ describe("hosted runtime callbacks", () => {
         await dependencies.sendLinq({
           answeredMailboxItemIds: [completionId],
           idempotencyKey,
+          media: storedIntent.media,
           message: storedIntent.message,
           target: "linq_chat_123",
           targetKind: "thread",
@@ -8367,6 +8511,7 @@ describe("hosted runtime callbacks", () => {
       expect(storedIntent.message).toBe(
         HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       );
+      expect(storedIntent.media).toEqual([]);
       expect(assertRecentInbound).toHaveBeenCalledTimes(1);
       expect(assertRecentInbound).toHaveBeenCalledWith(
         expect.objectContaining({

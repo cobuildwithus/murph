@@ -135,11 +135,17 @@ An automation-origin completion re-reads the active canonical automation and
 its current non-direct Linq route, then resumes that automation through the
 ordinary controlled group notification and outbox path. A deterministic key
 derived from the completion makes replay idempotent, while the automation
-revision and live disclosure authority are rechecked before delivery. The
-reviewed answer remains delimited untrusted data rather than consent for an
-external action. The continuation may use only the tools independently
-authorized by their existing owners for that current scheduled group turn; it
-never gains access to the grantor's personal runtime or connected accounts.
+revision and the same Web-owned live disclosure predicate are rechecked before
+model work, immediately before each tool call, before delivery or skip commit,
+and at final egress. The model decision uses an isolated one-shot thread with
+memory disabled and no prompt, output, transcript, receipt, session, or
+provider-resume persistence; the existing outbox is its sole durable delivery
+owner. If authority is gone, that outbox atomically replaces text and media with
+the fixed text-only fallback. The reviewed answer remains delimited untrusted
+data rather than consent for an external action. The continuation may use only
+the tools independently authorized by their existing owners for that current
+scheduled group turn; it never gains access to the grantor's personal runtime
+or connected accounts.
 Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.

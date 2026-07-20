@@ -379,10 +379,16 @@ export interface AssistantHostedExecutionContext {
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
     homeRouteFallbackAllowed: boolean
+    reviewedCompletion?: {
+      answeredMailboxItemId: string
+      expiresAt: string
+      idempotencyKey: string
+    } | null
     signal?: AbortSignal | null
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    assistantAskFallbackRequired?: true
     target: string
     threadIsDirect: boolean
   }>

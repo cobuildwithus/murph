@@ -76,10 +76,14 @@ review the candidate disclosure inside that boundary.
    byte-for-byte. A scheduled answer re-reads the active canonical automation
    and current non-direct Linq route, then resumes that automation through the
    ordinary group notification and outbox path with a deterministic key derived
-   from the completion. The answer is untrusted data, not consent for an
-   external action; every available tool still applies its existing independent
-   authority checks. Group-safe accountless service tools may be available, but
-   the continuation receives no member's connected account or private runtime.
+   from the completion. That model decision uses an isolated one-shot thread:
+   it reads no conversation or assistant memory and persists no prompt, model
+   output, transcript, receipt, session, or provider-resume state. The existing
+   outbox remains the only durable delivery owner. The answer is untrusted data,
+   not consent for an external action; every available tool still applies its
+   existing independent authority checks. Group-safe accountless service tools
+   may be available, but the continuation receives no member's connected
+   account or private runtime.
    A denied or candidate-declared cannot-answer becomes the fixed
    non-disclosing result. Infrastructure failure retries under the existing
    mailbox policy and may expire without disclosing anything.
@@ -134,14 +138,17 @@ group.
   admission, immediately before the personal read, and immediately before
   completion append. Reviewed exact delivery atomically carries that completion
   mailbox id, deterministic delivery key, and authority expiry into the
-  existing outbox. Before expiry the final Linq egress transaction repeats the
+  existing outbox. For scheduled continuations, that same Web-owned predicate
+  runs before model work, immediately before each tool call, and before delivery
+  or skip commit. Before expiry the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
   Missing or malformed outbox proof is terminal before provider entry. When a
   structurally bound completion loses live grant authority or reaches its
   outbox-owned expiry after the reviewed answer was queued, the existing intent
-  durably replaces that answer with the fixed cannot-answer copy and retries
-  before provider entry. An intent that already contains that exact fixed copy
-  remains deliverable after retention removes the expired mailbox rows.
+  durably replaces the complete answer payload, including all media, with the
+  fixed text-only cannot-answer copy and retries before provider entry. Only
+  that exact text with empty media counts as fallback. It remains deliverable
+  after retention removes the expired mailbox rows.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
 - Request identity is the group runtime, exact grant, and trusted invocation.

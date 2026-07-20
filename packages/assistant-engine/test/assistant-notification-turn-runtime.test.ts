@@ -2850,6 +2850,190 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
   expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal keeps a reviewed completion model turn isolated and ephemeral', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued the consented group follow-up.',
+      text: 'You are both free at 5pm.',
+    }),
+    session: providerSession,
+  })
+  const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
+  const beforeToolExecution = vi.fn(async () => undefined)
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+  sharedPlan.conversationPolicy.audience.threadId = 'group-reviewed-completion'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        expect(providerInput.profile).toEqual({
+          nativeResumePolicy: 'disabled',
+          promptProfile: 'notification-decision',
+          threadScope: 'isolated-thread',
+          toolProfile: 'notification-turn',
+        })
+        expect(providerInput.input).toEqual(expect.objectContaining({
+          codexConfigOverrides: [
+            'memories.use_memories=false',
+            'memories.generate_memories=false',
+          ],
+          suppressProviderFailureTranscriptAudit: true,
+        }))
+        await providerInput.onProviderRequestPlanned?.({
+          codexContinuation: { kind: 'explicit-structured-history' },
+          providerAttemptId: null,
+        })
+        await providerInput.hostedToolContext?.beforeToolExecution?.()
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      sharedPlan,
+      turnId: 'turn-reviewed-completion-ephemeral',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-reviewed-completion-ephemeral',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+
+  const result = await sendAssistantNotificationLocal({
+    beforeProviderAcceptedInputs,
+    beforeToolExecution,
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey:
+      'reviewed-assistant-ask-completion:ephemeral-test',
+    executionContext: {
+      hosted: {
+        memberId: 'member-reviewed-completion',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Reason over the reviewed private answer once.',
+    responsePolicy: { kind: 'allow_send_or_skip' },
+    reviewedAssistantAskCompletionExpiresAt: '2026-07-20T17:10:00.000Z',
+    scheduledInvocationAuthority: {
+      automationId: 'automation-reviewed-completion',
+      occurrenceAt: '2026-07-20T17:00:00.000Z',
+    },
+    threadId: 'group-reviewed-completion',
+    threadIsDirect: false,
+    vault: '/vaults/reviewed-completion-ephemeral',
+  })
+
+  expect(beforeProviderAcceptedInputs).toHaveBeenCalledWith({
+    acceptedInputs: [],
+  })
+  expect(beforeToolExecution).toHaveBeenCalledOnce()
+  expect(mocks.resolveAssistantSessionForMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
+  expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
+  expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+  expect(result.deliveryOutcome).toEqual(expect.objectContaining({
+    intentId: 'intent-reviewed-completion-ephemeral',
+    kind: 'queued',
+  }))
+})
+
+test('sendAssistantNotificationLocal keeps a reviewed completion skip isolated and ephemeral', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    codexThreadId: 'provider-thread-reviewed-completion-skip',
+    response: JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'The consented facts do not support a group follow-up.',
+    }),
+    session: providerSession,
+  })
+  const beforeCommit = vi.fn(async () => undefined)
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+  sharedPlan.conversationPolicy.audience.threadId = 'group-reviewed-completion-skip'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        expect(providerInput.profile).toEqual({
+          nativeResumePolicy: 'disabled',
+          promptProfile: 'notification-decision',
+          threadScope: 'isolated-thread',
+          toolProfile: 'notification-turn',
+        })
+        expect(providerInput.input).toEqual(expect.objectContaining({
+          codexConfigOverrides: [
+            'memories.use_memories=false',
+            'memories.generate_memories=false',
+          ],
+          suppressProviderFailureTranscriptAudit: true,
+        }))
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      sharedPlan,
+      turnId: 'turn-reviewed-completion-skip-ephemeral',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    beforeCommit,
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey:
+      'reviewed-assistant-ask-completion:ephemeral-skip-test',
+    executionContext: {
+      hosted: {
+        memberId: 'member-reviewed-completion-skip',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Reason over the reviewed private answer once.',
+    responsePolicy: { kind: 'allow_send_or_skip' },
+    reviewedAssistantAskCompletionExpiresAt: '2026-07-20T17:10:00.000Z',
+    scheduledInvocationAuthority: {
+      automationId: 'automation-reviewed-completion-skip',
+      occurrenceAt: '2026-07-20T17:00:00.000Z',
+    },
+    threadId: 'group-reviewed-completion-skip',
+    threadIsDirect: false,
+    vault: '/vaults/reviewed-completion-skip-ephemeral',
+  })
+
+  expect(beforeCommit).toHaveBeenCalledWith({
+    decision: {
+      kind: 'skip',
+      privateSummary: 'The consented facts do not support a group follow-up.',
+    },
+    deliveryOutcome: null,
+    response: null,
+  })
+  expect(result).toEqual(expect.objectContaining({
+    decision: expect.objectContaining({ kind: 'skip' }),
+    response: null,
+  }))
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantSessionForMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal rechecks notification authority before outbound delivery', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({

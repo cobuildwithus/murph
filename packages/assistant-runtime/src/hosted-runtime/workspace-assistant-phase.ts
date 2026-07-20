@@ -1200,6 +1200,7 @@ export async function runHostedWorkspaceAssistantPhase(
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
         resolveScheduledLinqRoute: async ({
           homeRouteFallbackAllowed,
+          reviewedCompletion,
           signal,
           target,
           targetKind,
@@ -1214,6 +1215,17 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           const authority = await assertEngagement({
+            ...(reviewedCompletion
+              ? {
+                  answeredMailboxItemIds: [
+                    reviewedCompletion.answeredMailboxItemId,
+                  ],
+                  assistantAskCompletionExpiresAt:
+                    reviewedCompletion.expiresAt,
+                  assistantAskFallback: false,
+                  idempotencyKey: reviewedCompletion.idempotencyKey,
+                }
+              : {}),
             authorityCheckOnly: true,
             homeRouteFallbackAllowed,
             target,
@@ -1227,6 +1239,9 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           return {
+            ...(authority.assistantAskFallbackRequired === true
+              ? { assistantAskFallbackRequired: true as const }
+              : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

@@ -658,7 +658,18 @@ async function preflightHostedAssistantDispatch(input: {
     requireHostedReviewedAssistantAskCompletionExpiresAt(input.intent);
   if (
     input.intent.message
-      !== HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+      === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+    && !isHostedReviewedAssistantAskFallbackPayload(input.intent)
+  ) {
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: input.intent.intentId,
+      now: input.now,
+      vaultRoot: input.vaultRoot,
+    });
+    return { action: "continue" };
+  }
+  if (
+    !isHostedReviewedAssistantAskFallbackPayload(input.intent)
     && Date.parse(completionExpiresAt) <= input.now.getTime()
   ) {
     await persistHostedAssistantAskFallbackSupersession({
@@ -692,8 +703,7 @@ async function preflightHostedAssistantDispatch(input: {
       answeredMailboxItemIds: input.intent.answeredMailboxItemIds,
       assistantAskCompletionExpiresAt: completionExpiresAt,
       assistantAskFallback:
-        input.intent.message
-          === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        isHostedReviewedAssistantAskFallbackPayload(input.intent),
       authorityCheckOnly: true,
       directRecipientPhoneNumber:
         normalizeHostedLinqDirectRecipient(
@@ -754,6 +764,15 @@ function requireHostedReviewedAssistantAskCompletionExpiresAt(
   return expiresAt;
 }
 
+function isHostedReviewedAssistantAskFallbackPayload(input: {
+  media?: readonly AssistantResponseMedia[] | null;
+  message: string;
+}): boolean {
+  return input.message
+      === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+    && (input.media?.length ?? 0) === 0;
+}
+
 async function persistHostedAssistantAskFallbackSupersession(input: {
   intentId: string;
   now: Date;
@@ -771,10 +790,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     );
   }
   requireHostedReviewedAssistantAskCompletionExpiresAt(current);
-  if (
-    current.message
-      === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
-  ) {
+  if (isHostedReviewedAssistantAskFallbackPayload(current)) {
     return current;
   }
   const updatedAt = input.now.toISOString();
@@ -784,15 +800,13 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     expectedUpdatedAt: current.updatedAt,
     intent: {
       ...current,
+      media: [],
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       updatedAt,
     },
     vault: input.vaultRoot,
   });
-  if (
-    persisted.message
-      !== HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
-  ) {
+  if (!isHostedReviewedAssistantAskFallbackPayload(persisted)) {
     throw new VaultCliError(
       "ASSISTANT_ASK_COMPLETION_FALLBACK_PERSIST_PENDING",
       "Reviewed Assistant Ask completion fallback persistence must retry before delivery.",
@@ -3193,8 +3207,10 @@ function createHostedAssistantLinqSendDependency(input: {
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           assistantAskFallback:
             reviewedAssistantAskCompletion
-              ? request.message
-                === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+              ? isHostedReviewedAssistantAskFallbackPayload({
+                  media: request.media,
+                  message: request.message,
+                })
               : undefined,
           authorityCheckOnly: true,
           directRecipientPhoneNumber,
@@ -3245,6 +3261,7 @@ function createHostedAssistantLinqSendDependency(input: {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
                 intentId: input.intentId ?? null,
+                media: request.media ?? [],
                 message: request.message,
                 now: new Date(),
                 vaultRoot: input.vaultRoot ?? null,
@@ -3256,8 +3273,10 @@ function createHostedAssistantLinqSendDependency(input: {
               assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
               assistantAskFallback:
                 reviewedAssistantAskCompletion
-                  ? request.message
-                    === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE
+                  ? isHostedReviewedAssistantAskFallbackPayload({
+                      media: request.media,
+                      message: request.message,
+                    })
                   : undefined,
               authorityCheckOnly: false,
               directRecipientPhoneNumber,
@@ -3390,6 +3409,7 @@ function createHostedAssistantLinqSendDependency(input: {
 
 async function prepareHostedReviewedAssistantAskProviderEntry(input: {
   intentId: string | null;
+  media: readonly AssistantResponseMedia[];
   message: string;
   now: Date;
   vaultRoot: string | null;
@@ -3415,8 +3435,27 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
   const expiresAt = requireHostedReviewedAssistantAskCompletionExpiresAt(
     current,
   );
-  const currentIsFallback = current.message
+  const currentIsFallback = isHostedReviewedAssistantAskFallbackPayload(current);
+  const requestIsFallback = isHostedReviewedAssistantAskFallbackPayload(input);
+  const currentContainsFallbackText = current.message
     === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
+  const requestContainsFallbackText = input.message
+    === HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
+  if (
+    (currentContainsFallbackText && !currentIsFallback)
+    || (requestContainsFallbackText && !requestIsFallback)
+  ) {
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: input.intentId,
+      now: input.now,
+      vaultRoot: input.vaultRoot,
+    });
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+      { retryable: true },
+    );
+  }
   if (current.message !== input.message) {
     throw new VaultCliError(
       currentIsFallback

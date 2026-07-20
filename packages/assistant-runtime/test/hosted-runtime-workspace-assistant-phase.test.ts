@@ -1035,6 +1035,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
       .mockResolvedValueOnce({
+        assistantAskFallbackRequired: true,
         targetOverride: {
           target: "chat_current_group",
           targetKind: "thread" as const,
@@ -1060,10 +1061,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
         await expect(resolveScheduledLinqRoute({
           homeRouteFallbackAllowed: false,
+          reviewedCompletion: {
+            answeredMailboxItemId: "aask_reviewed_completion",
+            expiresAt: "2026-07-20T17:10:00.000Z",
+            idempotencyKey: "reviewed-assistant-ask-completion:test",
+          },
           signal,
           target: "chat_saved_group",
           targetKind: "thread",
         })).resolves.toEqual({
+          assistantAskFallbackRequired: true,
           target: "chat_current_group",
           threadIsDirect: false,
         });
@@ -1087,8 +1094,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await runHostedWorkspaceAssistantPhase(phaseInput);
 
     expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
+      answeredMailboxItemIds: ["aask_reviewed_completion"],
+      assistantAskCompletionExpiresAt: "2026-07-20T17:10:00.000Z",
+      assistantAskFallback: false,
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: false,
+      idempotencyKey: "reviewed-assistant-ask-completion:test",
       target: "chat_saved_group",
       targetKind: "thread",
     }, { signal });
