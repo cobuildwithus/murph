@@ -631,6 +631,37 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.pageCount).toBe(0);
   });
 
+  it("accepts a formally marked search OperationOutcome without treating it as the requested family", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
+        entry: [
+          {
+            resource: {
+              resourceType: "Observation",
+              id: "observation-1",
+            },
+            search: { mode: "match" },
+          },
+          {
+            resource: {
+              resourceType: "OperationOutcome",
+              issue: [{ code: "informational", severity: "warning" }],
+            },
+            search: { mode: "outcome" },
+          },
+        ],
+        resourceType: "Bundle",
+        type: "searchset",
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_search_outcome", resourceType: "Observation" }),
+    });
+
+    expect(result).toMatchObject({ status: "page" });
+    expect(harness.state.run.pageCount).toBe(1);
+  });
+
   it("deduplicates concurrent claims for the same page across distinct caller request ids", async () => {
     const harness = createHarness(["Patient", "Observation"]);
     const fetchStarted = deferred<void>();
@@ -662,6 +693,41 @@ describe("Clinical Records retrieval control plane", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(harness.state.run.providerRequestCount).toBe(1);
     expect(harness.state.run.pageCount).toBe(1);
+  });
+
+  it("cannot reclaim a page from a snapshot taken before another claimant completes", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const firstFetchStarted = deferred<void>();
+    const releaseFirstFetch = deferred<Response>();
+    const staleSnapshotTaken = deferred<void>();
+    const releaseStaleSnapshot = deferred<void>();
+    const fetchImpl = vi.fn(async () => {
+      firstFetchStarted.resolve();
+      return releaseFirstFetch.promise;
+    });
+    const request = pageRequest({ requestId: "request_completion_race", resourceType: "Observation" });
+
+    const first = fetchClinicalRetrievalPage({ fetchImpl, memberId: MEMBER_ID, request });
+    await firstFetchStarted.promise;
+    harness.hooks.afterRequestUpsert = async () => {
+      staleSnapshotTaken.resolve();
+      await releaseStaleSnapshot.promise;
+    };
+    const racingClaim = fetchClinicalRetrievalPage({ fetchImpl, memberId: MEMBER_ID, request });
+    await staleSnapshotTaken.promise;
+
+    releaseFirstFetch.resolve(fhirResponse({ entry: [], resourceType: "Bundle", type: "searchset" }));
+    await expect(first).resolves.toMatchObject({ status: "page" });
+    releaseStaleSnapshot.resolve();
+
+    await expect(racingClaim).resolves.toEqual({
+      errorCode: "request-in-progress",
+      retryable: true,
+      status: "unavailable",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(harness.state.run.pageCount).toBe(1);
+    expect([...harness.state.requests.values()][0]?.claimVersion).toBe(3);
   });
 
   it("charges completed same-page replays without double-counting the logical page", async () => {
@@ -739,7 +805,7 @@ describe("Clinical Records retrieval control plane", () => {
     });
     expect(harness.state.run.pageCount).toBe(1);
     expect([...harness.state.requests.values()][0]).toMatchObject({
-      claimVersion: 3,
+      claimVersion: 4,
       responseBytes: expect.any(Number),
     });
   });
@@ -870,9 +936,11 @@ function createHarness(resourceTypes: string[]) {
   const cursorPlaintexts = new Map<string, string>();
   const runUpdateCalls: Array<Record<string, unknown>> = [];
   const hooks: {
+    afterRequestUpsert: (() => Promise<void>) | null;
     beforeConnectionUpdateMany: (() => void) | null;
     beforeRunUpdateMany: (() => void) | null;
   } = {
+    afterRequestUpsert: null,
     beforeConnectionUpdateMany: null,
     beforeRunUpdateMany: null,
   };
@@ -892,16 +960,24 @@ function createHarness(resourceTypes: string[]) {
     }) => {
       const key = requestKey(args.where.runId_requestFingerprint);
       const existing = state.requests.get(key);
-      if (existing) return { ...existing };
-      const created: RetrievalRequestRow = {
-        ...args.create,
-        claimVersion: 1,
-        completedAt: null,
-        reservedBytes: 0,
-        responseBytes: null,
-      };
-      state.requests.set(key, created);
-      return { ...created };
+      let result: RetrievalRequestRow;
+      if (existing) {
+        result = { ...existing };
+      } else {
+        const created: RetrievalRequestRow = {
+          ...args.create,
+          claimVersion: 1,
+          completedAt: null,
+          reservedBytes: 0,
+          responseBytes: null,
+        };
+        state.requests.set(key, created);
+        result = { ...created };
+      }
+      const hook = hooks.afterRequestUpsert;
+      hooks.afterRequestUpsert = null;
+      await hook?.();
+      return result;
     }),
   };
   const runApi = {
@@ -1038,6 +1114,22 @@ function updateRetrievalRequest(
   };
   const row = [...requests.values()].find((candidate) => candidate.id === where.id);
   if (!row) return { count: 0 };
+  if (typeof data.responseBytes === "number") {
+    const expectsFirstCompletion = where.responseBytes === null;
+    if (
+      row.claimVersion !== where.claimVersion
+      || row.completedAt !== null
+      || row.reservedBytes !== where.reservedBytes
+      || (expectsFirstCompletion ? row.responseBytes !== null : row.responseBytes === null)
+    ) return { count: 0 };
+    row.completedAt = data.completedAt as Date;
+    if (data.claimVersion && typeof data.claimVersion === "object") {
+      row.claimVersion += 1;
+    }
+    row.reservedBytes = data.reservedBytes as number;
+    row.responseBytes = data.responseBytes;
+    return { count: 1 };
+  }
   if (data.claimVersion && typeof data.claimVersion === "object") {
     const staleBefore = new Date(Date.now() - 30_000);
     const completedReplay = row.completedAt !== null && row.reservedBytes === 0;
@@ -1050,19 +1142,6 @@ function updateRetrievalRequest(
     row.claimedAt = data.claimedAt as Date;
     row.completedAt = null;
     row.reservedBytes = data.reservedBytes as number;
-    return { count: 1 };
-  }
-  if (typeof data.responseBytes === "number") {
-    const expectsFirstCompletion = where.responseBytes === null;
-    if (
-      row.claimVersion !== where.claimVersion
-      || row.completedAt !== null
-      || row.reservedBytes !== where.reservedBytes
-      || (expectsFirstCompletion ? row.responseBytes !== null : row.responseBytes === null)
-    ) return { count: 0 };
-    row.completedAt = data.completedAt as Date;
-    row.reservedBytes = data.reservedBytes as number;
-    row.responseBytes = data.responseBytes;
     return { count: 1 };
   }
   if (data.claimedAt instanceof Date) {

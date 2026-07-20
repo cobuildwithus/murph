@@ -19,8 +19,8 @@ import process from "node:process";
 
 const ENABLED_ENV = "MURPH_VERIFY_SHARED_HOST";
 const HELD_ENV = "MURPH_VERIFY_HOST_SLOT_HELD";
-const SLOT_COUNT_ENV = "MURPH_VERIFY_HOST_CONCURRENCY";
 const TEST_STATE_ROOT_ENV = "MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT";
+const CODEX_THREAD_ENV = "CODEX_THREAD_ID";
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_STALE_METADATA_GRACE_MS = 10_000;
 const WAIT_LOG_INTERVAL_MS = 60_000;
@@ -36,12 +36,18 @@ let lastWaitLogAtMs = 0;
 installTerminationHandlers();
 
 try {
-  if (process.env[ENABLED_ENV] !== "1" || process.env[HELD_ENV] === "1") {
-    process.exitCode = await runCommand(invocation.commandArgs, process.env);
+  const sharedHostMode = resolveSharedHostMode(process.env);
+  const childEnv = {
+    ...process.env,
+    [ENABLED_ENV]: sharedHostMode,
+  };
+
+  if (sharedHostMode !== "1" || process.env[HELD_ENV] === "1") {
+    process.exitCode = await runCommand(invocation.commandArgs, childEnv);
   } else {
     await acquireSlot(invocation.label);
     process.exitCode = await runCommand(invocation.commandArgs, {
-      ...process.env,
+      ...childEnv,
       [HELD_ENV]: "1",
     });
   }
@@ -54,7 +60,7 @@ try {
 
 async function acquireSlot(label) {
   const stateRoot = resolveStateRoot();
-  const slotCount = readSlotCount(process.env[SLOT_COUNT_ENV]);
+  const slotPath = path.join(stateRoot, "slot-1");
   const pollIntervalMs = readPositiveInteger(
     process.env.MURPH_VERIFY_SHARED_HOST_POLL_INTERVAL_MS,
     DEFAULT_POLL_INTERVAL_MS,
@@ -74,45 +80,31 @@ async function acquireSlot(label) {
   prepareStateRoot(stateRoot);
 
   while (true) {
-    const owners = [];
-    let reclaimedSlot = false;
-
-    for (let index = 1; index <= slotCount; index += 1) {
-      const slotPath = path.join(stateRoot, `slot-${index}`);
-
-      try {
-        mkdirSync(slotPath, { mode: 0o700 });
-        writeOwnerMetadata(slotPath, owner);
-        heldSlot = { owner, slotPath };
-        return;
-      } catch (error) {
-        if (!isAlreadyExistsError(error)) {
-          throw error;
-        }
+    try {
+      mkdirSync(slotPath, { mode: 0o700 });
+      writeOwnerMetadata(slotPath, owner);
+      heldSlot = { owner, slotPath };
+      return;
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        throw error;
       }
-
-      const inspection = inspectSlot(slotPath, staleMetadataGraceMs);
-      if (inspection.state === "available") {
-        reclaimedSlot = true;
-        break;
-      }
-      if (
-        inspection.state === "stale"
-        && reclaimStaleSlot(slotPath, inspection, staleMetadataGraceMs)
-      ) {
-        reclaimedSlot = true;
-        break;
-      }
-      owners.push(inspection.metadata);
     }
 
-    if (reclaimedSlot) {
+    const inspection = inspectSlot(slotPath, staleMetadataGraceMs);
+    if (inspection.state === "available") {
+      continue;
+    }
+    if (
+      inspection.state === "stale"
+      && reclaimStaleSlot(slotPath, inspection, staleMetadataGraceMs)
+    ) {
       continue;
     }
 
     if (Date.now() - lastWaitLogAtMs >= WAIT_LOG_INTERVAL_MS) {
       console.error(
-        `[host-verification] waiting for one of ${slotCount} shared-host slot(s).${formatOwners(owners)} Waiting continues until a slot is available or this command is cancelled.`,
+        `[host-verification] waiting for the exclusive shared-host slot.${formatOwner(inspection.metadata)} Waiting continues until the slot is available or this command is cancelled.`,
       );
       lastWaitLogAtMs = Date.now();
     }
@@ -390,16 +382,15 @@ function sanitizeLabel(label) {
   return sanitized.replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-function formatOwners(owners) {
-  const visibleOwners = owners.filter(Boolean).slice(0, 4);
-  if (visibleOwners.length === 0) {
+function formatOwner(owner) {
+  if (!owner) {
     return "";
   }
-  return ` Active: ${visibleOwners.map((owner) => `${owner.label} (pid ${owner.pid})`).join(", ")}.`;
+  return ` Active: ${owner.label} (pid ${owner.pid}).`;
 }
 
 function formatError(error) {
-  if (error instanceof Error && error.message.startsWith(`${SLOT_COUNT_ENV} `)) {
+  if (error instanceof Error && error.message.startsWith(`${ENABLED_ENV} `)) {
     return error.message;
   }
   if (error instanceof Error && error.message.startsWith(`${TEST_STATE_ROOT_ENV} `)) {
@@ -443,18 +434,19 @@ function readPositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readSlotCount(value) {
-  if (value === undefined || value === "") {
-    return 1;
+function resolveSharedHostMode(env) {
+  const configured = env[ENABLED_ENV];
+  if (configured !== undefined) {
+    if (configured !== "0" && configured !== "1") {
+      throw new Error(`${ENABLED_ENV} must be 0 or 1.`);
+    }
+    return configured;
   }
-  if (!/^[1-9][0-9]*$/.test(value)) {
-    throw new Error(`${SLOT_COUNT_ENV} must be a positive integer.`);
-  }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${SLOT_COUNT_ENV} must be a positive integer.`);
-  }
-  return parsed;
+
+  return !env.CI && typeof env[CODEX_THREAD_ENV] === "string"
+    && env[CODEX_THREAD_ENV].trim().length > 0
+    ? "1"
+    : "0";
 }
 
 function readNonNegativeInteger(value, fallback) {

@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import {
+  ArrowRightIcon,
   Building2Icon,
+  FileTextIcon,
+  KeyRoundIcon,
   LockKeyholeIcon,
   MapPinIcon,
+  RefreshCwIcon,
   SearchIcon,
 } from "lucide-react";
 import {
@@ -26,7 +30,10 @@ import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Spinner } from "@/src/components/ui/spinner";
-import { takeClinicalRecordsConnectIntentFromBrowser } from "@/src/lib/clinical-records/browser-connect-intent";
+import {
+  clearClinicalRecordsConnectIntentFromBrowser,
+  takeClinicalRecordsConnectIntentFromBrowser,
+} from "@/src/lib/clinical-records/browser-connect-intent";
 import {
   CLINICAL_RECORD_CONNECT_START_PATH,
   parseClinicalProviderSearchResponse,
@@ -48,7 +55,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
   useLayoutEffect(() => {
     if (capturedIntentRef.current === undefined) {
       capturedIntentRef.current = takeClinicalRecordsConnectIntentFromBrowser({
-        preserveForAuthReload: !authenticated,
+        preserveForAuthReload: true,
       });
     }
     const capturedIntent = capturedIntentRef.current;
@@ -88,30 +95,126 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
     return <AuthRequiredState onSignIn={openAuthDialog} />;
   }
 
+  const currentStep = consentRequired === false ? 1 : 0;
+
   return (
-    <div className="max-w-3xl space-y-6">
-      {consentRequired !== false ? (
-        <section aria-labelledby="records-consent-title" className="space-y-4">
-          <div className="space-y-1">
-            <h2 id="records-consent-title" className="font-serif text-xl font-medium text-foreground">
-              Before you choose an organization
-            </h2>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Review Murph&apos;s health-data terms. This beta makes one import of supported Epic laboratory results and diagnostic summaries.
-            </p>
-          </div>
-          <HostedLegalConsentCard
-            initialStatus={null}
-            onAccepted={() => setConsentRequired(false)}
-            onRequirementChange={setConsentRequired}
-            preferredScope="launch.legal"
-            source="clinical-records-connect"
+    <div className="max-w-5xl space-y-9">
+      <ConnectJourney currentStep={currentStep} />
+
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-12">
+        {consentRequired !== false ? (
+          <section aria-labelledby="records-consent-title" className="min-w-0 space-y-6">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+                Step 1 of 3
+              </p>
+              <h2 id="records-consent-title" className="mt-1 font-serif text-2xl font-medium tracking-tight text-foreground">
+                Review how Murph uses your health data
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                You control whether Murph can save these records. Review the terms that apply before choosing where you get care.
+              </p>
+            </div>
+            <HostedLegalConsentCard
+              acceptedPendingLabel="Opening records search"
+              initialStatus={null}
+              mode="compact"
+              onAccepted={() => setConsentRequired(false)}
+              onRequirementChange={setConsentRequired}
+              preferredScope="launch.legal"
+              source="clinical-records-connect"
+            />
+          </section>
+        ) : (
+          <ProviderSearch
+            intentClaim={intentClaim}
+            onConsentRequired={() => setConsentRequired(true)}
           />
-        </section>
-      ) : (
-        <ProviderSearch intentClaim={intentClaim} onConsentRequired={() => setConsentRequired(true)} />
-      )}
+        )}
+
+        <ImportBoundaryAside />
+      </div>
     </div>
+  );
+}
+
+function ConnectJourney({ currentStep }: { currentStep: number }) {
+  const steps = [
+    { description: "Check how Murph uses your health data", label: "Review" },
+    { description: "Find your hospital or clinic", label: "Where you get care" },
+    { description: "Sign in where you get care", label: "Patient portal" },
+  ] as const;
+
+  return (
+    <section aria-label="Medical records connection progress" className="border-y border-border py-4 sm:py-5">
+      <ol className="grid gap-4 sm:grid-cols-3 sm:gap-6">
+        {steps.map((step, index) => {
+          const active = index === currentStep;
+          const complete = index < currentStep;
+          return (
+            <li key={step.label} aria-current={active ? "step" : undefined} className="flex items-start gap-3">
+              <span
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] font-medium tabular-nums",
+                  active && "border-primary bg-primary text-primary-foreground",
+                  complete && "border-primary/30 bg-primary/10 text-primary",
+                  !active && !complete && "border-border text-muted-foreground",
+                )}
+              >
+                {index + 1}
+              </span>
+              <div className="pt-0.5">
+                <p className={cn("text-sm font-medium", active || complete ? "text-foreground" : "text-muted-foreground")}>
+                  {step.label}
+                </p>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                  {step.description}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function ImportBoundaryAside() {
+  const facts = [
+    {
+      description: "Your patient portal password never enters Murph.",
+      icon: KeyRoundIcon,
+      label: "Your portal handles sign-in",
+    },
+    {
+      description: "Murph copies records once. It does not keep checking your chart.",
+      icon: RefreshCwIcon,
+      label: "Copies once",
+    },
+    {
+      description: "Lab results and report summaries available through your portal.",
+      icon: FileTextIcon,
+      label: "What gets copied",
+    },
+  ] as const;
+
+  return (
+    <aside className="border-t border-border pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+      <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+        What to expect
+      </p>
+      <div className="mt-5 space-y-6">
+        {facts.map(({ description, icon: Icon, label }) => (
+          <div key={label} className="flex gap-3">
+            <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-medium text-foreground">{label}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -133,6 +236,8 @@ function ProviderSearch({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
+  const startCommittedRef = useRef(false);
+  const operationGenerationRef = useRef(0);
   const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
     searchInputRef.current = node;
     if (!node) {
@@ -149,10 +254,14 @@ function ProviderSearch({
       if (!event.persisted) {
         return;
       }
+      operationGenerationRef.current += 1;
       searchInFlightRef.current = false;
       startInFlightRef.current = false;
       setSearchPending(false);
       setStartingProviderId(null);
+      if (startCommittedRef.current) {
+        setIntentUnavailable(true);
+      }
     }
 
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
@@ -173,6 +282,8 @@ function ProviderSearch({
     }
 
     searchInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setSearchPending(true);
     setSearchError(null);
     setStartError(null);
@@ -184,19 +295,24 @@ function ProviderSearch({
         url: PROVIDER_SEARCH_PATH,
       });
       const parsed = parseClinicalProviderSearchResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setProviders(parsed.providers);
       setHasSearched(true);
       requestAnimationFrame(() => resultsHeadingRef.current?.focus());
-    } catch (error) {
+    } catch {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       setProviders([]);
       setHasSearched(false);
-      setSearchError(readRequestError(
-        error,
-        "Epic organizations could not be searched right now. Try again.",
-      ));
+      setSearchError("Hospitals and clinics could not be searched right now. Try again.");
     } finally {
-      searchInFlightRef.current = false;
-      setSearchPending(false);
+      if (operationGenerationRef.current === operationGeneration) {
+        searchInFlightRef.current = false;
+        setSearchPending(false);
+      }
     }
   }
 
@@ -206,25 +322,52 @@ function ProviderSearch({
     }
 
     startInFlightRef.current = true;
+    const operationGeneration = operationGenerationRef.current + 1;
+    operationGenerationRef.current = operationGeneration;
     setStartingProviderId(provider.id);
     setStartError(null);
+
+    const markStartCommitted = () => {
+      if (startCommittedRef.current) {
+        return;
+      }
+      startCommittedRef.current = true;
+      if (operationGenerationRef.current !== operationGeneration) {
+        setIntentUnavailable(true);
+      }
+      clearClinicalRecordsConnectIntentFromBrowser();
+    };
 
     try {
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
+        onSuccessfulResponseHeaders: markStartCommitted,
         payload: {
           claim: intentClaim,
           providerDirectoryEntryId: provider.id,
         },
         url: CLINICAL_RECORD_CONNECT_START_PATH,
       });
+      markStartCommitted();
       const parsed = parseClinicalRecordConnectStartResponse(response);
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
       const authorizationUrl = new URL(parsed.authorizationUrl);
       if (authorizationUrl.protocol !== "https:") {
         throw new TypeError("Clinical Records authorization URL must use HTTPS.");
       }
       window.location.assign(parsed.authorizationUrl);
     } catch (error) {
+      if (operationGenerationRef.current !== operationGeneration) {
+        return;
+      }
+      if (startCommittedRef.current) {
+        startInFlightRef.current = false;
+        setIntentUnavailable(true);
+        setStartingProviderId(null);
+        return;
+      }
       if (isConsentRequiredError(error)) {
         startInFlightRef.current = false;
         setStartingProviderId(null);
@@ -233,16 +376,16 @@ function ProviderSearch({
       }
       if (isUnavailableIntentError(error)) {
         startInFlightRef.current = false;
+        clearClinicalRecordsConnectIntentFromBrowser();
         setIntentUnavailable(true);
         setStartingProviderId(null);
         return;
       }
 
       startInFlightRef.current = false;
-      setStartError(readRequestError(
-        error,
-        `Could not continue with ${provider.brandName}. Choose the organization again or try another result.`,
-      ));
+      setStartError(
+        `Could not continue with ${provider.brandName}. Choose it again or try another result.`,
+      );
       setStartingProviderId(null);
     }
   }
@@ -252,26 +395,29 @@ function ProviderSearch({
   }
 
   return (
-    <section aria-labelledby="provider-search-title" className="space-y-6">
-      <div className="space-y-1">
-        <h2 id="provider-search-title" className="font-serif text-xl font-medium text-foreground">
-          Find your Epic organization
+    <section aria-labelledby="provider-search-title" className="min-w-0 space-y-7">
+      <div>
+        <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+          Step 2 of 3
+        </p>
+        <h2 id="provider-search-title" className="mt-1 font-serif text-2xl font-medium tracking-tight text-foreground">
+          Where do you get care?
         </h2>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          Search by health system, hospital, clinic, city, state, or ZIP code. You will choose the organization before leaving Murph.
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Search for the hospital or clinic whose patient portal you use. Murph supports selected portals right now.
         </p>
       </div>
 
       <form
         role="search"
-        className="space-y-3"
+        className="space-y-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           void searchProviders();
         }}
       >
-        <label htmlFor="clinical-provider-search" className="text-sm font-medium text-foreground">
-          Organization or location
+        <label htmlFor="clinical-provider-search" className="font-mono text-[10px] uppercase tracking-[0.11em] text-foreground">
+          Hospital or clinic
         </label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative min-w-0 flex-1">
@@ -284,6 +430,7 @@ function ProviderSearch({
               autoComplete="off"
               className="pl-11"
               inputSize="lg"
+              maxLength={120}
               name="provider-search"
               placeholder="Piedmont, Atlanta, GA, or 30309"
               readOnly={searchPending || Boolean(startingProviderId)}
@@ -327,19 +474,19 @@ function ProviderSearch({
             <h3
               ref={resultsHeadingRef}
               tabIndex={-1}
-              className="font-serif text-lg font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="font-serif text-xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Search results
+              Matching places
             </h3>
-            <p aria-live="polite" className="text-sm text-muted-foreground">
+            <p aria-live="polite" className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
               {providers.length === 0
-                ? "No matching Epic organizations found. Try a broader name or location."
-                : `${providers.length} ${providers.length === 1 ? "organization" : "organizations"} found.`}
+                ? "No matches"
+                : `${providers.length} ${providers.length === 1 ? "match" : "matches"}.`}
             </p>
           </div>
 
           {providers.length > 0 ? (
-            <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
               {providers.map((provider) => (
                 <ProviderResult
                   key={provider.id}
@@ -350,13 +497,19 @@ function ProviderSearch({
                 />
               ))}
             </ul>
-          ) : null}
+          ) : (
+            <div className="flex gap-4 border-y border-border py-6">
+              <SearchIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+              <div>
+                <p className="text-sm font-medium text-foreground">This portal may not be supported</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Murph does not support every patient portal yet. Check the hospital or clinic name and city, or try another place where you get care.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
-
-      <p className="border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
-        This beta performs one import of supported Epic laboratory results and diagnostic summaries. It does not continuously sync your chart.
-      </p>
     </section>
   );
 }
@@ -375,19 +528,21 @@ function ProviderResult({
   const facilities = formatFacilities(provider.facilities);
 
   return (
-    <li className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-      <div className="min-w-0 space-y-2">
+    <li className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <div className="min-w-0 space-y-3">
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-primary">
+          <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Building2Icon aria-hidden="true" className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="font-medium leading-6 text-foreground text-pretty">{provider.brandName}</p>
-            <p className="text-xs text-muted-foreground">Epic patient portal</p>
+            <p className="font-serif text-lg font-medium leading-6 tracking-tight text-foreground text-pretty">{provider.brandName}</p>
+            <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+              Patient portal
+            </p>
           </div>
         </div>
         {facilities.length > 0 ? (
-          <ul className="space-y-1 pl-11 text-sm text-muted-foreground">
+          <ul className="space-y-1.5 pl-12 text-sm text-muted-foreground">
             {facilities.map((facility) => (
               <li key={facility} className="flex items-start gap-1.5">
                 <MapPinIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
@@ -399,7 +554,7 @@ function ProviderResult({
       </div>
       <Button
         aria-busy={pending}
-        aria-label={`Continue with ${provider.brandName}`}
+        aria-label={`Continue to ${provider.brandName} patient portal`}
         className="w-full sm:w-auto"
         disabled={disabled}
         onClick={onSelect}
@@ -407,7 +562,8 @@ function ProviderResult({
         type="button"
       >
         {pending ? <Spinner /> : null}
-        {pending ? "Opening Epic" : "Continue"}
+        {pending ? "Opening portal" : "Continue to portal"}
+        {!pending ? <ArrowRightIcon aria-hidden="true" data-icon="inline-end" /> : null}
       </Button>
     </li>
   );
@@ -415,23 +571,30 @@ function ProviderResult({
 
 function ConnectPageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Preparing Epic connection" className="max-w-3xl space-y-5" role="status">
-      <Skeleton className="h-6 w-56" />
-      <Skeleton className="h-4 w-full max-w-xl" />
-      <Skeleton className="h-32 w-full rounded-2xl" />
+    <div aria-busy="true" aria-label="Preparing records connection" className="max-w-5xl space-y-8" role="status">
+      <Skeleton className="h-4 w-36" />
+      <Skeleton className="h-20 w-full rounded-xl" />
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="space-y-5">
+          <Skeleton className="h-7 w-64" />
+          <Skeleton className="h-4 w-full max-w-xl" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+        </div>
+        <Skeleton className="h-48 w-full rounded-xl" />
+      </div>
     </div>
   );
 }
 
 function AuthRequiredState({ onSignIn }: { onSignIn: () => void }) {
   return (
-    <section className="max-w-2xl rounded-2xl border border-border bg-card p-6 sm:p-8">
-      <span className="flex size-10 items-center justify-center rounded-full border border-border bg-background text-primary">
+    <section className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8">
+      <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
         <LockKeyholeIcon aria-hidden="true" className="size-5" />
       </span>
       <h2 className="mt-5 font-serif text-2xl font-medium text-foreground">Sign in to continue</h2>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        This private connection link is bound to your Murph account. Sign in, then choose the Epic organization whose portal you use.
+        This private link belongs to your Murph account. Sign in, then find the hospital or clinic whose patient portal you use.
       </p>
       <Button className="mt-6 w-full sm:w-auto" onClick={onSignIn} size="lg" type="button">
         Log in or sign up
@@ -442,10 +605,15 @@ function AuthRequiredState({ onSignIn }: { onSignIn: () => void }) {
 
 function UnavailableIntentState() {
   return (
-    <section className="max-w-2xl rounded-2xl border border-border bg-card p-6 sm:p-8">
+    <section
+      aria-atomic="true"
+      aria-live="polite"
+      className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8"
+      role="status"
+    >
       <h2 className="font-serif text-2xl font-medium text-foreground">Connection link unavailable</h2>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        This private link is missing, expired, or already used. Start a new Epic connection from Medical records.
+        This private link is missing, expired, or already used. Start a new connection from Medical records.
       </p>
       <Link
         href="/records"
@@ -476,12 +644,6 @@ function formatFacilities(
     }
   }
   return [...labels];
-}
-
-function readRequestError(error: unknown, fallback: string): string {
-  return error instanceof HostedOnboardingApiError && error.message
-    ? error.message
-    : fallback;
 }
 
 function isConsentRequiredError(error: unknown): boolean {

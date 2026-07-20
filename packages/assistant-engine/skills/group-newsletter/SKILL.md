@@ -46,12 +46,16 @@ turns may not have read the setup conversation or `group-chat`. Include:
 2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
    eligibility, the scheduled `referenceAt`, and `members` containing current-
    week facts only for currently eligible email recipients. The trusted runtime
-   builds those facts with the generic group weekly reader after filtering the
-   landed records by exact current member/scope/share-id grants. Use only `members`.
-   Never run another group-health read or fetch private 1:1 data for the email. If `prepare` is
-   unavailable or fails, or `referenceAt` is null, do not compose or call
-   `send`; return a `skip` notification decision with a factual private summary
-   and stop.
+   starts this authority and data work only after the model calls the tool. It
+   resolves the current eligible participants and exact member/scope grants,
+   then returns current-week facts from a direct bounded Web snapshot. No
+   roster, grant snapshot, or shared-data block is preloaded before model
+   start. Use only `members`. Never run another group-health read, open raw
+   `vault-share/**` or legacy `derived/vault-share/**` files, or fetch private
+   1:1 data for the email.
+   If `prepare` is unavailable or fails, or `referenceAt` is null,
+   do not compose or call `send`; return a `skip` notification decision with a
+   factual private summary and stop.
 3. Build the featured set only from returned members with at least one
    `weeklyStats` entry. Never use or mention any participant outside `members`
    in the subject, HTML body, or text body.

@@ -304,6 +304,25 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
     expect(mocks.openClinicalOauthVerifier).not.toHaveBeenCalled();
   });
+
+  it("classifies a provider callback error without a code as a connection failure", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await expect(finishClinicalRecordAuthorization({
+      code: null,
+      providerDenied: false,
+      providerError: true,
+      request: new Request(
+        "https://join.example.test/api/clinical-records/oauth/callback",
+      ),
+      state: "opaque-state",
+    })).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_AUTHORIZATION_FAILED",
+    });
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+  });
 });
 
 function createHarness(
@@ -350,6 +369,7 @@ function createHarness(
   };
   harness.prisma = {
     $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    clinicalRecordConnectIntent: tx.clinicalRecordConnectIntent,
     clinicalRecordConnection: tx.clinicalRecordConnection,
   };
   return harness;
@@ -384,6 +404,7 @@ function finishAuthorization() {
   return finishClinicalRecordAuthorization({
     code: "authorization-code",
     providerDenied: false,
+    providerError: false,
     request: new Request(
       "https://join.example.test/api/clinical-records/oauth/callback",
     ),

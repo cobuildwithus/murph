@@ -79,7 +79,7 @@ describe("Clinical Records connect intents", () => {
     expect(new URL(result.connectUrl).hash).toContain("clinicalRecordsIntent=cr_");
   });
 
-  it("requires an unexpired started intent to complete exactly once", async () => {
+  it("lets a started intent complete during its still-valid OAuth continuation", async () => {
     const { completeClinicalRecordConnectIntent } = await import(
       "@/src/lib/clinical-records/connect-intents"
     );
@@ -98,7 +98,6 @@ describe("Clinical Records connect intents", () => {
       where: {
         claimHash: "claim-hash",
         completedAt: null,
-        expiresAt: { gt: now },
         memberId: "member_clinical_1",
         startedAt: { not: null },
       },

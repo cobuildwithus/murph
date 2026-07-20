@@ -461,6 +461,35 @@ export function isClinicalFhirUrlWithinBase(input: {
   return false;
 }
 
+export function isClinicalFhirUrlWithinBaseResourceType(input: {
+  fhirBaseUrlHash: string;
+  resourceType: string;
+  url: string;
+}): boolean {
+  const resourceType = clinicalFhirResourceTypeSchema.safeParse(input.resourceType);
+  const expectedFhirBaseUrlHash = sha256HexSchema.safeParse(input.fhirBaseUrlHash);
+  if (
+    !resourceType.success
+    || !expectedFhirBaseUrlHash.success
+    || !isClinicalFhirUrlWithinBase(input)
+  ) {
+    return false;
+  }
+
+  const pageUrl = new URL(input.url.trim());
+  const pathSegments = pageUrl.pathname.split("/");
+  for (let segmentCount = 1; segmentCount < pathSegments.length; segmentCount += 1) {
+    const candidateBaseUrl = `${pageUrl.origin}${pathSegments.slice(0, segmentCount).join("/")}`;
+    if (
+      hashClinicalFhirBaseUrl(candidateBaseUrl) === expectedFhirBaseUrlHash.data
+      && pathSegments[segmentCount] === resourceType.data
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function hashClinicalFhirPageUrl(value: string): string {
   if (value.length === 0 || value.length > 4_096) {
     throw new Error("Expected a bounded FHIR page URL.");

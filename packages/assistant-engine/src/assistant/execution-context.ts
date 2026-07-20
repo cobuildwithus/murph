@@ -31,6 +31,11 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupSharedMember,
+  HostedRuntimeGroupSharedProjection,
+  HostedRuntimeGroupSharedReadRequest,
+  HostedRuntimeGroupSharedReadResult,
+  HostedRuntimeGroupSharedRecord,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -43,6 +48,9 @@ import type {
 import type {
   HostedPlanUsageStatus,
 } from '@murphai/hosted-execution/plan-usage'
+import type {
+  HostedVaultShareSelectableProjectionScope,
+} from '@murphai/hosted-execution/vault-share'
 import type {
   HostedRuntimeLabsToolRequest,
   HostedRuntimeLabsToolResponse,
@@ -257,6 +265,31 @@ export interface AssistantHostedGroupTool {
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 
+export interface AssistantHostedGroupPermissionOfferRequest {
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+}
+
+export interface AssistantHostedGroupPermissionOfferTool {
+  request(
+    request: AssistantHostedGroupPermissionOfferRequest,
+  ): Promise<Extract<HostedRuntimeGroupToolResponse, { action: 'post_join_offer' }>>
+}
+
+export type AssistantHostedGroupSharedReadRequest =
+  HostedRuntimeGroupSharedReadRequest
+export type AssistantHostedGroupSharedRecord = HostedRuntimeGroupSharedRecord
+export type AssistantHostedGroupSharedProjection =
+  HostedRuntimeGroupSharedProjection
+export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
+export type AssistantHostedGroupSharedReadResponse =
+  HostedRuntimeGroupSharedReadResult
+
+export interface AssistantHostedGroupSharedReader {
+  request(
+    request: AssistantHostedGroupSharedReadRequest,
+  ): Promise<AssistantHostedGroupSharedReadResponse>
+}
+
 export interface AssistantHostedNewsletterTool {
   request(
     request: HostedRuntimeNewsletterToolRequest,
@@ -310,6 +343,14 @@ export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   automationTool?: AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
+  createScheduledGroupTools?(input: {
+    channel: string
+    target: string
+    threadIsDirect: boolean
+  }): {
+    groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool
+    groupSharedReader: AssistantHostedGroupSharedReader
+  } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
@@ -319,6 +360,8 @@ export interface AssistantHostedExecutionContext {
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
+  groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
@@ -388,7 +431,13 @@ export function normalizeAssistantExecutionContext(
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
+    hosted?.groupPermissionOfferTool,
+  )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const groupSharedReader = normalizeAssistantGroupSharedReader(
+    hosted?.groupSharedReader,
+  )
   const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
@@ -415,12 +464,17 @@ export function normalizeAssistantExecutionContext(
             currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
+      ...(typeof hosted?.createScheduledGroupTools === 'function'
+        ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
+        : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
+      ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
@@ -636,6 +690,30 @@ function normalizeAssistantConfigurationTool(
 function normalizeAssistantGroupTool(
   input: AssistantHostedExecutionContext['groupTool'] | undefined,
 ): AssistantHostedGroupTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupPermissionOfferTool(
+  input: AssistantHostedExecutionContext['groupPermissionOfferTool'] | undefined,
+): AssistantHostedGroupPermissionOfferTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupSharedReader(
+  input: AssistantHostedExecutionContext['groupSharedReader'] | undefined,
+): AssistantHostedGroupSharedReader | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

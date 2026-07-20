@@ -17,15 +17,18 @@ import {
   type AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
+  createHostedPortableWorkspaceManifestFromBundle,
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
+  snapshotHostedPortableWorkspaceDelta,
   writeHostedBundleTextFile,
   type HostedExecutionBundleRef,
 } from "@murphai/runtime-state/node";
 import {
   buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -1649,6 +1652,224 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.equal(
         await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
         secondRolloutJson,
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not restore retired vault-share roots from legacy base or delta snapshots", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-retired-vault-share-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      const sourceCurrentVaultRoot = path.join(workspaceRoot, "current-vault");
+      await mkdir(path.join(sourceBaseVaultRoot, "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceBaseVaultRoot, "derived", "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceBaseVaultRoot, "vault-share-backup"), { recursive: true });
+      await writeFile(
+        path.join(sourceBaseVaultRoot, "vault-share", "base.json"),
+        "{\"retired\":\"base\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseVaultRoot, "derived", "vault-share", "base.json"),
+        "{\"retired\":\"derived-base\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseVaultRoot, "vault-share-backup", "base.json"),
+        "{\"preserved\":\"base\"}\n",
+        "utf8",
+      );
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{
+          root: sourceBaseVaultRoot,
+          rootKey: "vault",
+        }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseManifest = createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+
+      await mkdir(path.join(sourceCurrentVaultRoot, "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceCurrentVaultRoot, "derived", "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceCurrentVaultRoot, "vault-share-backup"), { recursive: true });
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "vault-share", "base.json"),
+        "{\"retired\":\"base\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "vault-share", "delta.json"),
+        "{\"retired\":\"delta\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "derived", "vault-share", "base.json"),
+        "{\"retired\":\"derived-base\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "derived", "vault-share", "delta.json"),
+        "{\"retired\":\"derived-delta\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "vault-share-backup", "base.json"),
+        "{\"preserved\":\"updated\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceCurrentVaultRoot, "vault-share-backup", "delta.json"),
+        "{\"preserved\":\"delta\"}\n",
+        "utf8",
+      );
+      const delta = await snapshotHostedPortableWorkspaceDelta({
+        baseManifest,
+        baseSnapshotHash: baseHash,
+        vaultRoot: sourceCurrentVaultRoot,
+      });
+      assert.equal(delta.kind, "changed");
+      const deltaHash = sha256HostedBundleHex(delta.bundle);
+      const artifactGetCalls: string[] = [];
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map([
+            [baseHash, baseBundle],
+            [deltaHash, delta.bundle],
+          ]),
+          artifactGetCalls,
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: buildHostedExecutionWorkingSnapshotRef({
+            base: createBundleRef({
+              hash: baseHash,
+              key: `cloudflare-workspace-base/${baseHash}.bundle`,
+              size: baseBundle.byteLength,
+            }),
+            delta: createBundleRef({
+              hash: deltaHash,
+              key: `cloudflare-workspace-delta/${deltaHash}.bundle`,
+              size: delta.bundle.byteLength,
+            }),
+          }),
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [baseHash, baseHash, deltaHash]);
+      for (const retiredPath of [
+        "vault-share/base.json",
+        "vault-share/delta.json",
+        "derived/vault-share/base.json",
+        "derived/vault-share/delta.json",
+      ]) {
+        await assert.rejects(
+          readFile(path.join(restoredVaultRoot, retiredPath), "utf8"),
+          { code: "ENOENT" },
+        );
+      }
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "vault-share-backup", "base.json"), "utf8"),
+        "{\"preserved\":\"updated\"}\n",
+      );
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "vault-share-backup", "delta.json"), "utf8"),
+        "{\"preserved\":\"delta\"}\n",
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not restore retired vault-share roots from legacy hot snapshots", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-retired-hot-vault-share-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      const sourceHotVaultRoot = path.join(workspaceRoot, "hot-vault");
+      await mkdir(sourceBaseVaultRoot, { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, "base-note.md"), "base note\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: sourceBaseVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+
+      await mkdir(path.join(sourceHotVaultRoot, "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceHotVaultRoot, "derived", "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceHotVaultRoot, "vault-share-backup"), { recursive: true });
+      await writeFile(
+        path.join(sourceHotVaultRoot, "vault-share", "hot.json"),
+        "{\"retired\":\"hot\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceHotVaultRoot, "derived", "vault-share", "hot.json"),
+        "{\"retired\":\"derived-hot\"}\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceHotVaultRoot, "vault-share-backup", "hot.json"),
+        "{\"preserved\":\"hot\"}\n",
+        "utf8",
+      );
+      const hotBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: sourceHotVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(hotBundle);
+
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const hotHash = sha256HostedBundleHex(hotBundle);
+      const artifactGetCalls: string[] = [];
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map([
+            [baseHash, baseBundle],
+            [hotHash, hotBundle],
+          ]),
+          artifactGetCalls,
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+            base: createBundleRef({
+              hash: baseHash,
+              key: `cloudflare-workspace-base/${baseHash}.bundle`,
+              size: baseBundle.byteLength,
+            }),
+            hot: createBundleRef({
+              hash: hotHash,
+              key: `cloudflare-workspace-hot-state/${hotHash}.bundle`,
+              size: hotBundle.byteLength,
+            }),
+          }),
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
+      for (const retiredPath of [
+        "vault-share/hot.json",
+        "derived/vault-share/hot.json",
+      ]) {
+        await assert.rejects(
+          readFile(path.join(restoredVaultRoot, retiredPath), "utf8"),
+          { code: "ENOENT" },
+        );
+      }
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "vault-share-backup", "hot.json"), "utf8"),
+        "{\"preserved\":\"hot\"}\n",
+      );
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "base-note.md"), "utf8"),
+        "base note\n",
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });

@@ -89,6 +89,7 @@ describe("Clinical Records SMART negotiation", () => {
       "Observation",
     ]);
     expect(token).not.toHaveProperty("refreshToken");
+    expect(token.patientId).toBe("patient-1");
     expect(readGrantedSmartResourceTypes(["patient/*.read"], resourceTypes)).toEqual(resourceTypes);
     expect(readGrantedSmartResourceTypes(
       [
@@ -99,6 +100,33 @@ describe("Clinical Records SMART negotiation", () => {
       ],
       resourceTypes,
     )).toEqual(["DiagnosticReport"]);
+  });
+
+  it("normalizes a FHIR Patient reference and rejects invalid patient launch context", async () => {
+    const tokenResponse = (patient: string) => jsonResponse({
+      access_token: "access-token",
+      patient,
+      scope: [...baseScopes, "patient/Patient.r", "patient/Observation.s"].join(" "),
+      token_type: "Bearer",
+    });
+    const input = {
+      clientId: "client-id",
+      code: "authorization-code",
+      redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
+      requestedScopes: [...baseScopes, "patient/Patient.r", "patient/Observation.s"],
+      tokenEndpoint: "https://fhir.example.test/oauth2/token",
+      verifier: "verifier",
+    };
+
+    await expect(exchangeSmartAuthorizationCode({
+      ...input,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(tokenResponse("Patient/patient-1")),
+    })).resolves.toMatchObject({ patientId: "patient-1" });
+
+    await expect(exchangeSmartAuthorizationCode({
+      ...input,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(tokenResponse("Practitioner/patient-1")),
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_TOKEN_INVALID" });
   });
 
   it("rejects a token grant without Patient plus one clinical family", async () => {

@@ -371,6 +371,47 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   })
 })
 
+test('sendAssistantMessageLocal passes lazy scheduled group tools without invoking them', async () => {
+  const groupPermissionOfferRequest = vi.fn(async () => ({
+    action: 'post_join_offer' as const,
+    result: {
+      group: null,
+      status: 'unavailable' as const,
+      unavailableReason: 'test_unavailable',
+    },
+  }))
+  const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
+  const groupSharedRead = vi.fn(async () => ({
+    members: [] as const,
+    requestedProjectionScopeKeys: ['steps-days.v0'],
+    status: 'none' as const,
+  }))
+  const groupSharedReader = { request: groupSharedRead }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        groupPermissionOfferTool,
+        groupSharedReader,
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Show the current challenge standings.',
+    vault: '/vaults/test',
+  })
+
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  expect(hostedToolContext?.groupPermissionOfferTool)
+    .toBe(groupPermissionOfferTool)
+  expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
+  expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
+  expect(groupSharedRead).not.toHaveBeenCalled()
+})
+
 test('sendAssistantMessageLocal compacts oversized runtime logs after the turn commits', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'assistant-local-service-runtime-maintenance-',

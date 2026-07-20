@@ -208,71 +208,96 @@ compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus explicit
 execution cleanup.
 
-### Vault-Share Selector-Scope Deploy Skew
+### Vault-Share Direct Read and Cutover
 
-Selector-scoped vault-share additions span two independent surfaces:
+`apps/web` is the authority and read owner for hosted group shares. The existing
+`HostedVaultShare` row carries one nullable encrypted replacement-snapshot
+column; there is no second table, destination mailbox delivery, local projection
+store, generation document, or cleanup queue. Non-device health projection
+delivery encrypts the complete bounded record set under the destination
+member's existing secure-box root and conditionally replaces the ciphertext on
+the exact active share id and scope. An encrypted empty set means observed but
+missing; `null` means no snapshot has been supplied. Revoke and regrant clear
+the column in the same authority transaction, and regrant rotates the share id,
+so a stale producer cannot update a later grant generation.
 
-- The runner-facing `murph.group` schema can create/read group join policies
-  containing the new scope keys.
-- The runner reads active vault-share projection scopes through web's signed
-  `/api/internal/hosted-runtime/vault-share/active-kinds` callback.
+`murph.group action="read_shared"` accepts one to three unique exact selectable
+projection scopes. The signed Web handler captures the current group roster and
+exact active grants, decrypts only the captured encrypted snapshots, and returns
+every current member with every requested scope. Each result is explicitly
+`not_granted`, `granted` plus `missing`, or `available`; a real zero remains
+available. Profile labels require their separate granted snapshot. Authority,
+decryption, parse, and bound failures return typed unavailability without shared
+records or identity-bearing infrastructure fields.
 
-The group-tool schema is bundled into the runner and parsed by web. Scope
-registry widenings on that path are therefore web-first deploys: web must know
-how to parse the new group-tool request/response scopes before a runner bundle
-exposes them to the model. New runners must also send repeated
-`supportedProjectionScope` query params on the group-tool callback. Web filters
-`requestedVaultShareProjectionScopes`, `grantedVaultShareProjectionScopes`, and
-the legacy projection-kind arrays in group summaries to the declared exact scope
-set. Warm old runners that omit `supportedProjectionScope` receive only the
-pre-distance/count response scope set, so `container_rollout=immediate` is not
-required for parser safety on the group-summary path.
+`device-sync-status.v0` is explicit consent only. When that exact grant is in
+the captured authority set, Web derives the result live from its bounded device
+state. It returns only public source labels, coarse connection state, status
+observation times, and the honestly named connection-wide sync-job completion
+time. It excludes connection, account, device, and provider identifiers,
+credentials, provider payloads and errors, raw health values, and private
+diagnostics. A connection sync-job time is not evidence that a health record or
+challenge metric arrived. Device data is never produced by the grantor runtime
+or stored in the share snapshot column.
 
-The active-scope delivery callback is separately capability-negotiated. New
-runner bundles must send repeated `supportedProjectionScope` query params for
-every exact projection-scope key they can parse, using the same key format as
-`buildHostedVaultShareProjectionScopeKey`. Web filters returned active scopes
-to that declared exact set before serializing the response.
+The runtime's shared reader is a synchronous no-I/O adapter. Constructing it,
+starting or resuming App Server, and admitting foreground, scheduled,
+notification, or detached read-only model work adds no group, grant, snapshot,
+device, projection, configuration, or attribution read before the model starts;
+existing accepted-input and route-binding work is unchanged. The only Web read
+occurs inside the adapter's request method after the model invokes `read_shared`.
+No roster or authority snapshot is preloaded into scheduled context.
 
-Warm old runner bundles omit `supportedProjectionScope`; web must treat that as
-support for the pre-distance/count scope set: fixed projection scopes plus
-`activity-minutes-days.v1`. This protects the grantor-facing active-scope read:
-newly granted `activity-distance-days.v1` and
-`activity-session-count-days.v1` scopes are hidden from old grantor runners on
-that callback rather than making active-scope parsing fail or suppressing
-existing vault-share offers.
+Interactive Linq group turns are actor-scoped. The importer derives blinded
+`actorId` from the same trimmed Linq sender value stored for the prompt;
+initial batching splits on actor change, and pre-provider plus live admission
+stop at a foreign group actor. Attribution therefore remains bound to the
+scanner-selected durable operation contexts, and active steering cannot add a
+second participant's identity authority to the turn.
 
-This omitted-capability fallback is temporary compatibility owned by `apps/web`.
-It may be removed after the selector-scope runner bundle has been deployed with
-`container_rollout=immediate`, production logs show current runners send exact
-`supportedProjectionScope` values on the group-tool and active-scope callbacks,
-and the rollback window to a runner bundle without exact scope support has
-closed. Until removal, the fallback scope set must stay frozen to the
-pre-distance/count protocol and must not derive support for future projection
-kinds from the live registry.
+Interactive `read_shared` requests may carry only bounded, deduplicated
+route-authorized iMessage sender handles from that operation scope. Web matches
+them against current membership phone and verified-email blind indexes selected
+by the same group query. A handle is returned only in the matching member's
+bounded `currentTurnHandles` array and only when it resolves to exactly one
+current membership; that row also carries its group-scoped `participantId`.
+Scheduled, notification, and detached requests carry no handles. The runtime
+drops overlong handles before transport, and the signed group-tool body limit
+covers the declared worst-case JSON expansion for all 32 bounded inputs.
 
-That callback negotiation does not protect the destination mailbox importer.
-Vault-share delivery wakes are appended by web directly into the destination
-member mailbox, and the destination runner does not declare projection-scope
-capability while importing mailbox rows. Therefore the runner bundle that first
-exposes distance/count selector grants must be deployed with
-`container_rollout=immediate` before selector-scoped offers are created or
-accepted. Gradual Cloudflare container rollout is unsafe for this selector
-expansion: a warm old destination runner could import a selector delivery wake
-whose exact scope key it cannot preserve.
-Until that rollout window is closed, production Cloudflare deploy preflight must
-reject explicit `HOSTED_EXECUTION_CONTAINER_ROLLOUT=gradual`, and the manual
-production deploy workflow/default helper path must default missing rollout
-input to `immediate`.
+The assistant may join only an exact current prompt `Sender:` handle present in
+one returned row. It never persists or renders handles. The model boundary
+strips global member ids and legacy roster handles from every group-summary
+action. This adds no state, pre-model work, standalone query, or decrypted
+contact roster, and the legacy `read_current` request and response wire stay
+unchanged.
 
-Rollback floor: after web has accepted distance/count grants, rolling web behind
-the projection-scope parser that knows those rows can make old web code unable
-to read or serve the stored scope keys. Roll back web to a build with this
-parser and group-summary filtering or newer, or remove the new grants before
-rolling web behind it. Runner rollback behind the selector-scope bundle is not
-allowed while selector grants or pending selector delivery wakes exist; first
-disable/revert the selector-producing web paths and drain, revoke, or remove the
-new selector grants.
+Legacy `vault-share.delivery` and `vault-share.revoke` mailbox rows are
+terminally skipped from their plaintext kind/route metadata before payload fetch
+or decryption. They advance ordinary import bookkeeping but never recreate or
+mutate a local share store. V2 archive restore excludes
+`vault/derived/vault-share/**` and `vault/vault-share/**`; legacy bundle
+materialization excludes the corresponding vault-relative subtrees. No
+foreground cleanup pass or revoke wake is part of the boundary.
+
+This protocol is a consumer-first hard cut:
+
+1. Deploy Cloudflare Worker and runner with `container_rollout=immediate`.
+   Prove fleet convergence, the zero-prestart-I/O boundary, direct-read parser,
+   pre-payload legacy-row skip, and snapshot restore exclusions.
+2. Apply the nullable snapshot-column migration, then deploy Web's encrypted
+   replacement writer, direct `read_shared` handler, and live consent-gated
+   device derivation. A new consumer against old Web fails closed as typed
+   shared-data unavailability during this bounded interval. The universal
+   new-group permission set omits `device-sync-status.v0`; challenge setup adds
+   that scope explicitly and remains unavailable until Web supports it. No
+   retry, legacy wire widening, or broader fallback is introduced. Remove the
+   legacy permission-offer template compatibility field after Web convergence.
+3. Once Web can write the new column or serve the direct read, the new
+   Cloudflare consumer is the hard rollback floor. Disable the Web producer/read
+   path and forward-fix; do not roll back to a consumer that restores or reads
+   legacy local projections. No mailbox drain or local cleanup proof can lower
+   this floor.
 
 ## Current Protocol
 
@@ -365,7 +390,8 @@ system-message execution and starts at most one `executeReadOnlyAssistantAsk`
 promise. That call launches a separate one-shot App Server process with the
 native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
 `.codex/**`, and environment-file denial, no tool network or inherited shell
-secrets, and no dynamic tools or delivery authority. Thread-start attestation
+secrets, and only the consent-aware lazy `murph.group/read_shared` dynamic
+tool, with no mutation or delivery authority. Thread-start attestation
 must confirm the exact profile, roots, sealed empty working directory, empty
 instruction sources, and approval policy before model work. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
@@ -745,22 +771,74 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
-
 Generated-delivery staging uses an expand-then-produce rollout. The first
-Cloudflare release adds persisted-outbox, hosted-side-effect, retry-read, and
+Cloudflare release added persisted-outbox, hosted-side-effect, retry-read, and
 encrypted-checkpoint compatibility for the exact flat ref
-`.runtime/operations/assistant/generated-deliveries/<filename>`, while initial
-`send_vault_file` preparation continues to reject it so that release cannot
-mint state an older runner would quarantine. Deploy that release with immediate
-container rollout and prove the exact runner fingerprint has converged before a
-later release enables writer guidance or cleanup. Once a producer can persist
-the hidden ref, the compatibility release is the rollback floor while any
-active or retained outbox record or committed checkpoint can contain it.
-Portable support bundles continue to omit all `.runtime/**`; the generic
-`exports/assistant-deliveries/**` path remains ordinary checkpointed vault data
-and receives no path-specific portable-package exclusion. Existing global
-file-type exclusions still apply regardless of directory.
+`.runtime/operations/assistant/generated-deliveries/<filename>` while keeping the
+writer closed. Only after that release reaches 100% traffic and the exact runner
+fingerprint converges may the producer release let initial `send_vault_file`
+preparation accept this ref.
 
+The producer uses the runtime path only when the same assistant turn creates a
+file for an already-established delivery obligation and calls `send_vault_file`.
+It never moves or copies an existing, canonical, or prepare-now/maybe-later file
+into staging. Generated-file sends join the existing stateful dynamic-tool chain,
+so overlapping calls execute in request order and a later call cannot race file
+adoption or approval against an earlier response-media update. Before the initial
+descriptor is persisted, the runtime-state owner tightens the exact path's parent
+directories to `0700`, rejects symlinks, non-regular files, and multiply-linked
+inodes, tightens the file to `0600`, and revalidates it before the assistant
+hashes or reads it. Ordinary vault-file refs are not chmodded.
+
+The owned physical ref is derived deterministically from
+`sha256([sessionId, turnId, toolCallId, ref])`, so two distinct tool calls that
+reuse one friendly staging name receive distinct owned refs (no cross-send
+overwrite), and an exact re-delivery of the same tool call re-derives and
+idempotently re-adopts the same owned bytes. A generated send without the
+provider's semantic tool-call id fails before adoption; the process-local JSON-RPC
+request id is not a substitute. Adoption uses an atomic no-clobber hard link,
+verifies the captured inode, removes the friendly source name, and then carries
+that identity through tightening the single-link target to `0600`. The verified
+target handle stays open across source unlink and chmod, so destination
+delete/recreate and inode reuse cannot substitute different bytes. A safe existing
+deterministic target is treated as the idempotent prior result, and an interrupted
+same-inode two-link transfer is completed before normal adoption; source or
+destination swaps and validation failures fail closed. Accepted limitation: this
+identity is attempt-scoped. If `send_vault_file` fails after the staging file is
+moved to its owned ref but before the outbox intent is persisted (approval-HTTP
+failure or process death),
+the model's in-turn recovery is a new provider call with a new `toolCallId` (the
+App Server mints a fresh call id per Responses request), which derives a different
+owned ref; the earlier owned file has no active descriptor and is pruned as
+unclaimed at the next quiescent checkpoint. The exposed data is a freshly
+generated, regenerable one-time artifact only — no stored user/vault data, no
+already-persisted outbox intent, and the persisted awaiting-approval retry path
+is unaffected. A retry-stable logical send identity that survives a replacement
+provider call would require a durable send fact or an explicit identical-send
+coalescing decision that no currently available input provides; this is
+intentionally deferred rather than solved with a registry, sidecar, scan-based
+recovery, or reconciliation loop.
+
+Idle snapshot publication already waits for foreground and background assistant
+work to become quiescent. At that boundary, cleanup validates the complete direct
+staging inventory and outbox state before deleting anything. Exact files remain
+when their filename/content type, size, and SHA-256 match an awaiting-approval,
+pending, sending, retryable, or delivery-confirmation-pending descriptor.
+Terminal, changed, or orphaned direct regular files are removed before archive
+planning; an orphan staging hardlink may remove only its runtime-owned link,
+leaving the ordinary linked file unchanged, while an active multiply-linked file
+fails closed. Nested directories, unsafe names, symlinks, special entries, or
+malformed/untrusted live outbox inventory retain the entire staging set. A
+malformed live record is quarantined on that pass; quarantine is terminal
+operational evidence, so a later clean live-inventory pass may prune its orphan.
+Cleanup emits aggregate counts and bytes only.
+
+Once a producer can persist the hidden ref, the phase-one compatibility release
+is the rollback floor while any active or retained outbox record or committed
+checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
+generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
+vault data and receives no deletion or path-specific packaging authority.
+Existing global file-type exclusions still apply regardless of directory.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 

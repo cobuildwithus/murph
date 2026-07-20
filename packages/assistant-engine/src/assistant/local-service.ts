@@ -714,6 +714,10 @@ export async function sendAssistantMessageLocal(
               beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               deviceTool: hostedExecutionContext.deviceTool ?? null,
+              groupPermissionOfferTool:
+                hostedExecutionContext.groupPermissionOfferTool ?? null,
+              groupSharedReader:
+                hostedExecutionContext.groupSharedReader ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               labsTool: hostedExecutionContext.labsTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
@@ -747,7 +751,10 @@ export async function sendAssistantMessageLocal(
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
-                    sendVaultFile: async (ref: string) => {
+                    sendVaultFile: async (
+                      ref: string,
+                      toolCallId?: string | null,
+                    ) => {
                       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
                         input: currentInput,
                         session: currentSession,
@@ -788,6 +795,7 @@ export async function sendAssistantMessageLocal(
                         sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
                         threadIsDirect: deliveryFields.threadIsDirect,
+                        toolCallId: toolCallId ?? null,
                         turnId: currentUserTurn.turnId,
                         turnTrigger: currentInput.turnTrigger ?? null,
                         vault: currentInput.vault,

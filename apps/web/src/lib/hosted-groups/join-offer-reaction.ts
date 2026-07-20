@@ -13,10 +13,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
-import {
-  signalHostedMailboxAppendRuntime,
-  signalHostedRuntimeMaintenanceRuntime,
-} from "../hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
@@ -166,31 +163,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       signal: input.signal,
     });
   }
-  await signalMailboxAppendRuntimesBestEffort({
-    deadlineMs: postCommitDeadlineMs,
-    signal: input.signal,
-    signals: result.vaultShareCleanupSignals,
-  });
-
   return { status: "accepted", reason: "accepted" };
-}
-
-async function signalMailboxAppendRuntimesBestEffort(input: {
-  deadlineMs: number;
-  signal?: AbortSignal;
-  signals: readonly { mailboxItemId: string; memberId: string }[];
-}): Promise<void> {
-  await Promise.all(input.signals.map((mailboxSignal) =>
-    runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: input.deadlineMs,
-      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
-        abortSignal,
-        expectedUserId: mailboxSignal.memberId,
-        mailboxItemId: mailboxSignal.mailboxItemId,
-      }),
-      signal: input.signal,
-    })
-  ));
 }
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {

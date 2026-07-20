@@ -16,7 +16,7 @@ describe("hosted vault-share supported projection scopes", () => {
     vi.resetModules();
   });
 
-  it("keeps omitted-capability fallback frozen when the live registry adds future minutes scopes", async () => {
+  it("keeps omitted-capability fallback frozen when the live registry adds new scopes", async () => {
     vi.doMock("@murphai/hosted-execution/vault-share", async (importOriginal) => {
       const actual =
         await importOriginal<typeof import("@murphai/hosted-execution/vault-share")>();
@@ -48,6 +48,7 @@ describe("hosted vault-share supported projection scopes", () => {
     expect(supported).toContain(
       hostedVaultShare.buildHostedVaultShareProjectionScopeKey(LEGACY_RUNNING_MINUTES_SCOPE),
     );
+    expect(supported).not.toContain("device-sync-status.v0");
     expect(supported).not.toContain("sleep-duration-days.v0");
     expect(supported).not.toContain(
       hostedVaultShare.buildHostedVaultShareProjectionScopeKey(FUTURE_MINUTES_SCOPE),

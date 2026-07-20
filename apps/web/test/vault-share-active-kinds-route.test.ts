@@ -22,7 +22,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 	requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
 }));
 
-vi.mock("@/src/lib/hosted-mailbox/vault-share-store", () => ({
+vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
 	readDeliverableHostedVaultShareProjectionScopes:
 		mocks.readDeliverableHostedVaultShareProjectionScopes,
 }));

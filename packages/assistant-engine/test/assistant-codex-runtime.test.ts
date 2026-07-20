@@ -1269,6 +1269,236 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('starts cold and warm App Server turns before any lazy shared-data read', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-group-shared-work-')
+    const codexHome = await createTempDir('assistant-codex-group-shared-home-')
+    const threadId = 'thread-group-shared-lazy-read'
+    const boundaryObservations: Array<{
+      providerStarts: number
+      rpcMethod: 'thread/start' | 'thread/resume' | 'turn/start'
+      sharedReaderCalls: number
+    }> = []
+    const executionOrder: string[] = []
+    let providerStartOrdinal = 0
+    let sharedReaderOrdinal = 0
+    let turnStartOrdinal = 0
+    const onProviderRequestStarted = vi.fn(() => {
+      providerStartOrdinal += 1
+      executionOrder.push(`provider-started:${providerStartOrdinal}`)
+    })
+    const groupSharedRead = vi.fn(async () => {
+      sharedReaderOrdinal += 1
+      executionOrder.push(`shared-reader:${sharedReaderOrdinal}`)
+      return {
+        members: [] as const,
+        requestedProjectionScopeKeys: ['steps-days.v0'],
+        status: 'none' as const,
+      }
+    })
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ computerToolsAvailable: false }),
+      groupSharedReader: { request: groupSharedRead },
+    }
+    const dynamicTools = resolveMurphDynamicTools({
+      groupSharedReadAvailable: true,
+      progressUpdatesAvailable: false,
+    })
+
+    const observeBoundary = (
+      rpcMethod: 'thread/start' | 'thread/resume' | 'turn/start',
+    ) => {
+      boundaryObservations.push({
+        providerStarts: onProviderRequestStarted.mock.calls.length,
+        rpcMethod,
+        sharedReaderCalls: groupSharedRead.mock.calls.length,
+      })
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.stdin.onWrite = (write) => {
+        for (const line of write.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) {
+            continue
+          }
+          const message = asRecord(JSON.parse(trimmed))
+          if (message.method === 'turn/start') {
+            turnStartOrdinal += 1
+            executionOrder.push(`turn-start:${turnStartOrdinal}`)
+            observeBoundary('turn/start')
+          }
+        }
+      }
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const runTurn = async (input: {
+            threadMethod: 'thread/start' | 'thread/resume'
+            turnOrdinal: number
+          }) => {
+            const threadRequest = await waitForRpcMethod(
+              child,
+              input.threadMethod,
+            )
+            observeBoundary(input.threadMethod)
+            const threadParams = asRecord(threadRequest.params)
+            child.stdout.write(jsonLine({
+              id: threadRequest.id,
+              result: {
+                ...(input.threadMethod === 'thread/resume'
+                  ? {
+                      approvalPolicy: threadParams.approvalPolicy,
+                      cwd: threadParams.cwd,
+                    }
+                  : {}),
+                thread: { id: threadId },
+              },
+            }))
+
+            const turnStart = await waitForRpcMethodCount(
+              child,
+              'turn/start',
+              input.turnOrdinal,
+            )
+            await waitForMockCall(
+              onProviderRequestStarted,
+              input.turnOrdinal,
+            )
+
+            const turnId = `turn-group-shared-${input.turnOrdinal}`
+            child.stdout.write(jsonLine({
+              id: turnStart.id,
+              result: { turn: { id: turnId } },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: { turn: { id: turnId } },
+            }))
+
+            const toolCallId = 70 + input.turnOrdinal
+            child.stdout.write(jsonLine({
+              id: toolCallId,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'group',
+                arguments: {
+                  action: 'read_shared',
+                  projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+                },
+                turnId,
+              },
+            }))
+            await expect(waitForRpcResponse(child, toolCallId)).resolves.toEqual({
+              id: toolCallId,
+              result: {
+                success: true,
+                contentItems: [{
+                  type: 'inputText',
+                  text: JSON.stringify({
+                    action: 'read_shared',
+                    result: {
+                      members: [],
+                      requestedProjectionScopeKeys: ['steps-days.v0'],
+                      status: 'none',
+                    },
+                  }),
+                }],
+              },
+            })
+
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: { id: turnId, status: 'completed' },
+              },
+            }))
+          }
+
+          await runTurn({ threadMethod: 'thread/start', turnOrdinal: 1 })
+          await runTurn({ threadMethod: 'thread/resume', turnOrdinal: 2 })
+        })()
+      })
+
+      return child
+    })
+
+    const env = {
+      CODEX_HOME: codexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools,
+      env,
+      hostedToolContext,
+      onProviderRequestStarted,
+      prompt: 'Check shared steps.',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: threadId,
+      turnId: 'turn-group-shared-1',
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools,
+      env,
+      hostedToolContext,
+      onProviderRequestStarted,
+      prompt: 'Check shared steps again.',
+      resumeSessionId: threadId,
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: threadId,
+      turnId: 'turn-group-shared-2',
+    })
+
+    expect(boundaryObservations).toEqual([
+      {
+        providerStarts: 0,
+        rpcMethod: 'thread/start',
+        sharedReaderCalls: 0,
+      },
+      {
+        providerStarts: 0,
+        rpcMethod: 'turn/start',
+        sharedReaderCalls: 0,
+      },
+      {
+        providerStarts: 1,
+        rpcMethod: 'thread/resume',
+        sharedReaderCalls: 1,
+      },
+      {
+        providerStarts: 1,
+        rpcMethod: 'turn/start',
+        sharedReaderCalls: 1,
+      },
+    ])
+    expect(executionOrder).toEqual([
+      'turn-start:1',
+      'provider-started:1',
+      'shared-reader:1',
+      'turn-start:2',
+      'provider-started:2',
+      'shared-reader:2',
+    ])
+    expect(groupSharedRead).toHaveBeenCalledTimes(2)
+    expect(groupSharedRead).toHaveBeenNthCalledWith(1, {
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    })
+    expect(groupSharedRead).toHaveBeenNthCalledWith(2, {
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the latest valid attach_response_media batch for final response media', async () => {
     const firstMedia = [
       {
@@ -2458,7 +2688,10 @@ describe('assistant codex runtime', () => {
     let nextApprovalIndex = 0
     const onFinishWithoutReplyAccepted = vi.fn()
     const onFinishWithoutReplyRecorded = vi.fn()
-    const sendVaultFile = vi.fn(async () => {
+    const sendVaultFile = vi.fn(async (
+      _ref: string,
+      _toolCallId?: string | null,
+    ) => {
       const approvalUrl = exactApprovalUrls[nextApprovalIndex]
       if (!approvalUrl) {
         throw new Error('Unexpected vault approval request.')
@@ -2517,6 +2750,7 @@ describe('assistant codex runtime', () => {
               method: 'item/tool/call',
               params: {
                 arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
+                callId: `call-vault-approval-${approvalIndex + 1}`,
                 namespace: 'murph',
                 tool: 'send_vault_file',
               },
@@ -2602,6 +2836,12 @@ describe('assistant codex runtime', () => {
       expect(result.transcriptMessage ?? '').not.toContain(exactApprovalUrl)
     }
     expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
+    expect(sendVaultFile.mock.calls).toEqual(
+      Array.from({ length: approvalCount }, (_, index) => [
+        `documents/report-${index + 1}.pdf`,
+        `call-vault-approval-${index + 1}`,
+      ]),
+    )
     expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
     expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   }
@@ -2610,6 +2850,126 @@ describe('assistant codex runtime', () => {
     '$name for a pending vault approval',
     runVaultApprovalUrlScenario,
   )
+
+  it('serializes overlapping vault-file sends before a second approval can start', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-vault-send-order-work-',
+    )
+    const firstSendStarted = createDeferred<void>()
+    const releaseFirstSend = createDeferred<void>()
+    const approvedFile = {
+      approvalGeneration: 'f'.repeat(64),
+      approvalId: `haa_${'f'.repeat(32)}`,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      kind: 'vault_file' as const,
+      ref: 'documents/report.pdf',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }
+    const sendVaultFile = vi.fn(async () => {
+      firstSendStarted.resolve()
+      await releaseFirstSend.promise
+      return {
+        file: approvedFile,
+        filename: approvedFile.filename,
+        status: 'approved' as const,
+      }
+    })
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
+      sendVaultFile,
+      vaultFileSendAvailable: true,
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-vault-send-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-vault-send-order' } },
+          }))
+
+          for (const requestId of [91, 92]) {
+            child.stdout.write(jsonLine({
+              id: requestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: { ref: 'documents/report.pdf' },
+                callId: `call-vault-send-order-${requestId}`,
+                namespace: 'murph',
+                tool: 'send_vault_file',
+              },
+            }))
+          }
+
+          await firstSendStarted.promise
+          try {
+            expect(sendVaultFile).toHaveBeenCalledOnce()
+          } finally {
+            releaseFirstSend.resolve()
+          }
+
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 92)).resolves.toEqual({
+            id: 92,
+            result: {
+              contentItems: [{
+                text: 'vault-file sending cannot be combined with other response media',
+                type: 'inputText',
+              }],
+              success: false,
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-vault-send-order',
+                message: 'Here is the report.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-vault-send-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      prompt: 'send the report twice',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Here is the report.',
+      responseMedia: [approvedFile],
+    })
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+  })
 
   it('leaves an earlier no-reply unsettled when the provider fails after creating a vault approval', async () => {
     const workingDirectory = await createTempDir(

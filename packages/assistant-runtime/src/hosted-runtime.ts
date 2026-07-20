@@ -92,6 +92,7 @@ import {
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
+import { createHostedGroupSharedReader } from "./hosted-runtime/group-shared-reader.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -1887,6 +1888,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
+      createGroupSharedReader() {
+        return createHostedGroupSharedReader({
+          groupToolPort: runtime.platform.groupToolPort ?? null,
+        });
+      },
       codexHome: hostedCodexRuntime.codexHome,
       env: hostedCodexRuntime.runtimeEnv,
       onStateMutation() {
