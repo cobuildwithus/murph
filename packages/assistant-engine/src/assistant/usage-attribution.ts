@@ -77,13 +77,10 @@ export function resolveAssistantUsageFeatureKey(input: {
   promptProfile:
     | 'assistant-ask-continuation'
     | 'conversation'
-    | 'notification-decision'
+    | 'maintenance'
+    | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {
-  if (input.promptProfile === 'notification-decision') {
-    return 'assistant_notification_decision'
-  }
-
   if (input.deliverResponse === false) {
     return 'assistant_internal_reply'
   }

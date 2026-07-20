@@ -53,38 +53,31 @@ import {
   type DeviceTrackedBiomarker,
 } from "../app/(dashboard)/biomarkers/biomarkers-page-client";
 
-const TREND_DEFAULTS = {
-  aggregation: "mean",
-  comparisonWindowDays: 30,
-  latestWindowDays: 7,
-  minimumPoints: 3,
-} as const;
-
 const DEVICE_BIOMARKERS: DeviceTrackedBiomarker[] = [
   {
-    key: "biomarker:resting-heart-rate",
+    category: "heart-health",
     privateMetricBindings: [{ metricKey: "resting-heart-rate", role: "primary" }],
     routeId: "resting-heart-rate",
     shortName: "Resting heart rate",
-    trendDefaults: TREND_DEFAULTS,
+    summary: "Resting heart rate reflects recovery load.",
     unit: "bpm",
     valuePrecision: 0,
   },
   {
-    key: "biomarker:hrv",
+    category: "heart-health",
     privateMetricBindings: [{ metricKey: "hrv", role: "primary" }],
     routeId: "hrv",
     shortName: "HRV",
-    trendDefaults: TREND_DEFAULTS,
+    summary: "Beat-to-beat variation can reflect recovery and stress.",
     unit: "ms",
     valuePrecision: 0,
   },
   {
-    key: "biomarker:vo2-max",
+    category: "cardiorespiratory-fitness",
     privateMetricBindings: [{ metricKey: "vo2-max", role: "primary" }],
     routeId: "vo2-max",
     shortName: "VO2 max",
-    trendDefaults: TREND_DEFAULTS,
+    summary: "An estimate of aerobic capacity.",
     unit: "mL/kg/min",
     valuePrecision: 1,
   },
@@ -105,7 +98,7 @@ test("only device-derived readings render, count, and decide the latest value", 
   browserVaultMock.value.client = clientWithMetricRows([
     // Device history for resting heart rate, plus newer manual and lab rows
     // that must not surface under a device heading.
-    metricRow({ date: "2026-07-10", id: "w1", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 61 }),
+    metricRow({ date: "2025-07-20", id: "w1", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 61 }),
     metricRow({ date: "2026-07-14", id: "w2", metricKey: "resting-heart-rate", sourceKind: "wearable-summary", value: 59 }),
     metricRow({ date: "2026-07-15", id: "m1", metricKey: "resting-heart-rate", sourceKind: "observation", value: 70 }),
     metricRow({ date: "2026-07-15", id: "t1", metricKey: "resting-heart-rate", sourceKind: "test-result", value: 75 }),
@@ -136,6 +129,15 @@ test("only device-derived readings render, count, and decide the latest value", 
 
     const link = rendered.container.querySelector('a[href="/biomarkers/resting-heart-rate"]');
     expect(link).not.toBeNull();
+    expect(link?.querySelector("svg")).not.toBeNull();
+    expect(link?.textContent).toContain("HEART HEALTH");
+    expect(link?.textContent).toContain("Resting heart rate reflects recovery load.");
+    expect(link?.textContent).toContain("Jul 14, 2026");
+    expect(link?.textContent).toContain("2025 to 2026");
+
+    const section = rendered.container.querySelector('[aria-labelledby="biomarker-devices-heading"]');
+    expect(section?.querySelector("ul")?.className).toContain("md:grid-cols-2");
+    expect(section?.querySelector("ul")?.className).toContain("xl:grid-cols-3");
 
     // The header count includes only the device metrics that render.
     expect(text).toContain("1 biomarker");

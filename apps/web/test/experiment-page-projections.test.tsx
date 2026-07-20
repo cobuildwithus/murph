@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   }),
   hostedStart: vi.fn(),
   protocolTab: vi.fn(),
+  privateRunResultsClient: vi.fn(),
   resultsTabClient: vi.fn(),
 }));
 
@@ -74,6 +75,13 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/results/results-tab-clien
   },
 }));
 
+vi.mock("../app/(dashboard)/experiments/runs/[experimentId]/private-run-results-client", () => ({
+  PrivateRunResultsClient({ experimentId }: { experimentId: string }) {
+    mocks.privateRunResultsClient({ experimentId });
+    return createElement("div", { "data-private-run-id": experimentId });
+  },
+}));
+
 vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server", () => ({
   ExperimentStartButtonFallback({ protocolTitle }: { protocolTitle: string }) {
     return createElement("button", { type: "button" }, protocolTitle);
@@ -99,6 +107,9 @@ import ExperimentDetailPage, {
 import ExperimentResultsPage, {
   generateMetadata as generateResultsMetadata,
 } from "../app/(dashboard)/experiments/[experimentId]/results/page";
+import PrivateExperimentRunPage, {
+  metadata as privateExperimentRunMetadata,
+} from "../app/(dashboard)/experiments/runs/[experimentId]/page";
 
 describe("experiment page projections", () => {
   beforeEach(() => {
@@ -111,6 +122,7 @@ describe("experiment page projections", () => {
     mocks.notFound.mockClear();
     mocks.hostedStart.mockClear();
     mocks.protocolTab.mockClear();
+    mocks.privateRunResultsClient.mockClear();
     mocks.resultsTabClient.mockClear();
   });
 
@@ -174,6 +186,30 @@ describe("experiment page projections", () => {
       title: "Finnish Dry Sauna",
     }));
     expect(markup).toContain('data-experiment-id="finnish-sauna"');
+  });
+
+  it("renders the authenticated private-run route without resolving a public protocol", async () => {
+    expect(privateExperimentRunMetadata).toEqual(expect.objectContaining({
+      description: expect.stringContaining("private progress"),
+      title: "Private experiment | Murph",
+    }));
+
+    const element = await PrivateExperimentRunPage({
+      params: Promise.resolve({ experimentId: "exp:private-run" }),
+    });
+    const markup = renderToStaticMarkup(element);
+
+    expect(mocks.getHostedDashboardPageAuthSnapshot).toHaveBeenCalled();
+    expect(mocks.privateRunResultsClient).toHaveBeenCalledWith({
+      experimentId: "exp:private-run",
+    });
+    expect(markup).toContain('data-private-run-id="exp:private-run"');
+
+    const privatePageSource = readFileSync(
+      new URL("../app/(dashboard)/experiments/runs/[experimentId]/page.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(privatePageSource).not.toContain("HealthCommons");
   });
 
   it("uses the shell projection for metadata and shared layout props", async () => {

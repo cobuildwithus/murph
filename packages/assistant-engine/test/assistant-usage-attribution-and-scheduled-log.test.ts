@@ -160,8 +160,8 @@ describe("assistant usage attribution", () => {
 
   it("resolves feature keys, surfaces, triggers, environments, and reporting secrets", () => {
     expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "notification-decision",
-    })).toBe("assistant_notification_decision");
+      promptProfile: "conversation",
+    })).toBe("assistant_reply");
     expect(resolveAssistantUsageFeatureKey({
       deliverResponse: false,
       promptProfile: "conversation",

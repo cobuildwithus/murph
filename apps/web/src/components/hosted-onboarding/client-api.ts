@@ -3,7 +3,9 @@ import type {
   HostedBillingPlanCode,
   HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
-import { HOSTED_START_PAID_PULSE_CONTINUATION_HEADER } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation-contract";
+import {
+  HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
+} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 
 interface ApiErrorPayload {
   error: {
@@ -61,6 +63,12 @@ export type HostedPulseTrialStartPaidClientResult =
   }
   | {
     status: "started";
+  };
+
+export type HostedPulseTrialContinuationClientResult =
+  | HostedPulseTrialStartPaidClientResult
+  | {
+    status: "continuing";
   };
 
 export async function requestHostedOnboardingJson<T>(input: {
@@ -153,24 +161,13 @@ export async function requestHostedAutoPulseTrialEnrollment(input: {
   });
 }
 
-export async function requestHostedPulseTrialStartPaid(input: {
-  automaticContinuation?: boolean;
-} = {}): Promise<HostedPulseTrialStartPaidClientResult> {
+export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
   const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
-    headers: input.automaticContinuation
-      ? { [HOSTED_START_PAID_PULSE_CONTINUATION_HEADER]: "1" }
-      : undefined,
     method: "POST",
     url: "/api/settings/billing/start-paid-pulse",
   });
 
   if (response.status === "payment_required") {
-    if (input.automaticContinuation) {
-      return {
-        status: "payment_required",
-      };
-    }
-
     if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
       throw new HostedOnboardingApiError({
         code: null,
@@ -188,6 +185,49 @@ export async function requestHostedPulseTrialStartPaid(input: {
     return {
       status: response.status,
     };
+  }
+
+  throw new HostedOnboardingApiError({
+    code: null,
+    message: "Request returned an unexpected response.",
+  });
+}
+
+export async function requestHostedPulseTrialContinuation(input: {
+  redirectIfPaymentRequired?: boolean;
+} = {}): Promise<
+  HostedPulseTrialContinuationClientResult
+> {
+  const response = await requestHostedOnboardingJson<
+    HostedPulseTrialStartPaidResponse | {
+      billingPlanCode: "launch_monthly";
+      paymentUrl?: string;
+      status: "continuing";
+    }
+  >({
+    method: "POST",
+    url: HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
+  });
+
+  if (response.status === "payment_required") {
+    if (input.redirectIfPaymentRequired) {
+      if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
+        throw new HostedOnboardingApiError({
+          code: null,
+          message: "Payment link missing.",
+        });
+      }
+      window.location.assign(response.paymentUrl);
+      return { status: "redirecting" };
+    }
+    return { status: "payment_required" };
+  }
+  if (
+    response.status === "billing_pending"
+    || response.status === "continuing"
+    || response.status === "started"
+  ) {
+    return { status: response.status };
   }
 
   throw new HostedOnboardingApiError({

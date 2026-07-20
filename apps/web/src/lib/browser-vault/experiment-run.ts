@@ -29,10 +29,16 @@ export interface ResolveBrowserVaultExperimentRunInput {
   protocol: BrowserVaultExperimentProtocol;
 }
 
+export interface ResolveBrowserVaultExperimentRunByIdInput {
+  client: BrowserVaultQueryClient | null;
+  experimentId: string;
+}
+
 export interface BrowserVaultExperimentProtocol {
   baselineDays: number;
   commons?: ExperimentCommonsReference;
   durationDays: number;
+  durationDaysKnown?: boolean;
   id: string;
   protocol: ExperimentProtocolStep[];
 }
@@ -51,6 +57,28 @@ export function resolveBrowserVaultExperimentRun({
   }
 
   return mapExperimentResultsProjection(client, protocol, results);
+}
+
+export function resolveBrowserVaultExperimentRunById({
+  client,
+  experimentId,
+}: ResolveBrowserVaultExperimentRunByIdInput): ExperimentRunProjection | null {
+  if (!client) {
+    return null;
+  }
+
+  const results = selectBrowserVaultExperimentResults(client, { experimentId }, {
+    asOf: client.replica.generatedAt,
+  });
+  if (!results) {
+    return null;
+  }
+
+  return mapExperimentResultsProjection(
+    client,
+    buildPrivateRunProtocol(results),
+    results,
+  );
 }
 
 function selectExperimentResultsForProtocol(
@@ -92,6 +120,8 @@ function mapExperimentResultsProjection(
       experiment.completedAt ??
       undefined;
   const fallbackDurationDays = normalizeDayCount(protocol.durationDays, 1);
+  const durationDaysKnown = protocol.durationDaysKnown !== false;
+  const baselineDays = resolveResultBaselineDays(results, protocol);
   const durationDays =
     status !== "stopped" && startedOn && analysisAvailableOn
       ? Math.max(1, daysBetweenInclusive(startedOn, analysisAvailableOn))
@@ -101,7 +131,7 @@ function mapExperimentResultsProjection(
     : undefined);
   const completionPercent = status === "finished"
     ? 100
-    : day
+    : durationDaysKnown && day
       ? clamp(Math.round((day / durationDays) * 100), 1, 99)
       : undefined;
   const tags = lookupExperimentTags(client, experiment.id, experiment.slug);
@@ -118,6 +148,8 @@ function mapExperimentResultsProjection(
     startedOn,
     tags,
     title: experiment.title,
+    baselineDays,
+    durationDays: durationDaysKnown ? durationDays : undefined,
     day,
     completionPercent,
     dateRange: dateRangeStart && analysisAvailableOn
@@ -128,7 +160,7 @@ function mapExperimentResultsProjection(
     trends: buildTrends(client, results),
     timeline: buildPrivateRunTimeline({
       analysisAvailableOn,
-      baselineDays: resolveResultBaselineDays(results, protocol),
+      baselineDays,
       day,
       phase: experiment.phase,
       interventionStart: experiment.windows.interventionStart,
@@ -140,7 +172,7 @@ function mapExperimentResultsProjection(
     sessionContext: buildSessionContext(results),
     nextStep: status === "active" || status === "paused"
       ? buildRunNextStep({
-          baselineDays: resolveResultBaselineDays(results, protocol),
+          baselineDays,
           day,
           progress: results.progress,
           protocol,
@@ -154,6 +186,49 @@ function mapExperimentResultsProjection(
       ? buildConclusions(results)
       : undefined,
   };
+}
+
+function buildPrivateRunProtocol(
+  results: BrowserVaultExperimentResultsView,
+): BrowserVaultExperimentProtocol {
+  const { experiment } = results;
+  const knownDurationDays = resolvePrivateRunDurationDays(results);
+  const durationDays = knownDurationDays
+    ?? normalizeDayCount(results.progress?.dayInRun ?? experiment.dayInRun ?? 1, 1);
+  const baselineStart = experiment.windows.baselineStart;
+  const baselineEnd = experiment.windows.baselineEnd;
+  const baselineDays = baselineStart && baselineEnd
+    ? knownDurationDays === null
+      ? Math.max(0, daysBetweenInclusive(baselineStart, baselineEnd))
+      : Math.max(
+          0,
+          Math.min(daysBetweenInclusive(baselineStart, baselineEnd), durationDays - 1),
+        )
+    : 0;
+
+  return {
+    baselineDays,
+    durationDays,
+    durationDaysKnown: knownDurationDays !== null,
+    id: experiment.id,
+    protocol: [],
+  };
+}
+
+function resolvePrivateRunDurationDays(
+  results: BrowserVaultExperimentResultsView,
+): number | null {
+  const { experiment } = results;
+  const startedOn = experiment.windows.baselineStart
+    ?? experiment.startedOn
+    ?? experiment.windows.interventionStart;
+  const endedOn = experiment.windows.interventionEnd ?? experiment.completedAt;
+
+  if (startedOn && endedOn) {
+    return Math.max(1, daysBetweenInclusive(startedOn, endedOn));
+  }
+
+  return null;
 }
 
 function buildExperimentResultLookups(
@@ -967,7 +1042,15 @@ function resolveResultBaselineDays(
   const protocolDurationDays = normalizeDayCount(protocol.durationDays, 1);
 
   if (baselineStart && baselineEnd) {
+    if (protocol.durationDaysKnown === false) {
+      return Math.max(0, daysBetweenInclusive(baselineStart, baselineEnd));
+    }
+
     return Math.max(0, Math.min(daysBetweenInclusive(baselineStart, baselineEnd), protocolDurationDays - 1));
+  }
+
+  if (protocol.durationDaysKnown === false) {
+    return normalizeDayCount(protocol.baselineDays, 0);
   }
 
   return Math.min(

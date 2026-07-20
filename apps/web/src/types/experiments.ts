@@ -339,6 +339,8 @@ export interface ExperimentRunProjection {
   startedOn: string | null;
   tags: string[];
   title: string;
+  baselineDays?: number;
+  durationDays?: number;
   day?: number;
   completionPercent?: number;
   dateRange?: string;

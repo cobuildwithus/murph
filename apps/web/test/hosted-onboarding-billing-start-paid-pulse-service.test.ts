@@ -170,7 +170,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
   });
 
-  test("collects a default payment method without ending an active trial", async () => {
+  test("collects a default payment method and returns the chat continuation to its exact action", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: null,
@@ -183,6 +183,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(continueHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -194,7 +195,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings#subscription",
+            return_url: expect.stringMatching(
+              /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=continue_pulse&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+            ),
           },
           type: "redirect",
         },
@@ -274,9 +277,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     }));
 
     await expect(startHostedPulseTrialPaidPlan({
-      browserContinuationAfterPaymentMethodSetup: true,
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -300,7 +303,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
-  test("keeps conversational no-card start handoffs unmarked", async () => {
+  test("returns conversational no-card starts through the signed exact-action bridge", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: null,
@@ -313,6 +316,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -324,7 +328,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
         flow_data: expect.objectContaining({
           after_completion: {
             redirect: {
-              return_url: "https://join.example.test/settings#subscription",
+              return_url: expect.stringMatching(
+                /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=start_pulse_now&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+              ),
             },
             type: "redirect",
           },
@@ -1459,9 +1465,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     }));
 
     await expect(startHostedPulseTrialPaidPlan({
-      browserContinuationAfterPaymentMethodSetup: true,
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -1476,7 +1482,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
-  test("keeps paused no-card conversational continuation handoffs unmarked", async () => {
+  test("returns paused no-card conversational continuations through the signed exact-action bridge", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -1501,6 +1507,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(continueHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -1512,7 +1519,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
         flow_data: expect.objectContaining({
           after_completion: {
             redirect: {
-              return_url: "https://join.example.test/settings#subscription",
+              return_url: expect.stringMatching(
+                /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=continue_pulse&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+              ),
             },
             type: "redirect",
           },
