@@ -1382,7 +1382,11 @@ the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
 legacy readable replica while refresh retries, but the Worker and warm containers
 should converge immediately after a generation bump so refreshes produce the
-current marker instead of repeatedly publishing legacy refs.
+current marker instead of repeatedly publishing legacy refs. During rollback,
+an older Web or Worker parser may omit the additive marker while echoing an
+otherwise identical ref. The browser loader may restore only that omission from
+its exact known ref or the authenticated replica payload; present mismatches and
+all other immutable-field mismatches still fail closed.
 
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
