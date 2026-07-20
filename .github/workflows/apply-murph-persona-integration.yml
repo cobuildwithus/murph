@@ -23,59 +23,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: agent/murph-personas
-          show-progress: false
+      - name: Checkout branch quietly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git clone --quiet --depth=1 --branch agent/murph-personas \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
 
       - name: Apply narrow integrations
-        id: integrate
-        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
-          node /tmp/apply-murph-persona-integration.mjs \
-            2>&1 | tee /tmp/murph-persona-integration.log
-
-      - name: Commit integration diagnostic
-        if: ${{ steps.integrate.outcome == 'failure' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          tail -n 60 /tmp/murph-persona-integration.log > /tmp/persona-failure.log
-          content="$(base64 -w0 /tmp/persona-failure.log)"
-          gh api --method PUT \
-            "repos/${GITHUB_REPOSITORY}/contents/agent-docs/exec-plans/active/murph-persona-integration-failure.log" \
-            -f message='chore: record persona integration failure [persona-failed]' \
-            -f branch='agent/murph-personas' \
-            -f content="$content"
-          exit 1
+          node /tmp/apply-murph-persona-integration.mjs
 
       - uses: actions/setup-node@v4
-        if: ${{ steps.integrate.outcome == 'success' }}
         with:
           node-version: 24.14.1
 
       - name: Enable pnpm
-        if: ${{ steps.integrate.outcome == 'success' }}
         run: |
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
 
       - name: Install workspace
-        if: ${{ steps.integrate.outcome == 'success' }}
         run: pnpm install --frozen-lockfile
 
       - name: Build contracts
-        if: ${{ steps.integrate.outcome == 'success' }}
         run: pnpm --dir packages/contracts build
 
       - name: Generate preview MP3s when credentials are configured
-        if: ${{ steps.integrate.outcome == 'success' }}
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           MURPH_ELEVENLABS_MODEL_ID: ${{ secrets.MURPH_ELEVENLABS_MODEL_ID }}
@@ -89,46 +68,25 @@ jobs:
           fi
 
       - name: Verify integration
-        id: verify
-        if: ${{ steps.integrate.outcome == 'success' }}
-        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          {
-            pnpm exec vitest run --no-coverage \
-              packages/contracts/test/assistant-personas.test.ts \
-              packages/contracts/test/preferences.test.ts \
-              packages/core/test/preferences.test.ts \
-              packages/hosted-execution/test/hosted-execution-contract-guards.test.ts \
-              packages/assistant-engine/test/persona-prompts.test.ts \
-              packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts \
-              packages/assistant-engine/test/assistant-codex-turn-planning.test.ts \
-              apps/web/test/home-initial-visit-dialog.test.tsx \
-              apps/web/test/hosted-onboarding-member-preferences.test.ts \
-              apps/web/test/account-settings-snapshot.test.ts
-            pnpm typecheck:packages
-            pnpm --dir apps/web typecheck
-            git diff --check
-          } 2>&1 | tee /tmp/murph-persona-verification.log
-
-      - name: Commit verification diagnostic
-        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          tail -n 120 /tmp/murph-persona-verification.log > /tmp/persona-verification-failure.log
-          content="$(base64 -w0 /tmp/persona-verification-failure.log)"
-          gh api --method PUT \
-            "repos/${GITHUB_REPOSITORY}/contents/agent-docs/exec-plans/active/murph-persona-verification-failure.log" \
-            -f message='chore: record persona verification failure [persona-failed]' \
-            -f branch='agent/murph-personas' \
-            -f content="$content"
-          exit 1
+          pnpm exec vitest run --no-coverage \
+            packages/contracts/test/assistant-personas.test.ts \
+            packages/contracts/test/preferences.test.ts \
+            packages/core/test/preferences.test.ts \
+            packages/hosted-execution/test/hosted-execution-contract-guards.test.ts \
+            packages/assistant-engine/test/persona-prompts.test.ts \
+            packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts \
+            packages/assistant-engine/test/assistant-codex-turn-planning.test.ts \
+            apps/web/test/home-initial-visit-dialog.test.tsx \
+            apps/web/test/hosted-onboarding-member-preferences.test.ts \
+            apps/web/test/account-settings-snapshot.test.ts
+          pnpm typecheck:packages
+          pnpm --dir apps/web typecheck
+          git diff --check
 
       - name: Commit integrated implementation
-        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
