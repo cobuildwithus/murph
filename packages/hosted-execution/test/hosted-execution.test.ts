@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+} from "@murphai/contracts/browser-vault";
 
 import {
   encodeHostedExecutionSignedRequestPayload,

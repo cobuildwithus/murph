@@ -1,4 +1,4 @@
-import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts";
+import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
   parseHostedDataKeyEnvelope,
   parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef,

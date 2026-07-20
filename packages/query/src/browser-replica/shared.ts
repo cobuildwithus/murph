@@ -1,9 +1,11 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
+import type {
+  ExperimentOutcome,
+} from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_SCHEMA,
-  type ExperimentOutcome,
-} from "@murphai/contracts";
+} from "@murphai/contracts/browser-vault";
 import type {
   OverviewExperiment,
   OverviewExperimentSummary,

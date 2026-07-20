@@ -7,12 +7,14 @@ import type {
   HostedExecutionDeviceSyncJobHint as DeviceSyncHostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
-import {
-  BROWSER_VAULT_REPLICA_SCHEMA,
-  type AssistantPersonalitySettingId,
-  type AssistantTonePreference,
-  type AssistantVoiceOptionId,
+import type {
+  AssistantPersonalitySettingId,
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
 } from "@murphai/contracts";
+import type {
+  BROWSER_VAULT_REPLICA_SCHEMA,
+} from "@murphai/contracts/browser-vault";
 import type {
   HostedExecutionBundlePayload,
   HostedExecutionLayeredSnapshotRef as SharedHostedExecutionLayeredSnapshotRef,

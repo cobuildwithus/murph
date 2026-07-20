@@ -1,4 +1,6 @@
-import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+} from "@murphai/contracts/browser-vault";
 import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,

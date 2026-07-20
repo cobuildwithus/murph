@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+} from "@murphai/contracts/browser-vault";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import type {
   HostedBrowserVaultReplicaRef,
