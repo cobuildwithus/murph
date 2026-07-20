@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 ## Decision
 
@@ -114,28 +114,27 @@ failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
-root reply, the parent writes the smallest truthful canonical fact or preserves
-the durable raw source and captures the exact record ids or source references.
-The child may perform only optional, idempotent enrichment against that durable
-base. Its terminal lifecycle receipt is advisory; canonical readback is the
-completion proof. If the member was promised the result and no separate durable
-owner exists, the root turn retains the work and uses normal progress updates
-instead of detaching it.
+root reply, Murph retains a durable accepted input, canonical fact, or raw
+source and gives each child its exact source words, ids, or refs. A loaded skill
+may assign one independent canonical record family per child, with every write
+idempotently attributable to that source. A terminal lifecycle receipt remains
+advisory; canonical readback is completion proof. If the member needs the result
+in the current reply, the root keeps the work and uses normal progress updates.
 
-Each root session may admit at most one detached child under Codex's native
-root-plus-one residency cap. Independent roots may retain children concurrently
-inside the same resident App Server. Every child must be a one-shot leaf: no
-root/child interaction, child reuse, nested child, same-root parallel child, or
-background terminal is supported. At the workspace snapshot boundary, the
-runtime waits for every exact resident child and checks every touched root and
-resident child for background terminals before archive construction may
-proceed. Codex admission of a per-session successor is the native fence that
-its completed predecessor was flushed and unloaded, leaving the successor as
-that root's resident child. A routine checkpoint wake cancels only that wait
-and keeps the process plus all resident lifecycle evidence warm for the later
-boundary. A timeout or unsupported lifecycle stops the exact process and fails
-the boundary closed. Explicit invocation abort/preemption cancels the wait and
-enters the synchronous exact-process stop path above.
+Hosted configuration admits one root plus at most three concurrent children
+per session. Independent roots may retain their own children inside the same
+resident App Server. Every child must be a one-shot leaf with one bounded
+family: no root/child interaction, child reuse, nested child, or background
+terminal is supported. At the workspace snapshot boundary, the runtime waits
+for every exact resident child and checks every touched root and child for
+background terminals before archive construction may proceed. The lifecycle
+owner retains the complete child set for each root until that boundary clears,
+so one sibling's completion cannot evict another. A routine checkpoint wake
+cancels only that wait and keeps the process plus all resident lifecycle
+evidence warm for the later boundary. A timeout or unsupported lifecycle stops
+the exact process and fails the boundary closed. Explicit invocation
+abort/preemption cancels the wait and enters the synchronous exact-process stop
+path above.
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,

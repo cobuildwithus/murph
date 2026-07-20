@@ -833,9 +833,11 @@ class CodexAppServerProcess {
   private nextRequestId = 1
   private normalShutdown = false
   private poisoned = false
-  // A same-root successor evicts its completed predecessor, so retain only the
-  // current resident child for each independent root.
-  private readonly detachedChildThreadIdsByRootThreadId = new Map<string, string>()
+  // MultiAgent V2 may retain several concurrent children for one root. Keep
+  // every child admitted since the last workspace boundary so checkpointing
+  // waits for and scans all of them, including children that completed before
+  // their parent reply.
+  private readonly detachedChildThreadIdsByRootThreadId = new Map<string, Set<string>>()
   private readonly detachedCompletedChildThreadIds = new Set<string>()
   private detachedChildViolation: string | null = null
   private readonly detachedRootThreadIds = new Set<string>()
@@ -1114,9 +1116,11 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildThreadIdsByRootThreadId.values()) {
-      if (!this.detachedCompletedChildThreadIds.has(threadId)) {
-        return true
+    for (const threadIds of this.detachedChildThreadIdsByRootThreadId.values()) {
+      for (const threadId of threadIds) {
+        if (!this.detachedCompletedChildThreadIds.has(threadId)) {
+          return true
+        }
       }
     }
     return false
@@ -1163,9 +1167,12 @@ class CodexAppServerProcess {
   private async assertNoBackgroundTerminals(
     signal: AbortSignal | null,
   ): Promise<void> {
+    const detachedChildThreadIds = [
+      ...this.detachedChildThreadIdsByRootThreadId.values(),
+    ].flatMap((threadIds) => [...threadIds])
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildThreadIdsByRootThreadId.values(),
+      ...detachedChildThreadIds,
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1215,10 +1222,16 @@ class CodexAppServerProcess {
             'Detached Codex children may not spawn nested children.',
           )
         } else {
-          this.detachedChildThreadIdsByRootThreadId.set(
-            senderThreadId,
-            activity.agentThreadId,
-          )
+          const existingThreadIds =
+            this.detachedChildThreadIdsByRootThreadId.get(senderThreadId)
+          if (existingThreadIds) {
+            existingThreadIds.add(activity.agentThreadId)
+          } else {
+            this.detachedChildThreadIdsByRootThreadId.set(
+              senderThreadId,
+              new Set([activity.agentThreadId]),
+            )
+          }
         }
       } else {
         this.recordDetachedChildViolation(

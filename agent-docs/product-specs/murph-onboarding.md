@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-07-15
+Last verified: 2026-07-20
 
 ## Product Decision
 
@@ -61,14 +61,18 @@ privacy, authorization, or provider boundaries.
   experiments, automations, and group state. Assistant runtime state is not
   product truth.
 - Route useful facts to their canonical owner in the same turn they are
-  learned. Before a visible reply, the parent saves the smallest truthful fact
-  or raw source and verifies its receipt. Batch related quick writes. Use the
-  resume snapshot to avoid repeating known facts.
-- A fresh non-blocking V2 child may optionally enrich exact durable record ids
-  or source refs. It is not the owner of a promised save, parse, or result, and
-  its spawn is not durable operation state. Do not describe its work as pending
-  or in progress or promise completion. Claim child enrichment only after
-  canonical readback confirms it. Do not add a queue or second state owner.
+  learned. The parent normally saves the smallest truthful fact or raw source
+  before a visible reply. For the dense foundation memo, the accepted current
+  input is the durable raw source and three bounded children own the independent
+  movement/protocol, supplement, and medical/safety persistence families. Use
+  the resume snapshot to avoid repeating known facts.
+- Hosted Codex admits root plus three concurrent V2 children. Every child is a
+  one-shot leaf with one self-contained exact-source task, an existing
+  canonical owner or skill, idempotent dedupe, and no authority for the other
+  families, user messages, voice generation, approvals, or external actions.
+  A spawn proves work started, not that writes completed. Claim saved or
+  enriched details only after canonical readback. Do not add a queue or second
+  state owner.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
@@ -190,30 +194,26 @@ not relevant, or explicitly skipped before answered completion:
 2. **Movement and training:** current activity, exercise, training, capacity,
    injuries, or relevant limitations.
 3. **Current protocols or experiments:** health changes, routines, diets,
-   recovery practices, or tests already underway. This is the default generated
-   onboarding voice-memo question when the tool is available and the member has
-   not declined voice; it does not require the member to request voice first.
+   recovery practices, or tests already underway.
 4. **Supplements:** current products, brands, and rough duration when known;
-   bottle or label photos are an easier input option. The parent first saves
-   the user-reported product identity, supplied brand, and active status in one
-   compact batch and captures the returned ids. That minimum is truthful
-   reported context, not a complete label. When V2 is available, no child is
-   active, a record is incomplete, and exact-label enrichment can materially
-   improve later help, spawn one child by default against those ids. Skip it
-   when the record is complete or enrichment cannot change later help. Existing
-   partial records are enriched rather than skipped or duplicated. Until
-   canonical readback proves enrichment, exact label details remain unconfirmed.
+   bottle or label photos are an easier input option. The supplement child
+   reads the owning skill, dedupes existing records, saves the named current
+   product identity plus supplied brand/status, and enriches incomplete exact
+   labels when useful. The parent does not duplicate these writes.
 5. **Medical and safety context:** prescription or OTC medications, diagnosed
-   conditions, allergies or intolerances, and pregnancy or nursing, asked once
-   as one optional open question. The parent saves all supported facts and
-   negative assertions in one compact batch across the named clinical owners,
-   verifies its receipts, and does not spawn a child for this bounded write.
+   conditions, injury history, allergies or intolerances, and pregnancy or
+   nursing, asked once as one optional open question. The medical/safety child
+   owns every supported fact and negative assertion across the named clinical
+   owners.
 6. **Recent blood tests or lab panels:** whether they exist and can be shared
-   now or later. If the member names Function Health, proactively send
+   now or later. This closer is a short generated voice memo when the tool is
+   available and the member has not declined voice; the same question is the
+   immediate text fallback. Do not duplicate the question in text. If the
+   member names Function Health, proactively send
    https://my.functionhealth.com/documents and ask for the Lab Results of Record
    PDFs. Naming the provider alone does not start a child. Once a PDF or paste
-   exists, the parent verifies or creates its durable attachment, document, or
-   import ref before replying. When V2 is available, no child is active, and
+   exists, the root verifies or creates its durable attachment, document, or
+   import ref before replying. When a V2 slot is available and
    structured extraction can materially improve later help, spawn one child by
    default from that exact source. Skip it when the source is already structured
    or extraction cannot change later help. If the current answer needs the
@@ -223,6 +223,21 @@ Use this order by default, but pull a checkpoint forward when it materially
 improves safety or keeps the conversation natural. One message, attachment, or
 voice note may resolve several checkpoints. Never re-ask facts Murph already
 has.
+
+After the data-source checkpoint, ask for checkpoints 2–5 in one low-effort
+voice-memo invitation covering movement/training, current protocols,
+supplements, and medical basics. When a supplied memo contains all three
+independent work families, immediately start three children before replying:
+
+1. movement plus current-protocol context;
+2. supplement persistence plus useful exact-label enrichment; and
+3. medical and safety persistence.
+
+The parent replies without waiting and may say, in natural words, that Murph's
+best people are sorting, saving, and checking what the member shared. That is a
+same-turn start acknowledgement, not a completion claim. The final labs
+question follows in the same response as generated voice when available, with
+no text duplicate.
 
 A clear `none`, `not relevant`, or explicit category skip resolves that
 checkpoint; a positive fact, connected wearable, supplement inventory,
@@ -239,24 +254,25 @@ For example, “not lifting right now” resolves useful movement context; it do
 not authorize a workout routine. Murph should acknowledge it briefly and keep
 learning unless the member asks for help now.
 
-For optional enrichment, spawn one fresh child with no forked transcript and a
-self-contained task containing exact durable record ids or source refs, the
-owner or skill, duplicate avoidance, and the bounded enrichment result. A child
-may use bounded read-only primary-source lookup when the owning enrichment skill
-requires it. Every create or update must be idempotently attributable to those
-exact ids or refs. Do not
+For detached work, spawn one fresh child per independent family with no forked
+transcript and a self-contained task containing the exact accepted source words
+or durable refs, the owner or skill, duplicate avoidance, exclusions, and the
+bounded result. The hosted limit is three concurrent children per root. A child may use
+bounded read-only primary-source lookup when its owning skill requires it.
+Every create or update must be idempotently attributable to the accepted source
+or exact returned ids. Do not
 delegate urgent or safety-sensitive judgment, reply-critical synthesis,
 user-facing messages, approvals, voice generation, other dynamic tools,
 browser or phone work, or external actions. If spawning is unavailable, use
 the smallest synchronous path for required work and leave optional details
 unconfirmed. Hosted Codex config must preserve Murph's custom V2 tool and mode
-hints; a boolean override must not replace that config table. A one-shot leaf
-child may outlive the reply, but only one may be active. Do not message, resume,
-reuse, close, interrupt, nest, or leave a background terminal from that child.
-Do not keep the root turn open solely to wait for optional enrichment. A spawn
-proves nothing durable. If the user's requested answer depends on the result,
-keep the work in the parent, follow the progress-update contract, and answer
-only from the confirmed result or an honest blocker.
+hints; a boolean override must not replace that config table. Children may
+outlive the reply. Do not message, resume, reuse, close, interrupt, nest, or
+leave a background terminal from a child. Do not keep the root turn open solely
+to wait. A spawn proves only that the bounded work started. If the user's
+requested answer depends on the result, keep the work in the parent, follow the
+progress-update contract, and answer only from the confirmed result or an honest
+blocker.
 
 ### 6. Return to the open thread and choose together
 
@@ -369,10 +385,10 @@ detail progressively at the first just-in-time instructional touchpoint.
 - Save concrete aspirations as ordinary goals or ongoing needs. Use the visible
   conversation and resume context for the park-and-return sequence; do not add
   persisted parked-thread or onboarding-step state.
-- The parent must verify the minimum canonical save or durable source before
-  replying. A child may only enrich exact returned ids or refs. Its spawn does
-  not prove or promise an enrichment result; claim child enrichment only after
-  canonical readback confirms it.
+- Before replying, verify a durable accepted input, minimum canonical save, or
+  raw source. During a dense foundation memo, the three children may own their
+  exact named record families from that accepted source. A spawn proves only
+  that work started; claim completion only after canonical readback.
 - Do not invent dose, severity, date, brand, diagnosis, motivation, or other
   missing details.
 - Treat negative allergy statements as clinical assertions through the owning
@@ -387,8 +403,8 @@ detail progressively at the first just-in-time instructional touchpoint.
   memory when the preference changes.
 - Use the global health-record ingestion path for files, labs, labels, and
   other slow evidence. Do not complete onboarding until each
-  foundation-critical minimum fact or raw source has a verified durable receipt
-  or the member explicitly defers it. Optional enrichment does not block
+  foundation-critical accepted input, minimum fact, or raw source has a
+  verified durable receipt or the member explicitly defers it. Optional enrichment does not block
   completion unless it would change the next decision.
 - Do not create fake records merely to remember that a category was skipped.
 
@@ -492,8 +508,8 @@ reflection-only scheduled message returns skip.
    substitutes for useful action or creates another onboarding automation.
 10. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
-11. Supplement identity and medical context are durably saved in compact parent
-    batches, and onboarding lab evidence is durably preserved before the next
-    reply. Optional children enrich exact supplement ids or lab source refs
-    without owning promised work. Murph claims child enrichment only after
-    canonical readback confirms it.
+11. A dense foundation memo starts one child for each supplied independent
+    movement/protocol, supplement, and medical/safety family, up to three,
+    from the durable accepted source. Murph replies after the spawns without
+    claiming completion and confirms child-owned writes only after canonical
+    readback. Onboarding lab evidence is durably preserved before the next reply.

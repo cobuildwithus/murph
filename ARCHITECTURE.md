@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 ## Accepted-Message Targeting
 
@@ -514,29 +514,27 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
-Detached MultiAgent V2 work is a bounded optional-enrichment path, not a second
-durable work owner. Before the root reply, the parent persists the smallest
-truthful canonical fact or durable raw source and retains its exact record ids
-or source references. The child may update only that durable base idempotently;
-work Murph promises to finish remains in the root turn unless a separate durable
-owner already exists. A child terminal event is only an advisory lifecycle
-receipt, so a canonical read confirms the enrichment before Murph reports it as
-finished.
+Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
+Before the root reply, Murph retains a durable accepted input, canonical fact,
+or raw source and gives each child its exact source words, ids, or refs. A
+loaded skill may assign one independent canonical record family per child; all
+writes remain idempotently attributable to that source. Work that needs a
+user-facing result in the current reply remains in the root turn. A child
+terminal event is only an advisory lifecycle receipt, so canonical readback
+confirms a write before Murph reports it as finished.
 
-Each root session may admit at most one detached child under Codex's native
-root-plus-one residency cap. Children from independent roots can overlap in the
-same App Server process. Each child is a one-shot leaf: no interaction with the
-root or another child, reuse, nested spawn, or background terminal is allowed.
-Root completion and later ordinary turns leave valid optional enrichment alone.
-Before publishing a workspace snapshot, the runtime waits for every exact
-resident child and checks every touched root and resident child for background
-terminals.
-Codex admission of a per-session successor is the native fence that its
-completed predecessor was flushed and unloaded, leaving the successor as that
-root's resident child. A routine checkpoint wake only interrupts that boundary
-wait and leaves the App Server plus all resident evidence warm. A timeout or
-unsupported lifecycle stops the exact process and fails the boundary closed.
-Explicit workspace invocation abort/preemption also interrupts the wait and
+Hosted configuration admits one root plus at most three concurrent children
+per session. Each child is a one-shot leaf with one bounded family: no
+interaction with the root or another child, reuse, nested spawn, or background
+terminal is allowed. Root completion and later ordinary turns leave valid
+detached work alone. Before publishing a workspace snapshot, the runtime waits
+for every exact resident child and checks every touched root and child for
+background terminals. The lifecycle owner retains the full child set for each
+root until that boundary clears, so one sibling's completion cannot evict
+another. A routine checkpoint wake only interrupts that boundary wait and
+leaves the App Server plus all resident evidence warm. A timeout or unsupported
+lifecycle stops the exact process and fails the boundary closed. Explicit
+workspace invocation abort/preemption also interrupts the wait and
 synchronously stops the exact process before workspace or job-slot ownership
 can be reused.
 
