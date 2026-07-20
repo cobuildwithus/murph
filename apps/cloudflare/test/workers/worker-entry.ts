@@ -19,7 +19,7 @@ import {
 } from "../../src/user-runner.ts";
 import {
   RunnerStateStore,
-  type RunnerInvocationLease,
+  type RunnerWriteFenceToken,
 } from "../../src/user-runner/runner-state-store.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
@@ -93,20 +93,20 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.bindUser(userId);
   }
 
-  async beginLeaseForTest(input: {
+  async beginWriteFenceForTest(input: {
     userId: string;
     workspaceVersion?: string | null;
-  }): Promise<RunnerInvocationLease> {
-    const lease = await this.stateStore.beginInvocation({
+  }): Promise<RunnerWriteFenceToken> {
+    const token = await this.stateStore.beginWriteFence({
       runnerContainerName: input.userId,
       userId: input.userId,
     });
     if (!input.workspaceVersion) {
-      return lease;
+      return token;
     }
 
-    return await this.stateStore.bindInvocationWorkspaceVersion({
-      lease,
+    return await this.stateStore.bindWriteFenceWorkspaceVersion({
+      token,
       workspaceVersion: input.workspaceVersion,
     });
   }
@@ -378,10 +378,10 @@ function getUserRunnerStub(userId: string) {
     env as {
       USER_RUNNER: {
         getByName(name: string): {
-          beginLeaseForTest(input: {
+          beginWriteFenceForTest(input: {
             userId: string;
             workspaceVersion?: string | null;
-          }): Promise<RunnerInvocationLease>;
+          }): Promise<RunnerWriteFenceToken>;
           bindUser(userId: string): Promise<{ userId: string }>;
           validateRuntimeWriteFence(input: {
             attemptId: string;
@@ -427,7 +427,7 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
     min: 0,
   });
 
-  const lease = await getUserRunnerStub(userId).beginLeaseForTest({
+  const lease = await getUserRunnerStub(userId).beginWriteFenceForTest({
     userId,
     workspaceVersion: "7",
   });
@@ -482,7 +482,7 @@ type LatencySummary = {
   totalMs: number;
 };
 
-function createWriteFenceLatencyRequest(lease: RunnerInvocationLease): Request {
+function createWriteFenceLatencyRequest(lease: RunnerWriteFenceToken): Request {
   const headers = new Headers();
   writeRunnerRuntimeWriteFenceHeaders(headers, {
     attemptId: lease.attemptId,

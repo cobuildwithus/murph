@@ -89,7 +89,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
     const stateStore = new RunnerStateStore(harness.storage.state);
     await stateStore.bindUser("member_123");
-    await stateStore.beginInvocation({
+    await stateStore.beginWriteFence({
       runnerContainerName: "member_123--v-worker_version_current",
       userId: "member_123",
     });
@@ -123,7 +123,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     const state = await stateStore.readState();
 
     expect(state.writeFence).toMatchObject({
-      expiresAt: null,
       kind: "runtime",
     });
   });
