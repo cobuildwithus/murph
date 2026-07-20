@@ -51,14 +51,14 @@ jobs:
           base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs \
-            2>&1 | tee /tmp/murph-persona-integration.log
+            2>&1 | tee murph-persona-integration.log
 
       - name: Upload integration diagnostic
         if: ${{ steps.integrate.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: murph-persona-integration-failure
-          path: /tmp/murph-persona-integration.log
+          path: murph-persona-integration.log
           if-no-files-found: error
 
       - name: Stop after integration failure
@@ -109,14 +109,14 @@ jobs:
             pnpm typecheck:packages
             pnpm --dir apps/web typecheck
             git diff --check
-          } 2>&1 | tee /tmp/murph-persona-verification.log
+          } 2>&1 | tee murph-persona-verification.log
 
       - name: Upload verification diagnostic
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: murph-persona-verification-failure
-          path: /tmp/murph-persona-verification.log
+          path: murph-persona-verification.log
           if-no-files-found: error
 
       - name: Stop after verification failure
@@ -126,6 +126,7 @@ jobs:
       - name: Commit integrated implementation
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
         run: |
+          rm -f murph-persona-integration.log murph-persona-verification.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
