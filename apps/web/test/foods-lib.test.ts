@@ -17,9 +17,11 @@ const emptyContaminants = {
   observationCount: 0,
   observations: [],
 };
+const productTestSourceDataOriginFilter =
+  "data_origin NOT IN ('plasticlist_bay_area_2024', 'nyc_dohmh_consumer_products', 'king_county_consumer_products', 'pure_earth_rms_2024')";
 
 function isProductTestsQuery(text: string): boolean {
-  return text.includes("FROM product_tests") || text.includes("JOIN product_tests");
+  return text.includes('product_tests.id AS "productTestId"');
 }
 
 describe("foods query helpers", () => {
@@ -104,11 +106,11 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toContain("name % query.raw_q");
     expect(searchCall?.text).not.toContain("OR name % query.raw_q");
     expect(searchCall?.text).toContain("FROM foods, query");
-    expect(searchCall?.text).toContain("data_origin NOT IN");
-    expect(searchCall?.text).toContain("'plasticlist_bay_area_2024'");
-    expect(searchCall?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(searchCall?.text).toContain("'king_county_consumer_products'");
-    expect(searchCall?.text).toContain("'pure_earth_rms_2024'");
+    expect(searchCall?.text).toContain(productTestSourceDataOriginFilter);
+    expect(searchCall?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(searchCall?.text).not.toContain("FROM product_tests product_test_sources");
     expect(searchCall?.text).not.toMatch(
       /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM foods, query/u,
     );
@@ -434,6 +436,242 @@ describe("foods query helpers", () => {
     });
   });
 
+  it("preserves sample metadata for laboratory results and regulatory findings", async () => {
+    const calls: string[] = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        calls.push(text);
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "fdc:123",
+                productTestId: "federal_catalog:sample-1:lead",
+                servingGrams: null,
+                sourceKey: "federal_catalog",
+                sourceName: "Federal Catalog",
+                sourceUrl: "https://example.test/catalog",
+                sourceReportTitle: "Market sampling",
+                reportDate: "2025-12-01",
+                sourceResultId: "sample-1",
+                testedProductName: "Ground Cinnamon",
+                testedProductBrand: "Example Spice",
+                testedProductUpc: null,
+                testedProductUpcRaw: "12345678901",
+                testedSourceProductId: "product-1",
+                evidenceType: "regulatory_laboratory",
+                samplingContext: "targeted_market_sampling",
+                sourceSampleId: "sample-1",
+                sourceSampleCount: 6,
+                testedLotCode: "LOT-1",
+                testedBestBy: "2027-01",
+                testedPackageSize: "2 oz",
+                collectedOn: "2025-10-01",
+                testedOn: "2025-10-08",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "lead",
+                contaminantName: "Lead",
+                resultOperator: "range",
+                resultValue: 1.2,
+                resultUpperValue: 1.8,
+                resultUnit: "ppm",
+                resultBasis: "product_mass",
+                normalizedValue: 1.2,
+                normalizedUpperValue: 1.8,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                resultQualifier: "estimated range",
+                detectionLimitValue: 0.01,
+                detectionLimitUnit: "ppm",
+                quantificationLimitValue: 0.03,
+                quantificationLimitUnit: "ppm",
+                reportingLimitValue: 0.05,
+                reportingLimitUnit: "ppm",
+                uncertaintyValue: 0.2,
+                uncertaintyUnit: "ppm",
+                labName: "Public Laboratory",
+                testMethod: "ICP-MS",
+                thresholdId: "example-lead-threshold",
+                thresholdValue: 1,
+                thresholdUnit: "ppm",
+                thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 1,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Example lead threshold",
+                thresholdUrl: null,
+                concernLevelIfExceeded: "high",
+              },
+              {
+                productId: "fdc:123",
+                productTestId: "fda_health_fraud_products:finding-1:undeclared_drug",
+                servingGrams: null,
+                sourceKey: "fda_health_fraud_products",
+                sourceName: "FDA Health Fraud Product Database",
+                sourceUrl: "https://example.test/enforcement-table",
+                sourceReportTitle: "Health Fraud Product Database",
+                reportDate: "2025-12-01",
+                sourceResultId: "finding-1",
+                testedProductName: "Example Supplement",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedProductUpcRaw: null,
+                testedSourceProductId: "finding-1",
+                evidenceType: "regulatory_finding",
+                samplingContext: "regulatory_enforcement_table",
+                sourceSampleId: null,
+                sourceSampleCount: null,
+                testedLotCode: null,
+                testedBestBy: null,
+                testedPackageSize: null,
+                collectedOn: null,
+                testedOn: null,
+                matchMethod: "manual_confirmed",
+                contaminantKey: "undeclared_drug",
+                contaminantName: "Undeclared active ingredient",
+                resultOperator: "detected",
+                resultValue: null,
+                resultUpperValue: null,
+                resultUnit: "presence",
+                resultBasis: "regulatory_finding",
+                normalizedValue: null,
+                normalizedUpperValue: null,
+                normalizedUnit: null,
+                normalizedBasis: null,
+                resultQualifier: "subject of regulatory action",
+                detectionLimitValue: null,
+                detectionLimitUnit: null,
+                quantificationLimitValue: null,
+                quantificationLimitUnit: null,
+                reportingLimitValue: null,
+                reportingLimitUnit: null,
+                uncertaintyValue: null,
+                uncertaintyUnit: null,
+                labName: null,
+                testMethod: null,
+                thresholdId: null,
+                thresholdValue: null,
+                thresholdUnit: null,
+                thresholdBasis: null,
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
+                thresholdAuthorityName: null,
+                thresholdName: null,
+                thresholdUrl: null,
+                concernLevelIfExceeded: null,
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_branded",
+              dataOriginId: "123",
+              name: "Ground Cinnamon",
+              brand: "Example Spice",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getFoodById({
+      id: "fdc:123",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "high",
+        alertCount: 1,
+        alerts: [
+          {
+            result: {
+              operator: "range",
+              value: 1.2,
+              upperValue: 1.8,
+            },
+            sample: {
+              sampleCount: 6,
+              reportedUpc: "12345678901",
+            },
+          },
+        ],
+        observationCount: 2,
+        observations: [
+          {
+            result: {
+              operator: "range",
+              value: 1.2,
+              upperValue: 1.8,
+              qualifier: "estimated range",
+              detectionLimit: { value: 0.01, unit: "ppm" },
+              quantificationLimit: { value: 0.03, unit: "ppm" },
+              reportingLimit: { value: 0.05, unit: "ppm" },
+              uncertainty: { value: 0.2, unit: "ppm" },
+            },
+            normalizedResult: {
+              value: 1.2,
+              upperValue: 1.8,
+            },
+            sample: {
+              evidenceType: "regulatory_laboratory",
+              samplingContext: "targeted_market_sampling",
+              sourceSampleId: "sample-1",
+              sampleCount: 6,
+              reportedUpc: "12345678901",
+              lotCode: "LOT-1",
+              bestBy: "2027-01",
+              packageSize: "2 oz",
+              collectedOn: "2025-10-01",
+              testedOn: "2025-10-08",
+              labName: "Public Laboratory",
+              testMethod: "ICP-MS",
+            },
+          },
+          {
+            result: {
+              operator: "detected",
+              value: null,
+              qualifier: "subject of regulatory action",
+            },
+            sample: {
+              evidenceType: "regulatory_finding",
+              samplingContext: "regulatory_enforcement_table",
+              sourceSampleId: null,
+              labName: null,
+              testMethod: null,
+            },
+          },
+        ],
+      },
+    });
+
+    const contaminantQuery = calls.find(isProductTestsQuery) ?? "";
+    expect(contaminantQuery).toContain(
+      'product_tests.result_upper_value::double precision AS "resultUpperValue"',
+    );
+    expect(contaminantQuery).toContain(
+      'product_tests.evidence_type AS "evidenceType"',
+    );
+    expect(contaminantQuery).toContain(
+      'product_tests.tested_product_upc_raw AS "testedProductUpcRaw"',
+    );
+    expect(contaminantQuery).toContain(
+      'product_tests.source_sample_count AS "sourceSampleCount"',
+    );
+    expect(contaminantQuery).toContain(
+      'product_tests.detection_limit_value::double precision AS "detectionLimitValue"',
+    );
+  });
+
   it("screens BPA against daily exposure guidance using one label serving", async () => {
     const queries = createFoodsQueries({
       async query<T>(text: string) {
@@ -729,11 +967,11 @@ describe("foods query helpers", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("id = $1");
-    expect(calls[0]?.text).toContain("data_origin NOT IN");
-    expect(calls[0]?.text).toContain("'plasticlist_bay_area_2024'");
-    expect(calls[0]?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(calls[0]?.text).toContain("'king_county_consumer_products'");
-    expect(calls[0]?.text).toContain("'pure_earth_rms_2024'");
+    expect(calls[0]?.text).toContain(productTestSourceDataOriginFilter);
+    expect(calls[0]?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(calls[0]?.text).not.toContain("FROM product_tests product_test_sources");
     expect(calls[0]?.text).not.toContain("FROM supplements");
     expect(calls[0]?.values).toEqual(["fdc:123", false]);
   });

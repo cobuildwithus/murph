@@ -214,8 +214,15 @@ function toPublicProductTests(
         key: normalizeAnalyteKey(observation.contaminantKey),
         name: boundedRequiredText(observation.contaminantName, 256),
       },
-      result: observation.result,
-      normalizedResult: observation.normalizedResult,
+      result: normalizeProductTestResult(observation.result),
+      normalizedResult: observation.normalizedResult
+        ? {
+            value: observation.normalizedResult.value,
+            upperValue: observation.normalizedResult.upperValue ?? null,
+            unit: boundedRequiredText(observation.normalizedResult.unit, 64),
+            basis: boundedRequiredText(observation.normalizedResult.basis, 256),
+          }
+        : null,
       screening: observation.screening
         ? {
             ...observation.screening,
@@ -235,6 +242,9 @@ function toPublicProductTests(
         ),
         matchMethod: observation.testedProduct.matchMethod,
       },
+      ...(observation.sample
+        ? { sample: normalizeProductTestSample(observation.sample) }
+        : {}),
       labName: boundedText(observation.labName, 512),
       testMethod: boundedText(observation.testMethod, 2_000),
     })),
@@ -244,7 +254,7 @@ function toPublicProductTests(
         name: boundedRequiredText(alert.contaminantName, 256),
       },
       concernLevel: alert.concernLevel,
-      result: alert.result,
+      result: normalizeProductTestResult(alert.result),
       threshold: normalizeProductTestThreshold(alert.threshold),
       ...(alert.screeningPolicy
         ? { screeningPolicy: alert.screeningPolicy }
@@ -257,7 +267,68 @@ function toPublicProductTests(
         sourceProductId: boundedText(alert.testedProduct.sourceProductId, 512),
         matchMethod: alert.testedProduct.matchMethod,
       },
+      ...(alert.sample
+        ? { sample: normalizeProductTestSample(alert.sample) }
+        : {}),
     })),
+  };
+}
+
+function normalizeProductTestResult(
+  result: PublicProductTestEvidence["observations"][number]["result"],
+): PublicProductDetail["productTests"]["observations"][number]["result"] {
+  return {
+    operator: result.operator,
+    value: result.value,
+    upperValue: result.upperValue ?? null,
+    qualifier: boundedText(result.qualifier ?? null, 512),
+    detectionLimit: normalizeProductTestMeasurement(result.detectionLimit),
+    quantificationLimit: normalizeProductTestMeasurement(
+      result.quantificationLimit,
+    ),
+    reportingLimit: normalizeProductTestMeasurement(result.reportingLimit),
+    uncertainty: normalizeProductTestMeasurement(result.uncertainty),
+    unit: boundedRequiredText(result.unit, 64),
+    basis: boundedRequiredText(result.basis, 256),
+  };
+}
+
+function normalizeProductTestMeasurement(
+  measurement:
+    | NonNullable<
+        PublicProductTestEvidence["observations"][number]["result"]["detectionLimit"]
+      >
+    | null
+    | undefined,
+): { value: number; unit: string } | null {
+  return measurement
+    ? {
+        value: measurement.value,
+        unit: boundedRequiredText(measurement.unit, 64),
+      }
+    : null;
+}
+
+function normalizeProductTestSample(
+  sample: NonNullable<
+    PublicProductTestEvidence["observations"][number]["sample"]
+  >,
+): NonNullable<
+  PublicProductDetail["productTests"]["observations"][number]["sample"]
+> {
+  return {
+    evidenceType: sample.evidenceType,
+    samplingContext: boundedRequiredText(sample.samplingContext, 128),
+    sourceSampleId: boundedText(sample.sourceSampleId, 512),
+    sampleCount: sample.sampleCount ?? null,
+    reportedUpc: boundedText(sample.reportedUpc ?? null, 128),
+    lotCode: boundedText(sample.lotCode, 512),
+    bestBy: boundedText(sample.bestBy, 512),
+    packageSize: boundedText(sample.packageSize, 256),
+    collectedOn: normalizeDate(sample.collectedOn),
+    testedOn: normalizeDate(sample.testedOn),
+    labName: boundedText(sample.labName, 512),
+    testMethod: boundedText(sample.testMethod, 2_000),
   };
 }
 
@@ -351,7 +422,10 @@ function buildPublicProductUnknowns(
 
   if (evidence.total === 0) {
     codes.add("NO_LINKED_PRODUCT_TESTS");
-  } else {
+  } else if (
+    evidence.truncated ||
+    evidence.observations.some((observation) => !observation.sample?.lotCode)
+  ) {
     codes.add("TESTED_LOT_NOT_REPORTED");
   }
   if (evidence.observations.some((observation) => !observation.labName)) {

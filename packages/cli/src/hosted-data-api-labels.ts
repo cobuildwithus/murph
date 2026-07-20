@@ -35,10 +35,52 @@ const hostedDataApiLabelContaminantResultOperatorSchema = z.enum([
   'lte',
   'gt',
   'gte',
+  'range',
   'not_detected',
   'detected',
   'trace',
 ])
+
+const hostedDataApiLabelContaminantEvidenceTypeSchema = z.enum([
+  'laboratory_measurement',
+  'regulatory_laboratory',
+  'regulatory_finding',
+  'xrf_screening',
+  'manufacturer_coa',
+])
+
+const hostedDataApiLabelContaminantMeasurementMetadataSchema = z.object({
+  value: z.number().nonnegative(),
+  unit: z.string().min(1),
+})
+
+const hostedDataApiLabelContaminantResultMetadataSchema = {
+  upperValue: z.number().nonnegative().nullable().optional(),
+  qualifier: z.string().min(1).nullable().optional(),
+  detectionLimit:
+    hostedDataApiLabelContaminantMeasurementMetadataSchema.nullable().optional(),
+  quantificationLimit:
+    hostedDataApiLabelContaminantMeasurementMetadataSchema.nullable().optional(),
+  reportingLimit:
+    hostedDataApiLabelContaminantMeasurementMetadataSchema.nullable().optional(),
+  uncertainty:
+    hostedDataApiLabelContaminantMeasurementMetadataSchema.nullable().optional(),
+}
+
+const hostedDataApiLabelContaminantSampleSchema = z.object({
+  evidenceType: hostedDataApiLabelContaminantEvidenceTypeSchema,
+  samplingContext: z.string().min(1),
+  sourceSampleId: z.string().min(1).nullable(),
+  sampleCount: z.number().int().positive().nullable().optional(),
+  reportedUpc: z.string().min(1).nullable().optional(),
+  lotCode: z.string().min(1).nullable(),
+  bestBy: z.string().min(1).nullable(),
+  packageSize: z.string().min(1).nullable(),
+  collectedOn: z.string().min(1).nullable(),
+  testedOn: z.string().min(1).nullable(),
+  labName: z.string().min(1).nullable(),
+  testMethod: z.string().min(1).nullable(),
+})
 
 const hostedDataApiLabelContaminantSourceSchema = z.object({
   key: z.string().min(1),
@@ -68,14 +110,17 @@ const hostedDataApiLabelContaminantObservationSchema = z.object({
     value: z.number().nonnegative().nullable(),
     unit: z.string().min(1),
     basis: z.string().min(1),
+    ...hostedDataApiLabelContaminantResultMetadataSchema,
   }),
   normalizedResult: z.object({
     value: z.number().nonnegative(),
+    upperValue: z.number().nonnegative().nullable().optional(),
     unit: z.string().min(1),
     basis: z.string().min(1),
   }).nullable(),
   source: hostedDataApiLabelContaminantSourceSchema,
   testedProduct: hostedDataApiLabelContaminantTestedProductSchema,
+  sample: hostedDataApiLabelContaminantSampleSchema.optional(),
 })
 
 const hostedDataApiLabelContaminantsSchema = z.object({
@@ -91,6 +136,7 @@ const hostedDataApiLabelContaminantsSchema = z.object({
       value: z.number().nonnegative(),
       unit: z.string().min(1),
       basis: z.string().min(1),
+      ...hostedDataApiLabelContaminantResultMetadataSchema,
     }),
     threshold: z.object({
       value: z.number().positive(),
@@ -114,6 +160,7 @@ const hostedDataApiLabelContaminantsSchema = z.object({
     }).optional(),
     source: hostedDataApiLabelContaminantSourceSchema,
     testedProduct: hostedDataApiLabelContaminantTestedProductSchema,
+    sample: hostedDataApiLabelContaminantSampleSchema.optional(),
   })).max(5),
   observationCount: z.number().int().nonnegative(),
   observations: z.array(hostedDataApiLabelContaminantObservationSchema),

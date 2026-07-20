@@ -17,9 +17,11 @@ const emptyContaminants = {
   observationCount: 0,
   observations: [],
 };
+const productTestSourceDataOriginFilter =
+  "data_origin NOT IN ('plasticlist_bay_area_2024', 'nyc_dohmh_consumer_products', 'king_county_consumer_products', 'pure_earth_rms_2024')";
 
 function isProductTestsQuery(text: string): boolean {
-  return text.includes("FROM product_tests") || text.includes("JOIN product_tests");
+  return text.includes('product_tests.id AS "productTestId"');
 }
 
 describe("supplements query helpers", () => {
@@ -229,9 +231,11 @@ describe("supplements query helpers", () => {
     expect(rows[0]?.contaminants).toEqual(emptyContaminants);
     expect(calls).toHaveLength(3);
     expect(calls[0]?.text).toContain("GROUP BY brand");
-    expect(calls[0]?.text).toContain("data_origin NOT IN");
-    expect(calls[0]?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(calls[0]?.text).toContain("'king_county_consumer_products'");
+    expect(calls[0]?.text).toContain(productTestSourceDataOriginFilter);
+    expect(calls[0]?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(calls[0]?.text).not.toContain("FROM product_tests product_test_sources");
     expect(calls[0]?.values).toEqual([]);
 
     const searchCall = calls[1];
@@ -255,9 +259,11 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain("name_phrase_length DESC");
     expect(searchCall?.text).toContain("name_similarity DESC");
     expect(searchCall?.text).toContain("FROM supplements, query");
-    expect(searchCall?.text).toContain("data_origin NOT IN");
-    expect(searchCall?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(searchCall?.text).toContain("'king_county_consumer_products'");
+    expect(searchCall?.text).toContain(productTestSourceDataOriginFilter);
+    expect(searchCall?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(searchCall?.text).not.toContain("FROM product_tests product_test_sources");
     expect(searchCall?.text).not.toMatch(
       /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
     );
@@ -299,7 +305,7 @@ describe("supplements query helpers", () => {
     expect(contaminantsCall?.text).toContain("FROM contaminant_thresholds threshold_rows");
     expect(contaminantsCall?.text).toContain("threshold_rows.active = true");
     expect(contaminantsCall?.text).toContain(
-      "product_tests.result_operator IN ('eq', 'gt', 'gte')",
+      "product_tests.result_operator IN ('eq', 'gt', 'gte', 'range')",
     );
     expect(contaminantsCall?.text).toContain(
       'thresholds.threshold_value::double precision AS "thresholdValue"',
@@ -1336,9 +1342,11 @@ describe("supplements query helpers", () => {
     // brand index + brand-scoped search + contaminant attach for the row
     expect(calls).toHaveLength(3);
     expect(calls[0]?.text).toContain("GROUP BY brand");
-    expect(calls[0]?.text).toContain("data_origin NOT IN");
-    expect(calls[0]?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(calls[0]?.text).toContain("'king_county_consumer_products'");
+    expect(calls[0]?.text).toContain(productTestSourceDataOriginFilter);
+    expect(calls[0]?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(calls[0]?.text).not.toContain("FROM product_tests product_test_sources");
     expect(calls[2]?.text).toContain("JOIN product_tests");
 
     const sql = calls[1]?.text ?? "";
@@ -1346,9 +1354,9 @@ describe("supplements query helpers", () => {
     expect(sql).toContain("brand_candidates AS MATERIALIZED");
     expect(sql).toContain("brand = ANY($4::text[])");
     expect(sql).toContain("$5::text AS product_q");
-    expect(sql).toContain("data_origin NOT IN");
-    expect(sql).toContain("'nyc_dohmh_consumer_products'");
-    expect(sql).toContain("'king_county_consumer_products'");
+    expect(sql).toContain(productTestSourceDataOriginFilter);
+    expect(sql).not.toContain("murph_product_test_legacy_source_backed_origin");
+    expect(sql).not.toContain("FROM product_tests product_test_sources");
     expect(sql).toContain("product_identity_match");
     expect(sql).toContain("WHERE product_identity_match = 1");
     expect(sql).toContain("websearch_to_tsquery('simple', product_q)");
@@ -1881,12 +1889,13 @@ describe("supplements query helpers", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM supplements");
     expect(calls[0]?.text).toContain("id = $1");
-    expect(calls[0]?.text).toContain("data_origin NOT IN");
-    expect(calls[0]?.text).toContain("'nyc_dohmh_consumer_products'");
-    expect(calls[0]?.text).toContain("'king_county_consumer_products'");
+    expect(calls[0]?.text).toContain(productTestSourceDataOriginFilter);
+    expect(calls[0]?.text).not.toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
+    expect(calls[0]?.text).not.toContain("FROM product_tests product_test_sources");
     expect(calls[0]?.text).not.toContain("supplement_external_labels");
     expect(calls[0]?.text).not.toContain("matched_dsld_id");
-    expect(calls[0]?.text).not.toContain("NOT EXISTS");
     expect(calls[0]?.values).toEqual([
       "dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64",
       false,
@@ -1960,7 +1969,6 @@ describe("supplements query helpers", () => {
     expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
     expect(calls[0]?.text).toContain("data_origin_priority ASC");
     expect(calls[0]?.text).not.toContain("supplement_external_labels");
-    expect(calls[0]?.text).not.toContain("NOT EXISTS");
     expect(calls[0]?.values).toEqual([
       ["00123456789012", "123456789012", "0123456789012"],
       false,

@@ -165,7 +165,7 @@ function ProductTestObservationRow(input: { observation: ProductTestObservation 
         </p>
         {observation.normalizedResult && hasDistinctNormalizedResult(observation) ? (
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Normalized result: {formatNumber(observation.normalizedResult.value)} {observation.normalizedResult.unit}. Basis: {formatEvidenceBasis(observation.normalizedResult.basis)}
+            Normalized result: {formatNormalizedTestResult(observation)}. Basis: {formatEvidenceBasis(observation.normalizedResult.basis)}
           </p>
         ) : null}
         {observation.screening ? (
@@ -612,13 +612,52 @@ function formatTestResult(result: ProductTestObservation["result"]): string {
       return `Greater than ${formatNullableNumber(result.value)} ${result.unit}`.trim();
     case "gte":
       return `Greater than or equal to ${formatNullableNumber(result.value)} ${result.unit}`.trim();
+    case "range":
+      return formatTestResultRange(result);
     case "eq":
       return `${formatNullableNumber(result.value)} ${result.unit}`.trim();
   }
 }
 
+function formatTestResultRange(
+  result: ProductTestObservation["result"],
+): string {
+  if (result.value !== null && result.upperValue != null) {
+    return `${formatNumber(result.value)}–${formatNumber(result.upperValue)} ${result.unit}`.trim();
+  }
+
+  if (result.value !== null) {
+    return `From ${formatNumber(result.value)} ${result.unit} (upper bound not reported)`.trim();
+  }
+
+  if (result.upperValue != null) {
+    return `Up to ${formatNumber(result.upperValue)} ${result.unit} (lower bound not reported)`.trim();
+  }
+
+  return result.unit ? `Range not reported (${result.unit})` : "Range not reported";
+}
+
 function formatNullableNumber(value: number | null): string {
   return value === null ? "Value not reported" : formatNumber(value);
+}
+
+function formatNormalizedTestResult(
+  observation: ProductTestObservation,
+): string {
+  const normalized = observation.normalizedResult;
+  if (!normalized) {
+    return "Value not reported";
+  }
+
+  if (observation.result.operator === "range") {
+    if (normalized.upperValue != null) {
+      return `${formatNumber(normalized.value)}–${formatNumber(normalized.upperValue)} ${normalized.unit}`.trim();
+    }
+
+    return `From ${formatNumber(normalized.value)} ${normalized.unit} (upper bound not reported)`.trim();
+  }
+
+  return `${formatNumber(normalized.value)} ${normalized.unit}`.trim();
 }
 
 function formatNumber(value: number): string {
@@ -631,8 +670,12 @@ function hasDistinctNormalizedResult(observation: ProductTestObservation): boole
     return false;
   }
 
-  return observation.result.operator !== "eq"
-    || observation.result.value !== normalized.value
+  if (observation.result.operator !== "eq" && observation.result.operator !== "range") {
+    return true;
+  }
+
+  return observation.result.value !== normalized.value
+    || (observation.result.upperValue ?? null) !== (normalized.upperValue ?? null)
     || observation.result.unit !== normalized.unit
     || observation.result.basis !== normalized.basis;
 }
