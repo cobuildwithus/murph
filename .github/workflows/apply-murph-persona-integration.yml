@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   apply:
@@ -63,18 +64,25 @@ jobs:
           node /tmp/apply-murph-persona-integration.mjs \
             2>&1 | tee /tmp/murph-persona-integration.log
 
-      - name: Record integration failure
+      - name: Report integration failure
         if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          git reset --hard HEAD
-          cp /tmp/murph-persona-integration.log \
-            agent-docs/exec-plans/active/murph-persona-integration-failure.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent-docs/exec-plans/active/murph-persona-integration-failure.log
-          git commit -m "chore: record persona integration failure [persona-failed]"
-          git push origin HEAD:agent/murph-personas
+          {
+            echo "### Persona integration codemod failed"
+            echo
+            echo '```text'
+            tail -n 180 /tmp/murph-persona-integration.log
+            echo '```'
+            echo
+            echo "Partial diff before the ephemeral runner was discarded:"
+            echo '```text'
+            git diff --stat
+            echo '```'
+          } > /tmp/persona-pr-comment.md
+          gh pr comment 801 --body-file /tmp/persona-pr-comment.md
           exit 1
 
       - name: Install workspace
@@ -123,18 +131,25 @@ jobs:
             git diff --check
           } 2>&1 | tee /tmp/murph-persona-verification.log
 
-      - name: Record verification failure
+      - name: Report verification failure
         if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          git reset --hard HEAD
-          cp /tmp/murph-persona-verification.log \
-            agent-docs/exec-plans/active/murph-persona-verification-failure.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent-docs/exec-plans/active/murph-persona-verification-failure.log
-          git commit -m "chore: record persona verification failure [persona-failed]"
-          git push origin HEAD:agent/murph-personas
+          {
+            echo "### Persona integration verification failed"
+            echo
+            echo '```text'
+            tail -n 220 /tmp/murph-persona-verification.log
+            echo '```'
+            echo
+            echo "Integrated diff summary:"
+            echo '```text'
+            git diff --stat
+            echo '```'
+          } > /tmp/persona-pr-comment.md
+          gh pr comment 801 --body-file /tmp/persona-pr-comment.md
           exit 1
 
       - name: Commit integrated implementation
