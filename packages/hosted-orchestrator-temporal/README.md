@@ -293,12 +293,9 @@ Worker concurrency:
   `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS`: maximum concurrent
   Workflow task polls, default `5`, and must be no higher than the Workflow task
   execution limit.
-- `HOSTED_TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS` /
-  `TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS`: maximum cached Workflow executions,
-  default `100`. It must be at least `2` and no lower than the concurrent
-  Workflow task execution limit.
-- Production explicitly enables Temporal's reusable V8 context and pins the
-  cache ceiling instead of deriving cache capacity from the process heap.
+- Production always enables Temporal's reusable V8 context and fixes the cache
+  ceiling at `100` Workflow executions instead of deriving cache capacity from
+  the process heap. The ceiling is intentionally not operator-configurable.
 - Local development omits these Worker performance options unless an override is
   configured. Production startup always sets explicit values instead of relying
   on Temporal SDK defaults.

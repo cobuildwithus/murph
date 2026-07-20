@@ -28,7 +28,6 @@ describe("hosted runtime Temporal worker", () => {
   const performanceEnvKeys = [
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS",
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
-    "HOSTED_TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS",
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS",
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
   ] as const;
@@ -168,7 +167,6 @@ describe("hosted runtime Temporal worker", () => {
   it("uses worker concurrency env overrides when configured", async () => {
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = "3";
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = "2";
-    process.env.HOSTED_TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS = "40";
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS = "12";
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = "6";
     const {
@@ -184,7 +182,7 @@ describe("hosted runtime Temporal worker", () => {
     const workerOptions = readCreatedWorkerOptions();
     expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(3);
     expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
-    expect(workerOptions.maxCachedWorkflows).toBe(40);
+    expect(workerOptions.maxCachedWorkflows).toBe(100);
     expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(12);
     expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(6);
     expect(workerOptions.reuseV8Context).toBe(true);
@@ -204,9 +202,8 @@ describe("hosted runtime Temporal worker", () => {
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS: "2",
     })).toThrow(/less than or equal/u);
     expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
-      HOSTED_TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS: "10",
-      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "20",
-    })).toThrow(/less than or equal to maxCachedWorkflows/u);
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "101",
+    })).toThrow(/fixed 100-Workflow cache limit/u);
   });
 
   it("fails production startup when the workflow bundle is missing", async () => {
