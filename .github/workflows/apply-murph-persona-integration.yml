@@ -36,4 +36,8 @@ jobs:
             --config apps/web/vitest.workspace.ts \
             --no-coverage \
             apps/web/test/settings-assistant-style-route.test.ts \
-            --reporter=verbose
+            --reporter=verbose > /tmp/persona-route-test.log 2>&1 || {
+              tail -n 80 /tmp/persona-route-test.log
+              exit 1
+            }
+          tail -n 25 /tmp/persona-route-test.log
