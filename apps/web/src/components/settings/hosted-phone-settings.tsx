@@ -62,17 +62,18 @@ export function HostedPhoneSettings(props: {
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
   const statusMessage = errorMessage ?? successMessage;
 
-  const isChangeFlow = Boolean(props.autoOpen && currentPhoneNumber);
+  const isDialogFlow = Boolean(props.autoOpen);
+  const isChangeFlow = Boolean(isDialogFlow && currentPhoneNumber);
 
   return (
     <div className="space-y-5">
-      {isChangeFlow ? null : (
+      {isDialogFlow ? null : (
         <div className="space-y-2">
           <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
         </div>
       )}
 
-      {isChangeFlow ? null : currentPhoneNumber ? (
+      {isDialogFlow ? null : currentPhoneNumber ? (
         <ConnectedAccountCard
           value={formatMaskedPhoneNumber(currentPhoneNumber)}
           action={
@@ -99,7 +100,7 @@ export function HostedPhoneSettings(props: {
         />
       )}
 
-      {props.murphPhoneNumber && !isChangeFlow ? (
+      {props.murphPhoneNumber && !isDialogFlow ? (
         <SettingsContactLink
           href={`sms:${props.murphPhoneNumber}`}
           label="Text Murph"
@@ -112,6 +113,7 @@ export function HostedPhoneSettings(props: {
         <HostedPhoneAuth
           intent="link"
           phoneFieldLabel={isChangeFlow ? "New phone number" : undefined}
+          phoneInputAutoFocus={isDialogFlow}
           onLinked={handleLinked}
         />
       ) : null}

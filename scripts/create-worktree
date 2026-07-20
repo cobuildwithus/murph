@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+original_args=("$@")
+
+usage() {
+  printf 'Usage: %s [--data-research <reason>] [-b <branch> | -B <branch> | --detach] <path> [<start-point>]\n' "$(basename "$0")" >&2
+  exit 2
+}
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+data_reason=''
+mode=''
+branch=''
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --data-research)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      data_reason="$2"
+      shift 2
+      ;;
+    -b|-B)
+      [[ $# -ge 2 && -z "$mode" ]] || usage
+      mode="$1"
+      branch="$2"
+      shift 2
+      ;;
+    --detach)
+      [[ -z "$mode" ]] || usage
+      mode='--detach'
+      shift
+      ;;
+    --) shift; break ;;
+    -*) usage ;;
+    *) break ;;
+  esac
+done
+
+[[ $# -ge 1 && $# -le 2 ]] || usage
+target="$1"
+start_point="${2:-}"
+if [[ "$target" == /* ]]; then
+  target_path="$target"
+else
+  target_path="$repo_root/$target"
+fi
+
+common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
+lock_file="$state_dir/lock"
+mkdir -p "$state_dir"
+
+if [[ "${MURPH_CREATE_WORKTREE_LOCK_HELD:-0}" != 1 ]]; then
+  if command -v flock >/dev/null 2>&1; then
+    exec flock -w 5 "$lock_file" env MURPH_CREATE_WORKTREE_LOCK_HELD=1 \
+      MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" "${original_args[@]}"
+  elif command -v lockf >/dev/null 2>&1; then
+    exec lockf -t 5 "$lock_file" env MURPH_CREATE_WORKTREE_LOCK_HELD=1 \
+      MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" "${original_args[@]}"
+  else
+    printf 'create-worktree: flock or lockf is required for serialization\n' >&2
+    exit 1
+  fi
+fi
+
+"$repo_root/scripts/install-git-hooks"
+
+if [[ -n "$data_reason" ]]; then
+  MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$repo_root/scripts/worktree-storage-guard" \
+    --target-path "$target_path"
+else
+  MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$repo_root/scripts/worktree-storage-guard" \
+    --reserve-worktree --target-path "$target_path"
+fi
+
+args=()
+if [[ "$mode" == -b || "$mode" == -B ]]; then
+  args+=("$mode" "$branch")
+elif [[ "$mode" == --detach ]]; then
+  args+=(--detach)
+fi
+if [[ -n "$data_reason" ]]; then
+  args+=(--lock --reason "data/research: $data_reason")
+fi
+args+=("$target")
+[[ -n "$start_point" ]] && args+=("$start_point")
+
+registered_before=0
+if [[ -d "$target_path" ]] \
+  && target_common_before="$(git -C "$target_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  && [[ "$target_common_before" == "$common_dir" ]]; then
+  registered_before=1
+fi
+if (( registered_before == 1 )); then
+  printf 'create-worktree: target is already a registered checkout\n' >&2
+  exit 1
+fi
+
+set +e
+git -C "$repo_root" worktree add "${args[@]}"
+add_status=$?
+set -e
+
+if [[ -d "$target_path" ]] \
+  && admin_dir="$(git -C "$target_path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+  && [[ -d "$admin_dir" ]]; then
+  admin_dir="$(cd "$admin_dir" && pwd -P)"
+  case "$admin_dir" in
+    "$common_dir"/worktrees/*) : >"$admin_dir/murph-storage-guard-authorized" ;;
+    *)
+      printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
+      exit 1
+      ;;
+  esac
+elif (( add_status == 0 )); then
+  printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
+  exit 1
+fi
+
+exit "$add_status"

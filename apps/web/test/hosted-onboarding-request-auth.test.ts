@@ -533,6 +533,23 @@ describe("hosted Privy request auth", () => {
       member: createHostedMember({
         id: "member_other",
       }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_other",
+    });
+
+    await expect(
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).rejects.toMatchObject({
+      code: "PRIVY_SESSION_MEMBER_MISMATCH",
+      httpStatus: 409,
+    });
+    expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects fresh Privy proof for a different Privy user than the app session", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember(),
       privyUserId: "did:privy:user_other",
       sessionId: "hws_other",
     });
@@ -546,18 +563,34 @@ describe("hosted Privy request auth", () => {
     expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
   });
 
-  it("does not trust the app-session member when the fresh Privy principal has no member", async () => {
+  it("uses the app-session member when the matching fresh Privy identity is not persisted yet", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
 
     await expect(
       requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
-    ).rejects.toMatchObject({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      httpStatus: 403,
+    ).resolves.toMatchObject({
+      appSession: {
+        member: {
+          id: "member_123",
+        },
+      },
+      freshPrivy: {
+        identity: {
+          userId: "did:privy:user_123",
+        },
+        member: {
+          id: "member_123",
+        },
+      },
     });
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
-    expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledTimes(1);
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "member_123",
+      },
+    }));
   });
 
   it("keeps app-session verification independent from fresh Privy verification", async () => {

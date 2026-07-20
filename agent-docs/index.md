@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-16
+Last verified: 2026-07-19
 
 ## Purpose
 
@@ -95,6 +95,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, automatic Codex shared-host admission with an exclusive heavyweight lane, scoped diff and direct repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method for parallel worktrees. | Verification performance policy | Medium | 2026-07-19 |
 | `agent-docs/operations/completion-workflow.md` | Outcome-based post-implementation completion bar, specialist audit routing, credit-aware review-only Fable-or-Opus Claude Code double-checks for user-facing website UI with a non-blocking Codex frontend-review substitute on explicit credit exhaustion, proportional ReviewGPT eligibility and low-risk exemptions, scoped verification, plan/commit closure, PR intent with explicit non-obvious affected-surface disclosure and change-shape anomaly contract, and PR-lane merge-readiness handoff. | Completion workflow | High | 2026-07-16 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, exact-message targeting, reminders, current-home routing, notifications, line health, pacing, links, and cold-contact behavior. | Phone-number messaging policy | High | 2026-07-16 |
+| `agent-docs/operations/local-storage-lifecycle.md` | Local Vitest temp-root ownership, abrupt-run stale cleanup, unmanaged temporary checkout ratcheting, and exact build-output cleanup rules. | Local rebuildable-storage lifecycle | High | 2026-07-19 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for running `pnpm dev` from secondary worktrees without colliding with the main checkout's ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel setup. | Local hosted runtime workflow | Medium | 2026-06-22 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | Required final cross-cutting gate for ReviewGPT-eligible PRs, with one full-patch round, guarded cumulative/immediate remediation evidence, a PR-body-persisted first-head baseline and non-obvious affected-surface disclosure, fail-closed rejection of marked concrete-model responses under 10 minutes, a same-head disclosure-only verification retry, scope-anomaly retrospectives, explicit invalid-run/rerun rules, and a 5-round automatic cap; it replaces local deep-review, not specialist passes. | PR ReviewGPT loop | Medium | 2026-07-16 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants, Junction aggregate-cadence and per-source recovery ownership, hosted connection-binding rules, durable payload replay with local-scheduler backoff, and companion-only scheduled overnight-PRV admission with explicit connect/passive-resume authority, immutable nightly identity, bounded local scalar recovery, and SDNN/Recovery separation. | Device-sync ingestion contract | High | 2026-07-14 |

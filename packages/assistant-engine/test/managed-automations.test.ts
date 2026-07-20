@@ -808,6 +808,13 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightSeed.instructions).toContain(
       'A consumer sleep-stage estimate by itself is never a weekly finding or reason to coach.',
     )
+    expect(insightSeed.instructions).toContain('Never infer alcohol use from a bad night')
+    expect(insightSeed.instructions).toContain(
+      'Do not send a weekly insight whose main point is that drinking or a late Friday/Saturday night hurt sleep or recovery',
+    )
+    expect(insightSeed.instructions).not.toContain('rough portions, alcohol')
+    expect(insightSeed.instructions).not.toContain('drink count')
+    expect(insightSeed.instructions).not.toContain('alcohol plus travel day')
     expect(insightSeed.instructions).toContain(
       'One weekly window or a repeated correlation can support "lined up with" or "was associated with," not "caused," "explains," or "proved."',
     )

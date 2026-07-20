@@ -11,6 +11,7 @@ import {
   resolveMurphVitestConcurrency,
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
+import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 import { createVitestAliasesFromTsconfigPaths } from "../../config/workspace-source-resolution.js";
 import {
@@ -70,6 +71,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
       ...murphVitestNoTimeouts,
       name,
       environment: "node",
+      globalSetup: [murphVitestTempGlobalSetup],
       ...cliVitestConcurrency,
       fileParallelism:
         spec?.fileParallelism ?? cliVitestConcurrency.fileParallelism,

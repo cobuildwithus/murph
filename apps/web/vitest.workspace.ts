@@ -7,6 +7,7 @@ import {
   resolveMurphAppVitestMaxWorkers,
   resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
+import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
 import {
@@ -40,6 +41,7 @@ function createHostedWebProject(name: string, fileNames: readonly string[]) {
       ...murphVitestNoTimeouts,
       name,
       environment: "node",
+      globalSetup: [murphVitestTempGlobalSetup],
       ...hostedWebVitestConcurrency,
       include: fileNames.map(hostedWebPattern),
       setupFiles: [
