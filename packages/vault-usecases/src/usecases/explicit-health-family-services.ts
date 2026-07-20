@@ -858,8 +858,104 @@ function toBloodTestReadEntity(record: object) {
   };
 }
 
-function toBloodTestListEntity(record: object) {
+function toBloodTestMatchedResult(
+  data: Record<string, unknown>,
+  text: string | undefined,
+): Record<string, unknown> | null {
+  const normalizedText = text?.trim().toLowerCase();
+  if (!normalizedText || !Array.isArray(data.results)) {
+    return null;
+  }
+
+  const matchedResult = data.results.find((value) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const result = toKeyedRecord(value);
+    return ["analyte", "slug", "biomarkerSlug"].some((key) => {
+      const candidate = result[key];
+      return typeof candidate === "string"
+        && candidate.trim().toLowerCase().includes(normalizedText);
+    });
+  });
+  if (
+    matchedResult === undefined
+    || matchedResult === null
+    || typeof matchedResult !== "object"
+    || Array.isArray(matchedResult)
+  ) {
+    return null;
+  }
+  const result = toKeyedRecord(matchedResult);
+  const analyte = boundedBloodTestMatchedResultString(result.analyte, 80);
+  if (!analyte) {
+    return null;
+  }
+
+  const summary: Record<string, unknown> = { analyte };
+  const value = result.value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    summary.value = value;
+  }
+  for (const [key, maxLength] of [
+    ["textValue", 80],
+    ["unit", 32],
+    ["comparator", 16],
+    ["flag", 16],
+  ] as const) {
+    const scalar = boundedBloodTestMatchedResultString(result[key], maxLength);
+    if (scalar) {
+      summary[key] = scalar;
+    }
+  }
+
+  const referenceRangeSummary: Record<string, unknown> = {};
+  if (
+    result.referenceRange !== null
+    && typeof result.referenceRange === "object"
+    && !Array.isArray(result.referenceRange)
+  ) {
+    const referenceRange = toKeyedRecord(result.referenceRange);
+    for (const key of ["low", "high"] as const) {
+      const boundary = referenceRange[key];
+      if (typeof boundary === "number" && Number.isFinite(boundary)) {
+        referenceRangeSummary[key] = boundary;
+      }
+    }
+    const rangeText = boundedBloodTestMatchedResultString(referenceRange.text, 80);
+    if (rangeText) {
+      referenceRangeSummary.text = rangeText;
+    }
+  }
+  if (Object.keys(referenceRangeSummary).length > 0) {
+    summary.referenceRange = referenceRangeSummary;
+  }
+
+  return summary;
+}
+
+function boundedBloodTestMatchedResultString(
+  value: unknown,
+  maxLength: number,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, Math.max(1, maxLength - 3)).trimEnd()}...`;
+}
+
+function toBloodTestListEntity(record: object, text?: string) {
   const data = toNestedHealthEntityData(record)
+  const matchedResult = toBloodTestMatchedResult(data, text)
+  if (matchedResult) {
+    data.matchedResult = matchedResult
+  }
 
   return toListEntity({
     id: firstNonEmptyString(record, ["id"]) ?? "",
@@ -1336,7 +1432,7 @@ export function createExplicitHealthQueryServices(
           to: input.to,
           limit: input.limit ?? 10,
         },
-        records.map((record) => toBloodTestListEntity(record)),
+        records.map((record) => toBloodTestListEntity(record, input.text)),
       );
     },
     async showImmunization(input: EntityLookupInput) {

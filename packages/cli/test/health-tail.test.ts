@@ -1809,10 +1809,22 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
     assert.equal(requireData(nounList).items[0]?.kind, "blood_test");
     assert.equal(requireData(nounList).items[0]?.data.resultStatus, "mixed");
     assert.equal(requireData(nounList).items[0]?.data.labName, "Function Health");
+    assert.deepEqual(requireData(nounList).items[0]?.data.matchedResult, {
+      analyte: "Apolipoprotein B",
+      flag: "normal",
+      unit: "mg/dL",
+      value: 87,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(requireData(nounList).items[0]?.data.matchedResult),
+      /LDL Cholesterol|134/u,
+    );
     assert.equal(genericList.ok, true);
     assert.equal(requireData(genericList).count, 1);
     assert.equal(requireData(genericList).items[0]?.kind, "blood_test");
     assert.equal(requireData(genericList).items[0]?.data.testCategory, "blood");
+    assert.equal(requireData(genericList).items[0]?.data.resultsCount, 2);
+    assert.equal(requireData(genericList).items[0]?.data.matchedResult, undefined);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

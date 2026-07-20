@@ -335,7 +335,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
-Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`; `immunization list` exposes `--from` and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, `--to`, and `--text`; `immunization list` exposes `--from` and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
 
 ## Native Incur Contract
 
@@ -352,6 +352,11 @@ Read surfaces intentionally separate summary from detail:
 
 - `show` returns the full canonical read entity, including `markdown` when that noun owns body text.
 - `list` returns summary rows, not many embedded `show` payloads.
+- A text-filtered `blood-test list` row may add one bounded
+  `data.matchedResult` containing only the matched analyte's answer-bearing
+  scalars (`analyte`, numeric or text value, unit, comparator, flag, and compact
+  reference range). It does not embed the full panel or unrelated results;
+  unfiltered panel lists retain ordinary compact behavior.
 - List rows never include full `markdown`; when a family owns first-class body text, list rows may carry a compact `excerpt` instead.
 - Default read/status/list/tail pages are model-facing summaries and should fit under roughly 15k characters with `--full-output --format json` on representative oversized fixtures.
 - Assistant timelines, raw provenance, import manifests, full nested telemetry arrays, and long instruction/body text require an explicit detail/export/schema path or an explicitly raised `--limit`; `--full-output` is an envelope selector, not an uncompression switch.

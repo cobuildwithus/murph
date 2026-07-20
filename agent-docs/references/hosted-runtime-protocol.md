@@ -1324,7 +1324,10 @@ cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
 derived-cache exception is the exact query SQLite triplet
 `.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
-still discards and rebuilds stale copies. No other projection is portable. Assistant
+still discards and rebuilds stale copies. New archives use the POSIX PAX format
+so canonical source-file subsecond mtimes survive restore and keep an otherwise
+fresh carried manifest fresh; extraction remains format-agnostic for older
+archives. No other projection is portable. Assistant
 diagnostics snapshots, status snapshots, runtime budgets, pending issue records,
 and the diagnostics snapshot's recent warning/error text remain portable; event
 logs are bounded local observability only and are rewritten by runtime
