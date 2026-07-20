@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-18
+Last verified: 2026-07-20
 
 ## Accepted-Message Targeting
 
@@ -131,13 +131,15 @@ non-direct thread does that scope attach the existing platform group port, and
 the notification retains it only with the runtime-minted occurrence authority.
 Ordinary notifications and manual, direct, unknown-audience, or local cron runs
 do not receive that group capability.
-An automation-origin completion runs as an isolated exact-skip turn in that
-same synthetic group runtime. Its native write sandbox is limited to the group
-vault, its only dynamic group actions are `read_current` and `ask_member`, and
-it has no person-facing delivery, notification, phone, connected-app, or
-network authority. The reviewed answer remains delimited untrusted data; this
-turn may retain only minimum bounded group-owned coordinator state and never
-gains write access to the grantor's personal runtime.
+An automation-origin completion re-reads the active canonical automation and
+its current non-direct Linq route, then resumes that automation through the
+ordinary controlled group notification and outbox path. A deterministic key
+derived from the completion makes replay idempotent, while the automation
+revision and live disclosure authority are rechecked before delivery. The
+reviewed answer remains delimited untrusted data rather than consent for an
+external action. The continuation may use only the tools independently
+authorized by their existing owners for that current scheduled group turn; it
+never gains access to the grantor's personal runtime or connected accounts.
 Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.

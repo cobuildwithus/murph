@@ -1,6 +1,6 @@
 # Enable Scheduled Consented-Answer Actions
 
-Status: active
+Status: completed
 Created: 2026-07-20
 Updated: 2026-07-20
 
@@ -27,6 +27,7 @@ Updated: 2026-07-20
 - Reuse the canonical automation record and ordinary scheduled notification path as the sole route and side-effect authority.
 - Keep the personal candidate and outgoing reviewer one-shot, read-only, and unable to access delivery or the group turn's tools.
 - Treat reviewed answer bytes as untrusted data in the downstream prompt; disclosure consent authorizes the answer's information, not instructions embedded in it.
+- Reuse the existing reviewed-completion delivery key and outbox expiry proof; derive exact accepted-input delivery versus scheduled continuation from the trusted completion origin instead of adding another key namespace.
 - Do not broaden any individual side-effect tool beyond its existing authority contract unless direct proof shows the normal scheduled group path still cannot satisfy the requested behavior.
 
 ## Tasks
@@ -39,4 +40,12 @@ Updated: 2026-07-20
 
 ## Verification
 
-- Pending.
+- Focused typechecks passed for Assistant Engine, Assistant Runtime, Hosted Execution, and hosted Web.
+- Focused behavior suites passed: Assistant Engine 166 tests, Assistant Runtime 34 tests, Hosted Execution 12 tests, and hosted Web 25 tests.
+- The first diff-aware lane cleared all guards/typechecks and Assistant Engine's 2,550-test suite, then found an overbroad cannot-answer normalization and a stale verified-sender assertion. Both were corrected at the narrow owner and the directly affected 34 Assistant Runtime tests passed.
+- Parent simplification removed a proposed continuation delivery-key namespace, made Assistant Engine derive the existing reviewed-completion key from the completion id, and deleted merge-residue mailbox signaling code. No new state owner or compatibility mechanism remains.
+- Coverage-write found no missing proof and made no edits. Existing tests cover canonical automation and route revalidation, scheduled group capability scoping, completion expiry/outbox reuse, live-grant dispatch revalidation, candidate/reviewer isolation, and legacy behavior.
+- The final bounded `pnpm test:diff` passed every architecture/privacy/dependency guard, all affected typechecks, all package-boundary checks, Web lint/dev smoke/production build, and the affected suites: Assistant CLI 128, Assistant Engine 2,545 with 5 skipped, Assistant Runtime 1,754 with 2 skipped, assistantd 40, CLI 1,075 with 1 skipped, Hosted Execution 378, hosted-local 393 with 1 skipped, Temporal 77, setup 124, Web 5,952 with 149 skipped, and Cloudflare 1,842 plus 1 Workers-runtime test.
+- One earlier diff run exposed eight CLI harness timeouts under shared-host contention; the full 38-test file passed in isolation and both later bounded full runs passed the complete CLI suite. Another supporting run exposed one current-main merge fixture that omitted the new empty disclosure-grant field; adding that exact test field made its 81-test owner file and the final full lane pass.
+- `pnpm docs:drift`, `git diff --check`, the privacy identifier scan, and the secret-pattern scan passed. Exact-head CI and ReviewGPT remain for the pushed PR head.
+Completed: 2026-07-20

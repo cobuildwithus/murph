@@ -125,7 +125,7 @@ type HostedAssistantAskConsentedAuthority = {
       origin: HostedExecutionAssistantAskAcceptedInputOrigin;
     }
   | {
-      deliveryMode: "internal";
+      deliveryMode: "automation_continuation";
       origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
     }
 );
@@ -620,10 +620,10 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     tx: Prisma.TransactionClient;
   },
 ): Promise<{ assistantAskFallbackRequired: true } | void> {
-  const isCompletionDelivery = input.idempotencyKey?.startsWith(
+  const reviewedCompletion = input.idempotencyKey?.startsWith(
     HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   ) === true;
-  if (!isCompletionDelivery) {
+  if (!reviewedCompletion) {
     return;
   }
 
@@ -703,7 +703,13 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || completionWake.eventId !== completionId
     || completionWake.userId !== input.boundRuntimeMemberId
     || !("origin" in completionWake.ask)
-    || completionWake.ask.origin.kind !== "accepted_input"
+    || (
+      completionWake.ask.origin.kind !== "accepted_input"
+      && (
+        completionWake.ask.origin.kind !== "automation_occurrence"
+        || !("permissionText" in completionWake.ask)
+      )
+    )
     || completionWake.ask.expiresAt !== completionItem.expiresAt
     || createHostedAssistantAskCompletionId(completionWake.ask.requestId)
       !== completionId
@@ -737,7 +743,11 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   const authority = requestRead.authority;
   if (
     !authority
-    || authority.deliveryMode !== "reviewed_exact"
+    || authority.deliveryMode !== (
+      completionWake.ask.origin.kind === "accepted_input"
+        ? "reviewed_exact"
+        : "automation_continuation"
+    )
     || authority.originMemberId !== input.boundRuntimeMemberId
     || authority.expiresAt !== completionWake.ask.expiresAt
     || !hostedAssistantAskOriginsEqual(
@@ -1018,10 +1028,14 @@ async function readHostedAssistantAskAuthorityTx(input: {
   const origin = wake.ask.origin;
   return {
     // Delivery is derived from the trusted origin kind, not a separate wire
-    // field: an automation occurrence completes internally, an accepted input
-    // is reviewed and delivered to the group conversation.
+    // field: an automation occurrence resumes its current canonical group
+    // turn, while an accepted input is reviewed and delivered exactly.
     authority: origin.kind === "automation_occurrence"
-      ? { ...consentedAuthorityCommon, deliveryMode: "internal", origin }
+      ? {
+          ...consentedAuthorityCommon,
+          deliveryMode: "automation_continuation",
+          origin,
+        }
       : { ...consentedAuthorityCommon, deliveryMode: "reviewed_exact", origin },
     terminalReason: null,
   };
@@ -1367,7 +1381,7 @@ function hostedAssistantAskCompletionMatchesAuthority(input: {
   ) {
     return false;
   }
-  return input.authority.deliveryMode !== "internal"
+  return input.authority.deliveryMode !== "automation_continuation"
     || (
       "permissionText" in input.payload
       && input.payload.permissionText === input.authority.permissionText
@@ -1489,7 +1503,7 @@ function normalizeHostedGroupMemberAssistantAskInvocation(input: {
       origin: HostedExecutionAssistantAskAcceptedInputOrigin;
     }
   | {
-      deliveryMode: "internal";
+      deliveryMode: "automation_continuation";
       origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
     } {
   if (input.origin.kind === "accepted_input") {
@@ -1511,7 +1525,7 @@ function normalizeHostedGroupMemberAssistantAskInvocation(input: {
     };
   }
   return {
-    deliveryMode: "internal",
+    deliveryMode: "automation_continuation",
     origin: {
       automationId: normalizeHostedAssistantAskText({
         label: "Hosted assistant ask automation ID",

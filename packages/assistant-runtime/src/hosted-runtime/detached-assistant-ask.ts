@@ -313,7 +313,10 @@ async function runOneHostedDetachedAssistantAsk(input: {
           : {}),
       });
     }
-    const result = normalizeHostedDetachedAssistantAskResult(answer);
+    const result = claimed.wake.ask.target.kind === "consented_member"
+      && answer.outcome === "cannot_answer"
+      ? { answer: null, outcome: "cannot_answer" as const }
+      : normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(
       {
         action: "complete",
@@ -489,7 +492,7 @@ function normalizeHostedDetachedAssistantAskResult(
     return result;
   }
   return {
-    answer: null,
+    answer: result.answer ?? null,
     outcome: "cannot_answer",
   };
 }

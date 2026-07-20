@@ -215,7 +215,6 @@ export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
   | 'maintenance-turn'
-  | 'internal-turn'
   | 'output-only-turn'
 
 export type AssistantCodexThreadScope =
@@ -508,15 +507,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const internalTurn = input.profile.toolProfile === 'internal-turn'
   const hostedDynamicContextPrompts =
-    maintenanceTurn || internalTurn || outputOnlyTurn
+    maintenanceTurn || outputOnlyTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const voiceMemoDeliveryChannel = outputOnlyTurn || internalTurn
+  const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
         messageInput: input.input,
@@ -542,7 +540,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
-    maintenanceTurn || internalTurn || !privateInteractiveAudience
+    maintenanceTurn || !privateInteractiveAudience
       ? null
       : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -574,7 +572,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
-            internalTurn,
             maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
               privateInteractiveAudience &&
@@ -682,50 +679,36 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = maintenanceTurn || outputOnlyTurn
     ? []
     : resolveMurphDynamicTools({
-        assistantStyleSettingsAvailable: internalTurn
-          ? false
-          : assistantStyleSettingsAvailable,
+        assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
-        messageTargetingAvailable:
-          !internalTurn && messageTargetingAvailable,
+        messageTargetingAvailable,
         assistantConfigurationAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
-        automationAvailable:
-          !internalTurn && input.hostedToolContext?.automationTool != null,
+        automationAvailable: input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
-        progressUpdatesAvailable:
-          !internalTurn && input.progressDelivery != null,
-        connectedAppsAvailable:
-          !internalTurn && input.hostedToolContext?.connectedApps != null,
-        connectedAppsManageAvailable: !internalTurn && privateInteractiveAudience,
+        progressUpdatesAvailable: input.progressDelivery != null,
+        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        connectedAppsManageAvailable: privateInteractiveAudience,
         deviceAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.deviceTool != null,
         clinicalRecordsConnectLinkAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
         labsAvailable:
-          !internalTurn &&
           privateInteractiveProviderTurn &&
           input.hostedToolContext?.labsTool != null,
         planUsageAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.planUsageTool != null,
         subscriptionAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.subscriptionTool != null,
@@ -734,34 +717,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.groupPermissionOfferTool != null,
         groupSharedReadAvailable:
           input.hostedToolContext?.groupSharedReader != null,
-        newsletterAvailable:
-          !internalTurn && input.hostedToolContext?.newsletterTool != null,
+        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         personalizationAvailable:
-          !internalTurn &&
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
-          !internalTurn &&
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
-        voiceMemoGenerationAvailable:
-          !internalTurn && voiceMemoDeliveryChannel !== null,
+        voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         vaultFileSendAvailable:
-          !internalTurn &&
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-        // Layered isolation for the internal scheduled turn: every capability
-        // above is already gated off by `!internalTurn`, and this final filter
-        // is a redundant backstop that hard-limits the surface to `group`. The
-        // group adapter then independently restricts actions to read_current /
-        // ask_member when the invocation origin is an automation occurrence.
-        .filter((tool) => !internalTurn || tool.name === 'group')
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -881,7 +852,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !internalTurn &&
       !outputOnlyTurn
       ? {
           binding: input.session.binding,

@@ -154,7 +154,7 @@ function disclosureRequestWake() {
   });
 }
 
-function internalDisclosureRequestWake() {
+function scheduledDisclosureRequestWake() {
   const requestId = createHostedGroupMemberAssistantAskRequestId({
     grantId: GRANT_ID,
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
@@ -187,6 +187,25 @@ function reviewedCompletionWake(
     ask: {
       expiresAt: requestWake.ask.expiresAt,
       origin: ACCEPTED_ORIGIN,
+      question: QUESTION,
+      requestId: requestWake.eventId,
+      result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
+      targetLabel: null,
+    },
+    eventId: createHostedAssistantAskCompletionId(requestWake.eventId),
+    memberId: GROUP_RUNTIME_MEMBER_ID,
+    occurredAt: NOW.toISOString(),
+  });
+}
+
+function scheduledCompletionWake(
+  requestWake: ReturnType<typeof scheduledDisclosureRequestWake>,
+) {
+  return buildHostedExecutionAssistantAskCompletedWake({
+    ask: {
+      expiresAt: requestWake.ask.expiresAt,
+      origin: SCHEDULED_ORIGIN,
+      permissionText: PERMISSION_TEXT,
       question: QUESTION,
       requestId: requestWake.eventId,
       result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
@@ -611,8 +630,8 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     });
   });
 
-  it("appends a scheduled result only as an internal group-runtime completion", async () => {
-    const wake = internalDisclosureRequestWake();
+  it("appends a scheduled result for a canonical group continuation", async () => {
+    const wake = scheduledDisclosureRequestWake();
     const completionId = createHostedAssistantAskCompletionId(wake.eventId);
     const { prisma } = createPrisma();
     mocks.readHostedMailboxItemById.mockImplementation(async (input: {
@@ -673,9 +692,53 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       : input.mailboxItemId === requestWake.eventId
         ? requestWake
         : null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
 
     await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
       answeredMailboxItemIds: [completionWake.eventId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
+      assistantAskFallback: false,
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: NOW,
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).toHaveBeenCalledWith({
+      expectedTargetMemberId: TARGET_MEMBER_ID,
+      grantId: GRANT_ID,
+      membershipId: MEMBERSHIP_ID,
+      permissionDigest: PERMISSION_DIGEST,
+      tx: expect.any(Object),
+    });
+  });
+
+  it("revalidates the exact live grant for a scheduled continuation dispatch", async () => {
+    const requestWake = scheduledDisclosureRequestWake();
+    const completionWake = scheduledCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : input.mailboxItemId === requestWake.eventId
+        ? mailboxItemForWake(requestWake)
+        : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? completionWake
+      : input.mailboxItemId === requestWake.eventId
+        ? requestWake
+        : null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionWake.eventId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
+      assistantAskFallback: false,
       boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       idempotencyKey:
         createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(

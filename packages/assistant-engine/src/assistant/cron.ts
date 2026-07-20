@@ -41,7 +41,9 @@ import {
   computeAssistantCronBackgroundMaintenanceYieldRetryAt,
   executeClaimedAssistantCronJob,
   isAssistantCronBackgroundMaintenanceYieldError,
+  sendAssistantScheduledAutomationContinuation,
   type AssistantCronRunnableProjectionInput,
+  type AssistantScheduledAutomationContinuationInput,
 } from './cron/execution.ts'
 import {
   earliestAssistantAutomationWakeAt,
@@ -96,11 +98,13 @@ export {
   repairPendingAssistantCronDeliveries,
 }
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
+export { sendAssistantScheduledAutomationContinuation }
 export type {
   AddAssistantCronJobInput,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
   UpsertAssistantCronAutomationInput,
+  AssistantScheduledAutomationContinuationInput,
 }
 
 export interface AssistantCronStatusSnapshot {

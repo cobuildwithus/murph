@@ -154,6 +154,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
+      linqSenderHandles: ["+15550000001"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 

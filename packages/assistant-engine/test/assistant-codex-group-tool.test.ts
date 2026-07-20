@@ -379,6 +379,7 @@ describe("murph.group dynamic tool", () => {
           kind: "friends",
           memberCount: 1,
           members: [{
+            disclosureGrants: [],
             grantedVaultShareProjectionKinds: ["steps-days.v0"],
             grantedVaultShareProjectionScopes: [{ projectionKind: "steps-days.v0" }],
             handle: "+15551110003",
@@ -662,6 +663,7 @@ describe("murph.group dynamic tool", () => {
       memberCount: 2,
       members: [
         {
+          disclosureGrants: [],
           grantedVaultShareProjectionKinds: [],
           grantedVaultShareProjectionScopes: [],
           handle: null,
@@ -670,6 +672,7 @@ describe("murph.group dynamic tool", () => {
           trustedOnlyMemberField: "summary_member_internal",
         },
         {
+          disclosureGrants: [],
           grantedVaultShareProjectionKinds: [],
           grantedVaultShareProjectionScopes: [],
           handle: "+15551110003",

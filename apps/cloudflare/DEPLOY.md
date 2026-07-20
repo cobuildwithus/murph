@@ -136,15 +136,16 @@ The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
 secret, Durable Object state, scheduler, workflow, or second container. Its
 producer gate is distinct from the original private-to-group Ask gate.
 
-1. Deploy Cloudflare/runner consumers for the `consented_member` request target,
+1. Deploy Web with `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` so
+   the storage, consent-reaction, admission, prepare, completion, and scheduled
+   continuation authority for the existing reviewed-completion delivery key are
+   present before a new runner can emit that intent. The deployment must remain able to
+   consume both old Assistant Ask payloads and the additive new shapes.
+2. Deploy Cloudflare/runner consumers for the `consented_member` request target,
    trusted accepted-input and scheduled-automation origins, disclosure-context
    preparation, the private candidate plus fresh outgoing reviewer, reviewed
-   exact group delivery, and isolated no-delivery automation completion with
+   exact group delivery, and canonical scheduled group continuation with
    `container_rollout=immediate`. Keep the Web producer gate off.
-2. Deploy the Web storage, consent-reaction, admission, prepare, and completion
-   paths with `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0`. The
-   deployment must remain able to consume both old Assistant Ask payloads and
-   the additive new shapes.
 3. Require managed-container smoke to report the new runner-bundle fingerprint
    and preserve the existing `murph-group-read` confinement proof. Verify the
    outgoing reviewer starts with an empty runtime root and no personal

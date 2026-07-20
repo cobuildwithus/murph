@@ -212,23 +212,6 @@ function isExactHostedGroupDisclosureLikeReaction(
     && event.reactionCustomEmoji === null;
 }
 
-async function signalMailboxAppendRuntimesBestEffort(input: {
-  deadlineMs: number;
-  signal?: AbortSignal;
-  signals: readonly { mailboxItemId: string; memberId: string }[];
-}): Promise<void> {
-  await Promise.all(input.signals.map((mailboxSignal) =>
-    runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: input.deadlineMs,
-      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
-        abortSignal,
-        expectedUserId: mailboxSignal.memberId,
-        mailboxItemId: mailboxSignal.mailboxItemId,
-      }),
-      signal: input.signal,
-    })
-  ));
-}
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;
   operation: (signal: AbortSignal) => Promise<unknown>;

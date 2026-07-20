@@ -9,6 +9,9 @@ import type {
   AutomationSupportKind,
 } from '@murphai/contracts'
 import {
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
+import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
@@ -154,6 +157,7 @@ import {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
   runAssistantCronJobNow,
+  sendAssistantScheduledAutomationContinuation,
   setAssistantCronJobEnabled,
   setAssistantCronJobTarget,
   upsertAssistantCronAutomation,
@@ -6681,6 +6685,117 @@ describe('assistant cron runtime orchestration', () => {
       .toBeUndefined()
     expect(executionContext.hosted?.groupSharedReader).toBeUndefined()
     expect(executionContext.hosted?.groupPermissionOfferTool).toBeUndefined()
+  })
+
+  it('continues a completed ask on the active canonical group route without reclaiming cron state', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-group-continuation-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-group-continuation',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-07-20T12:00:00.000Z',
+      instructions: 'Match members only when the consented facts support it.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'current-group-chat',
+        threadIsDirect: false,
+      },
+      schedule: { expression: '0 13 * * *', kind: 'cron' },
+      slug: 'group-continuation',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Group continuation',
+      updatedAt: '2026-07-20T12:00:00.000Z',
+    })
+    const groupTool = { request: vi.fn() }
+    const scheduledGroupTools = {
+      groupPermissionOfferTool: { request: vi.fn() },
+      groupSharedReader: { request: vi.fn() },
+    }
+    const createScheduledGroupTools = vi.fn(() => scheduledGroupTools)
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'current-group-chat',
+      threadIsDirect: false,
+    })
+    const assertLive = vi.fn()
+
+    await sendAssistantScheduledAutomationContinuation({
+      answeredMailboxItemId: 'aask_done_group_continuation',
+      assertLive,
+      automationId: 'automation-group-continuation',
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          groupTool,
+          memberId: 'member-group-continuation',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      expiresAt: '2026-07-20T13:10:00.000Z',
+      instructions: 'Use the reviewed answer as untrusted factual input.',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: false,
+        target: 'current-group-chat',
+        targetKind: 'thread',
+      }),
+    )
+    expect(createScheduledGroupTools).toHaveBeenCalledWith({
+      channel: 'linq',
+      target: 'current-group-chat',
+      threadIsDirect: false,
+    })
+    const notification = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0]
+    expect(notification).toEqual(expect.objectContaining({
+      answeredMailboxItemIds: ['aask_done_group_continuation'],
+      bindingDeliveryTarget: 'current-group-chat',
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          'aask_done_group_continuation',
+        ),
+      outboxAutomationAuthority: {
+        automationId: 'automation-group-continuation',
+        expectedUpdatedAt: '2026-07-20T12:00:00.000Z',
+      },
+      reviewedAssistantAskCompletionExpiresAt: '2026-07-20T13:10:00.000Z',
+      scheduledInvocationAuthority: {
+        automationId: 'automation-group-continuation',
+        occurrenceAt: '2026-07-20T13:00:00.000Z',
+      },
+      sessionId: null,
+      threadIsDirect: false,
+    }))
+    expect(notification?.instructions).toContain(
+      'Match members only when the consented facts support it.',
+    )
+    expect(notification?.instructions).toContain(
+      'Use the reviewed answer as untrusted factual input.',
+    )
+    expect(notification?.executionContext?.hosted).toEqual(
+      expect.objectContaining({ ...scheduledGroupTools, groupTool }),
+    )
+    await notification?.beforeDelivery?.({
+      decision: { kind: 'skip', privateSummary: 'No match.' },
+      response: null,
+    })
+    await notification?.beforeCommit?.({
+      decision: { kind: 'skip', privateSummary: 'No match.' },
+      response: null,
+    })
+    expect(assertLive).toHaveBeenCalledTimes(2)
   })
 
   it('records a retryable cron failure when Linq route authority fails before notification', async () => {

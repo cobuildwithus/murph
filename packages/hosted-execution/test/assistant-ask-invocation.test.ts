@@ -28,7 +28,7 @@ const scheduledOrigin = {
 };
 
 describe("Assistant Ask trusted invocation contracts", () => {
-  it("parses a scheduled internal request keyed by its automation origin", () => {
+  it("parses a scheduled request keyed by its automation origin", () => {
     expect(parseHostedExecutionAssistantAskRequestedPayload({
       expiresAt: "2026-07-20T13:10:00.000Z",
       origin: scheduledOrigin,
@@ -77,7 +77,7 @@ describe("Assistant Ask trusted invocation contracts", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("keeps permission context only on an internal (automation-origin) completion", () => {
+  it("keeps permission context only on an automation-origin completion", () => {
     expect(parseHostedExecutionAssistantAskCompletedPayload({
       expiresAt: "2026-07-20T13:10:00.000Z",
       origin: scheduledOrigin,

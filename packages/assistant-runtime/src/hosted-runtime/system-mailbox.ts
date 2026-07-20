@@ -22,7 +22,7 @@ import {
 } from "./events.ts";
 import {
   isHostedAssistantAskCompletionPreemptedError,
-  isHostedAssistantAskInternalCompletedWake,
+  isHostedAssistantAskAutomationCompletedWake,
 } from "./events/assistant-ask-completion.ts";
 import type {
   HostedMailboxItemImportOutcome,
@@ -533,7 +533,7 @@ async function executePendingHostedSystemMailboxItem(input: {
       runtime: input.runtime,
       wake: input.pendingItem.wake,
     });
-  const executionContext = scopeHostedInternalAssistantAskGroupTool({
+  const executionContext = scopeHostedScheduledAssistantAskGroupTool({
     executionContext: baseExecutionContext,
     groupToolPort: input.runtime.platform.groupToolPort ?? null,
     wake: input.pendingItem.wake,
@@ -561,14 +561,14 @@ async function executePendingHostedSystemMailboxItem(input: {
   });
 }
 
-function scopeHostedInternalAssistantAskGroupTool(input: {
+function scopeHostedScheduledAssistantAskGroupTool(input: {
   executionContext: AssistantExecutionContext;
   groupToolPort: HostedSystemMailboxRuntime["platform"]["groupToolPort"] | null;
   wake: HostedExecutionSystemWake;
 }): AssistantExecutionContext {
   if (
     input.wake.kind !== "assistant.ask.completed"
-    || !isHostedAssistantAskInternalCompletedWake(input.wake)
+    || !isHostedAssistantAskAutomationCompletedWake(input.wake)
     || !input.executionContext.hosted
     || !input.groupToolPort
   ) {

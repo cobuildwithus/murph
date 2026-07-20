@@ -563,6 +563,7 @@ function createHostedAssistantAutomationOperationScope(
         ? scopeHostedGroupToolToAssistantOperation({
             emailDeliveryContexts: [],
             executionContext: scopeInput.executionContext,
+            groupSharedReadAvailable: false,
             groupEmailIngress: false,
             groupToolPort: input.runtime.platform.groupToolPort ?? null,
             linqDeliveryContexts: [],

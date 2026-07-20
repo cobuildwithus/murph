@@ -340,15 +340,11 @@ async function executeConfinedReadOnlyAssistantAskTurn(
       approvalPolicy: 'never',
       codexCommand: input.codexCommand,
       codexHome: input.codexHome,
-      developerInstructions: turn.developerInstructions,
-      dynamicTools,
-      env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
-      ephemeral: true,
-      hostedToolContext,
       model: input.model,
       modelProvider: input.modelProvider,
       provider: 'codex-cli',
       reasoningEffort: input.reasoningEffort,
+      sandbox: 'read-only',
     })
     try {
       const result = await executeCodexAppServerTurn({

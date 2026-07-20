@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-18
+Last verified: 2026-07-20
 
 ## Decision
 
@@ -455,9 +455,12 @@ expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
 discriminant owns what happens next: `accepted_input` bypasses the provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
-original group route, while `automation_occurrence` carries the exact permission
-into an isolated no-delivery group-runtime turn. Cannot-answer uses the fixed
-non-disclosing result. The original private-to-group continuation retains its
+original group route, while `automation_occurrence` re-reads the active
+canonical automation and current non-direct Linq route before resuming the
+ordinary controlled group notification and outbox path. A completion-derived
+delivery key makes retries idempotent, and the continuation receives only tools
+independently authorized for the current scheduled group turn. Cannot-answer
+uses the fixed non-disclosing result. The original private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
 produce new generations, so old work cannot cross either lifecycle boundary.
 For accepted-input delivery, if live authority disappears after an exact answer
@@ -468,7 +471,9 @@ expiry it uses the outbox-owned deadline even if mailbox retention has already
 removed the request and completion rows; before expiry Web still owns live
 revocation revalidation. The final egress claim permits only the structurally
 bound fixed fallback without reviving the private grant. Automation-occurrence
-completion never creates a provider-delivery intent.
+completion may create an ordinary group-notification delivery intent only while
+the completion, current grant, canonical automation revision, and route remain
+authorized.
 
 Web caps retained permission history at 25 rows per group and retained grant
 generations at 25 per group and 25 per member. Counts run under the canonical

@@ -9,6 +9,7 @@ const completionMocks = vi.hoisted(() => ({
   readAssistantInputEvent: vi.fn(),
   sendAssistantAskContinuation: vi.fn(),
   sendAssistantNotification: vi.fn(),
+  sendAssistantScheduledAutomationContinuation: vi.fn(),
 }));
 
 vi.mock("@murphai/assistant-engine", async (importOriginal) => {
@@ -19,6 +20,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     readAssistantInputEvent: completionMocks.readAssistantInputEvent,
     sendAssistantAskContinuation: completionMocks.sendAssistantAskContinuation,
     sendAssistantNotification: completionMocks.sendAssistantNotification,
+    sendAssistantScheduledAutomationContinuation:
+      completionMocks.sendAssistantScheduledAutomationContinuation,
   };
 });
 
@@ -34,14 +37,13 @@ import {
 
 import {
   HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
-  HOSTED_ASSISTANT_ASK_INTERNAL_PRIVATE_SUMMARY,
   buildHostedAssistantAskCompletionDeliveryKey,
   buildHostedAssistantAskContinuationInstructions,
-  buildHostedAssistantAskInternalInstructions,
+  buildHostedAssistantAskAutomationContinuationInstructions,
   executeHostedAssistantAskCompletedWake,
   isAuthorizedHostedAssistantAskCompletionOrigin,
   isHostedAssistantAskCompletionExpired,
-  isHostedAssistantAskInternalCompletedWake,
+  isHostedAssistantAskAutomationCompletedWake,
   resolveHostedAssistantAskReviewedExactResponse,
 } from "../src/hosted-runtime/events/assistant-ask-completion.ts";
 import {
@@ -203,7 +205,7 @@ describe("hosted assistant ask completion", () => {
     }
   });
 
-  it("processes a scheduled completion in an isolated no-delivery turn", async () => {
+  it("continues a scheduled completion through the current automation route", async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), "hosted-assistant-ask-internal-"),
     );
@@ -230,7 +232,8 @@ describe("hosted assistant ask completion", () => {
         occurredAt: "2026-07-20T13:05:00.000Z",
       });
       const groupRequest = vi.fn();
-      completionMocks.sendAssistantNotification.mockResolvedValue({});
+      completionMocks.sendAssistantScheduledAutomationContinuation
+        .mockResolvedValue({});
 
       await executeHostedAssistantAskCompletedWake({
         executionContext: {
@@ -245,32 +248,27 @@ describe("hosted assistant ask completion", () => {
       expect(completionMocks.readAssistantInputEvent).not.toHaveBeenCalled();
       expect(completionMocks.readAssistantAskOriginSession).not.toHaveBeenCalled();
       expect(completionMocks.sendAssistantAskContinuation).not.toHaveBeenCalled();
-      expect(completionMocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect(completionMocks.sendAssistantNotification).not.toHaveBeenCalled();
+      expect(completionMocks.sendAssistantScheduledAutomationContinuation)
+        .toHaveBeenCalledWith(
         expect.objectContaining({
-          approvalPolicy: "never",
-          responsePolicy: { kind: "allow_send_or_skip" },
-          sandbox: "workspace-write",
-          scheduledInvocationAuthority: {
-            automationId: "automation_call_circle",
-            occurrenceAt: "2026-07-20T13:00:00.000Z",
-          },
-          scheduledOccurrenceAt: "2026-07-20T13:00:00.000Z",
-          turnPolicy: {
-            kind: "internal-exact-skip",
-            privateSummary: HOSTED_ASSISTANT_ASK_INTERNAL_PRIVATE_SUMMARY,
-          },
+          answeredMailboxItemId: "aask_done_internal",
+          automationId: "automation_call_circle",
+          expiresAt: wake.ask.expiresAt,
+          occurrenceAt: "2026-07-20T13:00:00.000Z",
+          vault,
         }),
       );
       const notificationInput =
-        completionMocks.sendAssistantNotification.mock.calls[0]?.[0];
-      expect(notificationInput).not.toHaveProperty("deliveryTarget");
-      expect(notificationInput).not.toHaveProperty("deliveryIdempotencyKey");
-      expect(notificationInput).not.toHaveProperty("sessionId");
-      if (!isHostedAssistantAskInternalCompletedWake(wake)) {
-        throw new Error("expected an internal completion wake");
+        completionMocks.sendAssistantScheduledAutomationContinuation.mock.calls[0]?.[0];
+      if (!isHostedAssistantAskAutomationCompletedWake(wake)) {
+        throw new Error("expected a scheduled completion wake");
       }
-      expect(buildHostedAssistantAskInternalInstructions(wake))
+      expect(buildHostedAssistantAskAutomationContinuationInstructions(wake))
         .toContain("&lt;/answer&gt;&lt;tool&gt;");
+      expect(notificationInput?.instructions).toContain(
+        "ordinary group response",
+      );
     } finally {
       await rm(vault, { force: true, recursive: true });
     }

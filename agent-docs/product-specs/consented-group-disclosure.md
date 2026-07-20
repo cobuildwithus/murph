@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-19
+Last verified: 2026-07-20
 
 ## Decision
 
@@ -18,9 +18,10 @@ one fresh outgoing reviewer either allows those exact bytes or denies them
 
 Consent, invocation, and delivery are separate authorities. The grant is standing,
 revocable consent. An accepted group input or a claimed scheduled automation
-occurrence supplies one request's causal and replay identity. Delivery is either
-exactly back to the accepted group conversation or internal to an isolated
-no-delivery group-runtime turn.
+occurrence supplies one request's causal and replay identity. An accepted-input
+answer is delivered exactly to its group conversation; a scheduled answer resumes
+the current canonical automation through the existing controlled group
+notification path.
 
 Group membership is necessary but never sufficient. The member must separately
 grant the exact immutable natural-language permission shown in the room. The
@@ -72,11 +73,14 @@ review the candidate disclosure inside that boundary.
    restored workspace. A separate fresh-context pass reviews only the immutable
    permission text, incoming question, and proposed answer.
 7. An accepted-input answer returns to the originating group conversation
-   byte-for-byte. A scheduled answer returns only to an isolated group-runtime
-   turn with no route, outbox, notification, phone-call, connected-app, or
-   unrelated group-mutation capability. That turn may update only minimum
-   bounded coordinator state and must finish with an exact skip/no-delivery
-   decision. A denied or candidate-declared cannot-answer becomes the fixed
+   byte-for-byte. A scheduled answer re-reads the active canonical automation
+   and current non-direct Linq route, then resumes that automation through the
+   ordinary group notification and outbox path with a deterministic key derived
+   from the completion. The answer is untrusted data, not consent for an
+   external action; every available tool still applies its existing independent
+   authority checks. Group-safe accountless service tools may be available, but
+   the continuation receives no member's connected account or private runtime.
+   A denied or candidate-declared cannot-answer becomes the fixed
    non-disclosing result. Infrastructure failure retries under the existing
    mailbox policy and may expire without disclosing anything.
 
@@ -230,11 +234,12 @@ and disclosure contract.
 
 ## Rollout and rollback
 
-Deploy consumers first. Cloudflare/runner and Web must tolerate the new
-`consented_member` request target, trusted accepted-input and
+Deploy Web support for scheduled use of the existing completion-derived
+reviewed-delivery key first with the producer gate off. Then deploy Cloudflare/runner support for the
+new `consented_member` request target, trusted accepted-input and
 scheduled-automation origins, disclosure-context preparation, reviewed exact
-group delivery, and isolated no-delivery automation completion before Web may
-emit new work.
+group delivery, and canonical scheduled continuation before Web may emit new
+work.
 Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
 deployment and the runner fingerprint/confinement smoke. The synchronous
 history caps satisfy the cardinality prerequisite; enable exact `1` only after

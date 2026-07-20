@@ -1953,6 +1953,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       ...GROUP_SUMMARY,
       memberCount: 1,
       members: [{
+        disclosureGrants: [],
         grantedVaultShareProjectionKinds: ["steps-days.v0" as const],
         grantedVaultShareProjectionScopes: requestedScopes,
         handle: null,
