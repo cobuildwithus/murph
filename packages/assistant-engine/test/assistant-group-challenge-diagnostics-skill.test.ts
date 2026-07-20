@@ -165,7 +165,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
   })
 
-  it('keeps challenge permission guidance in one natural-language response', async () => {
+  it('proactively offers exact missing shares without nagging or confusing sync', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
@@ -173,13 +173,13 @@ describe('assistant group challenge diagnostics guidance', () => {
       'At kickoff, identify the exact scoring scope and include it with `device-sync-status.v0` in the shared read.',
     )
     expect(challenge).toContain(
-      'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff or standings.',
+      'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',
     )
     expect(challenge).toContain(
-      'Explain any missing group setup or challenge share in ordinary language inside the one normal reply.',
+      'During later standings, Murph may proactively open the existing server-authored permission offer',
     )
     expect(challenge).toContain(
-      'If an affected participant explicitly asks to enable it, follow `group-chat`\'s interactive permission flow.',
+      'contains neither an explicit decline for that share nor a prior offer for it.',
     )
     expect(challenge).toContain(
       'do not create a hosted group or post a permission offer as part of challenge setup.',
@@ -188,32 +188,37 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Tell the affected participant they can ask you to open the group permission flow if they want to share it.',
     )
     expect(challenge).toContain(
-      'Only that explicit later request may enter `group-chat`\'s existing permission flow.',
+      'the bounded proactive standings behavior below begins only once the challenge is running.',
     )
     expect(challenge).toContain(
-      'When current evidence is `not_granted`, state the exact missing group share in ordinary language in this same response.',
+      'When current evidence is `not_granted`, state the exact missing group share in ordinary language in this same standings response',
     )
     expect(challenge).toContain(
       'Never infer a missing permission from granted-but-missing or stale data.',
     )
     expect(challenge).toContain(
-      'Challenge kickoff and scheduled challenge turns never call `murph.group action="post_join_offer"`, emit a separate permission card, or ask the platform to send a second message.',
+      'call `murph.group action="post_join_offer"` exactly once after the read with only those `projectionScopes`.',
     )
     expect(challenge).toContain(
-      'The scheduled tool surface is read-only.',
+      'it adds no scheduler-side message and no pre-model work.',
     )
     expect(challenge).toContain(
-      'Do not imply that reacting to the standings grants anything.',
+      'Never author generic permission copy or tell someone to Like the standings.',
     )
     expect(challenge).toContain(
-      'If the affected participant later explicitly asks to enable the missing share, follow `group-chat`\'s interactive permission flow in that later turn.',
+      'If a participant explicitly says they do not want to share a scope, record that choice and do not offer, repeat, or nag.',
     )
     expect(challenge).toContain(
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
-    expect(challenge).not.toContain('A separate permission card is available')
-    expect(challenge).not.toContain('Web suppresses the call')
-    expect(challenge).not.toContain('one-offer budget')
+    expect(challenge).toContain('separate permission card is available')
+    expect(challenge).toContain('active-offer/all-granted dedupe')
+    expect(challenge).toContain(
+      'Never offer the scoring scope merely because its grant exists but current data is missing.',
+    )
+    expect(challenge).toContain(
+      'Apart from the exact diagnostic `not_granted` case above, disconnected, `needs-reconnect`, and other sync/device cases get ordinary-language sync or reconnect guidance and no permission card.',
+    )
     expect(challenge).not.toContain('Gap disclosure log')
     expect(challenge).not.toContain('gapState')
     expect(challenge).not.toContain('episodePublicGapDate')

@@ -22,6 +22,7 @@ import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedClinicalRecordsConnectLinkTool,
+  AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
   AssistantHostedLabsTool,
@@ -81,6 +82,7 @@ export interface AssistantHostedToolContext {
   readonly clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly deviceTool?: AssistantHostedDeviceTool | null
+  readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
@@ -126,6 +128,7 @@ export function createAssistantHostedToolContext(input: {
   clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   deviceTool?: AssistantHostedDeviceTool | null
+  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
@@ -212,6 +215,7 @@ export function createAssistantHostedToolContext(input: {
       : null,
     familyPlanTool: input.familyPlanTool ?? null,
     deviceTool: input.deviceTool ?? null,
+    groupPermissionOfferTool: input.groupPermissionOfferTool ?? null,
     groupSharedReader: input.groupSharedReader ?? null,
     groupTool: input.groupTool ?? null,
     labsTool: input.labsTool ?? null,

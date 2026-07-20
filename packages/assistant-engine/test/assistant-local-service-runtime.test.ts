@@ -371,7 +371,16 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   })
 })
 
-test('sendAssistantMessageLocal passes the lazy scheduled group reader without invoking it', async () => {
+test('sendAssistantMessageLocal passes lazy scheduled group tools without invoking them', async () => {
+  const groupPermissionOfferRequest = vi.fn(async () => ({
+    action: 'post_join_offer' as const,
+    result: {
+      group: null,
+      status: 'unavailable' as const,
+      unavailableReason: 'test_unavailable',
+    },
+  }))
+  const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
   const groupSharedRead = vi.fn(async () => ({
     members: [] as const,
     requestedProjectionScopeKeys: ['steps-days.v0'],
@@ -384,6 +393,7 @@ test('sendAssistantMessageLocal passes the lazy scheduled group reader without i
     deliverResponse: false,
     executionContext: {
       hosted: {
+        groupPermissionOfferTool,
         groupSharedReader,
         memberId: 'member-hosted',
         userEnvKeys: [],
@@ -395,7 +405,10 @@ test('sendAssistantMessageLocal passes the lazy scheduled group reader without i
 
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  expect(hostedToolContext?.groupPermissionOfferTool)
+    .toBe(groupPermissionOfferTool)
   expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
+  expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
   expect(groupSharedRead).not.toHaveBeenCalled()
 })
 

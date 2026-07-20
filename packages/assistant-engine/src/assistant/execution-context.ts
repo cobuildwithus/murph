@@ -49,6 +49,9 @@ import type {
   HostedPlanUsageStatus,
 } from '@murphai/hosted-execution/plan-usage'
 import type {
+  HostedVaultShareSelectableProjectionScope,
+} from '@murphai/hosted-execution/vault-share'
+import type {
   HostedRuntimeLabsToolRequest,
   HostedRuntimeLabsToolResponse,
 } from '@murphai/hosted-execution/labs'
@@ -262,6 +265,16 @@ export interface AssistantHostedGroupTool {
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 
+export interface AssistantHostedGroupPermissionOfferRequest {
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+}
+
+export interface AssistantHostedGroupPermissionOfferTool {
+  request(
+    request: AssistantHostedGroupPermissionOfferRequest,
+  ): Promise<Extract<HostedRuntimeGroupToolResponse, { action: 'post_join_offer' }>>
+}
+
 export type AssistantHostedGroupSharedReadRequest =
   HostedRuntimeGroupSharedReadRequest
 export type AssistantHostedGroupSharedRecord = HostedRuntimeGroupSharedRecord
@@ -330,11 +343,14 @@ export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   automationTool?: AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
-  createScheduledGroupSharedReader?(input: {
+  createScheduledGroupTools?(input: {
     channel: string
     target: string
     threadIsDirect: boolean
-  }): AssistantHostedGroupSharedReader | null
+  }): {
+    groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool
+    groupSharedReader: AssistantHostedGroupSharedReader
+  } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
@@ -344,6 +360,7 @@ export interface AssistantHostedExecutionContext {
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
@@ -414,6 +431,9 @@ export function normalizeAssistantExecutionContext(
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
+    hosted?.groupPermissionOfferTool,
+  )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const groupSharedReader = normalizeAssistantGroupSharedReader(
     hosted?.groupSharedReader,
@@ -444,11 +464,8 @@ export function normalizeAssistantExecutionContext(
             currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
-      ...(typeof hosted?.createScheduledGroupSharedReader === 'function'
-        ? {
-            createScheduledGroupSharedReader:
-              hosted.createScheduledGroupSharedReader,
-          }
+      ...(typeof hosted?.createScheduledGroupTools === 'function'
+        ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
@@ -456,6 +473,7 @@ export function normalizeAssistantExecutionContext(
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(labsTool ? { labsTool } : {}),
@@ -672,6 +690,18 @@ function normalizeAssistantConfigurationTool(
 function normalizeAssistantGroupTool(
   input: AssistantHostedExecutionContext['groupTool'] | undefined,
 ): AssistantHostedGroupTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupPermissionOfferTool(
+  input: AssistantHostedExecutionContext['groupPermissionOfferTool'] | undefined,
+): AssistantHostedGroupPermissionOfferTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

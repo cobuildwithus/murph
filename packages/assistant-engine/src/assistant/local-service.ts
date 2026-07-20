@@ -714,6 +714,8 @@ export async function sendAssistantMessageLocal(
               beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               deviceTool: hostedExecutionContext.deviceTool ?? null,
+              groupPermissionOfferTool:
+                hostedExecutionContext.groupPermissionOfferTool ?? null,
               groupSharedReader:
                 hostedExecutionContext.groupSharedReader ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,

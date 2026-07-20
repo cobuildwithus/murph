@@ -34,15 +34,16 @@ provider traces, or private 1:1 data for a group challenge.
 
 At kickoff, identify the exact scoring scope and include it with
 `device-sync-status.v0` in the shared read. Do not create a hosted group or post
-a permission offer as a side effect of challenge kickoff or standings. Explain
-any missing group setup or challenge share in ordinary language inside the one
-normal reply. If an affected participant explicitly asks to enable it, follow
-`group-chat`'s interactive permission flow. The device scope is diagnostic
-context, not scoring data: it shares only public
+a permission offer as a side effect of challenge kickoff. During later
+standings, Murph may proactively open the existing server-authored permission
+offer only after `read_shared` proves an exact required scope is `not_granted`
+and the challenge page contains neither an explicit decline for that share nor
+a prior offer for it. The device scope is diagnostic context, not scoring data:
+it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
-participant may decline it and still join the challenge. A later explicit
-permission offer grants only the disclosed Murph group shares; it cannot
-connect a source or grant Apple Health access.
+participant may decline it and still join the challenge. The permission offer
+grants only the disclosed Murph group shares; it cannot connect a source or
+grant Apple Health access.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -121,6 +122,9 @@ The page carries these sections, kept current:
   an explicit `unresolved` identity marker), participation state (`in`,
   `pending`, `declined`, or `withdrawn`), their intro or fun fact (verbatim),
   and the capture refs for their photos.
+- **Sharing choices** — per participant and exact scope, explicit sharing
+  declines and any permission offer already made available. Silence is not
+  consent or refusal, but an ignored offer is not a reason to repost it.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
@@ -196,11 +200,12 @@ loses a reminder; it must never lose the challenge.
    create a hosted group or post a permission offer as part of challenge setup.
    Explain any missing group setup or share naturally in the normal group reply.
    Tell the affected participant they can ask you to open the group permission
-   flow if they want to share it. Only that explicit later request may enter
-   `group-chat`'s existing permission flow. Do not tell the room to join again,
-   imply that reacting to an ordinary challenge message grants access, or retry
-   and nag when someone declines or ignores sharing. Never use data a member
-   has not granted to this group.
+   flow if they want to share it. During setup, only that explicit later request
+   may enter `group-chat`'s existing permission flow; the bounded proactive
+   standings behavior below begins only once the challenge is running. Do not
+   tell the room to join again, imply that reacting to an ordinary challenge
+   message grants access, or retry and nag when someone declines or ignores
+   sharing. Never use data a member has not granted to this group.
 
    When the hosted group exists, after the model turn has begun and before
    writing the challenge roster, call
@@ -325,13 +330,15 @@ automation action rules with a `dailyLocal` schedule and
      challenge-metric data through the reporting cutoff: rank the participant.
      Do not override current metric evidence with a device status.
    - The scoring projection is `not_granted`: say that the participant has not
-     shared that challenge metric with this group and tell them they can
-     explicitly ask you to open that permission offer.
+     shared that challenge metric with this group. Unless their sharing choices
+     record an explicit decline or prior offer for that exact scope, include the
+     scope in the one proactive permission offer described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
      the metric share exists, but Murph cannot verify the source problem because
-     connection status was not shared. Tell them they can explicitly ask you to
-     open that diagnostic permission offer.
+     connection status was not shared. Unless their sharing choices record an
+     explicit decline or prior offer for that exact scope, include the diagnostic
+     scope in the one proactive permission offer described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
      `device-sync-status.v0` record is `available`: use its literal source label,
@@ -372,19 +379,36 @@ automation action rules with a `dailyLocal` schedule and
    present a partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
-   in ordinary language in this same response. Address the affected participant
-   by their consented group name and say they can ask you to open the permission
-   offer if they want to share it. Never infer a missing permission from
-   granted-but-missing or stale data.
+   in ordinary language in this same standings response and address the
+   affected participant by their consented group name. Never infer a missing
+   permission from granted-but-missing or stale data.
 
-   Challenge kickoff and scheduled challenge turns never call
-   `murph.group action="post_join_offer"`, emit a separate permission card, or
-   ask the platform to send a second message. The scheduled tool surface is
-   read-only. Do not imply that reacting to the standings grants anything. If
-   the affected participant later explicitly asks to enable the missing share,
-   follow `group-chat`'s interactive permission flow in that later turn. A
-   permission offer cannot connect a source, grant Apple Health or
-   operating-system Steps access, or fix granted-but-missing or stale data.
+   After `read_shared`, collect the exact scopes eligible for a proactive offer:
+   use the scoring scope when that scope is `not_granted`; use
+   `device-sync-status.v0` only when the scoring scope is granted but has no
+   current metric and the diagnostic scope is `not_granted`. Exclude a scope
+   when every affected participant has explicitly declined it or the challenge
+   page records that an offer for it is already available. Deduplicate the list.
+
+   When that list is nonempty and the narrow scheduled action is available,
+   call `murph.group action="post_join_offer"` exactly once after the read with
+   only those `projectionScopes`. This is a model decision inside the already-
+   started turn; it adds no scheduler-side message and no pre-model work. Web
+   owns the complete separate Like-or-heart consent message, exact scope
+   disclosure, recipient-safe delivery, and active-offer/all-granted dedupe.
+   Never author generic permission copy or tell someone to Like the standings.
+
+   A `sent` result may mean a matching card was already active. Say only that a
+   separate permission card is available, and record those scopes as offered on
+   the challenge page so future standings do not repost or nag. If the tool is
+   absent or returns `unavailable`, do not claim a card exists. If a participant
+   explicitly says they do not want to share a scope, record that choice and do
+   not offer, repeat, or nag. A permission offer cannot connect a source, grant
+   Apple Health or operating-system Steps access, or fix missing or stale data.
+   Never offer the scoring scope merely because its grant exists but current
+   data is missing. Apart from the exact diagnostic `not_granted` case above,
+   disconnected, `needs-reconnect`, and other sync/device cases get
+   ordinary-language sync or reconnect guidance and no permission card.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does

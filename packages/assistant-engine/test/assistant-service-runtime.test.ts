@@ -3392,8 +3392,9 @@ describe("assistant execution context normalization", () => {
 
   it("normalizes hosted context and preserves callable helpers only", () => {
     const deviceTool = { request: vi.fn() };
+    const groupPermissionOfferTool = { request: vi.fn() };
     const groupSharedReader = { request: vi.fn() };
-    const createScheduledGroupSharedReader = vi.fn();
+    const createScheduledGroupTools = vi.fn();
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra",
@@ -3404,7 +3405,7 @@ describe("assistant execution context normalization", () => {
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
-          createScheduledGroupSharedReader,
+          createScheduledGroupTools,
           defaultTarget,
           deviceConnectProviders: [
             { label: " Oura ", provider: " OURA " },
@@ -3412,6 +3413,7 @@ describe("assistant execution context normalization", () => {
             { label: "bad", provider: "not allowed!" },
           ],
           deviceTool,
+          groupPermissionOfferTool,
           groupSharedReader,
           memberId: " member-1 ",
           resolveScheduledLinqRoute,
@@ -3420,12 +3422,15 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
-        createScheduledGroupSharedReader,
+        createScheduledGroupTools,
         defaultTarget,
         deviceConnectProviders: [
           { label: "Oura", provider: "oura" },
         ],
         deviceTool: {
+          request: expect.any(Function),
+        },
+        groupPermissionOfferTool: {
           request: expect.any(Function),
         },
         groupSharedReader: {
@@ -3436,7 +3441,7 @@ describe("assistant execution context normalization", () => {
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });
-    expect(createScheduledGroupSharedReader).not.toHaveBeenCalled();
+    expect(createScheduledGroupTools).not.toHaveBeenCalled();
   });
 
   it("keeps a valid hosted member id even when no hosted helper functions are injected", () => {

@@ -691,8 +691,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
     expect(raw).toContain('## Creating a hosted group')
-    expect(raw).toContain('Before any permission-bearing `create_join_link` or `post_join_offer`, call')
-    expect(raw).toContain('Only when it returns `status="none"`')
+    expect(raw).toContain('In interactive group setup and additive-permission flows, call `read_current`')
+    expect(raw).toContain('scheduled surface uses `read_shared` and may post one evidence-gated offer')
+    expect(raw).toContain('Only when an interactive `read_current` returns')
     expect(raw).toMatch(/one reusable core\s+set/u)
     const coreSet = raw.match(
       /one reusable core[\s\S]*?Pass the set/u,
@@ -900,14 +901,15 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('`gapState`')
     expect(raw).not.toContain('`episodePublicGapDate`')
     expect(raw).toContain('state the exact missing group share\n   in ordinary language')
-    expect(raw).toContain('Never infer a missing permission from\n   granted-but-missing or stale data.')
-    expect(raw).toContain('scheduled challenge turns never call\n   `murph.group action="post_join_offer"`')
-    expect(raw).toContain('emit a separate permission card, or\n   ask the platform to send a second message')
-    expect(raw).toContain('The scheduled tool surface is\n   read-only.')
-    expect(raw).toContain('Do not imply that reacting to the standings grants anything.')
-    expect(raw).toMatch(/grant Apple Health or\s+operating-system Steps access/u)
-    expect(raw).not.toContain('A separate permission card is available')
-    expect(raw).not.toMatch(/matching active\s+offer exists/u)
+    expect(raw).toMatch(/Never infer a missing\s+permission from granted-but-missing or stale data\./u)
+    expect(raw).toMatch(/call `murph\.group action="post_join_offer"` exactly once after the read with\s+only those `projectionScopes`/u)
+    expect(raw).toMatch(/adds no scheduler-side message and no pre-model work/u)
+    expect(raw).toContain('Never author generic permission copy or tell someone to Like the standings.')
+    expect(raw).toMatch(/explicitly says they do not want to share a scope, record that choice and do\s+not offer, repeat, or nag/u)
+    expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
+    expect(raw).toContain('A `sent` result may mean a matching card was already active.')
+    expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
+    expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')
     expect(raw).toContain(
       'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',
@@ -918,8 +920,8 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
     expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
     expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
-    expect(raw).toMatch(/Only that explicit later request may enter\s+`group-chat`'s existing permission flow/u)
-    expect(raw).toMatch(/Do not tell\s+the room to join again/u)
+    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
+    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",

@@ -44,10 +44,13 @@ actions create the hosted group record as part of the existing flow.
 
 ## Creating a hosted group
 
-Before any permission-bearing `create_join_link` or `post_join_offer`, call
-`read_current`. Only when it returns `status="none"`, request one reusable core
-set so members do not have to revisit consent for common future newsletter and
-group-health uses:
+In interactive group setup and additive-permission flows, call `read_current`
+before a permission-bearing `create_join_link` or `post_join_offer`. The bounded
+running-challenge standings flow in `group-challenge` is the exception: its
+scheduled surface uses `read_shared` and may post one evidence-gated offer
+without `read_current`. Only when an interactive `read_current` returns
+`status="none"`, request one reusable core set so members do not have to revisit
+consent for common future newsletter and group-health uses:
 
 - `group-email.v0`
 - `steps-days.v0`

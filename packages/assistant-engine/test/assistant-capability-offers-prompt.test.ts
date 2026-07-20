@@ -135,34 +135,60 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
-    expect(section).toContain('`action="post_join_offer"` only in an explicit user-requested group-chat permission flow')
+    expect(section).toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
     expect(section).toContain("exact handle appears in exactly one returned member's `currentTurnHandles`")
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
-    expect(section).toContain('inspect every returned member before replying')
-    expect(section).toContain('one normal conversational reply')
-    expect(section).toContain('challenge kickoff and standings never call it or send a separate permission message')
+    expect(section).toContain('inspect every returned participant')
+    expect(section).toContain('Include each exact missing scope only when at least one participant affected by that scope')
+    expect(section).toContain('neither explicitly declined it nor a prior offer recorded on the challenge page')
+    expect(section).toContain('If the tool returns `sent`, record those scopes as offered')
+    expect(section).toContain('Record later declines and never repeat or nag')
+    expect(section).toContain('Never offer the scoring scope merely because it is granted but missing data')
+    expect(section).toContain('other sync/device cases get ordinary open-Murph, sync, or reconnect guidance and no permission card')
+    expect(section).toContain('Outside this bounded case, `post_join_offer` requires an explicit group-chat request')
+    expect(section).toContain('never imply that reacting to the standings grants anything')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
     expect(section).toContain('not Apple Health access')
     expect(section).toContain('Apple does not expose HealthKit read authorization')
-    expect(section).toContain('permission opt-in, not joining or rejoining')
+    expect(section).toContain('Existing members opt into permissions; they do not rejoin')
     expect(section).toContain(
       "After read_current, use the group-chat skill's core permissions only for `status=none`",
     )
     expect(section).toContain('existing groups use workflow scopes')
-    expect(section).toContain('pass the exact `projectionScopes`')
-    expect(section).toContain('never pass offer text')
-    expect(section).toContain('Web owns the consent sentence')
-    expect(section).toContain('scope disclosure')
-    expect(section).toContain('reaction gestures')
-    expect(section).toContain('customize link')
+    expect(section).toContain('Pass the exact `projectionScopes`')
+    expect(section).toContain('never offer text')
+    expect(section).toContain('Web owns the consent sentence, scope disclosure, reaction gestures, and customize link')
+    expect(section).toContain('liking or hearting it adds only its disclosed permission snapshot')
     expect(section).toContain('grants membership only when needed')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',
     )
     expect(section).not.toContain('to join by reacting')
+  })
+
+  it('puts proactive challenge permission handling in the scheduled group prompt', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptLayers(
+      createNotificationDecisionPromptInput({
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).prompt
+
+    expect(prompt).toContain('For running-challenge standings')
+    expect(prompt).toContain('report all available rankings plus each named blocker')
+    expect(prompt).toContain('required scoring scope that is `not_granted`')
+    expect(prompt).toContain('`device-sync-status.v0` when the scoring scope is granted but lacks current data')
+    expect(prompt).toContain('Include each exact missing scope only when at least one participant affected by that scope')
+    expect(prompt).toContain('neither explicitly declined it nor a prior offer recorded on the challenge page')
+    expect(prompt).toContain('proactively call `action="post_join_offer"` once')
+    expect(prompt).toContain('never imply that reacting to the standings grants anything')
+    expect(prompt).toContain('If the tool returns `sent`, record those scopes as offered')
+    expect(prompt).toContain('Never offer the scoring scope merely because it is granted but missing data')
+    expect(prompt).toContain('other sync/device cases get ordinary open-Murph, sync, or reconnect guidance and no permission card')
   })
 
   it('keeps bounded device diagnostics inside the closed group permission contract', () => {

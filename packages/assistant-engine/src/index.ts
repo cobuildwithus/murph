@@ -24,6 +24,8 @@ export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from './assistant/group-shared-read-limits.js'
 export type {
+  AssistantHostedGroupPermissionOfferRequest,
+  AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedMember,
   AssistantHostedGroupSharedProjection,
   AssistantHostedGroupSharedReader,

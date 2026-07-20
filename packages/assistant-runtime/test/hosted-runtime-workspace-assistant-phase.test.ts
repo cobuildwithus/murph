@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
@@ -796,28 +797,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       sequence.push("assistant_lane");
       expect(request).not.toHaveBeenCalled();
       expect(laneInput.executionContext.hosted?.groupSharedReader).toBeUndefined();
-      const createScheduledGroupSharedReader =
-        laneInput.executionContext.hosted?.createScheduledGroupSharedReader;
-      expect(createScheduledGroupSharedReader).toEqual(expect.any(Function));
-      if (!createScheduledGroupSharedReader) {
-        throw new Error("Expected the scheduled group reader factory.");
+      const createScheduledGroupTools =
+        laneInput.executionContext.hosted?.createScheduledGroupTools;
+      expect(createScheduledGroupTools).toEqual(expect.any(Function));
+      if (!createScheduledGroupTools) {
+        throw new Error("Expected the scheduled group capability factory.");
       }
-      expect(createScheduledGroupSharedReader({
+      expect(createScheduledGroupTools({
         channel: "linq",
         target: "chat_direct",
         threadIsDirect: true,
       })).toBeNull();
-      const scheduledGroupSharedReader = createScheduledGroupSharedReader({
+      const scheduledGroupTools = createScheduledGroupTools({
         channel: "linq",
         target: "chat_current_group",
         threadIsDirect: false,
       });
-      expect(scheduledGroupSharedReader).not.toBeNull();
-      if (!scheduledGroupSharedReader) {
-        throw new Error("Expected the scheduled group reader.");
+      expect(scheduledGroupTools).not.toBeNull();
+      if (!scheduledGroupTools) {
+        throw new Error("Expected scheduled group capabilities.");
       }
       expect(request).not.toHaveBeenCalled();
-      await expect(scheduledGroupSharedReader.request({
+      await expect(scheduledGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
       return {
@@ -835,6 +836,163 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(sequence).toEqual(["assistant_lane", "read_shared"]);
       expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("allows one scheduled offer only for exact not-granted evidence from the same model operation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-scheduled-group-offer-"));
+    const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
+    let readGrantStatus: "granted" | "not_granted" = "not_granted";
+    const request: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = vi.fn(async (groupToolRequest) => {
+      groupToolRequests.push(groupToolRequest);
+      if (groupToolRequest.action === "read_shared") {
+        return {
+          action: "read_shared" as const,
+          result: {
+            members: [{
+              currentTurnHandles: [],
+              displayName: "Ada",
+              memberId: "member_shared_current",
+              participantId: "participant_shared_current",
+              projections: [{
+                dataStatus: "missing" as const,
+                grantStatus: readGrantStatus,
+                projectionScope: { projectionKind: "steps-days.v0" as const },
+                projectionScopeKey: "steps-days.v0",
+                records: [],
+              }],
+            }],
+            requestedProjectionScopeKeys: ["steps-days.v0"],
+            status: "ok" as const,
+          },
+        };
+      }
+      if (groupToolRequest.action === "post_join_offer") {
+        return {
+          action: "post_join_offer" as const,
+          result: {
+            group: null,
+            status: "unavailable" as const,
+            unavailableReason: "synthetic_web_unavailable",
+          },
+        };
+      }
+      throw new Error(`Unexpected group action: ${groupToolRequest.action}`);
+    });
+
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      const factory = laneInput.executionContext.hosted?.createScheduledGroupTools;
+      if (!factory) {
+        throw new Error("Expected the scheduled group capability factory.");
+      }
+      expect(factory({
+        channel: "email",
+        target: "chat_current_group",
+        threadIsDirect: false,
+      })).toBeNull();
+
+      const createTools = () => {
+        const tools = factory({
+          channel: "linq",
+          target: "chat_current_group",
+          threadIsDirect: false,
+        });
+        if (!tools) {
+          throw new Error("Expected scheduled group capabilities.");
+        }
+        return tools;
+      };
+      const stepsOffer = {
+        projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
+      };
+
+      const beforeRead = createTools();
+      await expect(beforeRead.groupPermissionOfferTool.request(stepsOffer))
+        .resolves.toMatchObject({
+          result: {
+            unavailableReason: "scheduled_group_permission_offer_unavailable",
+          },
+        });
+
+      const unobserved = createTools();
+      await unobserved.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      await expect(unobserved.groupPermissionOfferTool.request({
+        projectionScopes: [{ projectionKind: "device-sync-status.v0" }],
+      })).resolves.toMatchObject({
+        result: {
+          unavailableReason: "scheduled_group_permission_offer_unavailable",
+        },
+      });
+
+      const grantedMissing = createTools();
+      await grantedMissing.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      readGrantStatus = "granted";
+      await grantedMissing.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      await expect(grantedMissing.groupPermissionOfferTool.request(stepsOffer))
+        .resolves.toMatchObject({
+          result: {
+            unavailableReason: "scheduled_group_permission_offer_unavailable",
+          },
+        });
+
+      readGrantStatus = "not_granted";
+      const allowed = createTools();
+      await allowed.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      });
+      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+        .resolves.toMatchObject({
+          result: { unavailableReason: "synthetic_web_unavailable" },
+        });
+      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+        .resolves.toMatchObject({
+          result: {
+            unavailableReason: "scheduled_group_permission_offer_unavailable",
+          },
+        });
+
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    try {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }));
+      expect(groupToolRequests.filter((item) => item.action === "read_shared"))
+        .toHaveLength(4);
+      expect(groupToolRequests.filter((item) => item.action === "post_join_offer"))
+        .toEqual([{
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+            projectionScopes: [{ projectionKind: "steps-days.v0" }],
+          },
+          linqThread: {
+            authority: {
+              channel: "linq",
+              containerMemberId: "member_synthetic_phase",
+              threadId: "chat_current_group",
+            },
+            chatId: "chat_current_group",
+          },
+        }]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -5789,7 +5947,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.automationTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupSharedReader).toBeUndefined();
-    expect(assistantLaneCall?.executionContext.hosted?.createScheduledGroupSharedReader)
+    expect(assistantLaneCall?.executionContext.hosted?.createScheduledGroupTools)
       .toEqual(expect.any(Function));
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),

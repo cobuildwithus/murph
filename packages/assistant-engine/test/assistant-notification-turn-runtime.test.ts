@@ -33,7 +33,7 @@ import {
 } from '../src/assistant/conversation-policy.ts'
 import {
   executeMurphDynamicToolRequest,
-  MURPH_GROUP_SHARED_READ_TOOL,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -2430,7 +2430,7 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
   expect(observedHostedToolContexts[1]).toBeNull()
 })
 
-test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and read-only', async () => {
+test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',
   })
@@ -2449,6 +2449,24 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
       status: 'none' as const,
     }
   })
+  const groupPermissionOfferRequest = vi.fn(async (request) => {
+    events.push('permission-offer')
+    expect(request).toEqual({
+      projectionScopes: [
+        { projectionKind: 'steps-days.v0' },
+        { projectionKind: 'device-sync-status.v0' },
+      ],
+    })
+    return {
+      action: 'post_join_offer' as const,
+      result: {
+        group: null,
+        status: 'unavailable' as const,
+        unavailableReason: 'test_unavailable',
+      },
+    }
+  })
+  const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
   const groupSharedReader = { request: groupSharedRead }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience = {
@@ -2467,6 +2485,8 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
       const hostedToolContext = providerInput.hostedToolContext
+      expect(hostedToolContext?.groupPermissionOfferTool)
+        .toBe(groupPermissionOfferTool)
       expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
       expect(hostedToolContext?.groupTool).toBeNull()
       expect(providerInput.profile?.toolProfile).toBe('notification-turn')
@@ -2477,13 +2497,19 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
         startedAt: '2026-07-18T13:00:00.000Z',
       })
       expect(events).toEqual(['provider-started'])
+      expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
       expect(groupSharedRead).not.toHaveBeenCalled()
 
       const groupTools = resolveMurphDynamicTools({
         groupAvailable: hostedToolContext?.groupTool != null,
+        groupPermissionOfferAvailable:
+          hostedToolContext?.groupPermissionOfferTool != null,
         groupSharedReadAvailable: hostedToolContext?.groupSharedReader != null,
       }).filter((tool) => tool.namespace === 'murph' && tool.name === 'group')
-      expect(groupTools).toEqual([MURPH_GROUP_SHARED_READ_TOOL])
+      expect(groupTools).toEqual([
+        MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+      ])
+      expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
       expect(groupSharedRead).not.toHaveBeenCalled()
 
       const request = readMurphDynamicToolRequest({
@@ -2539,13 +2565,8 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
         request: permissionOfferRequest,
         vaultRoot: null,
       })
-      expect(permissionOfferResult.rpcResult).toEqual({
-        success: false,
-        contentItems: [{
-          type: 'inputText',
-          text: 'group tools are unavailable for this turn',
-        }],
-      })
+      expect(permissionOfferResult.rpcResult.success).toBe(true)
+      expect(groupPermissionOfferRequest).toHaveBeenCalledTimes(1)
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -2559,6 +2580,7 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
   await sendAssistantNotificationLocal({
     executionContext: {
       hosted: {
+        groupPermissionOfferTool,
         groupSharedReader,
         memberId: 'member-scheduled-group-runtime',
         userEnvKeys: [],
@@ -2571,7 +2593,11 @@ test('sendAssistantNotificationLocal keeps the scheduled group reader lazy and r
     vault: '/vaults/scheduled-group-runtime',
   })
 
-  expect(events).toEqual(['provider-started', 'authority-read'])
+  expect(events).toEqual([
+    'provider-started',
+    'authority-read',
+    'permission-offer',
+  ])
   expect(providerStartHook).toHaveBeenCalledTimes(1)
 })
 

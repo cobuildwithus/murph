@@ -11,6 +11,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
@@ -22,6 +23,9 @@ import {
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
@@ -37,6 +41,7 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
+  type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
   type AssistantInputEventRecord,
   type AssistantTurnEnvironment,
@@ -113,6 +118,7 @@ import {
 } from "./device-sync-status-prompt.ts";
 import {
   createHostedGroupSharedReader,
+  normalizeHostedGroupSharedProjectionScopes,
 } from "./group-shared-reader.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -686,13 +692,19 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
   };
 }
 
-function createHostedScheduledGroupSharedReader(input: {
+const HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE =
+  "scheduled_group_permission_offer_unavailable";
+
+function createHostedScheduledGroupTools(input: {
   channel: string;
   containerMemberId: string;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   target: string;
   threadIsDirect: boolean;
-}): AssistantHostedGroupSharedReader | null {
+}): {
+  groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool;
+  groupSharedReader: AssistantHostedGroupSharedReader;
+} | null {
   const channel = input.channel.trim().toLowerCase();
   const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
   const target = normalizeAssistantRouteString(input.target);
@@ -705,9 +717,95 @@ function createHostedScheduledGroupSharedReader(input: {
     return null;
   }
 
-  return createHostedGroupSharedReader({
+  // This state belongs to one scheduled model operation. It proves a missing
+  // grant from the model-triggered read and prevents repeated offer attempts.
+  const observedNotGrantedScopeKeys = new Set<string>();
+  let permissionOfferAttempted = false;
+  const unobservedGroupSharedReader = createHostedGroupSharedReader({
     groupToolPort: input.groupToolPort,
   });
+  const groupSharedReader: AssistantHostedGroupSharedReader = {
+    async request(request) {
+      const result = await unobservedGroupSharedReader.request(request);
+      if (result.status !== "ok") {
+        observedNotGrantedScopeKeys.clear();
+        return result;
+      }
+      observedNotGrantedScopeKeys.clear();
+      for (const member of result.members) {
+        for (const projection of member.projections) {
+          if (projection.grantStatus === "not_granted") {
+            observedNotGrantedScopeKeys.add(projection.projectionScopeKey);
+          }
+        }
+      }
+      return result;
+    },
+  };
+
+  const groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool = {
+    async request(request) {
+      if (permissionOfferAttempted) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+      permissionOfferAttempted = true;
+
+      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(
+        request.projectionScopes,
+      );
+      if (
+        !input.groupToolPort
+        || !projectionScopes
+        || projectionScopes.some((projectionScope) =>
+          !observedNotGrantedScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(projectionScope),
+          )
+        )
+      ) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+
+      try {
+        const response = await input.groupToolPort.request({
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+            projectionScopes,
+          },
+          linqThread: {
+            authority: {
+              channel: "linq",
+              containerMemberId,
+              threadId: target,
+            },
+            chatId: target,
+          },
+        });
+        return response.action === "post_join_offer"
+          ? response
+          : buildHostedScheduledGroupPermissionOfferUnavailable();
+      } catch {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+    },
+  };
+
+  return { groupPermissionOfferTool, groupSharedReader };
+}
+
+function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "post_join_offer" }
+> {
+  return {
+    action: "post_join_offer",
+    result: {
+      group: null,
+      status: "unavailable",
+      unavailableReason: HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE,
+    },
+  };
 }
 
 type HostedAssistantAutomationTool = NonNullable<
@@ -1062,8 +1160,8 @@ export async function runHostedWorkspaceAssistantPhase(
           ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
           : {}),
         memberId: input.request.userId,
-        createScheduledGroupSharedReader: ({ channel, target, threadIsDirect }) =>
-          createHostedScheduledGroupSharedReader({
+        createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
+          createHostedScheduledGroupTools({
             channel,
             containerMemberId: input.request.userId,
             groupToolPort: input.runtime.platform.groupToolPort ?? null,

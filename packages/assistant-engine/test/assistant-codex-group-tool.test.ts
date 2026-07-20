@@ -29,6 +29,7 @@ import type {
 import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
@@ -66,6 +67,9 @@ function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
 type NewsletterToolRequest = NonNullable<AssistantHostedToolContext["newsletterTool"]>["request"];
 const NEWSLETTER_AUTHORIZATION_PROOF = "a".repeat(64);
 type GroupToolRequest = NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
+type GroupPermissionOfferRequest = NonNullable<
+  AssistantHostedToolContext["groupPermissionOfferTool"]
+>["request"];
 type GroupSharedReadRequest = AssistantHostedGroupSharedReader["request"];
 
 const webpBytes = new Uint8Array([
@@ -79,6 +83,8 @@ const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
+    expect(MURPH_DYNAMIC_TOOLS)
+      .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
       "read_shared",
@@ -181,6 +187,31 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
+
+    const scheduledGroupTools = resolveMurphDynamicTools({
+      groupAvailable: false,
+      groupPermissionOfferAvailable: true,
+      groupSharedReadAvailable: true,
+    }).filter((tool) => tool.namespace === "murph" && tool.name === "group");
+    expect(scheduledGroupTools).toEqual([
+      MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+    ]);
+    expect(
+      MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
+        .inputSchema.properties.action.enum,
+    ).toEqual(["read_shared", "post_join_offer"]);
+    expect(
+      Object.keys(
+        MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
+      ),
+    ).toEqual(["action", "projectionScopes"]);
+
+    expect(resolveMurphDynamicTools({
+      groupAvailable: false,
+      groupPermissionOfferAvailable: true,
+      groupSharedReadAvailable: false,
+    }).filter((tool) => tool.namespace === "murph" && tool.name === "group"))
+      .toEqual([]);
 
     const fullGroupTools = resolveMurphDynamicTools({
       groupAvailable: true,
@@ -1254,6 +1285,59 @@ describe("murph.group dynamic tool", () => {
       },
     });
     expect(JSON.stringify(groupRequest.mock.calls)).not.toContain(modelAuthoredCopy);
+  });
+
+  it("routes the narrow scheduled offer without exposing group metadata", async () => {
+    const groupPermissionOfferRequest = vi.fn<GroupPermissionOfferRequest>(
+      async () => ({
+        action: "post_join_offer",
+        result: {
+          group: {
+            displayName: "Private label",
+            id: "private-group-id",
+            kind: "challenge",
+            memberCount: 0,
+            members: [],
+            requestedVaultShareProjectionKinds: ["steps-days.v0"],
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "steps-days.v0" },
+            ],
+            status: "active",
+          },
+          joinUrl: "https://example.test/private-offer",
+          status: "sent",
+        },
+      }),
+    );
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a scheduled permission-offer request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupPermissionOfferRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupPermissionOfferRequest).toHaveBeenCalledWith({
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain("private");
   });
 
   it("keeps non-offer group mutations unavailable without the full group port", async () => {
@@ -2578,6 +2662,7 @@ function createNewsletterHostedToolContext(input: {
 
 function createGroupHostedToolContext(input: {
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
+  groupPermissionOfferRequest?: GroupPermissionOfferRequest;
   groupSharedReadRequest?: GroupSharedReadRequest;
   groupRequest?: GroupToolRequest;
   groupToolAvailable?: boolean;
@@ -2590,6 +2675,9 @@ function createGroupHostedToolContext(input: {
     currentUserActionScope: input.currentUserActionScope ?? (() => null),
     currentScheduledAutomationAuthority: () => null,
     familyPlanTool: null,
+    groupPermissionOfferTool: input.groupPermissionOfferRequest
+      ? { request: input.groupPermissionOfferRequest }
+      : null,
     groupSharedReader: input.groupSharedReadRequest
       ? { request: input.groupSharedReadRequest }
       : null,

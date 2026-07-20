@@ -58,9 +58,10 @@ Four facts remain separate:
 The runtime constructs the `read_shared` adapter synchronously. This path adds
 no pre-model group, grant, snapshot, device, projection, configuration, or
 attribution read; existing accepted-input and route-binding work is unchanged.
-Foreground, scheduled, notification, and detached read-only turns contact Web
-only if the model invokes `read_shared`. Scheduled turns do not receive a
-preloaded roster or grant snapshot.
+Foreground, scheduled, notification, and detached turns contact Web for shared
+facts only if the model invokes `read_shared`. Scheduled turns do not receive a
+preloaded roster or grant snapshot; the bounded permission action becomes
+eligible only after that read returns exact missing-grant evidence.
 
 Web answers one model-triggered read with every current member and every
 requested scope. Each cell distinguishes `not_granted`, `granted` plus
@@ -149,8 +150,8 @@ to each `in` participant and stops at the first match:
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
 | Current challenge-metric data through the reporting cutoff | Include the participant in the ranked standings. | None. Device status cannot override current metric evidence. |
-| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Explain the exact missing share naturally and say the participant can explicitly ask Murph to open the permission offer. |
-| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Explain that diagnostic access is missing and say the participant can explicitly ask Murph to open the permission offer. |
+| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior offer recorded. |
+| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior offer recorded. |
 | Live diagnostic result with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
 | Live diagnostic result with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
 | Live diagnostic result with `needs-attention` | The visible source needs attention; the result does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
@@ -230,26 +231,39 @@ data or proves the cause of a missing metric.
 ## Permission behavior
 
 At challenge kickoff, the exact scoring scope and `device-sync-status.v0` are
-workflow-specific scopes. Challenge kickoff and standings do not create a
-hosted group or post an additive permission offer, whether or not the hosted
-group already exists. Murph explains the exact missing group setup or share in
-ordinary language inside its one normal reply and says the affected participant
-can explicitly ask Murph to open the permission flow. The challenge flow never
-tells someone to react to an ordinary challenge message.
+workflow-specific scopes. Challenge kickoff does not create a hosted group or
+post an additive permission offer. Once a challenge is running, a scheduled
+standings turn may ask Web to post the existing additive offer only as a model
+tool call after `read_shared` reports an exact required scope as `not_granted`.
+Each included scope must have at least one affected participant for whom the
+challenge page records neither an explicit sharing decline nor a prior offer.
 
-Only a later interactive turn containing an explicit request to enable the
-missing share may enter `group-chat`'s existing `post_join_offer` flow. Web, not
-the model, writes that separate offer's causal Like-or-heart sentence, exact
-frozen scope disclosure, and first-party customize link. Liking or hearting
-adds only that disclosed snapshot; the first-party page remains the customize
-path. Ignoring or declining it never causes a retry or nudge.
+The operation-local scheduled adapter accepts only scopes supported by that
+turn's missing-grant evidence and only one offer attempt. It rejects calls
+before the read, unobserved scopes, and every second attempt without calling
+Web. Web remains the durable authority for the canonical Like-or-heart sentence,
+frozen scope disclosure, recipient-safe delivery, active-offer/all-granted
+dedupe, and first-party customize link. Liking or hearting adds only that
+disclosed snapshot. The standings message itself never grants permission.
+
+After a successful or already-active result, Murph records the offered scopes on
+the challenge page and does not repost or nag. An explicit sharing decline is
+also recorded there and excludes that participant from the scope decision. The
+scoring scope is never offered merely because its grant exists but current data
+is missing. Apart from the exact missing diagnostic grant above, stale,
+disconnected, reconnect, and other sync/device cases never enter the permission
+path.
+This extra member-facing card is limited to this explicitly approved challenge
+case under the automatic-message invariant.
 
 ## Message shape
 
-The update stays one conversational group message. It leads with completeness,
-then separates the ranked standings from named participants waiting on data.
-For example, the semantic shape is "partial standings: 2 of 5 current," a
-ranked section, then a waiting section with one reason/action per person.
+The standings update stays one conversational group message. It leads with
+completeness, then separates the ranked standings from named participants
+waiting on data. For example, the semantic shape is "partial standings: 2 of 5
+current," a ranked section, then a waiting section with one reason/action per
+person. When eligible, Web's canonical permission card is a separate message;
+Murph never authors generic consent copy or tells members to react to standings.
 
 Names in the waiting section are operational status, not performance shaming.
 Each update may include the participant's current evidence-backed reason and
@@ -274,6 +288,10 @@ This is a consumer-first hard cut:
    during this interval. Challenge setup requests that new scope explicitly and
    remains unavailable until Web supports it; there is no retry or widened
    fallback.
+   The runtime continues sending the ignored legacy permission-offer template
+   field only so old Web accepts the model-triggered scheduled offer during this
+   consumer-first window; delete it after Web convergence and rollback-floor
+   confirmation.
 3. Verify complete member/scope matrices, empty-snapshot behavior, stale-writer
    rejection, revoke/regrant clearing, device privacy, and the challenge output
    against the deployed route.
@@ -297,10 +315,13 @@ drain, or foreground reconciliation step in either deployment or rollback.
   opening Murph and checking Steps access only as recovery steps.
 - A three-day-old connection sync-job timestamp may be named literally but is
   not presented as health-data receipt or a proven cause.
-- Challenge kickoff and a scheduled occurrence never call `post_join_offer` or
-  emit a second permission message; a missing grant is explained naturally in
-  the one normal challenge reply.
-- A later interactive permission offer requires an explicit participant request
-  and remains owned by the existing group-chat permission flow.
+- Challenge kickoff never calls `post_join_offer` as a side effect.
+- A scheduled occurrence may call `post_join_offer` once after `read_shared`,
+  only for exact `not_granted` scopes with at least one affected participant who
+  has neither a recorded decline nor a prior offer.
+- Missing or stale synced data, a disconnected source, or `needs-reconnect`
+  produces ordinary-language recovery guidance and no permission card.
+- A `sent` result is described as a separate permission card being available;
+  Murph does not claim a new card was posted when one was already active.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.
