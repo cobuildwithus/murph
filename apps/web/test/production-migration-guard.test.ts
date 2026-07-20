@@ -869,6 +869,10 @@ describe("hosted web production migration guard", () => {
       buildScript,
       /pnpm typecheck:prepared && next build/u,
     );
+    assert.match(
+      buildScript,
+      /^node \.\.\/\.\.\/scripts\/run-with-host-verification-slot\.mjs 'apps\/web build' -- bash -c /u,
+    );
     assert.match(buildScript, /next build/u);
     assert.doesNotMatch(buildScript, /migrate:production/u);
     assert.doesNotMatch(buildScript, /release:production:contract-migrate/u);
@@ -908,7 +912,7 @@ describe("hosted web production migration guard", () => {
       'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]',
     );
     const hostSlotGuardIndex = verifyFastScript.indexOf(
-      'if [[ "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]',
+      'if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]',
     );
     assert.ok(artifactLockGuardIndex >= 0, "workspace artifact-lock guard must remain present");
     assert.ok(
@@ -917,9 +921,14 @@ describe("hosted web production migration guard", () => {
     );
     assert.ok(
       verifyFastScript.includes(
-        'verify_step_parallel_default="$([[ -n "${CI:-}" || "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" ]] && echo 0 || echo 1)"',
+        'verify_step_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"',
       ),
       "shared-host verification must default its internal steps to serial execution",
+    );
+    assert.match(
+      verifyFastScript,
+      /-z "\$\{CI:-\}" && -n "\$\{CODEX_THREAD_ID:-\}"/u,
+      "Codex app verification must join shared-host admission by default",
     );
     assert.equal(
       contractMigrationScript,

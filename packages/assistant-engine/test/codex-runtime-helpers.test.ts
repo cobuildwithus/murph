@@ -615,13 +615,19 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('keeps per-turn profile command labels member-content safe at the edges', () => {
-    const commandEvent = (id: string, command: string, outputChars: number) => ({
+    const commandEvent = (
+      id: string,
+      command: string,
+      outputChars: number,
+      commandActions?: unknown,
+    ) => ({
       method: 'item/completed',
       params: {
         item: {
           type: 'commandExecution',
           id,
           command,
+          ...(commandActions === undefined ? {} : { commandActions }),
           aggregatedOutput: 'x'.repeat(outputChars),
           durationMs: 10,
         },
@@ -632,7 +638,14 @@ describe('Codex assistant registry helpers', () => {
         { method: 'turn/started', params: { turn: { id: 'turn_labels' } } },
         // Uppercase positional token fails the subcommand shape even after an
         // allowlisted head binary: 'Samples' could be a member-named vault dir.
-        commandEvent('item_1', 'vault-cli Samples', 40),
+        // The safe raw-command label stays authoritative over a conflicting
+        // structured fallback and its private-looking query.
+        commandEvent(
+          'item_1',
+          'vault-cli Samples',
+          40,
+          [{ type: 'search', command: 'rg private-query', query: 'private-query' }],
+        ),
         // 'murph' is the second allowlisted head binary; labels stop at three
         // tokens so trailing args never persist.
         commandEvent('item_2', 'murph reminders list --all glucose', 30),
@@ -654,6 +667,51 @@ describe('Codex assistant registry helpers', () => {
         // Multiple quoted regions are not a single wrapped script; the greedy
         // splice must not surface inner words as a head binary.
         commandEvent('item_9', 'bash -lc "hypertension log" > "out"', 3),
+        // Codex's parsed action recovers only the fixed executable head when
+        // POSIX quote splicing makes the raw shell wrapper fail closed.
+        commandEvent(
+          'item_10',
+          "bash -lc 'rg -n '\\''sleep score'\\'' records'",
+          8,
+          [{ type: 'search', command: 'rg -n \'sleep score\' records', query: 'sleep score' }],
+        ),
+        commandEvent(
+          'item_11',
+          "bash -lc 'sed -n '\\''1,80p'\\'' journal.md'",
+          7,
+          [{ type: 'read', command: "sed -n '1,80p' journal.md", path: 'journal.md' }],
+        ),
+        // The fallback persists only the executable, not Vault CLI arguments.
+        commandEvent(
+          'item_12',
+          "bash -lc 'vault-cli memory show '\\''private-memory'\\'''",
+          6,
+          [{ type: 'unknown', command: "vault-cli memory show 'private-memory'" }],
+        ),
+        // Arbitrary names and path-invoked binaries stay collapsed even when
+        // supplied as structured actions.
+        commandEvent(
+          'item_13',
+          "bash -lc 'hypertension '\\''private'\\'''",
+          2,
+          [{ type: 'unknown', command: 'hypertension log' }],
+        ),
+        commandEvent(
+          'item_14',
+          'bash -lc "/tmp/rg secret"',
+          1,
+          [{ type: 'search', command: '/tmp/rg secret' }],
+        ),
+        // Never skip an untrusted first action to label a later pipeline stage.
+        commandEvent(
+          'item_15',
+          "bash -lc 'hypertension '\\''private'\\'' | rg secret'",
+          1,
+          [
+            { type: 'unknown', command: 'hypertension' },
+            { type: 'search', command: 'rg secret' },
+          ],
+        ),
       ],
       turnId: 'turn_labels',
     })
@@ -667,12 +725,18 @@ describe('Codex assistant registry helpers', () => {
     })
     expect(profile?.tools).toEqual([
       { calls: 2, durationMs: 20, label: 'murph reminders list', outputChars: 55 },
-      { calls: 1, durationMs: 10, label: 'vault-cli', outputChars: 40 },
+      { calls: 2, durationMs: 20, label: 'vault-cli', outputChars: 46 },
       { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 20 },
+      { calls: 6, durationMs: 60, label: 'command', outputChars: 16 },
       { calls: 1, durationMs: 10, label: 'grep', outputChars: 15 },
-      { calls: 3, durationMs: 30, label: 'command', outputChars: 12 },
       { calls: 1, durationMs: 10, label: 'a'.repeat(64), outputChars: 10 },
+      { calls: 1, durationMs: 10, label: 'rg', outputChars: 8 },
+      { calls: 1, durationMs: 10, label: 'sed', outputChars: 7 },
     ])
+    expect(JSON.stringify(profile)).not.toContain('sleep score')
+    expect(JSON.stringify(profile)).not.toContain('private-memory')
+    expect(JSON.stringify(profile)).not.toContain('private-query')
+    expect(JSON.stringify(profile)).not.toContain('journal.md')
   })
 
   it('fails closed on adversarial shell-wrapper quoting shapes', () => {

@@ -608,6 +608,21 @@ const ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN =
 // other command the first positional token can be member content (search
 // terms, vault paths), so the label stops at the binary name.
 const ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES = new Set(['vault-cli', 'murph'])
+// Codex also emits a best-effort parsed commandActions array. Use only these
+// fixed executable names when shell-wrapper quoting makes the raw command fail
+// closed; never persist an action argument, path, query, or arbitrary head.
+const ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES = new Set([
+  'cat',
+  'grep',
+  'head',
+  'jq',
+  'murph',
+  'printf',
+  'rg',
+  'sed',
+  'tail',
+  'vault-cli',
+])
 
 interface AssistantTurnProfileToolAggregate {
   calls: number
@@ -717,6 +732,7 @@ function readAssistantTurnProfileToolAggregate(
       durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
       label: buildAssistantTurnProfileCommandLabel(
         readAssistantProviderString(item.command),
+        item.commandActions ?? item.command_actions,
       ),
       outputChars: readAssistantTurnProfileTextLength(
         item.aggregatedOutput ?? item.aggregated_output,
@@ -748,7 +764,10 @@ function readAssistantTurnProfileToolAggregate(
 // head binary is a known subcommand-style CLI, because the first positional
 // argument of arbitrary commands (grep patterns, file paths) can carry member
 // health content even when it matches a benign-looking token charset.
-function buildAssistantTurnProfileCommandLabel(command: string | null): string {
+function buildAssistantTurnProfileCommandLabel(
+  command: string | null,
+  commandActions: unknown,
+): string {
   const tokens = unwrapAssistantTurnProfileShellWrapper(command ?? '')
     .split(/\s+/u)
     .filter((token) => token.length > 0)
@@ -783,9 +802,33 @@ function buildAssistantTurnProfileCommandLabel(command: string | null): string {
     }
   }
 
-  return truncateAssistantTurnProfileLabel(
-    labelTokens.length > 0 ? labelTokens.join(' ') : 'command',
-  )
+  if (labelTokens.length > 0) {
+    return truncateAssistantTurnProfileLabel(labelTokens.join(' '))
+  }
+
+  return readAssistantTurnProfileStructuredCommandHead(commandActions) ?? 'command'
+}
+
+function readAssistantTurnProfileStructuredCommandHead(
+  value: unknown,
+): string | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null
+  }
+
+  const firstAction = readAssistantProviderRecord(value[0])
+  const command = readAssistantProviderString(firstAction?.command)
+  const head = command?.split(/\s/u, 1)[0] ?? null
+  if (
+    !head
+    || head.includes('/')
+    || !ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(head)
+    || !ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES.has(head)
+  ) {
+    return null
+  }
+
+  return head
 }
 
 // Strip one `bash -lc <script>` wrapper layer so the inner head binary can be
