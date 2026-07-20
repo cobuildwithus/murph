@@ -130,7 +130,7 @@ Hosted group runtimes execute as synthetic thread-container members, not as any 
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
-Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled notification turns receive no conversation-mutation tool, and unauthenticated group-email replies remain read-only: managed lifecycle cleanup stays deterministic in its existing owner. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
+Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs through the existing one-shot App Server process path so its restrictive launch config cannot rotate the resident ordinary-turn process or terminate valid detached enrichment. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
 
 ### Canonical Automation Support Lifecycles
 
@@ -311,8 +311,8 @@ Authenticated hosted Linq group turns register the same `murph.personalization`
 and `murph.assistant_style` tools against the room runtime. The container's
 `HostedMember` projection fields and canonical room vault therefore own Tone,
 Voice, Humor, Push, and Detail for that group. Saved room tone and personality
-enter later hosted group prompts, saved room tone also governs hosted room
-notification decisions, and saved room voice enters later generated voice
+enter later attended and scheduled hosted group turns, and saved room voice
+enters later generated voice
 output. They never read, inherit, or mutate a speaker's private Murph
 preferences. Group email may apply the room's already saved style but cannot
 mutate it. Model and reasoning controls remain unavailable to group runtimes and
@@ -458,6 +458,15 @@ SQL candidate sets; detail reads cap stored label transfer and aggregate DTO
 size. One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
+
+Each product-test observation may preserve evidence and sampling context,
+sample or lot identity, result bounds and qualifiers, analytical limits, and
+the raw reported product identifier. Only checksum-valid GTINs enter the
+canonical UPC field. Private label lookup and the bounded public product-detail
+contract expose the same additive metadata so a regulatory finding or sampled
+package is not presented as a timeless product claim. One-time acquisition,
+reconciliation, and remap tooling is operational research rather than deployed
+application code.
 
 ## Trust Boundaries
 
@@ -828,7 +837,11 @@ children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
-warm local runtime markers across leases. The detailed contract lives in
+warm local runtime markers across leases. Encrypted hosted snapshots also carry
+the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
+last projection; canonical vault files remain authoritative, source-manifest
+validation rebuilds stale caches, and every other projection remains excluded.
+The detailed contract lives in
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 A valid `idle_shutdown` snapshot whose workspace-version compare-and-swap still

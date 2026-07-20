@@ -4,6 +4,10 @@ import { HOSTED_RUNTIME_STATUS_PATH } from "@murphai/hosted-execution/routes";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import {
+  RunnerStateStore,
+  type RunnerWriteFenceToken,
+} from "../src/user-runner/runner-state-store.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
@@ -26,6 +30,7 @@ vi.mock("../src/web-control-plane.ts", async () => {
 
 describe("HostedUserRunner status", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
@@ -139,6 +144,71 @@ describe("HostedUserRunner status", () => {
       },
     });
   });
+
+  it("derives the public status contract from the current write fence and diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const { runner, stateStore } = createRunnerStatusHarness();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async () =>
+      Response.json({
+        mailboxLag: [],
+        userId: "member_123",
+        workspace: null,
+      })
+    );
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+
+    const activeStatus = await runner.runnerStatus() as Awaited<
+      ReturnType<HostedUserRunner["runnerStatus"]>
+    > & {
+      activeWriteFence: RunnerWriteFenceToken | null;
+    };
+    expect(activeStatus).toMatchObject({
+      activeWriteFence: {
+        attemptId: token.attemptId,
+        expiresAt: null,
+        generation: token.generation,
+        userId: "member_123",
+      },
+      inFlight: true,
+      mailboxLag: [],
+      nextAlarmAt: null,
+      userId: "member_123",
+      workspace: null,
+    });
+
+    await stateStore.clearWriteFenceAfterTransportFailure({
+      error: new Error("runner transport failed"),
+      finishedAt: "2026-04-27T00:00:05.000Z",
+      token,
+    });
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      inFlight: false,
+      lastErrorAt: "2026-04-27T00:00:05.000Z",
+      lastErrorCode: expect.any(String),
+      nextAlarmAt: null,
+    });
+
+    const replacement = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    await stateStore.clearWriteFenceAfterCompletion({
+      finishedAt: "2026-04-27T00:00:10.000Z",
+      token: replacement,
+    });
+    const completedStatus = await runner.runnerStatus();
+    expect(completedStatus).toMatchObject({
+      inFlight: false,
+      lastInvocationAt: "2026-04-27T00:00:10.000Z",
+      nextAlarmAt: null,
+    });
+    expect(completedStatus).not.toHaveProperty("lastErrorAt");
+    expect(completedStatus).not.toHaveProperty("lastErrorCode");
+  });
 });
 
 function createWorkspace(input: {
@@ -184,5 +254,6 @@ function createRunnerStatusHarness() {
   return {
     runner,
     sql,
+    stateStore: new RunnerStateStore({ storage, waitUntil() {} }),
   };
 }

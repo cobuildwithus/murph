@@ -2176,6 +2176,8 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, ".runtime", "cache", "assistant-cache.json"), "{\"cache\":true}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "projections", "gateway.sqlite"), "retired-gateway-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "query-projection\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite-shm"), "query-projection-shm\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite-wal"), "query-projection-wal\n");
     await writeFile(path.join(vaultRoot, ".runtime", "search.sqlite"), "legacy-search\n");
     await writeFile(path.join(vaultRoot, ".runtime", "tmp", "scratch.txt"), "scratch\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
@@ -2546,7 +2548,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
       { expected: null, path: ".runtime/cache/assistant-cache.json", root: "vault" },
       { expected: null, path: ".runtime/projections/gateway.sqlite", root: "vault" },
-      { expected: null, path: ".runtime/projections/query.sqlite", root: "vault" },
+      { expected: "query-projection\n", path: ".runtime/projections/query.sqlite", root: "vault" },
+      { expected: "query-projection-shm\n", path: ".runtime/projections/query.sqlite-shm", root: "vault" },
+      { expected: "query-projection-wal\n", path: ".runtime/projections/query.sqlite-wal", root: "vault" },
       { expected: null, path: ".runtime/search.sqlite", root: "vault" },
       { expected: null, path: ".runtime/tmp/scratch.txt", root: "vault" },
       { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
@@ -2907,8 +2911,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "projections", "gateway.sqlite"), "utf8"),
     );
-    await assert.rejects(
-      readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"),
+      "query-projection\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"),
+      "query-projection-shm\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"),
+      "query-projection-wal\n",
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "search.sqlite"), "utf8"),

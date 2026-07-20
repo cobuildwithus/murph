@@ -200,6 +200,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     const tar = spawn("tar", [
       "-C",
       durableRoot,
+      "--format=pax",
       "--no-recursion",
       "--null",
       "-T",

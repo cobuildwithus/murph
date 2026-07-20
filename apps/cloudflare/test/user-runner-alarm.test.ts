@@ -1784,6 +1784,7 @@ describe("HostedUserRunner execution coordination", () => {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
         orchestration: {
+          activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
@@ -1833,6 +1834,7 @@ describe("HostedUserRunner execution coordination", () => {
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
       orchestration: {
+        activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
       },
@@ -3770,6 +3772,7 @@ describe("HostedUserRunner execution coordination", () => {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
         orchestration: {
+          activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
@@ -3784,6 +3787,14 @@ describe("HostedUserRunner execution coordination", () => {
         active_attempt_id: null,
         wake_at: null,
       });
+    });
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
+      activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+      activeWakeFinishedAtEpochMs: Date.parse(FIXED_NOW),
+      replacementFenceClearStartedAtEpochMs: Date.parse(FIXED_NOW),
+      replacementFenceClearedAtEpochMs: Date.parse(FIXED_NOW),
+      replacedStaleFence: true,
     });
   });
 
@@ -5333,7 +5344,6 @@ function clearRuntimeFenceForTest(sql: TestSqlStorageLike): void {
   sql.exec(
     `UPDATE runner_meta
      SET active_attempt_id = NULL,
-         active_expires_at = NULL,
          active_kind = NULL,
          active_provider_egress_token_hash = NULL,
          active_reason = NULL,
@@ -5346,35 +5356,35 @@ function clearRuntimeFenceForTest(sql: TestSqlStorageLike): void {
 
 function readRunnerMeta(sql: TestSqlStorageLike): {
   active_attempt_id: string | null;
-  active_expires_at: string | null;
+  active_expires_at: null;
   active_generation: number;
   active_started_at: string | null;
   active_workspace_version: string | null;
-  backoff_until: string | null;
+  backoff_until: null;
   failure_count: number;
   last_invocation_at: string | null;
-  wake_at: string | null;
+  wake_at: null;
 } {
   return sql.exec<{
     active_attempt_id: string | null;
-    active_expires_at: string | null;
+    active_expires_at: null;
     active_generation: number;
     active_started_at: string | null;
     active_workspace_version: string | null;
-    backoff_until: string | null;
+    backoff_until: null;
     failure_count: number;
     last_invocation_at: string | null;
-    wake_at: string | null;
+    wake_at: null;
   }>(
     `SELECT active_attempt_id,
-            active_expires_at,
+            NULL AS active_expires_at,
             active_generation,
             active_started_at,
             active_workspace_version,
-            backoff_until,
+            NULL AS backoff_until,
             failure_count,
             last_invocation_at,
-            wake_at
+            NULL AS wake_at
      FROM runner_meta
      WHERE singleton = 1`,
   ).one();

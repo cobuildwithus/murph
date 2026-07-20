@@ -15,12 +15,12 @@ import type {
 
 const NOW = "2026-04-27T00:00:00.000Z";
 
-describe("RunnerStateStore execution lease authority", () => {
+describe("RunnerStateStore write-fence state", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("records transport failures without scheduling wake or backoff work", async () => {
+  it("records transport failures after clearing the exact write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
@@ -37,15 +37,13 @@ describe("RunnerStateStore execution lease authority", () => {
     });
 
     expect(failed.record).toMatchObject({
-      backoffUntil: null,
       failureCount: 1,
       lastErrorAt: NOW,
-      wakeAt: null,
       writeFence: null,
     });
   });
 
-  it("clears completed write fences without writing wake or backoff work", async () => {
+  it("clears completed write fences and resets failure diagnostics", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
@@ -62,10 +60,8 @@ describe("RunnerStateStore execution lease authority", () => {
 
     expect(completed.completed).toBe(true);
     expect(completed.record).toMatchObject({
-      backoffUntil: null,
       failureCount: 0,
       lastInvocationAt: NOW,
-      wakeAt: null,
       writeFence: null,
     });
   });
@@ -99,7 +95,7 @@ describe("RunnerStateStore execution lease authority", () => {
     await expect(store.readWriteFenceToken()).resolves.toBeNull();
   });
 
-  it("clears replacement fences by identity without scheduling retry work", async () => {
+  it("clears replacement fences by identity and records the failure", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
@@ -120,14 +116,10 @@ describe("RunnerStateStore execution lease authority", () => {
     expect(cleared).toMatchObject({
       cleared: true,
       record: {
-        backoffUntil: null,
         failureCount: 1,
         lastErrorAt: NOW,
         writeFence: null,
       },
-    });
-    expect(cleared.record).toMatchObject({
-      wakeAt: null,
     });
   });
 
@@ -156,39 +148,13 @@ describe("RunnerStateStore execution lease authority", () => {
       userId: "member_123",
     } satisfies Partial<RunnerWriteFenceToken>);
   });
-
-  it("keeps legacy pending_nudge-only state inert after migration", async () => {
-    const { store } = createHarness((db) => {
-      db.exec(`
-        CREATE TABLE runner_meta (
-          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-          user_id TEXT NOT NULL,
-          pending_nudge INTEGER NOT NULL DEFAULT 0
-        )
-      `);
-      db.exec(`
-        INSERT INTO runner_meta (singleton, user_id, pending_nudge)
-        VALUES (1, 'member_123', 1)
-      `);
-    });
-
-    const state = await store.readState();
-    expect(state).toMatchObject({
-      nextWakeAt: null,
-      pendingNudge: false,
-      pendingWork: false,
-      wakeAt: null,
-      wakePending: false,
-    });
-  });
 });
 
-function createHarness(setup?: (db: DatabaseSync) => void): {
+function createHarness(): {
   db: DatabaseSync;
   store: RunnerStateStore;
 } {
   const db = new DatabaseSync(":memory:");
-  setup?.(db);
   return {
     db,
     store: new RunnerStateStore(createDurableObjectState(db)),

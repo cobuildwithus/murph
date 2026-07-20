@@ -3,6 +3,7 @@ import type {
   HostedBillingPlanCode,
   HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { HOSTED_START_PAID_PULSE_CONTINUATION_HEADER } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation-contract";
 
 interface ApiErrorPayload {
   error: {
@@ -54,6 +55,9 @@ export type HostedPulseTrialStartPaidClientResult =
   }
   | {
     status: "redirecting";
+  }
+  | {
+    status: "payment_required";
   }
   | {
     status: "started";
@@ -149,13 +153,24 @@ export async function requestHostedAutoPulseTrialEnrollment(input: {
   });
 }
 
-export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
+export async function requestHostedPulseTrialStartPaid(input: {
+  automaticContinuation?: boolean;
+} = {}): Promise<HostedPulseTrialStartPaidClientResult> {
   const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
+    headers: input.automaticContinuation
+      ? { [HOSTED_START_PAID_PULSE_CONTINUATION_HEADER]: "1" }
+      : undefined,
     method: "POST",
     url: "/api/settings/billing/start-paid-pulse",
   });
 
   if (response.status === "payment_required") {
+    if (input.automaticContinuation) {
+      return {
+        status: "payment_required",
+      };
+    }
+
     if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
       throw new HostedOnboardingApiError({
         code: null,

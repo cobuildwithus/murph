@@ -7,7 +7,6 @@ import {
 const runForegroundCommand = vi.hoisted(() =>
   vi.fn(async (_input: ForegroundCommandInput) => {})
 );
-const cleanupHostedLocalOrphanedWorkerdProcesses = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
 const cleanupHostedRunnerImages = vi.hoisted(() => vi.fn(async () => {}));
 const cleanupHostedLocalMinioBuildContainersBestEffort = vi.hoisted(() => vi.fn(async () => {}));
@@ -31,7 +30,6 @@ vi.mock("../src/process.ts", () => {
 });
 
 vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
-  cleanupHostedLocalOrphanedWorkerdProcesses,
   cleanupHostedRunnerContainers,
   cleanupHostedRunnerImages,
 }));
@@ -42,6 +40,62 @@ vi.mock("../src/dev-hosted-local/minio.ts", () => ({
 }));
 
 import { runHostedLocalE2eSuite } from "../src/e2e.ts";
+
+const interruptionCases: Array<{
+  expectedExitCode: number;
+  signal: "SIGHUP" | "SIGINT" | "SIGTERM";
+}> = [
+  { expectedExitCode: 130, signal: "SIGINT" },
+  { expectedExitCode: 143, signal: "SIGTERM" },
+  ...(process.platform === "win32"
+    ? []
+    : [{ expectedExitCode: 129, signal: "SIGHUP" as const }]),
+];
+
+function captureSuiteSignalHandlers(): {
+  handlers: Map<NodeJS.Signals, Array<() => void>>;
+  restore: () => void;
+} {
+  const handlers = new Map<NodeJS.Signals, Array<() => void>>();
+  const originalOnMethod = process.on.bind(process);
+  const originalOffMethod = process.off.bind(process);
+  const onSpy = vi.spyOn(process, "on").mockImplementation((event, listener) => {
+    if (event === "SIGINT" || event === "SIGTERM" || event === "SIGHUP") {
+      handlers.set(event, [
+        ...(handlers.get(event) ?? []),
+        listener as () => void,
+      ]);
+      return process;
+    }
+    return originalOnMethod(event, listener);
+  });
+  const offSpy = vi.spyOn(process, "off").mockImplementation((event, listener) => {
+    if (event === "SIGINT" || event === "SIGTERM" || event === "SIGHUP") {
+      handlers.set(
+        event,
+        (handlers.get(event) ?? []).filter((handler) => handler !== listener),
+      );
+      return process;
+    }
+    return originalOffMethod(event, listener);
+  });
+  return {
+    handlers,
+    restore: () => {
+      onSpy.mockRestore();
+      offSpy.mockRestore();
+    },
+  };
+}
+
+function emitCapturedSignal(
+  handlers: Map<NodeJS.Signals, Array<() => void>>,
+  signal: NodeJS.Signals,
+): void {
+  for (const handler of handlers.get(signal) ?? []) {
+    handler();
+  }
+}
 
 describe("hosted-local E2E suite preparation", () => {
   afterEach(() => {
@@ -401,7 +455,6 @@ describe("hosted-local E2E suite preparation", () => {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       }),
     );
-    expect(cleanupHostedLocalOrphanedWorkerdProcesses).toHaveBeenCalled();
   });
 
   test("scrubs inherited web session authority before E2E preparation", async () => {
@@ -470,65 +523,110 @@ describe("hosted-local E2E suite preparation", () => {
     expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
   });
 
-  test("preserves SIGINT exit semantics while cleaning up runner artifacts", async () => {
-    const signalHandlers = new Map<NodeJS.Signals, Array<() => void>>();
-    const originalOnceMethod = process.once.bind(process);
-    const originalOffMethod = process.off.bind(process);
-    const originalExitCode = process.exitCode;
-    const onceSpy = vi.spyOn(process, "once").mockImplementation((event, listener) => {
-      if (event === "SIGINT" || event === "SIGTERM") {
-        signalHandlers.set(event, [
-          ...(signalHandlers.get(event) ?? []),
-          listener as () => void,
-        ]);
-        return process;
-      }
-      return originalOnceMethod(event, listener);
-    });
-    const offSpy = vi.spyOn(process, "off").mockImplementation((event, listener) => {
-      if (event === "SIGINT" || event === "SIGTERM") {
-        signalHandlers.set(
-          event,
-          (signalHandlers.get(event) ?? []).filter((handler) => handler !== listener),
-        );
-        return process;
-      }
-      return originalOffMethod(event, listener);
-    });
-    process.exitCode = undefined;
+  test.each(interruptionCases)(
+    "preserves $signal exit semantics while cleaning up runner artifacts",
+    async ({ expectedExitCode, signal }) => {
+      const signalCapture = captureSuiteSignalHandlers();
+      const originalExitCode = process.exitCode;
+      process.exitCode = undefined;
 
-    try {
-      runForegroundCommand.mockImplementation(async (input) => {
-        if (!input.args.includes("vitest")) {
-          return;
-        }
-        for (const handler of signalHandlers.get("SIGINT") ?? []) {
-          handler();
-        }
-        throw new ForegroundCommandSignalError(input.label, "SIGINT");
+      try {
+        runForegroundCommand.mockImplementation(async (input) => {
+          if (!input.args.includes("vitest")) {
+            return;
+          }
+          expect(input.forwardProcessSignals).toBeUndefined();
+          emitCapturedSignal(signalCapture.handlers, signal);
+          emitCapturedSignal(signalCapture.handlers, signal);
+          throw new ForegroundCommandSignalError(input.label, signal);
+        });
+
+        await expect(runHostedLocalE2eSuite({
+          env: {},
+          prepareRunnerBundle: false,
+          scenario: "checkpoint-baseline",
+        })).resolves.toEqual({ terminationSignal: signal });
+
+        expect(process.exitCode).toBe(expectedExitCode);
+        expect(cleanupHostedRunnerContainers).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            ignoreErrors: true,
+            scope: "current-build",
+            timeoutMs: 60_000,
+          }),
+        );
+        expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+        expect(signalCapture.handlers.get(signal)).toEqual([]);
+      } finally {
+        process.exitCode = originalExitCode;
+        signalCapture.restore();
+      }
+    },
+  );
+
+  test.each(interruptionCases)(
+    "closes work admission when $signal arrives during pre-scenario cleanup",
+    async ({ expectedExitCode, signal }) => {
+      const signalCapture = captureSuiteSignalHandlers();
+      const originalExitCode = process.exitCode;
+      process.exitCode = undefined;
+      cleanupHostedRunnerContainers.mockImplementationOnce(async () => {
+        emitCapturedSignal(signalCapture.handlers, signal);
+        emitCapturedSignal(signalCapture.handlers, signal);
       });
 
-      await expect(runHostedLocalE2eSuite({
-        env: {},
-        prepareRunnerBundle: false,
-        scenario: "checkpoint-baseline",
-      })).resolves.toEqual({ terminationSignal: "SIGINT" });
+      try {
+        await expect(runHostedLocalE2eSuite({
+          env: {},
+          prepareRunnerBundle: false,
+          scenario: "checkpoint-baseline",
+        })).resolves.toEqual({ terminationSignal: signal });
 
-      expect(process.exitCode).toBe(130);
-      expect(cleanupHostedRunnerContainers).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          ignoreErrors: true,
-          scope: "current-build",
-          timeoutMs: 60_000,
-        }),
-      );
-      expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
-    } finally {
-      process.exitCode = originalExitCode;
-      onceSpy.mockRestore();
-      offSpy.mockRestore();
-    }
-  });
+        const vitestCalls = runForegroundCommand.mock.calls
+          .map(([call]) => call)
+          .filter((call) => call.args.includes("vitest"));
+        expect(vitestCalls).toHaveLength(0);
+        expect(process.exitCode).toBe(expectedExitCode);
+        expect(signalCapture.handlers.get(signal)).toEqual([]);
+      } finally {
+        process.exitCode = originalExitCode;
+        signalCapture.restore();
+      }
+    },
+  );
+
+  test.runIf(process.platform !== "win32")(
+    "closes batch admission when SIGHUP arrives during between-batch cleanup",
+    async () => {
+      const signalCapture = captureSuiteSignalHandlers();
+      const originalExitCode = process.exitCode;
+      process.exitCode = undefined;
+      cleanupHostedRunnerContainers
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(async () => {
+          emitCapturedSignal(signalCapture.handlers, "SIGHUP");
+          emitCapturedSignal(signalCapture.handlers, "SIGHUP");
+        });
+
+      try {
+        await expect(runHostedLocalE2eSuite({
+          env: {},
+          prepareRunnerBundle: false,
+          scenario: "all",
+        })).resolves.toEqual({ terminationSignal: "SIGHUP" });
+
+        const vitestCalls = runForegroundCommand.mock.calls
+          .map(([call]) => call)
+          .filter((call) => call.args.includes("vitest"));
+        expect(vitestCalls).toHaveLength(1);
+        expect(process.exitCode).toBe(129);
+        expect(signalCapture.handlers.get("SIGHUP")).toEqual([]);
+      } finally {
+        process.exitCode = originalExitCode;
+        signalCapture.restore();
+      }
+    },
+  );
 
   test("does not add aggregate-only web preparation for one focused scenario", async () => {
     await runHostedLocalE2eSuite({

@@ -190,15 +190,30 @@ const publicProductTestResultOperatorSchema = z.enum([
   "lte",
   "gt",
   "gte",
+  "range",
   "not_detected",
   "detected",
   "trace",
 ]);
 
+const publicProductTestMeasurementMetadataSchema = z
+  .object({
+    value: nonnegativeFiniteNumber,
+    unit: boundedText(64),
+  })
+  .strict();
+
 const publicProductTestResultSchema = z
   .object({
     operator: publicProductTestResultOperatorSchema,
     value: nonnegativeFiniteNumber.nullable(),
+    upperValue: nonnegativeFiniteNumber.nullable().optional(),
+    qualifier: nullableText(512).optional(),
+    detectionLimit: publicProductTestMeasurementMetadataSchema.nullable().optional(),
+    quantificationLimit:
+      publicProductTestMeasurementMetadataSchema.nullable().optional(),
+    reportingLimit: publicProductTestMeasurementMetadataSchema.nullable().optional(),
+    uncertainty: publicProductTestMeasurementMetadataSchema.nullable().optional(),
     unit: boundedText(64),
     basis: boundedText(256),
   })
@@ -207,8 +222,32 @@ const publicProductTestResultSchema = z
 const publicProductNormalizedTestResultSchema = z
   .object({
     value: nonnegativeFiniteNumber,
+    upperValue: nonnegativeFiniteNumber.nullable().optional(),
     unit: boundedText(64),
     basis: boundedText(256),
+  })
+  .strict();
+
+const publicProductTestSampleSchema = z
+  .object({
+    evidenceType: z.enum([
+      "laboratory_measurement",
+      "regulatory_laboratory",
+      "regulatory_finding",
+      "xrf_screening",
+      "manufacturer_coa",
+    ]),
+    samplingContext: z.string().regex(/^[a-z][a-z0-9_]*$/u).max(128),
+    sourceSampleId: nullableText(512),
+    sampleCount: z.number().int().positive().finite().nullable().optional(),
+    reportedUpc: nullableText(128).optional(),
+    lotCode: nullableText(512),
+    bestBy: nullableText(512),
+    packageSize: nullableText(256),
+    collectedOn: z.iso.date().nullable(),
+    testedOn: z.iso.date().nullable(),
+    labName: nullableText(512),
+    testMethod: nullableText(2_000),
   })
   .strict();
 
@@ -287,6 +326,7 @@ const publicProductTestObservationSchema = z
     normalizedResult: publicProductNormalizedTestResultSchema.nullable(),
     source: publicProductTestSourceSchema,
     testedProduct: publicProductTestedProductSchema,
+    sample: publicProductTestSampleSchema.optional(),
     labName: nullableText(512),
     testMethod: nullableText(2_000),
     screening: publicProductTestScreeningSchema.nullable(),
@@ -302,6 +342,7 @@ const publicProductTestAlertSchema = z
     screeningPolicy: publicProductScreeningPolicySchema.optional(),
     source: publicProductTestSourceSchema,
     testedProduct: publicProductTestedProductSchema,
+    sample: publicProductTestSampleSchema.optional(),
   })
   .strict();
 

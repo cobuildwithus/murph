@@ -40,6 +40,7 @@ const HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME = "murph.hosted-local.build-id";
 const HOSTED_LOCAL_MINIO_E2E_LABEL = "murph.hosted-local.e2e=1";
 const HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX = "murph-hosted-local-r2-";
 const HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
+const HOSTED_LOCAL_MINIO_DOCKER_CLEANUP_TIMEOUT_MS = 10_000;
 
 interface HostedLocalMinioPublishTarget {
   controlHost: string;
@@ -455,32 +456,70 @@ function inferHostedLocalMinioBuildIdFromContainerName(containerName: string): s
 }
 
 async function runDockerBestEffort(env: NodeJS.ProcessEnv, args: string[]): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const child = spawn("docker", args, {
-      env,
-      stdio: "ignore",
-    });
-    child.once("error", () => resolve());
-    child.once("exit", () => resolve());
+  const child = spawn("docker", args, {
+    env,
+    stdio: "ignore",
   });
+  await settleDockerCleanupChild(child, undefined, () => undefined);
 }
 
 async function runDockerCaptureBestEffort(env: NodeJS.ProcessEnv, args: string[]): Promise<string> {
-  return await new Promise<string>((resolve) => {
-    const child = spawn("docker", args, {
-      env,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const decoder = new StringDecoder("utf8");
-    let output = "";
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      output += typeof chunk === "string" ? chunk : decoder.write(chunk);
-    });
-    child.once("error", () => resolve(""));
-    child.once("exit", (code) => {
+  const child = spawn("docker", args, {
+    env,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const decoder = new StringDecoder("utf8");
+  let output = "";
+  const onStdoutData = (chunk: Buffer | string): void => {
+    output += typeof chunk === "string" ? chunk : decoder.write(chunk);
+  };
+  child.stdout?.on("data", onStdoutData);
+  try {
+    return await settleDockerCleanupChild(child, "", (code) => {
       output += decoder.end();
-      resolve(code === 0 ? output : "");
+      return code === 0 ? output : "";
     });
+  } finally {
+    child.stdout?.off("data", onStdoutData);
+  }
+}
+
+async function settleDockerCleanupChild<T>(
+  child: ReturnType<typeof spawn>,
+  fallback: T,
+  onExit: (code: number | null) => T,
+): Promise<T> {
+  return await new Promise<T>((resolve) => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+    const settle = (value: T): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      resolve(value);
+    };
+    child.once("error", () => settle(fallback));
+    child.once("exit", (code) => {
+      if (!settled) {
+        settle(onExit(code));
+      }
+    });
+    timeout = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The exact retained child may have exited between the timer and kill.
+      }
+      settle(fallback);
+    }, HOSTED_LOCAL_MINIO_DOCKER_CLEANUP_TIMEOUT_MS);
+    timeout.unref();
+    if (settled) {
+      clearTimeout(timeout);
+    }
   });
 }
 

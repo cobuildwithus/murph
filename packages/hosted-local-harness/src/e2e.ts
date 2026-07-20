@@ -406,18 +406,54 @@ export async function runHostedLocalE2eSuite(
   const onSigterm = (): void => {
     terminationSignal ??= "SIGTERM";
   };
-  process.once("SIGINT", onSigint);
-  process.once("SIGTERM", onSigterm);
+  const onSighup = (): void => {
+    terminationSignal ??= "SIGHUP";
+  };
+  const assertWorkAdmission = (): void => {
+    if (terminationSignal) {
+      throw new ForegroundCommandSignalError(
+        "Hosted local E2E suite",
+        terminationSignal,
+      );
+    }
+  };
+  const runAdmittedStep = async (run: () => Promise<void>): Promise<void> => {
+    assertWorkAdmission();
+    await run();
+    assertWorkAdmission();
+  };
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
+  if (process.platform !== "win32") {
+    process.on("SIGHUP", onSighup);
+  }
 
   try {
     try {
       if (prepareRunnerBundle) {
-        await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
+        await runAdmittedStep(async () => {
+          await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
+        });
       }
+      assertWorkAdmission();
       prepareHostedLocalRunnerSmokeEnv(suiteEnv);
-      await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
-      await prepareHostedLocalWebGeneratedArtifacts({ env: suiteEnv, scenarios });
-      await runHostedLocalVitest({ env: suiteEnv, scenarios });
+      await runAdmittedStep(async () => {
+        await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
+      });
+      await runAdmittedStep(async () => {
+        await prepareHostedLocalWebGeneratedArtifacts({
+          assertWorkAdmission,
+          env: suiteEnv,
+          scenarios,
+        });
+      });
+      await runAdmittedStep(async () => {
+        await runHostedLocalVitest({
+          assertWorkAdmission,
+          env: suiteEnv,
+          scenarios,
+        });
+      });
     } catch (error) {
       if (
         !terminationSignal
@@ -435,11 +471,14 @@ export async function runHostedLocalE2eSuite(
         runnerCleanupTimeoutMs: FINAL_RUNNER_CLEANUP_TIMEOUT_MS,
       });
       if (terminationSignal) {
-        process.exitCode = terminationSignal === "SIGINT" ? 130 : 143;
+        process.exitCode = foregroundSignalExitCode(terminationSignal);
       }
     } finally {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      if (process.platform !== "win32") {
+        process.off("SIGHUP", onSighup);
+      }
     }
   }
 
@@ -464,7 +503,6 @@ async function prepareHostedLocalRunnerBundle(input: {
     command: "pnpm",
     cwd: hostedLocalHarnessRepoRoot,
     env,
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner bundle preparation",
   });
 }
@@ -477,7 +515,6 @@ async function prepareHostedLocalRunnerBaseImage(input: {
     command: "pnpm",
     cwd: hostedLocalHarnessRepoRoot,
     env: input.env,
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner base image preparation",
   });
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
@@ -490,6 +527,7 @@ function prepareHostedLocalRunnerSmokeEnv(env: NodeJS.ProcessEnv): void {
 }
 
 async function prepareHostedLocalWebGeneratedArtifacts(input: {
+  assertWorkAdmission: () => void;
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
@@ -498,24 +536,24 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
   }
 
   if (input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] !== "1") {
+    input.assertWorkAdmission();
     await runForegroundCommand({
       args: ["--dir", "apps/web", "prisma:generate"],
       command: "pnpm",
       cwd: hostedLocalHarnessRepoRoot,
       env: input.env,
-      forwardProcessSignals: ["SIGINT", "SIGTERM"],
       label: "Hosted local web Prisma client preparation",
     });
     input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] = "1";
   }
 
   if (input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] !== "1") {
+    input.assertWorkAdmission();
     await runForegroundCommand({
       args: ["health-commons:generate"],
       command: "pnpm",
       cwd: hostedLocalHarnessRepoRoot,
       env: input.env,
-      forwardProcessSignals: ["SIGINT", "SIGTERM"],
       label: "Hosted local Health Commons generation",
     });
     input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] = "1";
@@ -523,6 +561,7 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
 }
 
 async function runHostedLocalVitest(input: {
+  assertWorkAdmission: () => void;
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
@@ -533,6 +572,7 @@ async function runHostedLocalVitest(input: {
       removeRunnerImages: false,
       runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
     });
+    input.assertWorkAdmission();
     try {
       await runHostedLocalVitestForScenarios({
         env: input.env,
@@ -558,10 +598,12 @@ async function runHostedLocalVitest(input: {
     removeRunnerImages: false,
     runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
   });
+  input.assertWorkAdmission();
   try {
     const batches = buildHostedLocalVitestBatches(input.scenarios);
     for (let index = 0; index < batches.length; index += 1) {
       const scenarios = batches[index] ?? [];
+      input.assertWorkAdmission();
       await runHostedLocalVitestForScenarios({
         env: buildHostedLocalVitestBatchEnv({
           env: input.env,
@@ -580,6 +622,7 @@ async function runHostedLocalVitest(input: {
           removeRunnerImages: false,
           runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
         });
+        input.assertWorkAdmission();
       }
     }
   } finally {
@@ -678,9 +721,21 @@ async function runHostedLocalVitestForScenarios(input: {
       env: input.env,
       scenarios: input.scenarios,
     }),
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: input.label,
   });
+}
+
+function foregroundSignalExitCode(signal: NodeJS.Signals): number {
+  switch (signal) {
+    case "SIGHUP":
+      return 129;
+    case "SIGINT":
+      return 130;
+    case "SIGTERM":
+      return 143;
+    default:
+      return 1;
+  }
 }
 
 function buildHostedLocalE2eSuiteEnv(input: {
@@ -776,7 +831,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   options: HostedLocalE2eRunnerCleanupOptions,
 ): Promise<void> {
   const {
-    cleanupHostedLocalOrphanedWorkerdProcesses,
     cleanupHostedRunnerContainers,
     cleanupHostedRunnerImages,
   } =
@@ -787,7 +841,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   } =
     await import("./dev-hosted-local/minio.ts");
 
-  cleanupHostedLocalOrphanedWorkerdProcesses();
   await cleanupHostedRunnerContainers({
     cwd: hostedLocalHarnessRepoRoot,
     env,

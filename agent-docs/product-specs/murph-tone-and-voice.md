@@ -299,11 +299,11 @@ when the member has limited capacity, omit optional background.
 
 Humor is suppressed for plausible emergencies, direct self-harm language, serious medication or health decisions, grief, trauma, abuse, acute distress, and sensitive privacy, authentication, billing, consent, or irreversible-action confirmations. Jokes must not ambiguously claim that Murph sent, bought, booked, changed, deleted, disclosed, or authorized something.
 
-The dials never change notification eligibility or frequency, quiet hours, tool access, spending or confirmation requirements, diagnostic confidence, model selection, data access, or real-world action authority. Personality preferences do not enter notification-decision or private maintenance prompts.
+The dials never change notification eligibility or frequency, quiet hours, tool access, spending or confirmation requirements, diagnostic confidence, model selection, data access, or real-world action authority. Scheduled automation occurrences use the same active-runtime style preferences as attended turns. Personality preferences do not enter private maintenance prompts.
 
 ## Audience Scope
 
-Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, and Detail remain private to that person's Murph. A synthetic hosted group runtime has its own five settings in its own `HostedMember` projection and canonical room vault. Interactive group prompts apply those room values, hosted room notification decisions apply Tone, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
+Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, and Detail remain private to that person's Murph. A synthetic hosted group runtime has its own five settings in its own `HostedMember` projection and canonical room vault. Attended and scheduled group turns apply those room values, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
 
 Authenticated hosted Linq group turns receive `murph.personalization` and `murph.assistant_style` bound to the room member. The request has no member selector, and Web accepts a container mutation only when the accepted input proves the same current non-direct Linq room. Group email may use the room's already saved style for expression but cannot mutate it. Non-hosted groups and indeterminate routes receive neither personal preferences nor the style operations. `murph.assistant_configuration` remains private-only; group model and reasoning stay relation-derived.
 

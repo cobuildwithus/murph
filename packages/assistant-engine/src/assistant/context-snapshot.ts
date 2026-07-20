@@ -624,8 +624,8 @@ async function buildAssistantSnapshotCoverage(input: {
     bloodTestsPresent: bloodTestCoverage.present,
     bloodTestsLine: bloodTestCoverage.present
       ? bloodTestCoverage.latestBloodTestDate
-        ? `- Blood test records are present (latest ${bloodTestCoverage.latestBloodTestDate}). Read them with \`vault-cli blood-test list --format json\` before supplement, deficiency, or lab-relevant advice.`
-        : '- Blood test records are present. Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.'
+        ? `- Blood test records are present (latest ${bloodTestCoverage.latestBloodTestDate}). For a named biomarker, read it once with \`vault-cli blood-test list --text "<biomarker>" --limit 1 --format json\`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.`
+        : '- Blood test records are present. For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.'
       : null,
     conditionCount: conditions.length,
     goalCount: goals.length,

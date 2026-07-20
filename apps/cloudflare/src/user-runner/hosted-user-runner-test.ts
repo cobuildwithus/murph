@@ -94,7 +94,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       userId: input.userId,
     });
     if (typeof input.startedAgoMs === "number") {
-      await this.ageActiveInvocationForHostedLocalTest({
+      await this.ageActiveWriteFenceForHostedLocalTest({
         startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
       });
     }
@@ -106,7 +106,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     };
   }
 
-  private async ageActiveInvocationForHostedLocalTest(input: {
+  private async ageActiveWriteFenceForHostedLocalTest(input: {
     startedAt: string;
   }) {
     const sql = this.testState.storage.sql;
@@ -124,8 +124,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
 
     sql.exec(
       `UPDATE runner_meta
-       SET active_started_at = ?,
-           active_expires_at = NULL
+       SET active_started_at = ?
        WHERE singleton = 1`,
       new Date(input.startedAt).toISOString(),
     );

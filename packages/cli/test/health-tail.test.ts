@@ -1743,10 +1743,28 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
             flag: "normal",
           },
           {
+            analyte: "VLDL Cholesterol",
+            value: 24,
+            unit: "mg/dL",
+            flag: "normal",
+          },
+          {
             analyte: "LDL Cholesterol",
             value: 134,
             unit: "mg/dL",
             flag: "high",
+          },
+          {
+            analyte: "Non-HDL Cholesterol",
+            value: 158,
+            unit: "mg/dL",
+            flag: "high",
+          },
+          {
+            analyte: "HDL Cholesterol",
+            value: 52,
+            unit: "mg/dL",
+            flag: "normal",
           },
         ],
       }),
@@ -1775,6 +1793,8 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
       "list",
       "--status",
       "mixed",
+      "--text",
+      "Apolipoprotein B",
       "--limit",
       "5",
       "--vault",
@@ -1796,9 +1816,49 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
       "--vault",
       vaultRoot,
     ]);
+    const ldlList = await runCli<{
+      count: number;
+      items: Array<{ data: Record<string, unknown> }>;
+    }>([
+      "blood-test",
+      "list",
+      "--text",
+      "LDL",
+      "--limit",
+      "1",
+      "--vault",
+      vaultRoot,
+    ]);
+    const hdlList = await runCli<{
+      count: number;
+      items: Array<{ data: Record<string, unknown> }>;
+    }>([
+      "blood-test",
+      "list",
+      "--text",
+      "HDL",
+      "--limit",
+      "1",
+      "--vault",
+      vaultRoot,
+    ]);
+    const ambiguousList = await runCli<{
+      count: number;
+      items: Array<{ data: Record<string, unknown> }>;
+    }>([
+      "blood-test",
+      "list",
+      "--text",
+      "cholesterol",
+      "--limit",
+      "1",
+      "--vault",
+      vaultRoot,
+    ]);
 
     assert.equal(nounList.ok, true);
     assert.equal(requireData(nounList).filters.status, "mixed");
+    assert.equal(requireData(nounList).filters.text, "Apolipoprotein B");
     assert.equal("kind" in requireData(nounList).filters, false);
     assert.equal(requireData(nounList).filters.limit, 5);
     assert.equal(requireData(nounList).count, 1);
@@ -1806,10 +1866,39 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
     assert.equal(requireData(nounList).items[0]?.kind, "blood_test");
     assert.equal(requireData(nounList).items[0]?.data.resultStatus, "mixed");
     assert.equal(requireData(nounList).items[0]?.data.labName, "Function Health");
+    assert.deepEqual(requireData(nounList).items[0]?.data.matchedResult, {
+      analyte: "Apolipoprotein B",
+      flag: "normal",
+      unit: "mg/dL",
+      value: 87,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(requireData(nounList).items[0]?.data.matchedResult),
+      /LDL Cholesterol|134/u,
+    );
     assert.equal(genericList.ok, true);
     assert.equal(requireData(genericList).count, 1);
     assert.equal(requireData(genericList).items[0]?.kind, "blood_test");
     assert.equal(requireData(genericList).items[0]?.data.testCategory, "blood");
+    assert.equal(requireData(genericList).items[0]?.data.resultsCount, 5);
+    assert.equal(requireData(genericList).items[0]?.data.matchedResult, undefined);
+    assert.deepEqual(requireData(ldlList).items[0]?.data.matchedResult, {
+      analyte: "LDL Cholesterol",
+      flag: "high",
+      unit: "mg/dL",
+      value: 134,
+    });
+    assert.deepEqual(requireData(hdlList).items[0]?.data.matchedResult, {
+      analyte: "HDL Cholesterol",
+      flag: "normal",
+      unit: "mg/dL",
+      value: 52,
+    });
+    assert.equal(requireData(ambiguousList).count, 1);
+    assert.equal(
+      requireData(ambiguousList).items[0]?.data.matchedResult,
+      undefined,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

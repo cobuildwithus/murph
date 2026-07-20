@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  foodLabelSearchItemSchema,
   searchFoodLabels,
   searchFoodLabelsBatch,
 } from '../src/food-labels.js'
@@ -34,6 +35,21 @@ const riceLabel = {
   ],
 }
 
+const yogurtTestSample = {
+  evidenceType: 'regulatory_laboratory',
+  samplingContext: 'retail_surveillance',
+  sourceSampleId: 'sample-79',
+  sampleCount: 6,
+  reportedUpc: '01234 56789 05',
+  lotCode: 'LOT-2024-07',
+  bestBy: '2024-08-31',
+  packageSize: '170 g',
+  collectedOn: '2024-07-01',
+  testedOn: '2024-07-08',
+  labName: 'Example Laboratory',
+  testMethod: 'LC-MS/MS',
+}
+
 const yogurtContaminants = {
   status: 'known_product_tests',
   murphConcernLevel: 'medium',
@@ -46,6 +62,21 @@ const yogurtContaminants = {
       result: {
         operator: 'eq',
         value: 0.012,
+        upperValue: null,
+        qualifier: 'estimated',
+        detectionLimit: {
+          value: 0.001,
+          unit: 'ppm',
+        },
+        quantificationLimit: {
+          value: 0.002,
+          unit: 'ppm',
+        },
+        reportingLimit: null,
+        uncertainty: {
+          value: 0.0005,
+          unit: 'ppm',
+        },
         unit: 'ppm',
         basis: 'product_mass',
       },
@@ -83,6 +114,7 @@ const yogurtContaminants = {
         sourceProductId: '79',
         matchMethod: 'manual_confirmed',
       },
+      sample: yogurtTestSample,
     },
   ],
   observationCount: 6,
@@ -90,13 +122,23 @@ const yogurtContaminants = {
     contaminantKey,
     contaminantName: contaminantKey.toUpperCase(),
     result: {
-      operator: 'eq',
+      operator: index === 0 ? 'range' : 'eq',
       value: 12 + index,
+      upperValue: index === 0 ? 13 : null,
+      qualifier: index === 0 ? 'estimated range' : null,
+      detectionLimit: {
+        value: 1,
+        unit: 'ng/g',
+      },
+      quantificationLimit: null,
+      reportingLimit: null,
+      uncertainty: null,
       unit: 'ng/g',
       basis: 'product_mass',
     },
     normalizedResult: {
       value: (12 + index) / 1000,
+      upperValue: index === 0 ? 0.013 : null,
       unit: 'ppm',
       basis: 'product_mass',
     },
@@ -114,8 +156,125 @@ const yogurtContaminants = {
       sourceProductId: '79',
       matchMethod: 'manual_confirmed',
     },
+    sample: yogurtTestSample,
   })),
 }
+
+describe('foodLabelSearchItemSchema', () => {
+  it('accepts regulatory presence findings without lab-measurement metadata', () => {
+    const parsed = foodLabelSearchItemSchema.parse({
+      id: 'fdc:2259794',
+      dataOrigin: 'usda_branded',
+      dataOriginId: '2259794',
+      name: 'Example Supplement',
+      brand: null,
+      upc: null,
+      offMarket: false,
+      contaminants: {
+        status: 'known_product_tests',
+        murphConcernLevel: 'unknown',
+        alertCount: 0,
+        alerts: [],
+        observationCount: 1,
+        observations: [
+          {
+            contaminantKey: 'undeclared_drug',
+            contaminantName: 'Undeclared active ingredient',
+            result: {
+              operator: 'detected',
+              value: null,
+              unit: 'presence',
+              basis: 'regulatory_finding',
+            },
+            normalizedResult: null,
+            source: {
+              key: 'fda_health_fraud_products',
+              name: 'FDA Health Fraud Product Database',
+              url: 'https://www.fda.gov/consumers/health-fraud-scams/health-fraud-product-database',
+              reportTitle: 'Health Fraud Product Database',
+              reportDate: null,
+            },
+            testedProduct: {
+              name: 'Example Supplement',
+              brand: null,
+              upc: null,
+              sourceProductId: 'finding-1',
+              matchMethod: 'manual_confirmed',
+            },
+            sample: {
+              evidenceType: 'regulatory_finding',
+              samplingContext: 'regulatory_enforcement_table',
+              sourceSampleId: null,
+              sampleCount: null,
+              reportedUpc: null,
+              lotCode: null,
+              bestBy: null,
+              packageSize: null,
+              collectedOn: null,
+              testedOn: null,
+              labName: null,
+              testMethod: null,
+            },
+          },
+        ],
+      },
+    })
+
+    assert.equal(
+      parsed.contaminants?.observations[0]?.sample?.evidenceType,
+      'regulatory_finding',
+    )
+  })
+
+  it('keeps legacy contaminant payloads valid when additive test metadata is absent', () => {
+    const parsed = foodLabelSearchItemSchema.parse({
+      id: 'fdc:2259794',
+      dataOrigin: 'usda_branded',
+      dataOriginId: '2259794',
+      name: 'Plain Greek Yogurt',
+      brand: 'Example Dairy',
+      upc: '012345678905',
+      offMarket: false,
+      contaminants: {
+        status: 'known_product_tests',
+        murphConcernLevel: 'none',
+        alertCount: 0,
+        alerts: [],
+        observationCount: 1,
+        observations: [
+          {
+            contaminantKey: 'lead',
+            contaminantName: 'Lead',
+            result: {
+              operator: 'eq',
+              value: 0.01,
+              unit: 'ppm',
+              basis: 'product_mass',
+            },
+            normalizedResult: null,
+            source: {
+              key: 'legacy_source',
+              name: 'Legacy Source',
+              url: null,
+              reportTitle: null,
+              reportDate: null,
+            },
+            testedProduct: {
+              name: 'Plain Greek Yogurt',
+              brand: 'Example Dairy',
+              upc: '012345678905',
+              sourceProductId: 'legacy-1',
+              matchMethod: 'manual_confirmed',
+            },
+          },
+        ],
+      },
+    })
+
+    assert.equal(parsed.contaminants?.observations[0]?.sample, undefined)
+    assert.equal(parsed.contaminants?.observations[0]?.result.upperValue, undefined)
+  })
+})
 
 describe('searchFoodLabels', () => {
   it('calls the internal foods API with the hosted provider credential', async () => {

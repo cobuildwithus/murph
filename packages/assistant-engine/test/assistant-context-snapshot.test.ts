@@ -259,7 +259,7 @@ describe('assistant context snapshot', () => {
       )
       expect(prompt).not.toContain('Wearable coverage is present')
       expect(prompt).toContain(
-        'Blood test records are present (latest 2026-05-31). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+        'Blood test records are present (latest 2026-05-31). For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.',
       )
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active goals:')
@@ -447,7 +447,7 @@ describe('assistant context snapshot', () => {
 
       const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
       expect(prompt).toContain(
-        'Blood test records are present (latest 2026-01-15). Read them with `vault-cli blood-test list --format json` before supplement, deficiency, or lab-relevant advice.',
+        'Blood test records are present (latest 2026-01-15). For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.',
       )
       expect(prompt).not.toContain('latest 2026-05-31')
     } finally {

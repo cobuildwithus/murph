@@ -111,21 +111,21 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
   assistantNotificationSendDecisionSchema,
 ])
 
-const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
-  Omit<AssistantCodexTurnThreadScopeProfile, 'nativeResumePolicy'>
-> = {
-  promptProfile: 'notification-decision',
-  threadScope: 'session-thread',
-  toolProfile: 'notification-turn',
-}
-
-const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
+const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
-  promptProfile: 'notification-decision',
+  promptProfile: 'maintenance',
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
+}
+const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'system-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
 }
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
@@ -334,46 +334,31 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
-      const hostedDeviceTool =
-        !isAssistantNotificationMaintenanceExactSkip(input) &&
-        conversationScope === 'direct'
-          ? executionContext?.hosted?.deviceTool ?? null
-          : null
-      const hostedGroupSharedReader =
+      const hostedExecutionContext =
+        isAssistantNotificationScheduledOccurrence(input) &&
         !isAssistantNotificationMaintenanceExactSkip(input)
-        && conversationScope === 'group'
-          ? executionContext?.hosted?.groupSharedReader ?? null
+          ? executionContext?.hosted ?? null
           : null
-      const hostedGroupPermissionOfferTool =
-        !isAssistantNotificationMaintenanceExactSkip(input)
-        && conversationScope === 'group'
-          ? executionContext?.hosted?.groupPermissionOfferTool ?? null
-          : null
-      const hostedToolContext =
-        hostedNewsletterTool
-        || hostedDeviceTool
-        || hostedGroupPermissionOfferTool
-        || hostedGroupSharedReader
-          ? createAssistantHostedToolContext({
-              deviceTool: hostedDeviceTool,
-              groupPermissionOfferTool: hostedGroupPermissionOfferTool,
-              groupSharedReader: hostedGroupSharedReader,
-              newsletterTool: hostedNewsletterTool,
-              messageInput,
-              newsletterOutbox: {
-                turnId,
-                vault: input.vault,
-              },
-              recordNewsletterSendResult: (result) => {
-                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                  current: newsletterSendResult ?? null,
-                  next: result.result,
-                })
-              },
-              session: resolved.session,
-            })
-          : null
+      const hostedToolContext = hostedExecutionContext
+        ? createAssistantHostedToolContext({
+            computerToolsAvailable:
+              typeof hostedExecutionContext.providerFetch === 'function',
+            executionContext: hostedExecutionContext,
+            getConversationScope: () => conversationScope,
+            messageInput,
+            newsletterOutbox: {
+              turnId,
+              vault: input.vault,
+            },
+            recordNewsletterSendResult: (result) => {
+              newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
+                current: newsletterSendResult ?? null,
+                next: result.result,
+              })
+            },
+            session: resolved.session,
+          })
+        : null
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
@@ -393,8 +378,9 @@ export async function sendAssistantNotificationLocal(
       try {
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
-        const notificationTurnProfile =
-          resolveAssistantNotificationTurnProfile(input)
+        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
+        const notificationThreadScope =
+          notificationTurnProfile?.threadScope ?? 'session-thread'
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
@@ -410,7 +396,9 @@ export async function sendAssistantNotificationLocal(
             : undefined,
           plan: sharedPlan,
           progressDelivery,
-          profile: notificationTurnProfile,
+          ...(notificationTurnProfile
+            ? { profile: notificationTurnProfile }
+            : {}),
           resolvedSession: resolved.session,
           route,
           turnCreatedAt,
@@ -427,7 +415,7 @@ export async function sendAssistantNotificationLocal(
             await applyAssistantSessionCodexResumeStateAction({
               action: resolveAssistantProviderResumeStateAction({
                 codexThreadId: providerOutcome.codexThreadId,
-                threadScope: notificationTurnProfile.threadScope,
+                threadScope: notificationThreadScope,
               }),
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
@@ -1205,22 +1193,26 @@ function buildAssistantNotificationMessageInput(
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
   const instructions = normalizeRequiredText(input.instructions, 'instructions')
-  // One overlay for every maintenance-turn divergence, so the fields cannot
-  // drift apart across separate conditional spreads.
-  const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
+  const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
+  const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
+  // One overlay for each non-user turn boundary, so provider-audit policy
+  // cannot drift across caller-specific configuration.
+  const executionOverlay = maintenanceTurn
     ? {
         codexConfigOverrides:
           ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
-    : {}
+    : scheduledOccurrence
+      ? {}
+      : { suppressProviderFailureTranscriptAudit: true }
   return {
-    ...maintenanceOverlay,
+    ...executionOverlay,
     abortSignal: input.abortSignal,
     actorId: input.actorId,
     alias: input.alias,
     allowBindingRebind: input.allowBindingRebind,
-    approvalPolicy: input.approvalPolicy,
+    approvalPolicy: scheduledOccurrence ? input.approvalPolicy : 'never',
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
     codexCommand: input.codexCommand,
@@ -1256,7 +1248,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    sandbox: input.sandbox,
+    sandbox: scheduledOccurrence ? input.sandbox : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
@@ -1266,7 +1258,9 @@ function buildAssistantNotificationMessageInput(
     threadIsDirect: input.threadIsDirect,
     turnEnvironment: input.turnEnvironment ?? null,
     assistantTargetOverride: input.assistantTargetOverride ?? null,
-    turnTrigger: input.turnTrigger ?? 'automation-cron',
+    turnTrigger: scheduledOccurrence
+      ? input.turnTrigger ?? 'automation-cron'
+      : 'manual-deliver',
     userMessageContent: null,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
@@ -1366,19 +1360,14 @@ async function deliverAssistantNotificationMessage(input: {
   }
 }
 
-function resolveAssistantNotificationTurnProfile(
-  input: AssistantNotificationInput,
-) {
-  return isAssistantNotificationMaintenanceExactSkip(input)
-    ? ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
-    : ASSISTANT_NOTIFICATION_TURN_PROFILE
-}
-
 function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
-  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
+  if (
+    isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    !isAssistantNotificationScheduledOccurrence(input.input)
+  ) {
     return 'preserve-existing'
   }
 
@@ -1435,6 +1424,25 @@ function isAssistantNotificationMaintenanceExactSkip(
   input: AssistantNotificationInput,
 ): boolean {
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
+}
+
+function isAssistantNotificationScheduledOccurrence(
+  input: Pick<AssistantNotificationInput, 'scheduledOccurrenceAt'>,
+): boolean {
+  const occurrenceAt = normalizeNullableString(input.scheduledOccurrenceAt)
+  return occurrenceAt !== null && Number.isFinite(new Date(occurrenceAt).getTime())
+}
+
+function resolveAssistantNotificationTurnProfile(
+  input: AssistantNotificationInput,
+): Required<AssistantCodexTurnThreadScopeProfile> | null {
+  if (isAssistantNotificationMaintenanceExactSkip(input)) {
+    return ASSISTANT_MAINTENANCE_TURN_PROFILE
+  }
+
+  return isAssistantNotificationScheduledOccurrence(input)
+    ? null
+    : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run

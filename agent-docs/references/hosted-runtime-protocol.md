@@ -1320,7 +1320,14 @@ ports, and the local encrypted archive writer.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, rebuildable projections, and assistant JSONL event logs. Assistant
+cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
+derived-cache exception is the exact query SQLite triplet
+`.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
+canonical rescan after a cold restore, while normal source-manifest validation
+still discards and rebuilds stale copies. New archives use the POSIX PAX format
+so canonical source-file subsecond mtimes survive restore and keep an otherwise
+fresh carried manifest fresh; extraction remains format-agnostic for older
+archives. No other projection is portable. Assistant
 diagnostics snapshots, status snapshots, runtime budgets, pending issue records,
 and the diagnostics snapshot's recent warning/error text remain portable; event
 logs are bounded local observability only and are rewritten by runtime
@@ -1584,6 +1591,13 @@ explicitly appends one.
 `HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers.
+Orchestration phase telemetry is interpreted causally: direct-request routing
+ends at the Cloudflare route/auth stamps, Durable Object activation ends at
+`userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and
+replacement-clear interval, and fresh container allocation/readiness ends at
+`freshStartContainerReadyAtEpochMs`. The outer Temporal-signal-to-runner span is
+not a single Temporal activity duration; the direct wake may win before the
+Temporal activity begins.
 The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
 for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
 and status plus bounded metadata-only correlation, count, and timing fields. The

@@ -1561,9 +1561,11 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     cloudflareRouteReceivedAtEpochMs?: number;
     triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
+    activeFenceObservedAtEpochMs?: number;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
     activeWakeAccepted?: boolean;
+    replacementFenceClearStartedAtEpochMs?: number;
     replacementFenceClearedAtEpochMs?: number;
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
@@ -1695,9 +1697,11 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "cloudflareRouteReceivedAtEpochMs",
     "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
+    "activeFenceObservedAtEpochMs",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
     "activeWakeAccepted",
+    "replacementFenceClearStartedAtEpochMs",
     "replacementFenceClearedAtEpochMs",
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",

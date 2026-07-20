@@ -138,7 +138,9 @@ export class RuntimeProcessingController {
     if (record.writeFence) {
       return await this.ensureExistingRuntimeProcessing({
         commandBudget,
-        input: processingInput,
+        input: withRuntimeProcessingOrchestration(processingInput, {
+          activeFenceObservedAtEpochMs: Date.now(),
+        }),
         record,
         runtimeWakeStartedAt,
       });
@@ -354,6 +356,9 @@ export class RuntimeProcessingController {
       });
     }
 
+    const inputAtClearStart = withRuntimeProcessingOrchestration(input.input, {
+      replacementFenceClearStartedAtEpochMs: Date.now(),
+    });
     const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
       attemptId: activeFence.attemptId,
       finishedAt: new Date().toISOString(),
@@ -363,7 +368,7 @@ export class RuntimeProcessingController {
     if (!cleared.cleared) {
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
-        input: input.input,
+        input: inputAtClearStart,
         record: cleared.record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
@@ -375,7 +380,7 @@ export class RuntimeProcessingController {
       });
     }
 
-    const replacementInput = withRuntimeProcessingOrchestration(input.input, {
+    const replacementInput = withRuntimeProcessingOrchestration(inputAtClearStart, {
       replacedStaleFence: true,
       replacementFenceClearedAtEpochMs: Date.now(),
     });

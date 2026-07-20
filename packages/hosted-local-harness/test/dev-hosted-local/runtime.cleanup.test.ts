@@ -5,16 +5,9 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hostedLocalHarnessRepoRoot as repoRoot } from "../../src/repo.ts";
 
 interface SpawnResult {
   exitCode: number | null;
-  stderr?: string;
-  stdout?: string;
-}
-
-interface SpawnSyncResult {
-  status: number | null;
   stderr?: string;
   stdout?: string;
 }
@@ -58,9 +51,6 @@ function createSpawnResultChild(result: SpawnResult) {
 
 async function importRuntimeWithSpawnSequence(
   sequence: SpawnResult[],
-  options: {
-    spawnSyncResult?: SpawnSyncResult;
-  } = {},
 ) {
   const spawn = vi.fn<SpawnForTest>(() => {
     const next = sequence.shift();
@@ -70,32 +60,22 @@ async function importRuntimeWithSpawnSequence(
 
     return createSpawnResultChild(next);
   });
-  const spawnSync = vi.fn(() => ({
-    status: options.spawnSyncResult?.status ?? 0,
-    stderr: options.spawnSyncResult?.stderr ?? "",
-    stdout: options.spawnSyncResult?.stdout ?? "",
-  }));
-
   vi.doMock("node:child_process", async () => {
     const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
 
     return {
       ...actual,
       spawn,
-      spawnSync,
     };
   });
 
   const runtime = await import("../../src/dev-hosted-local/runtime.ts");
 
   return {
-    cleanupHostedLocalOrphanedWorkerdProcesses:
-      runtime.cleanupHostedLocalOrphanedWorkerdProcesses,
     cleanupHostedRunnerContainerLocalState: runtime.cleanupHostedRunnerContainerLocalState,
     cleanupHostedRunnerContainers: runtime.cleanupHostedRunnerContainers,
     cleanupHostedRunnerImages: runtime.cleanupHostedRunnerImages,
     spawn,
-    spawnSync,
   };
 }
 
@@ -567,76 +547,6 @@ describe("cleanupHostedRunnerContainers", () => {
       },
       timeoutMs: 50,
     })).rejects.toThrow("Failed to remove stale local Cloudflare runner containers.");
-  });
-});
-
-describe("cleanupHostedLocalOrphanedWorkerdProcesses", () => {
-  afterEach(() => {
-    vi.resetModules();
-    vi.restoreAllMocks();
-    vi.doUnmock("node:child_process");
-  });
-
-  it("kills only orphaned repo-local loopback workerd serve processes", async () => {
-    const workerdPath = path.join(
-      repoRoot,
-      "node_modules",
-      ".pnpm",
-      "@cloudflare+workerd-test",
-      "node_modules",
-      "workerd",
-      "bin",
-      "workerd",
-    );
-    const stdout = [
-      [
-        "111",
-        "1",
-        workerdPath,
-        "serve",
-        "--socket-addr=entry=127.0.0.1:0",
-        "--external-addr=loopback=127.0.0.1:55555",
-      ].join(" "),
-      [
-        "222",
-        "99",
-        workerdPath,
-        "serve",
-        "--socket-addr=entry=127.0.0.1:0",
-        "--external-addr=loopback=127.0.0.1:55556",
-      ].join(" "),
-      [
-        "333",
-        "1",
-        "/tmp/other/node_modules/.pnpm/@cloudflare+workerd-test/bin/workerd",
-        "serve",
-        "--socket-addr=entry=127.0.0.1:0",
-        "--external-addr=loopback=127.0.0.1:55557",
-      ].join(" "),
-      [
-        "444",
-        "1",
-        workerdPath,
-        "serve",
-        "--socket-addr=entry=127.0.0.1:0",
-      ].join(" "),
-    ].join("\n");
-    const { cleanupHostedLocalOrphanedWorkerdProcesses, spawnSync } =
-      await importRuntimeWithSpawnSequence([], {
-        spawnSyncResult: { status: 0, stdout },
-      });
-    const kill = vi.spyOn(process, "kill").mockImplementation(
-      (() => true) as typeof process.kill,
-    );
-
-    cleanupHostedLocalOrphanedWorkerdProcesses({ signal: "SIGKILL" });
-
-    expect(spawnSync).toHaveBeenCalledWith("ps", ["-axo", "pid=,ppid=,command="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    expect(kill).toHaveBeenCalledTimes(1);
-    expect(kill).toHaveBeenCalledWith(111, "SIGKILL");
   });
 });
 
