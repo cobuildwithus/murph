@@ -1,6 +1,6 @@
 # PR 800 system-notification boundary
 
-Status: active
+Status: completed
 Created: 2026-07-20
 Updated: 2026-07-20
 
@@ -42,13 +42,15 @@ Updated: 2026-07-20
 
 ## Tasks
 
-1. Separate genuine occurrences from one-shot system notifications in the
-   shared notification entrypoint.
-2. Make output-only a runner-enforced no-tool invariant and give detached
-   system notifications a small non-scheduled formatting prompt.
-3. Add planner, notification runtime, and system-mailbox production-path tests.
-4. Run scoped verification, commit and push the remediation, then run CI and
-   ReviewGPT round 2 against the new exact head.
+- [x] Separate genuine occurrences from one-shot system notifications in the
+  shared notification entrypoint.
+- [x] Make output-only a runner-enforced no-tool invariant and give detached
+  system notifications a small non-scheduled formatting prompt.
+- [x] Add planner, notification runtime, system-mailbox, and provider-lifecycle
+  production-path tests.
+- [x] Run scoped verification, the required coverage-write audit, GitHub CI,
+  and ReviewGPT correction-verification rounds against their exact pushed
+  heads.
 
 ## Decisions
 
@@ -61,3 +63,21 @@ Updated: 2026-07-20
   Detached system notifications therefore use the existing one-shot provider
   process so they cannot replace the resident ordinary-turn process or kill
   valid detached enrichment.
+- The round-3 anomaly retrospective retained one indivisible PR: scheduled
+  parity broadens the shared notification entrypoint, so the occurrence
+  discriminator and detached boundary are required to ship it safely. Each
+  concern remains in an existing owner, with no new scheduler stack, state,
+  service, pool, manager, or delivery owner.
+
+## Verification
+
+- Focused assistant-engine runtime suites: 216 passed.
+- Assistant-engine typecheck: passed.
+- Required coverage-write audit: 2,526 passed, 5 skipped; 89.63% statements,
+  82.06% branches, 94.16% functions, and 89.65% lines.
+- GitHub PR checks: 25 passed on the final substantive head.
+- ReviewGPT round 3: attested `PASS` with no qualifying findings. Two earlier
+  clean diagnostic responses were rejected by the mandatory ten-minute model
+  attestation floor and did not count.
+- Diff check and privacy/identifier scan: passed before the substantive commit.
+Completed: 2026-07-20
