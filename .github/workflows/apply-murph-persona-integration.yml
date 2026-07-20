@@ -1,4 +1,4 @@
-name: Diagnose Murph persona planning
+name: Repair Murph persona integration
 
 on:
   pull_request:
@@ -10,24 +10,908 @@ on:
       - .github/workflows/apply-murph-persona-integration.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  repair:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
-      - name: Run planning regression
+      - name: Checkout branch quietly
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           git clone --quiet --depth=1 --branch agent/murph-personas \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
-          corepack enable >/dev/null
-          corepack prepare pnpm@10.33.0 --activate >/dev/null
-          pnpm install --frozen-lockfile --reporter=silent
-          pnpm --dir packages/contracts build >/dev/null
+
+      - name: Apply reviewed repair
+        shell: bash
+        run: |
+          cat > /tmp/repair-personas.py <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path: str) -> str:
+              return Path(path).read_text()
+
+          def write(path: str, content: str) -> None:
+              Path(path).write_text(content)
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
+              content = read(path)
+              actual = content.count(old)
+              if actual != expected:
+                  raise RuntimeError(f"{path}: expected {expected} matches, found {actual}: {old[:120]!r}")
+              write(path, content.replace(old, new, expected))
+
+          # Keep missing persona fully backward compatible. Persona defaults enter
+          # planning only when a persona was explicitly selected.
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              """export interface AssistantTurnPreferenceContext {
+            assistantPersona: AssistantPersonaId | null
+            assistantPersonality: AssistantPersonalityPreferences | null
+            assistantTone: AssistantTonePreference | null
+            assistantVoice: string | null
+          }
+
+          const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+            assistantPersona: null,
+            assistantPersonality: null,
+            assistantTone: null,
+            assistantVoice: null,
+          }
+          """,
+              """export interface AssistantTurnPreferenceContext {
+            assistantPersona?: AssistantPersonaId | null
+            assistantPersonality: AssistantPersonalityPreferences | null
+            assistantTone: AssistantTonePreference | null
+            assistantVoice: string | null
+          }
+
+          const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+            assistantPersonality: null,
+            assistantTone: null,
+            assistantVoice: null,
+          }
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              """  const effectiveAssistantStyle = resolveAssistantEffectiveStyle({
+            ...(privateInteractiveAudience && preferenceContext.assistantPersona
+              ? { persona: preferenceContext.assistantPersona }
+              : {}),
+            ...(preferenceContext.assistantTone
+              ? { tone: preferenceContext.assistantTone }
+              : {}),
+            ...(preferenceContext.assistantVoice
+              ? { voice: preferenceContext.assistantVoice }
+              : {}),
+            ...(preferenceContext.assistantPersonality
+              ? { personality: preferenceContext.assistantPersonality }
+              : {}),
+          })
+          """,
+              """  const explicitAssistantPersona = privateInteractiveAudience
+            ? preferenceContext.assistantPersona ?? null
+            : null
+            const effectiveAssistantStyle = explicitAssistantPersona
+              ? resolveAssistantEffectiveStyle({
+                  persona: explicitAssistantPersona,
+                  ...(preferenceContext.assistantTone
+                    ? { tone: preferenceContext.assistantTone }
+                    : {}),
+                  ...(preferenceContext.assistantVoice
+                    ? { voice: preferenceContext.assistantVoice }
+                    : {}),
+                  ...(preferenceContext.assistantPersonality
+                    ? { personality: preferenceContext.assistantPersonality }
+                    : {}),
+                })
+              : null
+            const assistantTone = effectiveAssistantStyle?.tone
+              ?? preferenceContext.assistantTone
+            const assistantPersonality = effectiveAssistantStyle?.personality
+              ?? preferenceContext.assistantPersonality
+            const assistantVoice = preferenceContext.assistantVoice
+              ?? effectiveAssistantStyle?.voice
+              ?? null
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              "assistantTone: effectiveAssistantStyle.tone,",
+              "assistantTone,",
+              2,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              """            assistantPersona: privateInteractiveAudience
+                        ? effectiveAssistantStyle.persona
+                        : null,
+                      assistantPersonality:
+                        privateInteractiveAudience || groupAssistantStylePreferencesApply
+                          ? effectiveAssistantStyle.personality
+                          : null,
+          """,
+              """            assistantPersona: explicitAssistantPersona,
+                      assistantPersonality:
+                        privateInteractiveAudience || groupAssistantStylePreferencesApply
+                          ? assistantPersonality
+                          : null,
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              """        ? resolveAssistantVoiceOptionElevenLabsVoiceId(
+                      effectiveAssistantStyle.voice,
+                    )
+          """,
+              """        ? resolveAssistantVoiceOptionElevenLabsVoiceId(assistantVoice)
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/codex-turn/planning.ts",
+              """    return {
+                assistantPersona: preferences.assistant?.persona ?? null,
+                assistantPersonality: preferences.assistant?.personality ?? null,
+                assistantTone: preferences.assistant?.tone ?? null,
+                assistantVoice: preferences.assistant?.voice ?? null,
+              }
+            } catch {
+              return {
+                assistantPersona: null,
+                assistantPersonality: null,
+                assistantTone: null,
+                assistantVoice: null,
+              }
+          """,
+              """    return {
+                ...(preferences.assistant?.persona
+                  ? { assistantPersona: preferences.assistant.persona }
+                  : {}),
+                assistantPersonality: preferences.assistant?.personality ?? null,
+                assistantTone: preferences.assistant?.tone ?? null,
+                assistantVoice: preferences.assistant?.voice ?? null,
+              }
+            } catch {
+              return {
+                assistantPersonality: null,
+                assistantTone: null,
+                assistantVoice: null,
+              }
+          """,
+          )
+
+          # Preserve Classic Murph's static baseline byte-for-byte for users who
+          # never select a persona, and inject a persona only when explicitly set.
+          replace_exact(
+              "packages/assistant-engine/src/assistant/system-prompt.ts",
+              """    conversationScope === "direct"
+                ? buildAssistantPersonaPrompt(input.assistantPersona ?? null)
+                : null,
+          """,
+              """    conversationScope === "direct" && input.assistantPersona
+                ? buildAssistantPersonaPrompt(input.assistantPersona)
+                : null,
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/system-prompt.ts",
+              """Behavioral baseline:
+          Support judgment and name uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a partner rather than claiming authority over the user. Saved persona, tone, and personality settings may change expression and emphasis, never facts, evidence standards, safety, privacy, consent, authorization, or required warnings.`;
+          """,
+              """Personality:
+          Calm, observant, direct, plainspoken. Defaults: Humor 3—deadpan; at most one earned beat when playful; no canned bits, laughing emojis, or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context. Support judgment; name uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a peer, not an authority: outside safety concerns, offer one better idea at most, then back an informed choice without veto or lecture.`;
+          """,
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/system-prompt.ts",
+              "- Push changes delivery, not authority, and above the gentlest levels it applies only to explicit user-chosen, low-risk, non-sensitive goals. Never pressure a reply, signup, sharing, spending, consent, health compliance, authorization, or irreversible action; never infer motive or alter notification/follow-up cadence.",
+              "- Push changes delivery, not authority. Never shame, coerce, invent urgency, demand unsafe exertion, continue after the user asks to stop, pressure a reply or consent, or alter notification and follow-up cadence.",
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant/system-prompt.ts",
+              "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only explicit user-chosen low-risk, non-sensitive goals; never shame, coerce, invent urgency, demand unsafe exertion, or alter message cadence.",
+              "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health or medication decisions, grief, trauma, abuse, acute distress, or sensitive privacy, authentication, billing, consent, or irreversible actions. Push never permits shame, coercion, invented urgency, unsafe exertion, persistence after a stop request, or altered message cadence.",
+          )
+
+          # A persona prompt is a compact overlay, not a second safety policy.
+          write(
+              "packages/assistant-engine/src/assistant/persona-prompts.ts",
+              '''import {
+            resolveAssistantPersonaOption,
+            type AssistantPersonaId,
+          } from "@murphai/contracts";
+
+          const PERSONA_PROMPT_BY_ID: Readonly<Record<AssistantPersonaId, string>> = {
+            classic:
+              "Be calm, observant, direct, warm, and adaptable. Lead with the useful answer, then add the context that earns its place.",
+            "navy-seal":
+              "Bring relentless intensity, mental toughness, urgency, and zero tolerance for empty self-negotiation. When the user is stalling, cut through it and drive toward immediate action. Use short, forceful lines. Make commitment feel real.",
+            "stoic-philosopher":
+              "Separate what is controllable from what is not. Stay emotionally steady, disciplined, and unsentimental. Turn setbacks into the next deliberate action.",
+            "wise-elder":
+              "Bring long-horizon perspective, pattern recognition, patience, and gentle candor. Help the user see what matters beyond today's emotion without becoming vague or mystical.",
+            "medical-detective":
+              "Reason like an excellent diagnostician without claiming a diagnosis. Organize clues, timing, competing explanations, missing evidence, and the next discriminating question or test.",
+            "longevity-scientist":
+              "Think in mechanisms, evidence quality, absolute effects, tradeoffs, and long time horizons. Distinguish strong evidence from plausible speculation and avoid optimization theater.",
+            "hype-coach":
+              "Bring contagious energy, belief, celebration, and momentum. Make wins feel real and the next action feel exciting without empty praise or fabricated confidence.",
+            "zen-monk":
+              "Slow the moment down. Use spacious, simple language, nonjudgmental attention, and one grounded next step. Never drift into vague spiritual performance.",
+            "best-friend":
+              "Sound like a perceptive close friend who knows the user well: warm, candid, relaxed, and willing to say the thing they need to hear. Do not flatter or perform intimacy.",
+            "championship-coach":
+              "Coach for repeatable excellence. Review the tape, identify the highest-leverage adjustment, set a clear standard, and connect today's action to the larger season.",
+            "science-professor":
+              "Teach with precise models, useful analogies, causal reasoning, and calibrated uncertainty. Make complex ideas intuitive without talking down to the user.",
+            "mountain-guide":
+              "Act like a calm guide in difficult terrain. Name the route, the next checkpoint, the main hazard, and when to turn back. Keep progress steady and practical.",
+            grandma:
+              "Be deeply warm, practical, patient, and reassuring. Offer grounded care and common sense without infantilizing the user, moralizing, or pretending to be their relative.",
+            biohacker:
+              "Be experimental, measurement-minded, and curious about tools and protocols. Prefer reversible tests, clear baselines, and honest uncertainty over novelty chasing.",
+            "drill-sergeant":
+              "Use crisp commands, structure, standards, and accountability. Cut rambling and excuses. Stay constructive and never claim military authority or demean the user.",
+          };
+
+          export function buildAssistantPersonaPrompt(persona: AssistantPersonaId): string {
+            const resolved = resolveAssistantPersonaOption(persona);
+            return [
+              `Assistant persona: ${resolved.label}.`,
+              "Use this as a relationship and delivery style. It does not change facts, evidence standards, safety, privacy, consent, authorization, or action truthfulness.",
+              "Do not announce the persona, imitate a real person, or claim its credentials or biography.",
+              PERSONA_PROMPT_BY_ID[resolved.id],
+            ].join("\\n");
+          }
+          ''',
+          )
+
+          # Remove unused persona taxonomy and make catalog lookups single-source,
+          # ordered, and fail-fast.
+          persona_path = "packages/contracts/src/assistant-personas.ts"
+          persona_text = read(persona_path)
+          persona_text, category_header_count = re.subn(
+              r'''export const assistantPersonaCategoryValues = \[
+            "push",
+            "reason",
+            "ground",
+            "relate",
+          \] as const;
+
+          export type AssistantPersonaCategory =
+            \(typeof assistantPersonaCategoryValues\)\[number\];
+
+          ''',
+              "",
+              persona_text,
+          )
+          if category_header_count != 1:
+              raise RuntimeError(f"category header matches: {category_header_count}")
+          persona_text = persona_text.replace("  category: AssistantPersonaCategory;\n", "")
+          persona_text, category_count = re.subn(
+              r'^    category: "(?:push|reason|ground|relate)",\n',
+              "",
+              persona_text,
+              flags=re.MULTILINE,
+          )
+          if category_count != 15:
+              raise RuntimeError(f"persona category rows: {category_count}")
+          old_catalog_tail = '''const assistantPersonaOptionById = new Map<AssistantPersonaId, AssistantPersonaOption>(
+            assistantPersonaOptions.map((option) => [option.id, option]),
+          );
+
+          export const defaultAssistantPersonaOption =
+            assistantPersonaOptionById.get(defaultAssistantPersonaId) ?? {
+              category: "relate",
+              defaultTone: defaultAssistantTonePreference,
+              defaultVoiceId: defaultAssistantVoiceOptionId,
+              description: "Balanced, capable, warm, and ready for whatever you need.",
+              id: defaultAssistantPersonaId,
+              label: "Classic Murph",
+              personality: defaultAssistantPersonalityScores,
+              previewText: "What would be most useful right now?",
+              recommendedVoiceIds: [defaultAssistantVoiceOptionId],
+              sample: "Be balanced and adapt to whatever I need.",
+            };
+          '''
+          new_catalog_tail = '''const assistantPersonaOptionById = new Map<AssistantPersonaId, AssistantPersonaOption>(
+            assistantPersonaOptions.map((option) => [option.id, option]),
+          );
+          const assistantVoiceOptionById = new Map(
+            assistantVoiceOptions.map((option) => [option.id, option]),
+          );
+          const resolvedDefaultAssistantPersonaOption =
+            assistantPersonaOptionById.get(defaultAssistantPersonaId);
+          if (!resolvedDefaultAssistantPersonaOption) {
+            throw new TypeError("Classic Murph is missing from the persona catalog.");
+          }
+          export const defaultAssistantPersonaOption = resolvedDefaultAssistantPersonaOption;
+          '''
+          if persona_text.count(old_catalog_tail) != 1:
+              raise RuntimeError("default persona fallback block did not match")
+          persona_text = persona_text.replace(old_catalog_tail, new_catalog_tail)
+          old_voice_resolver = '''export function resolveAssistantPersonaRecommendedVoiceOptions(
+            persona: AssistantPersonaId | null | undefined,
+          ): AssistantVoiceOption[] {
+            const voiceIds = new Set(resolveAssistantPersonaOption(persona).recommendedVoiceIds);
+            return assistantVoiceOptions.filter((option) => voiceIds.has(option.id));
+          }
+          '''
+          new_voice_resolver = '''export function resolveAssistantPersonaRecommendedVoiceOptions(
+            persona: AssistantPersonaId | null | undefined,
+          ): AssistantVoiceOption[] {
+            return resolveAssistantPersonaOption(persona).recommendedVoiceIds.map((voiceId) => {
+              const option = assistantVoiceOptionById.get(voiceId);
+              if (!option) {
+                throw new TypeError(`Persona voice ${voiceId} is missing from the voice catalog.`);
+              }
+              return option;
+            });
+          }
+          '''
+          if persona_text.count(old_voice_resolver) != 1:
+              raise RuntimeError("persona voice resolver block did not match")
+          write(persona_path, persona_text.replace(old_voice_resolver, new_voice_resolver))
+
+          write(
+              "packages/contracts/test/assistant-personas.test.ts",
+              '''import assert from "node:assert/strict";
+          import { test } from "vitest";
+
+          import {
+            assistantPersonaOptions,
+            assistantVoiceOptions,
+            defaultAssistantPersonaId,
+            resolveAssistantEffectiveStyle,
+            resolveAssistantPersonaRecommendedVoiceOptions,
+          } from "../src/index.ts";
+
+          test("assistant persona catalog is complete and uses ordered valid voices", () => {
+            assert.equal(assistantPersonaOptions.length, 15);
+            assert.equal(assistantPersonaOptions[0]?.id, defaultAssistantPersonaId);
+            assert.equal(new Set(assistantPersonaOptions.map((persona) => persona.id)).size, 15);
+            const voiceIds = new Set(assistantVoiceOptions.map((voice) => voice.id));
+            for (const persona of assistantPersonaOptions) {
+              assert.ok(persona.recommendedVoiceIds.length >= 5);
+              assert.ok(persona.recommendedVoiceIds.length <= 10);
+              assert.equal(
+                new Set(persona.recommendedVoiceIds).size,
+                persona.recommendedVoiceIds.length,
+              );
+              assert.ok(persona.recommendedVoiceIds.includes(persona.defaultVoiceId));
+              assert.ok(persona.recommendedVoiceIds.every((voiceId) => voiceIds.has(voiceId)));
+              assert.deepEqual(
+                resolveAssistantPersonaRecommendedVoiceOptions(persona.id).map((voice) => voice.id),
+                persona.recommendedVoiceIds,
+              );
+            }
+          });
+
+          test("persona defaults resolve without materializing dial preferences", () => {
+            assert.deepEqual(resolveAssistantEffectiveStyle({ persona: "navy-seal" }), {
+              persona: "navy-seal",
+              personality: { humor: 1, push: 10, detail: 2 },
+              tone: "formal",
+              voice: "drill-sergeant",
+            });
+          });
+
+          test("explicit tone, voice, and dial preferences override persona defaults", () => {
+            assert.deepEqual(resolveAssistantEffectiveStyle({
+              persona: "navy-seal",
+              personality: { humor: 8, detail: 7 },
+              tone: "casual",
+              voice: "warm",
+            }), {
+              persona: "navy-seal",
+              personality: { humor: 8, push: 10, detail: 7 },
+              tone: "casual",
+              voice: "warm",
+            });
+          });
+
+          test("missing persona preserves Classic Murph with existing overrides", () => {
+            assert.deepEqual(resolveAssistantEffectiveStyle({
+              personality: { push: 7 },
+              voice: "classic",
+            }), {
+              persona: "classic",
+              personality: { humor: 3, push: 7, detail: 5 },
+              tone: "formal",
+              voice: "classic",
+            });
+          });
+          ''',
+          )
+
+          # Use the existing style mutation owner and route. Persona + tone + voice
+          # remain one transaction and one mailbox preference event.
+          write(
+              "apps/web/app/api/settings/assistant-style/route.ts",
+              '''import {
+            assistantPersonalityCausalWritesEnabled,
+            assistantPersonalityPreferencesSchema,
+            isAssistantPersonaId,
+            isAssistantTonePreference,
+            isAssistantVoiceOptionId,
+            type AssistantPersonaId,
+            type AssistantPersonalityPreferences,
+            type AssistantTonePreference,
+            type AssistantVoiceOptionId,
+          } from "@murphai/contracts";
+
+          import { getPrisma } from "@/src/lib/prisma";
+          import {
+            signalHostedMailboxAppendRuntime,
+          } from "@/src/lib/hosted-orchestration/signal-runtime";
+          import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+          import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
+          import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+          import {
+            jsonOk,
+            readHostedOnboardingJsonObject,
+            withJsonError,
+          } from "@/src/lib/hosted-onboarding/http";
+          import {
+            upsertHostedMemberAssistantPreferencesTx,
+            type HostedMemberAssistantPreferencesUpdate,
+          } from "@/src/lib/hosted-onboarding/member-preferences";
+          import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+          import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+
+          const ASSISTANT_STYLE_REQUEST_BODY_LIMIT_BYTES = 1_024;
+          const ASSISTANT_STYLE_REQUEST_FIELDS = new Set([
+            "persona",
+            "personality",
+            "tone",
+            "voice",
+          ]);
+
+          export const POST = withJsonError(async (request: Request) => {
+            assertHostedOnboardingMutationOrigin(request);
+            const auth = await requireActiveHostedAppSessionFromRequest(request);
+            assertHostedMemberNotSuspended(auth.member);
+            const body = await readHostedOnboardingJsonObject(request, {
+              limitBytes: ASSISTANT_STYLE_REQUEST_BODY_LIMIT_BYTES,
+              tooLargeErrorCode: "ASSISTANT_STYLE_BODY_TOO_LARGE",
+              tooLargeErrorMessage: "Assistant style request body is too large.",
+            });
+            const preferences = parseAssistantStyleRequestBody(body);
+            const causalWritesEnabled = assistantPersonalityCausalWritesEnabled(process.env);
+            if (preferences.persona !== undefined && !causalWritesEnabled) {
+              throw hostedOnboardingError({
+                code: "ASSISTANT_PERSONA_ROLLOUT_PENDING",
+                httpStatus: 503,
+                message: "Murph personas are temporarily unavailable during rollout.",
+                retryable: true,
+              });
+            }
+            if (preferences.personality !== undefined && !causalWritesEnabled) {
+              throw hostedOnboardingError({
+                code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
+                httpStatus: 503,
+                message: "Personality settings are temporarily unavailable during rollout.",
+                retryable: true,
+              });
+            }
+            const prisma = getPrisma();
+            const now = new Date();
+            const result = await prisma.$transaction(async (tx) => (
+              upsertHostedMemberAssistantPreferencesTx({
+                mailboxPayloadMode: causalWritesEnabled
+                  ? "sparse_delta"
+                  : "legacy_snapshot",
+                memberId: auth.member.id,
+                occurredAt: now.toISOString(),
+                preferences,
+                prisma: tx,
+              })
+            ), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+            if (result.dispatch) {
+              await signalHostedMailboxAppendBestEffort({
+                expectedUserId: auth.member.id,
+                mailboxItemId: result.dispatch.mailboxItemId,
+              });
+            }
+
+            return jsonOk({
+              assistantPersona: result.assistantPersona,
+              assistantPersonality: result.assistantPersonality,
+              assistantTone: result.assistantTone,
+              assistantVoice: result.assistantVoice,
+              ok: true,
+              runTriggered: result.dispatch !== null,
+              updated: result.updated,
+            });
+          });
+
+          function parseAssistantStyleRequestBody(
+            body: Record<string, unknown>,
+          ): HostedMemberAssistantPreferencesUpdate {
+            for (const key of Object.keys(body)) {
+              if (!ASSISTANT_STYLE_REQUEST_FIELDS.has(key)) {
+                throw hostedOnboardingError({
+                  code: "ASSISTANT_STYLE_UNKNOWN_FIELD",
+                  httpStatus: 400,
+                  message: "Assistant style request contains an unknown field.",
+                });
+              }
+            }
+            const persona = body.persona === undefined
+              ? undefined
+              : parseAssistantPersona(body.persona);
+            const personality = body.personality === undefined
+              ? undefined
+              : parseAssistantPersonality(body.personality);
+            const tone = body.tone === undefined
+              ? undefined
+              : parseAssistantTone(body.tone);
+            const voice = body.voice === undefined
+              ? undefined
+              : parseAssistantVoice(body.voice);
+
+            if (
+              personality !== undefined
+              && (persona !== undefined || tone !== undefined || voice !== undefined)
+            ) {
+              throw hostedOnboardingError({
+                code: "ASSISTANT_STYLE_MIXED_UPDATE",
+                httpStatus: 400,
+                message: "Update personality separately from persona, tone, and voice.",
+              });
+            }
+
+            if (
+              persona === undefined
+              && personality === undefined
+              && tone === undefined
+              && voice === undefined
+            ) {
+              throw hostedOnboardingError({
+                code: "ASSISTANT_STYLE_EMPTY_UPDATE",
+                httpStatus: 400,
+                message: "Choose a persona, tone, voice, or personality setting before continuing.",
+              });
+            }
+
+            return {
+              ...(persona === undefined ? {} : { persona }),
+              ...(personality === undefined ? {} : { personality }),
+              ...(tone === undefined ? {} : { tone }),
+              ...(voice === undefined ? {} : { voice }),
+            };
+          }
+
+          function parseAssistantPersona(value: unknown): AssistantPersonaId {
+            if (isAssistantPersonaId(value)) return value;
+            throw hostedOnboardingError({
+              code: "ASSISTANT_STYLE_INVALID_PERSONA",
+              httpStatus: 400,
+              message: "Choose a valid Murph persona.",
+            });
+          }
+
+          function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {
+            const result = assistantPersonalityPreferencesSchema.safeParse(value);
+            if (result.success && Object.keys(result.data).length > 0) return result.data;
+            throw hostedOnboardingError({
+              code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
+              httpStatus: 400,
+              message: "Choose a valid personality setting.",
+            });
+          }
+
+          function parseAssistantTone(value: unknown): AssistantTonePreference {
+            if (isAssistantTonePreference(value)) return value;
+            throw hostedOnboardingError({
+              code: "ASSISTANT_STYLE_INVALID_TONE",
+              httpStatus: 400,
+              message: "Choose a valid tone.",
+            });
+          }
+
+          function parseAssistantVoice(value: unknown): AssistantVoiceOptionId {
+            if (isAssistantVoiceOptionId(value)) return value;
+            throw hostedOnboardingError({
+              code: "ASSISTANT_STYLE_INVALID_VOICE",
+              httpStatus: 400,
+              message: "Choose a valid voice.",
+            });
+          }
+
+          async function signalHostedMailboxAppendBestEffort(input: {
+            expectedUserId: string;
+            mailboxItemId: string;
+          }): Promise<void> {
+            try {
+              await signalHostedMailboxAppendRuntime(input);
+            } catch {
+              // The durable preference save succeeds even when the best-effort wake is unavailable.
+            }
+          }
+          ''',
+          )
+          Path("apps/web/app/api/settings/assistant-persona/route.ts").unlink()
+
+          # Keep the picker catalog-driven and point it at the single mutation route.
+          replace_exact(
+              "apps/web/src/components/murph/murph-persona-picker.tsx",
+              """  assistantPersonaOptions,
+            assistantVoiceOptions,
+            resolveAssistantPersonaOption,
+            type AssistantPersonaId,
+          """,
+              """  assistantPersonaOptions,
+            resolveAssistantPersonaOption,
+            resolveAssistantPersonaRecommendedVoiceOptions,
+            type AssistantPersonaId,
+            type AssistantVoiceOption,
+          """,
+          )
+          replace_exact(
+              "apps/web/src/components/murph/murph-persona-picker.tsx",
+              """  const voices = selected.recommendedVoiceIds.flatMap((voiceId) => {
+                const option = assistantVoiceOptions.find((candidate) => candidate.id === voiceId);
+                return option
+                  ? [{
+                      ...option,
+                      previewPath: `/audio/murph-personas/${selected.id}/${option.id}.mp3`,
+                    }]
+                  : [];
+              });
+          """,
+              """  const voices = resolveAssistantPersonaRecommendedVoiceOptions(selected.id).map(
+                (option) => ({
+                  ...option,
+                  previewPath: `/audio/murph-personas/${selected.id}/${option.id}.mp3`,
+                }),
+              );
+          """,
+          )
+          replace_exact(
+              "apps/web/src/components/murph/murph-persona-picker.tsx",
+              "option: (typeof assistantVoiceOptions)[number] & { previewPath: string };",
+              "option: AssistantVoiceOption & { previewPath: string };",
+          )
+          replace_exact(
+              "apps/web/src/components/murph/murph-persona-picker.tsx",
+              "Choose how Murph should show up. You can change or fine-tune this anytime.",
+              "Choose how Murph should show up. You can fine-tune the writing style, voice, and personality later.",
+              2,
+          )
+          replace_exact(
+              "apps/web/src/components/murph/murph-persona-picker.tsx",
+              'fetch("/api/settings/assistant-persona", {',
+              'fetch("/api/settings/assistant-style", {',
+          )
+
+          # Remove an unused parameter left by persona-specific defaults.
+          replace_exact(
+              "packages/assistant-engine/src/assistant-codex/dynamic-tools/assistant-style.ts",
+              "? !isDefaultPersonalitySetting(setting, actual)",
+              "? !isDefaultPersonalitySetting(actual)",
+          )
+          replace_exact(
+              "packages/assistant-engine/src/assistant-codex/dynamic-tools/assistant-style.ts",
+              """function isDefaultPersonalitySetting(
+            setting: AssistantPersonalitySettingId,
+            snapshot: HostedRuntimeAssistantPersonalitySettingSnapshot,
+          ): boolean {
+          """,
+              """function isDefaultPersonalitySetting(
+            snapshot: HostedRuntimeAssistantPersonalitySettingSnapshot,
+          ): boolean {
+          """,
+          )
+
+          # Extend the existing route test instead of maintaining a duplicate test suite.
+          route_test = "apps/web/test/settings-assistant-style-route.test.ts"
+          replace_exact(
+              route_test,
+              "mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({\n      assistantPersonality:",
+              "mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({\n      assistantPersona: null,\n      assistantPersonality:",
+              2,
+          )
+          replace_exact(
+              route_test,
+              "await expect(response.json()).resolves.toEqual({\n      assistantPersonality:",
+              "await expect(response.json()).resolves.toEqual({\n      assistantPersona: null,\n      assistantPersonality:",
+              3,
+          )
+          persona_route_test = '''
+            it("persists persona, writing style, and voice in one preference write", async () => {
+              mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
+                assistantPersona: "navy-seal",
+                assistantPersonality: { detail: 2, humor: 1, push: 10 },
+                assistantTone: "formal",
+                assistantVoice: "drill-sergeant",
+                dispatch: { mailboxItemId: "mailbox_item_persona" },
+                updated: true,
+              });
+
+              const response = await route.POST(jsonRequest({
+                persona: "navy-seal",
+                tone: "formal",
+                voice: "drill-sergeant",
+              }));
+
+              expect(response.status).toBe(200);
+              await expect(response.json()).resolves.toMatchObject({
+                assistantPersona: "navy-seal",
+                assistantTone: "formal",
+                assistantVoice: "drill-sergeant",
+                ok: true,
+                runTriggered: true,
+              });
+              expect(mocks.transaction).toHaveBeenCalledTimes(1);
+              expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+                mailboxPayloadMode: "sparse_delta",
+                memberId: "member_123",
+                occurredAt: "2026-07-08T12:00:00.000Z",
+                preferences: {
+                  persona: "navy-seal",
+                  tone: "formal",
+                  voice: "drill-sergeant",
+                },
+                prisma: { tx: true },
+              });
+              expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+            });
+
+          '''
+          replace_exact(
+              route_test,
+              '  it("persists a sparse validated personality update", async () => {',
+              persona_route_test + '  it("persists a sparse validated personality update", async () => {',
+          )
+          persona_gate_test = '''
+            it("keeps persona writes closed until sparse causal writes are enabled", async () => {
+              vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
+              const response = await route.POST(jsonRequest({
+                persona: "navy-seal",
+                tone: "formal",
+                voice: "drill-sergeant",
+              }));
+              expect(response.status).toBe(503);
+              await expect(response.json()).resolves.toEqual({
+                error: {
+                  code: "ASSISTANT_PERSONA_ROLLOUT_PENDING",
+                  message: "Murph personas are temporarily unavailable during rollout.",
+                  retryable: true,
+                },
+              });
+              expect(mocks.transaction).not.toHaveBeenCalled();
+            });
+
+          '''
+          replace_exact(
+              route_test,
+              '  it("keeps personality writes closed until the causal runtime is enabled", async () => {',
+              persona_gate_test + '  it("keeps personality writes closed until the causal runtime is enabled", async () => {',
+          )
+          invalid_persona_test = '''
+            it("rejects invalid personas before opening the persistence transaction", async () => {
+              const response = await route.POST(jsonRequest({ persona: "celebrity-guru" }));
+              expect(response.status).toBe(400);
+              await expect(response.json()).resolves.toEqual({
+                error: {
+                  code: "ASSISTANT_STYLE_INVALID_PERSONA",
+                  message: "Choose a valid Murph persona.",
+                  retryable: false,
+                },
+              });
+              expect(mocks.transaction).not.toHaveBeenCalled();
+            });
+
+            it("rejects unknown style fields instead of silently ignoring them", async () => {
+              const response = await route.POST(jsonRequest({ tone: "formal", surprise: 5 }));
+              expect(response.status).toBe(400);
+              await expect(response.json()).resolves.toEqual({
+                error: {
+                  code: "ASSISTANT_STYLE_UNKNOWN_FIELD",
+                  message: "Assistant style request contains an unknown field.",
+                  retryable: false,
+                },
+              });
+              expect(mocks.transaction).not.toHaveBeenCalled();
+            });
+
+          '''
+          replace_exact(
+              route_test,
+              '  it("rejects invalid tones before opening the persistence transaction", async () => {',
+              invalid_persona_test + '  it("rejects invalid tones before opening the persistence transaction", async () => {',
+          )
+          replace_exact(
+              route_test,
+              "Update personality separately from tone and voice.",
+              "Update personality separately from persona, tone, and voice.",
+          )
+          replace_exact(
+              route_test,
+              "Choose a tone, voice, or personality setting before continuing.",
+              "Choose a persona, tone, voice, or personality setting before continuing.",
+          )
+
+          # Keep scope claims honest: persona changes are onboarding-only here;
+          # existing Settings controls still fine-tune the underlying primitives.
+          replace_exact(
+              "agent-docs/exec-plans/active/2026-07-20-murph-personas.md",
+              "- Settings support for changing persona, voice, tone, and existing dials.",
+              "- Existing Settings and conversation controls continue to fine-tune voice, tone, and dials; changing persona remains onboarding-only in this patch.",
+          )
+          replace_exact(
+              "agent-docs/product-specs/murph-personas.md",
+              "3. Classic Murph default when persona is absent or invalid",
+              "3. the existing Classic Murph baseline when persona is absent; stale voice ids retain the existing provider fallback",
+          )
+          replace_exact(
+              "agent-docs/product-specs/murph-personas.md",
+              "Missing persona resolves to Classic Murph, while any existing tone, voice, Humor, Push, or Detail values remain explicit overrides. Existing members therefore keep their current behavior.",
+              "Missing persona adds no persona or dial overlay to the prompt. The existing static Classic Murph baseline and any saved tone, voice, Humor, Push, or Detail overrides remain unchanged, so existing members keep their current behavior.",
+          )
+
+          # Temporary materialization machinery must never ship.
+          Path("scripts/apply-murph-persona-integration.mjs.gz.b64").unlink()
+          for part in Path("scripts/persona-integration-parts").glob("*.b64"):
+              part.unlink()
+          Path("scripts/persona-integration-parts").rmdir()
+          Path(".github/workflows/apply-murph-persona-integration.yml").unlink()
+          PY
+          python /tmp/repair-personas.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Build contracts
+        run: pnpm --dir packages/contracts build
+
+      - name: Run focused regressions
+        run: |
           pnpm exec vitest run --no-coverage \
+            packages/contracts/test/assistant-personas.test.ts \
+            packages/contracts/test/preferences.test.ts \
+            packages/core/test/preferences.test.ts \
+            packages/hosted-execution/test/hosted-execution-contract-guards.test.ts \
+            packages/assistant-engine/test/persona-prompts.test.ts \
+            packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts \
             packages/assistant-engine/test/assistant-codex-turn-planning.test.ts \
-            --reporter=verbose
+            apps/web/test/settings-assistant-style-route.test.ts \
+            apps/web/test/home-initial-visit-dialog.test.tsx \
+            apps/web/test/hosted-onboarding-member-preferences.test.ts \
+            apps/web/test/hosted-assistant-personalization-tool.test.ts \
+            apps/web/test/account-settings-snapshot.test.ts
+
+      - name: Typecheck packages
+        run: pnpm typecheck:packages
+
+      - name: Typecheck Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Check diff
+        run: git diff --check
+
+      - name: Commit repaired implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: repair and simplify Murph persona integration [persona-repaired]"
+          git push origin HEAD:agent/murph-personas
