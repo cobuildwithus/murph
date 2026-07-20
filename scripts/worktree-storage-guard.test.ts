@@ -124,6 +124,43 @@ describe('worktree storage guard', () => {
     )
   })
 
+  it('runs prepare hook setup locally and skips it in hosted automation', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'murph-prepare-hook-test-'))
+    roots.push(root)
+    const marker = path.join(root, 'hook-installed')
+    mkdirSync(path.join(root, 'scripts'))
+    executable(
+      path.join(root, 'scripts', 'install-git-hooks'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+touch hook-installed
+`,
+    )
+    runGit(root, ['init', '-b', 'main'])
+
+    const packageJson = JSON.parse(readFileSync(path.join(sourceRoot, 'package.json'), 'utf8'))
+    const { CI: _ci, VERCEL: _vercel, ...baseEnvironment } = process.env
+    const runPrepare = (overrides: NodeJS.ProcessEnv = {}) =>
+      spawnSync('bash', ['-c', packageJson.scripts.prepare], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...baseEnvironment, ...overrides },
+      })
+
+    const local = runPrepare()
+    expect(local.status, local.stderr).toBe(0)
+    expect(existsSync(marker)).toBe(true)
+
+    rmSync(marker)
+    const github = runPrepare({ CI: '1' })
+    expect(github.status, github.stderr).toBe(0)
+    expect(existsSync(marker)).toBe(false)
+
+    const vercel = runPrepare({ VERCEL: '1' })
+    expect(vercel.status, vercel.stderr).toBe(0)
+    expect(existsSync(marker)).toBe(false)
+  })
+
   it('avoids process substitution in the install-time guard', () => {
     const guard = readFileSync(
       path.join(sourceRoot, 'scripts', 'worktree-storage-guard'),
