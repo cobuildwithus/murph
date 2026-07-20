@@ -51,7 +51,6 @@ export function createAssistantNewsletterOutboxTool(input: {
         prepareAttempted = true
         const result = await input.newsletterTool.request({
           action: 'prepare',
-          groupId: request.groupId,
         })
         if (
           input.authority
@@ -84,7 +83,6 @@ export function createAssistantNewsletterOutboxTool(input: {
       }
       if (
         !prepared
-        || prepared.groupId !== request.groupId
         || prepared.authority.automationId !== input.authority.automationId
         || prepared.authority.occurrenceAt !== input.authority.occurrenceAt
       ) {

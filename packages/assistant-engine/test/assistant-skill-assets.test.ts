@@ -718,27 +718,34 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )
-    expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
-    expect(raw).toContain(
-      "Create a new newsletter under the developer prompt's shared automation action",
+    expect(raw).toContain('`murph.automation action="save_newsletter"`')
+    expect(raw).toMatch(
+      /`delivery` \(`current_chat` or `group_email`\)/u,
     )
-    expect(raw).toContain(
-      "For changes or stopping, follow the developer prompt's shared automation",
+    expect(raw).toMatch(/Chat delivery must not require or solicit email\s+sharing\./u)
+    expect(raw).toContain('do not include `group-email.v0`')
+    expect(raw).toMatch(
+      /Do not use generic\s+`save` or `patch` to author newsletter configuration/u,
     )
-    expect(raw).not.toContain('the current group channel')
-    expect(raw).toContain('`title`: the group\'s chosen name')
-    expect(raw).toContain('require every email subject to start with that exact name')
-    expect(raw).toContain('Future notification turns may not read this skill')
-    expect(raw).toContain('`slug`: exactly `group-health-newsletter`')
-    expect(raw).toContain('Any other slug will not be able to send')
-    expect(raw).toContain('`schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }`')
-    expect(raw).toContain('`continuityPolicy`: `fresh`')
+    expect(raw).toMatch(
+      /keeps one stable newsletter automation,\s+binds it to this current group, and selects either ordinary group-chat delivery\s+or consented group email/u,
+    )
+    expect(raw).toMatch(
+      /To change configuration or delivery, call `save_newsletter` again with the\s+complete desired values from the destination group/u,
+    )
+    expect(raw).toContain('To stop or resume it, patch only its `status`')
+    expect(raw).toMatch(
+      /chosen schedule becomes the cron expression; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
+    )
     expect(raw).toMatch(
       /until\s+`murph\.automation` returns success[\s\S]*never\s+turn a failed action into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
     expect(raw).toContain('never call `murph.newsletter` `send` right after')
+    expect(raw).toMatch(
+      /For current-chat delivery, confirm the shared scopes and destination\s+without asking for email access/u,
+    )
     expect(raw).toContain('complete read-compose-send and notification')
     expect(raw).toContain('Do not duplicate or')
     expect(raw).toContain('action="revoke_own_email_share"')
@@ -827,6 +834,8 @@ describe('assistant skill assets', () => {
       'every scheduled group-health-newsletter run',
     )
     const raw = await readSkillFile(newsletterSkill)
+    expect(raw).toContain('`murph.automation action="save_newsletter"`')
+    expect(raw).toContain('(`current_chat` or `group_email`)')
     expect(raw).toContain('## Compose each edition')
     expect(raw).toContain('Usually include 6–12 useful stats')
     expect(raw).toContain('Cross-person comparisons are welcome')
@@ -844,7 +853,9 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group weekly')
     expect(raw).not.toContain('Join the two results by exact `memberId`')
     expect(raw).toMatch(/do not compose or call\s+`send`/u)
-    expect(raw).toContain('After any `send` result')
+    expect(raw).toContain('For `current_chat`, do not call `murph.newsletter`')
+    expect(raw).toContain('`murph.group action="read_shared"` once')
+    expect(raw).toContain('After any email `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
@@ -852,7 +863,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('### Example 1: close race')
     expect(raw).toContain('### Example 2: opted-in roast')
     expect(raw).not.toContain('### Example 3:')
-    expect(raw).toContain('<Exact Group Name> — <specific hook>')
+    expect(raw).toContain('<Exact Newsletter Name> — <specific hook>')
     expect(raw).not.toContain('286 active minutes')
     expect(raw).not.toContain('17 workouts')
     expect(raw).not.toContain('completed the most workouts')

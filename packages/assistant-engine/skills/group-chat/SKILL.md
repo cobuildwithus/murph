@@ -75,6 +75,11 @@ idea in the room is one particular challenge; the hosted group is reusable
 beyond that first activity. Do not request every available projection by
 default.
 
+A newsletter that the room explicitly chooses to deliver only in the current
+chat is a narrow exception: request only its chosen one to three health scopes
+and omit `group-email.v0`. Chat delivery must not require or solicit email
+sharing.
+
 Workflow-specific scopes are additive and explicit. In particular,
 `device-sync-status.v0` is not in the universal core set. When creating a group
 for a challenge, follow `group-challenge` and pass the unique union of the core
@@ -341,8 +346,8 @@ messages are expected; send them on schedule with confidence. Etiquette:
 
 Read and follow
 `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` whenever setting up,
-editing, or composing the email newsletter. That skill owns the editorial
-story, human-readable units, comparisons, tone, subject, and final email. This
+editing, or composing a group newsletter. That skill owns the editorial story,
+human-readable units, comparisons, tone, email subject, and final edition. This
 section owns the group-room setup, consent, notice, and opt-out behavior.
 
 The group health newsletter is a single cron automation in the group runtime's
@@ -364,6 +369,14 @@ the group widen or narrow that set. If they already gave some of that, or say
 `displayName` from `read_current` as the newsletter name before inventing a
 generic default, and confirm the essentials in one line.
 
+For a current-chat newsletter when `read_current` returns `status="none"`,
+create the hosted group through the ordinary disclosed join/offer flow with
+only the chosen one to three health scopes; do not include `group-email.v0`.
+For an existing group, offer only any chosen health scopes the workflow still
+needs. The first edition still waits for its natural cron occurrence, so setup
+does not need a separate pending-newsletter state while members decide what to
+share.
+
 Apply the answers directly. The chosen name is the automation title, the name
 used in the setup notice, and the group display name for the permissions
 surface. For the newsletter like-to-consent path, pass that same chosen name
@@ -371,40 +384,27 @@ as `displayName` on `murph.group action="post_join_offer"`. If you mint a
 standalone join link instead, pass the same `displayName` on
 `murph.group action="create_join_link"`.
 The chosen schedule becomes the cron expression; `0 9 * * 0` is the Sunday 9am
-default. Tone and any custom notes belong in the automation instructions.
+default. Create or replace the newsletter with
+`murph.automation action="save_newsletter"`, passing the chosen
+`newsletterName`, cron `schedule`, `delivery` (`current_chat` or `group_email`),
+`tone`, exact `healthScopes`, and optional `customNote`. Do not use generic
+`save` or `patch` to author newsletter configuration, instructions, slug, or
+reserved tags. The structured action keeps one stable newsletter automation,
+binds it to this current group, and selects either ordinary group-chat delivery
+or consented group email without a second scheduler or sender. Choose at most
+three scopes for current-chat delivery so its edition uses one bounded
+`read_shared`; email may use the full supported set.
 
-If the group wants the recurring update in the chat instead of email, do not
-create the `group-health-newsletter` email automation and do not use the
-newsletter email tool. Set up a normal scheduled group-chat update automation
-under the Scheduled updates and automations rules above; on each run it calls
-`murph.group action="read_shared"` for its exact needed scopes after model
-start and needs no email grant.
+To change configuration or delivery, call `save_newsletter` again with the
+complete desired values from the destination group; this also repairs or moves
+its bound route. To stop or resume it, patch only its `status`.
 
-Create a new newsletter under the developer prompt's shared automation action
-rules using:
-
-- `title`: the group's chosen name
-- `slug`: exactly `group-health-newsletter`. Any other slug will not be able to send
-  because scheduled newsletter send authority resolves only this automation slug.
-- `schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }` unless the
-  group chose another schedule
-- `continuityPolicy`: `fresh`
-- `instructions`: say this is the group health newsletter, include the
-  exact chosen name, chosen tone, and any optional custom note, and explicitly
-  require the scheduled run to read and follow
-  `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing, and
-  require every email subject to start with that exact name instead of a generic
-  newsletter label. Future notification turns may not read this skill, so keep
-  that complete naming rule in the saved instructions
-
-For changes or stopping, follow the developer prompt's shared automation
-action rules and apply only the requested fields to `group-health-newsletter`.
-
-When creating or materially editing the newsletter, post one clear group notice
-in the chat. Say what will be shared, that it goes only to members who granted
-group email sharing and have a verified email, how to add an email at
+When creating or materially editing an email newsletter, post one clear group
+notice in the chat. Say what will be shared, that it goes only to members who
+granted group email sharing and have a verified email, how to add an email at
 `https://www.withmurph.ai/settings?addEmail=true`, and that anyone can ask to be
-taken off. The first
+taken off. For current-chat delivery, confirm the shared scopes and destination
+without asking for email access. The first
 edition must wait for the next natural cron occurrence. Never create an
 immediate `at` automation and never call `murph.newsletter` `send` right after
 setup.

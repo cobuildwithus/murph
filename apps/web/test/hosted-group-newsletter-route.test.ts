@@ -111,19 +111,27 @@ describe("hosted group newsletter route", () => {
       },
     });
     expect(mocks.prepareHostedGroupNewsletterParticipants).toHaveBeenCalledWith({
-      groupId: "group_123",
+      runtimeMemberId: "member_runtime",
+    });
+  });
+
+  it("ignores the legacy group selector and derives the group from the signed runtime", async () => {
+    const response = await route.POST(buildRequest("prepare", "group_hijack"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prepareHostedGroupNewsletterParticipants).toHaveBeenCalledWith({
       runtimeMemberId: "member_runtime",
     });
   });
 });
 
-function buildRequest(action: string): Request {
+function buildRequest(action: string, legacyGroupId?: string): Request {
   return new Request(
     "https://web.test/api/internal/hosted-execution/groups/newsletter-tool",
     {
       body: JSON.stringify({
         action,
-        groupId: "group_123",
+        ...(legacyGroupId === undefined ? {} : { groupId: legacyGroupId }),
       }),
       headers: { "content-type": "application/json" },
       method: "POST",

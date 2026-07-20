@@ -334,7 +334,9 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const hostedNewsletterTool = messageInput.scheduledAutomationAuthority
+        ? executionContext?.hosted?.newsletterTool ?? null
+        : null
       const hostedDeviceTool =
         !isAssistantNotificationMaintenanceExactSkip(input) &&
         conversationScope === 'direct'

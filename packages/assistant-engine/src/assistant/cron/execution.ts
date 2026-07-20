@@ -42,6 +42,9 @@ import {
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
+  resolveGroupNewsletterAutomationDelivery,
+} from '../group-newsletter-automation.js'
+import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
 } from '../experiment-support-automations.js'
@@ -125,7 +128,6 @@ const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
   'Group health newsletter delivery did not complete.'
-const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
 const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
   2 * 60 * 60 * 1000
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
@@ -1350,7 +1352,7 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
     input.job.kind !== 'canonical' ||
     input.job.source.kind !== 'automation' ||
     input.job.source.schedule.kind !== 'cron' ||
-    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+    resolveGroupNewsletterAutomationDelivery(input.job.source) !== 'group_email'
   ) {
     return null
   }

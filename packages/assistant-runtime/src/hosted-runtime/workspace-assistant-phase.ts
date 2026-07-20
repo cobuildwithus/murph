@@ -29,8 +29,13 @@ import {
 import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+  GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
+  hasGroupNewsletterDeliveryTag,
+  isCanonicalGroupNewsletterAutomationInstructions,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
@@ -58,6 +63,7 @@ import {
 import {
   patchAutomation,
   reconcileAutomationSupportSeries,
+  resolveAutomationUpsertSlug,
   showAutomation,
   upsertAutomation,
 } from "@murphai/core";
@@ -874,9 +880,38 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
+        const requestedSlug = resolveAutomationUpsertSlug({
+          slug: request.slug,
+          title: request.title,
+        });
+        const existingTarget = request.automationId
+          ? await showAutomation({
+              automationId: request.automationId,
+              vaultRoot: input.vaultRoot,
+            })
+          : null;
+        const isGroupNewsletter =
+          requestedSlug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+          || existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG;
+        const status =
+          isGroupNewsletter && request.status === undefined
+            ? (
+                existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+                  ? existingTarget
+                  : await showAutomation({
+                      slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+                      vaultRoot: input.vaultRoot,
+                    })
+              )?.status ?? "active"
+            : request.status ?? "active";
+        assertHostedAutomationSaveRequest({
+          isGroupNewsletter,
+          request,
+          route: currentRoute,
+        });
         assertActiveHostedAutomationRoute({
           route: currentRoute,
-          status: request.status ?? "active",
+          status,
         });
         const result = await upsertAutomation({
           ...(request.activeUntil === undefined
@@ -891,7 +926,7 @@ function createHostedAssistantAutomationTool(input: {
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
-          status: request.status ?? "active",
+          status,
           ...(request.summary === undefined ? {} : { summary: request.summary }),
           ...(request.supportKind === undefined
             ? {}
@@ -927,6 +962,7 @@ function createHostedAssistantAutomationTool(input: {
           "Automation was not found.",
         );
       }
+      assertHostedAutomationPatchRequest({ existing, request });
       context?.signal?.throwIfAborted();
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
@@ -982,6 +1018,105 @@ function createHostedAssistantAutomationTool(input: {
       });
     },
   };
+}
+
+function assertHostedAutomationSaveRequest(input: {
+  isGroupNewsletter: boolean;
+  request: Extract<
+    Parameters<HostedAssistantAutomationTool["request"]>[0],
+    { action: "save" }
+  >;
+  route: AutomationRoute;
+}): void {
+  const tags = input.request.tags ?? [];
+  const newsletterTagCount = tags.filter((tag) =>
+    tag === GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG
+    || tag === GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG
+  ).length;
+  if (!input.isGroupNewsletter) {
+    if (newsletterTagCount > 0) {
+      throw new VaultCliError(
+        "invalid_option",
+        "Newsletter delivery tags are valid only on the group newsletter automation.",
+      );
+    }
+    return;
+  }
+
+  const channel = normalizeAssistantRouteString(input.route.channel)?.toLowerCase();
+  if (
+    input.route.threadIsDirect !== false
+    || (channel !== "linq" && channel !== "telegram")
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Group newsletters can be saved only from the current iMessage or Telegram group conversation.",
+    );
+  }
+  if (
+    input.request.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+    || newsletterTagCount !== 1
+    || tags.length !== 3
+    || !tags.includes("assistant")
+    || !tags.includes("scheduled")
+    || input.request.schedule.kind !== "cron"
+    || input.request.continuityPolicy !== "fresh"
+    || !isCanonicalGroupNewsletterAutomationInstructions(input.request.instructions)
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Use murph.automation action=save_newsletter to configure this group newsletter.",
+    );
+  }
+}
+
+function assertHostedAutomationPatchRequest(input: {
+  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>;
+  request: Extract<
+    Parameters<HostedAssistantAutomationTool["request"]>[0],
+    { action: "patch" }
+  >;
+}): void {
+  if (
+    input.request.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+    && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Use murph.automation action=save_newsletter to configure this group newsletter.",
+    );
+  }
+  if (
+    input.request.tags?.some((tag) => hasGroupNewsletterDeliveryTag([tag]))
+    && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Newsletter delivery tags are valid only on the group newsletter automation.",
+    );
+  }
+  if (input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG) {
+    return;
+  }
+  if (
+    input.request.activeUntil !== undefined
+    || input.request.assistantTargetOverride !== undefined
+    || input.request.continuityPolicy !== undefined
+    || input.request.instructions !== undefined
+    || input.request.retargetToCurrentConversation !== undefined
+    || input.request.schedule !== undefined
+    || input.request.slug !== undefined
+    || input.request.summary !== undefined
+    || input.request.supportKind !== undefined
+    || input.request.supportSeriesId !== undefined
+    || input.request.tags !== undefined
+    || input.request.title !== undefined
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+    );
+  }
 }
 
 function normalizeHostedAutomationSupportTags(input: {

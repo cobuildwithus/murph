@@ -424,7 +424,7 @@ function preparationResponse(input?: {
 }
 
 async function prepare(tool: ReturnType<typeof createTool>) {
-  return await tool.request({ action: 'prepare', groupId: 'group_123' })
+  return await tool.request({ action: 'prepare' })
 }
 
 async function send(
@@ -437,7 +437,6 @@ async function send(
 ) {
   return await tool.request({
     action: 'send',
-    groupId: 'group_123',
     html: input?.html ?? '<p>Weekly</p>',
     subject: input?.subject ?? 'Weekly health note',
     text: input?.text ?? 'Weekly',

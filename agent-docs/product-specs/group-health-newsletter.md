@@ -1,13 +1,13 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-18
+Last verified: 2026-07-20
 Status: Implemented
 
 ## Current State
 
-A member of a Murph group chat (family, friend group, couple, household, team) wants Murph to send a **recurring health newsletter by email** to the group. It celebrates wins, notes standouts, and gently nudges laggards, in a **tone the group picks** (supportive by default; coach-style roast only if the group explicitly asks for it). Setup happens conversationally from inside the group chat: "Murph, set up a weekly health newsletter for us." Murph asks a short setup question set before creating anything: name, schedule, email versus chat delivery, and optional tone.
+A member of a Murph group chat (family, friend group, couple, household, team) wants Murph to send a **recurring health newsletter** either in the current iMessage or Telegram group chat or by group email. It celebrates wins, notes standouts, and finds the week's most interesting shared pattern, in a **tone the group picks** (supportive by default; coach-style roast only if the group explicitly asks for it). Setup happens conversationally from inside the group chat: "Murph, set up a weekly health newsletter for us." Murph asks a short setup question set before creating anything: name, schedule, delivery, and optional tone.
 
-The newsletter is delivered as **one shared email thread** that the whole group is on, so members can reply-all and banter, and Murph takes part in the thread the way it does in the group chat.
+For email delivery, the newsletter is **one shared email thread** that the whole group is on, so members can reply-all and banter, and Murph takes part in the thread the way it does in the group chat. For current-chat delivery, it is one ordinary scheduled assistant response on the automation's bound route.
 
 This is a thin feature over primitives that already exist. Group chats are already hosted runtimes with their own vault; members can grant the group access to exact selected health scopes; recurring scheduled sends already exist as automations; and outbound email already ships through the Cloudflare `HOSTED_EMAIL` send binding. Web keeps each bounded health snapshot encrypted on its existing grant row and resolves shared data only when the scheduled model invokes newsletter preparation. The newsletter is a **new consumer** of these primitives plus one new reusable consent grant.
 
@@ -16,7 +16,7 @@ This is a thin feature over primitives that already exist. Group chats are alrea
 The newsletter is not a new scheduler, not a second email system, and not a new personal data store.
 
 - It is one **cron automation living in the group runtime's own vault**, authored the same way reminders are.
-- It **reuses** the Cloudflare outbound email path. It does not introduce a parallel Resend broadcast sender (Resend stays for web transactional mail only).
+- It uses the existing conversation outbox for iMessage and Telegram. Email delivery **reuses** the Cloudflare outbound email path. It does not introduce a parallel sender.
 - It sends **one shared email to the whole group** (a thread everyone is on), not a personalized email per member. Members reply-all; Murph participates in the thread.
 - It **reads only health data that members explicitly share** through the disclosed reaction offer or the join page. Newsletter `prepare` performs the consent-aware Web read after the model invokes the tool; no shared snapshot or destination-local share store is written into the group vault. It does not infer newsletter health access from private 1:1 Murph data.
 - Email addresses are **shared with the group by explicit grant** and are visible to co-members in the thread's `To` line — that visibility is the point of a shared reply-all thread and is exactly what the grant authorizes. Addresses are **not persisted in the group vault**; they are resolved web-side at send time and placed only in the outbound email headers.
@@ -26,10 +26,10 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Decision | Choice |
 | --- | --- |
 | Who can set up / edit / stop it | **Any member.** One shared automation per group; last-write-wins. |
-| Delivery shape | **One shared email thread** to all participants; addresses visible; reply-all; Murph present in-thread; a new thread each week. |
+| Delivery shape | One stable newsletter automation chooses either **one ordinary current-chat update** or **one shared email thread** to all eligible participants. |
 | Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
 | Newsletter content opt-in | Liking the newsletter permission offer opts into the disclosed default snapshot: profile name, email, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. It grants membership only when needed; the customize link lets a member share more or less. |
-| New-group requested permissions | On first hosted-group creation, Murph normally requests the reusable core set: email, steps, broad activity, workout summaries, sleep duration, sleep timing, resting heart rate, and HRV. An explicit creator choice may narrow or change the health scopes; email remains the server-standard request, and every member may deselect any requested permission. |
+| New-group requested permissions | For email delivery, Murph normally requests email plus the supported health scopes, narrowed by any explicit creator choice. For current-chat delivery, it requests only the chosen one to three health scopes and omits email. Every member may deselect any requested permission. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** (self-service, in chat or by replying in the thread). Leaves challenge/health-sharing intact. Forward-only. |
@@ -38,7 +38,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
-| Chat delivery | If the group wants delivery in the group chat, use a normal scheduled group-chat update automation. The `group-health-newsletter` slug and email machinery are only for email delivery. |
+| Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. |
 | Permission offers | Lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. Liking opts into the disclosed snapshot and grants membership only when needed; the link is the fine-tune path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
@@ -72,7 +72,9 @@ A cron automation persisted in the **group runtime's** vault (`bank/automations/
 
 - `schedule: { kind: 'cron', expression: '0 9 * * 0' }` (Sunday 09:00 default; timezone = vault timezone). Weekly uses `cron`, never `every` (which drifts across DST/missed wakes).
 - `continuityPolicy: 'fresh'` (a standalone digest).
-- Tone flavor + optional custom note live in the automation's **instruction text** — no new config table. This satisfies the persisted-state placement gate: an automation is already a canonical vault record and is the group-scoped source of truth for the newsletter.
+- Setup uses the structured `murph.automation action="save_newsletter"` action. It writes canonical configuration text plus exactly one system-owned delivery tag: `system:group-newsletter:current-chat` or `system:group-newsletter:email`. The model does not author operational instructions, the slug, or reserved tags.
+- Newsletter configuration or route changes repeat that structured save from the destination group; generic patch is status-only.
+- Name, exact scopes, tone flavor, delivery, and optional custom note live in the automation's **instruction text** — no new config table. This satisfies the persisted-state placement gate: an automation is already a canonical vault record and is the group-scoped source of truth for the newsletter.
 - One automation per group. "Any member can edit" = any member's in-chat request upserts/patches that single record (last-write-wins). `status: paused` stops it.
 - **First run after creation is not immediate.** When the newsletter is created, Murph posts a group notice and the first edition respects an opt-out window (see Security & Abuse).
 
@@ -108,10 +110,12 @@ Revocation clears its encrypted snapshot in the same Web authority transaction;
 the read path does not depend on asynchronous cleanup. The model never performs
 the authorization join and receives neither the grant snapshot nor its proof.
 
-Authorized newsletter cron turns keep the normal group conversation thread,
-native resume behavior, and shell/tool access. The automation instructions tell
-the assistant to read the newsletter skill and to use only the filtered
-`prepare.result.members` facts when writing that edition. This is an assistant
+Newsletter cron turns keep the normal group conversation thread, native resume
+behavior, and shell/tool access. The runtime appends the current execution
+contract to the saved configuration on every run, so legacy records receive the
+current workflow without mutating their persisted instructions. Email runs use
+only the filtered `prepare.result.members` facts; current-chat runs use one
+bounded `read_shared` for the exact saved scopes. This is an assistant
 instruction, not a provenance guarantee: conversation or tool context can still
 be visible to the model. The hard boundary is the late authorization proof,
 which constrains current preparation and recipients but does not prove that
@@ -265,13 +269,12 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 ## The Skill
 
 The dedicated `group-newsletter` assistant skill owns the editorial story,
-human-readable units, comparison rules, subject, tone, calibrated examples, and
-final email. The `group-chat` skill owns the room-level setup questions,
-group-chosen name and schedule, chat-delivery routing, email-share offer,
-announce-before-first-send behavior, and opt-out handling. Saved automation
-instructions explicitly tell every future scheduled run to read the newsletter
-skill because notification turns may not retain the setup conversation or load
-the group-chat skill. The skill carries no durable state itself; state lives in
+human-readable units, comparison rules, email subject, tone, calibrated
+examples, and final edition. The `group-chat` skill owns the room-level setup
+questions, group-chosen name and schedule, email-share offer,
+announce-before-first-send behavior, and opt-out handling. The structured setup
+action writes configuration only; the runtime appends the current execution
+contract on each scheduled turn. Skills carry no durable state; state lives in
 the automation and grants.
 
 ## Net-New Surface (summary)
@@ -283,11 +286,11 @@ the automation and grants.
    status. The reusable current-week summary builder lives in `packages/query`;
    trusted newsletter preparation calls it without destination-local share
    state.
-4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
+4. `group-newsletter` skill + one structured newsletter save action over the existing automation port (group-chosen name as title, schedule as cron, delivery tag, scopes and tone in configuration text), including setup questions, ordinary current-chat delivery, announce-before-first-email + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
 5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest seven records per projection kind.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
-Everything else is reuse: scheduling, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.
+Everything else is reuse: scheduling, current-chat outbox, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.
 
 ## Open Items / Future Work
 
@@ -308,15 +311,13 @@ callback, live membership and grant resolution, exact share-id/scope filtering,
 and proof-required delivery revalidation remain the authorization boundary; the
 retired request-version negotiation did not contribute authority.
 
-For the contract cleanup, deploy Vercel/web first, then deploy the
-Cloudflare/runner bundle with `container_rollout=immediate`. During the short
-skew window, the strict web parser rejects the prior runner's request shape; the
-current runner records the unavailable result and preserves the newsletter
-occurrence for retry rather than spending it. After both planes deploy, the
-cleanup head is the independent rollback floor for each plane. A coordinated
-rollback may return both planes to the PR #608 contract by rolling Cloudflare
-back first and Vercel/web second; never roll the runner below PR #608. After
-both are live, run one preparation call and confirm the trusted web wire contains
+For the route-derivation and delivery-choice change, deploy Vercel/web first,
+then deploy the Cloudflare/runner bundle with `container_rollout=immediate`.
+The new Web consumer accepts the old optional `groupId` field but ignores it and
+derives the one group from the signed runtime member. The new runner omits that
+redundant model-controlled field. This makes the skew window compatible in the
+forward direction; roll back the runner before Web. After both are live, run
+one preparation call and confirm the trusted web wire contains
 only member ids, email eligibility, and address-free share ids/scope keys, while
 the model-facing runner result contains only the authorized current-week facts
 and no raw email addresses or grant metadata. Confirm a scheduled send first
