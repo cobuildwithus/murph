@@ -1,10 +1,14 @@
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  phoneAuthProps: [] as Array<{
+    phoneFieldLabel?: string | null;
+    phoneInputAutoFocus?: boolean;
+  }>,
   refreshUser: vi.fn(),
   useUser: vi.fn(),
 }));
@@ -14,7 +18,14 @@ vi.mock("@privy-io/react-auth", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth() {
+  HostedPhoneAuth(props: {
+    phoneFieldLabel?: string | null;
+    phoneInputAutoFocus?: boolean;
+  }) {
+    mocks.phoneAuthProps.push({
+      phoneFieldLabel: props.phoneFieldLabel,
+      phoneInputAutoFocus: props.phoneInputAutoFocus,
+    });
     return createElement(
       "div",
       {
@@ -28,6 +39,11 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
 let cleanupRender: (() => Promise<void>) | null = null;
 
 describe("HostedPhoneSettings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.phoneAuthProps = [];
+  });
+
   afterEach(async () => {
     if (cleanupRender) {
       await cleanupRender();
@@ -111,6 +127,40 @@ describe("HostedPhoneSettings", () => {
 
     expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeTruthy();
   });
+
+  it.each([
+    [null, undefined],
+    ["+14046257706", "New phone number"],
+  ] as const)(
+    "opens the dialog phone form directly without a duplicate account card for %s",
+    async (initialPhoneNumber, phoneFieldLabel) => {
+      mocks.useUser.mockReturnValue({
+        refreshUser: mocks.refreshUser,
+        user: null,
+      });
+
+      const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+
+      const { cleanup, container } = await renderClientComponent(
+        createElement(HostedPhoneSettings, {
+          authenticated: true,
+          autoOpen: true,
+          initialPhoneNumber,
+        }),
+        { requireButton: false },
+      );
+      cleanupRender = cleanup;
+
+      expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeTruthy();
+      expect(container.textContent).not.toContain("Not connected");
+      expect(container.textContent).not.toContain("Link phone");
+      expect(container.textContent).not.toContain("•••• 7706");
+      expect(mocks.phoneAuthProps.at(-1)).toEqual({
+        phoneFieldLabel,
+        phoneInputAutoFocus: true,
+      });
+    },
+  );
 
   it("does not use Privy client user state as the displayed phone authority", async () => {
     mocks.useUser.mockReturnValue({

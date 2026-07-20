@@ -7,6 +7,7 @@ import {
   resolveMurphAppVitestMaxWorkers,
   resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
+import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 import {
   murphVitestLongRunningTimeouts,
   murphVitestNoTimeouts,
@@ -56,6 +57,7 @@ function createCloudflareNodeProject(name: string, fileNames: readonly string[])
         : murphVitestNoTimeouts),
       name,
       environment: "node",
+      globalSetup: [murphVitestTempGlobalSetup],
       ...concurrency,
       include: fileNames.map(cloudflareNodePattern),
     },
