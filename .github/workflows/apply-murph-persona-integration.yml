@@ -32,6 +32,8 @@ jobs:
           corepack prepare pnpm@10.33.0 --activate >/dev/null
           pnpm install --frozen-lockfile --reporter=silent >/dev/null
           pnpm --dir packages/contracts build >/dev/null
-          pnpm exec vitest run --no-coverage \
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
             apps/web/test/settings-assistant-style-route.test.ts \
             --reporter=verbose
