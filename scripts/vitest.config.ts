@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import { resolveMurphVitestConcurrency } from "../config/vitest-parallelism.js";
+import {
+  resolveMurphVitestConcurrency,
+  resolveMurphVitestMaxWorkers,
+} from "../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../config/vitest-timeouts.js";
 import {
   createVitestWorkspaceRuntimeAliases,
@@ -28,6 +31,7 @@ export default defineConfig({
     name: "repo-tools",
     environment: "node",
     ...resolveMurphVitestConcurrency(),
+    maxWorkers: resolveMurphVitestMaxWorkers(),
     include: ["scripts/**/*.test.ts"],
     exclude: ["scripts/murph-age/**/*.test.ts"],
   },
