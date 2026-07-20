@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   ChevronsUpDown,
-  FileText,
   FlaskConical,
   Home,
 } from "lucide-react";
@@ -71,7 +70,6 @@ const navItems: {
     matchPrefix: "/biomarkers",
     icon: Activity,
   },
-  { label: "Records", href: "/records", icon: FileText },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
 
