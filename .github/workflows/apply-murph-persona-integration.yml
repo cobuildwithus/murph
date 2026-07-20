@@ -32,12 +32,13 @@ jobs:
           corepack prepare pnpm@10.33.0 --activate >/dev/null
           pnpm install --frozen-lockfile --reporter=silent >/dev/null
           pnpm --dir packages/contracts build >/dev/null
-          pnpm exec vitest run \
+          if ! pnpm exec vitest run \
             --config apps/web/vitest.workspace.ts \
             --no-coverage \
             apps/web/test/settings-assistant-style-route.test.ts \
-            --reporter=verbose > /tmp/persona-route-test.log 2>&1 || {
-              tail -n 80 /tmp/persona-route-test.log
-              exit 1
-            }
-          tail -n 25 /tmp/persona-route-test.log
+            --reporter=verbose > /tmp/persona-route-test.log 2>&1; then
+            grep -nE 'FAIL|Error|error|Caused by|Test Files|Tests|Unhandled|failed' \
+              /tmp/persona-route-test.log | tail -n 80
+            exit 1
+          fi
+          grep -nE 'Test Files|Tests' /tmp/persona-route-test.log
