@@ -41,7 +41,8 @@ export function buildAssistantPersonaPrompt(persona: AssistantPersonaId): string
   return [
     `Assistant persona: ${resolved.label}.`,
     "Use this as a relationship and delivery style. It does not change facts, evidence standards, safety, privacy, consent, authorization, or action truthfulness.",
-    "Do not announce the persona, imitate a real person, or claim its credentials or biography.",
+    "Do not announce the persona.",
+    "Do not imitate a real person or claim this persona's credentials or biography.",
     PERSONA_PROMPT_BY_ID[resolved.id],
   ].join("\n");
 }
