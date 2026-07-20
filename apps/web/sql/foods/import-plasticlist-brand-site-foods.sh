@@ -123,23 +123,16 @@ function requiredBoolean(row, field) {
 function firstServingGrams(label, id) {
   const servingSizes = label.servingSizes;
   if (!Array.isArray(servingSizes)) return "";
-  let firstGrams = "";
   for (const servingSize of servingSizes) {
     if (!servingSize || typeof servingSize !== "object" || Array.isArray(servingSize)) {
-      throw new Error(`PlasticList brand-site food row ${id} has an invalid servingSizes entry`);
-    }
-    if (!Object.prototype.hasOwnProperty.call(servingSize, "grams")) {
       continue;
     }
     const grams = servingSize.grams;
-    if (typeof grams !== "number" || !Number.isFinite(grams) || grams <= 0) {
-      throw new Error(`PlasticList brand-site food row ${id} has invalid serving grams`);
-    }
-    if (firstGrams === "") {
-      firstGrams = grams;
+    if (typeof grams === "number" && Number.isFinite(grams) && grams > 0) {
+      return grams;
     }
   }
-  return firstGrams;
+  throw new Error(`PlasticList brand-site food row ${id} has servingSizes without positive grams`);
 }
 
 function csvField(value) {
@@ -159,10 +152,8 @@ function csvRow(row) {
   if (dataOrigin !== "brand_site") {
     throw new Error(`PlasticList brand-site food row ${id} must use dataOrigin brand_site`);
   }
-  if (dataOriginId !== id && `${dataOrigin}:${dataOriginId}` !== id) {
-    throw new Error(
-      `PlasticList brand-site food row ${id} must use its id or source-local suffix as dataOriginId`,
-    );
+  if (dataOriginId !== id) {
+    throw new Error(`PlasticList brand-site food row ${id} must use dataOriginId equal to id`);
   }
   if (seenIds.has(id)) {
     throw new Error(`Duplicate PlasticList brand-site food id ${id}`);

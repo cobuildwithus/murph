@@ -57,15 +57,11 @@ fi
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
 script_dir="apps/web/sql/product-tests"
-run_work_dir=""
 
 # shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
 . "$script_dir_abs/labels-db-psql.sh"
 
 cleanup_product_test_match_candidates_export() {
-  if [ -n "$run_work_dir" ]; then
-    rm -rf "$run_work_dir"
-  fi
   cleanup_labels_db_psql_env
 }
 
@@ -73,13 +69,11 @@ trap cleanup_product_test_match_candidates_export EXIT
 prepare_labels_db_psql_env
 
 cd "$repo_root"
-umask 077
 
 mkdir -p "$(dirname "$candidates_tsv_path")"
 
 work_dir=".product-tests-work/product-test-match-candidates"
 mkdir -p "$work_dir"
-chmod 700 "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 candidate_tmp="$run_work_dir/candidates.tsv"
 
@@ -90,6 +84,5 @@ run_labels_psql \
   -v candidate_limit="$candidate_limit" \
   -f "$script_dir/export-product-test-match-candidates.sql" > "$candidate_tmp"
 mv "$candidate_tmp" "$candidates_tsv_path"
-chmod 600 "$candidates_tsv_path"
 
 echo "Exported product test match candidates."

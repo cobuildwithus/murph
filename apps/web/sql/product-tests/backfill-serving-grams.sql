@@ -245,21 +245,6 @@ SET
   evidence_url = btrim(evidence_url),
   evidence_note = btrim(evidence_note);
 
-CREATE TEMP TABLE serving_grams_retired_reviewed_import (
-  entity_type TEXT NOT NULL,
-  label_id TEXT NOT NULL,
-  stale_serving_grams NUMERIC NOT NULL,
-  retirement_note TEXT NOT NULL
-) ON COMMIT DROP;
-
-\copy serving_grams_retired_reviewed_import FROM __RETIRED_REVIEWED_SERVING_GRAMS_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
-
-UPDATE serving_grams_retired_reviewed_import
-SET
-  entity_type = btrim(entity_type),
-  label_id = btrim(label_id),
-  retirement_note = btrim(retirement_note);
-
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM serving_grams_reviewed_import) THEN
@@ -286,64 +271,6 @@ BEGIN
     HAVING count(*) > 1
   ) THEN
     RAISE EXCEPTION 'duplicate reviewed serving grams label';
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM serving_grams_retired_reviewed_import) THEN
-    RAISE EXCEPTION 'retired reviewed serving grams import prepared zero rows';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM serving_grams_retired_reviewed_import retired
-    WHERE
-      retired.entity_type NOT IN ('food', 'supplement')
-      OR retired.label_id = ''
-      OR retired.retirement_note = ''
-      OR NOT (retired.stale_serving_grams > 0 AND retired.stale_serving_grams <= 2000)
-  ) THEN
-    RAISE EXCEPTION 'retired reviewed serving grams row is invalid';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM serving_grams_retired_reviewed_import retired
-    GROUP BY retired.entity_type, retired.label_id
-    HAVING count(*) > 1
-  ) THEN
-    RAISE EXCEPTION 'duplicate retired reviewed serving grams label';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM serving_grams_retired_reviewed_import retired
-    JOIN serving_grams_reviewed_import reviewed
-      USING (entity_type, label_id)
-  ) THEN
-    RAISE EXCEPTION 'serving grams label cannot be both reviewed and retired';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM serving_grams_retired_reviewed_import retired
-    JOIN foods
-      ON foods.id = retired.label_id
-    WHERE retired.entity_type = 'food'
-      AND foods.serving_grams IS NOT NULL
-      AND foods.serving_grams IS DISTINCT FROM retired.stale_serving_grams
-  ) THEN
-    RAISE EXCEPTION 'retired reviewed serving grams food value diverged from guarded stale value';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM serving_grams_retired_reviewed_import retired
-    JOIN supplements
-      ON supplements.id = retired.label_id
-    WHERE retired.entity_type = 'supplement'
-      AND supplements.serving_grams IS NOT NULL
-      AND supplements.serving_grams IS DISTINCT FROM retired.stale_serving_grams
-  ) THEN
-    RAISE EXCEPTION 'retired reviewed serving grams supplement value diverged from guarded stale value';
   END IF;
 
   IF EXISTS (
@@ -483,27 +410,6 @@ WHERE reviewed.entity_type = 'supplement'
 
 SELECT
   'foods' AS table_name,
-  count(*) AS retired_rows,
-  count(*) FILTER (WHERE foods.serving_grams = retired.stale_serving_grams) AS guarded_rows_to_clear,
-  count(*) FILTER (WHERE foods.id IS NULL) AS missing_rows
-FROM serving_grams_retired_reviewed_import retired
-LEFT JOIN foods
-  ON foods.id = retired.label_id
-WHERE retired.entity_type = 'food'
-UNION ALL
-SELECT
-  'supplements' AS table_name,
-  count(*) AS retired_rows,
-  count(*) FILTER (WHERE supplements.serving_grams = retired.stale_serving_grams) AS guarded_rows_to_clear,
-  count(*) FILTER (WHERE supplements.id IS NULL) AS missing_rows
-FROM serving_grams_retired_reviewed_import retired
-LEFT JOIN supplements
-  ON supplements.id = retired.label_id
-WHERE retired.entity_type = 'supplement'
-ORDER BY table_name;
-
-SELECT
-  'foods' AS table_name,
   source_rule,
   count(*) AS candidate_rows,
   min(serving_grams) AS min_serving_grams,
@@ -589,20 +495,6 @@ ORDER BY data_origin, id
 LIMIT 20;
 
 \if :serving_grams_backfill_apply
-  UPDATE foods
-  SET serving_grams = NULL
-  FROM serving_grams_retired_reviewed_import retired
-  WHERE retired.entity_type = 'food'
-    AND foods.id = retired.label_id
-    AND foods.serving_grams = retired.stale_serving_grams;
-
-  UPDATE supplements
-  SET serving_grams = NULL
-  FROM serving_grams_retired_reviewed_import retired
-  WHERE retired.entity_type = 'supplement'
-    AND supplements.id = retired.label_id
-    AND supplements.serving_grams = retired.stale_serving_grams;
-
   UPDATE foods
   SET serving_grams = candidates.serving_grams
   FROM serving_grams_food_candidates candidates

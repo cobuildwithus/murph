@@ -459,22 +459,14 @@ size. One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
 
-Product-test ingestion is catalog-driven. Enabled adapters may add open,
-product-identifiable observations from government or permissively licensed
-sources. The source registry contains only executable adapters and their
-attribution; generic-only, event-only, permission-gated, and excluded research
-stays outside the runtime registry so it cannot be silently treated as
-measurements. Each observation preserves its evidence and sampling
-context, sample or lot identity when published, result bounds and qualifiers,
-analytical limits, and raw reported product identifier. Only checksum-valid
-GTINs enter the canonical UPC field or exact-match path; invalid or ambiguously
-formatted source identifiers remain provenance. Source refreshes carry a
-reviewed link forward only when the complete source-product identity remains
-stable, and all fuzzy name candidates require explicit review.
-Private label lookup and the bounded public product-detail contract expose the
-same additive result bounds, analytical-limit, and sample/lot metadata so a
-regulatory finding or sampled package is not presented as a timeless product
-claim.
+Each product-test observation may preserve evidence and sampling context,
+sample or lot identity, result bounds and qualifiers, analytical limits, and
+the raw reported product identifier. Only checksum-valid GTINs enter the
+canonical UPC field. Private label lookup and the bounded public product-detail
+contract expose the same additive metadata so a regulatory finding or sampled
+package is not presented as a timeless product claim. One-time acquisition,
+reconciliation, and remap tooling is operational research rather than deployed
+application code.
 
 ## Trust Boundaries
 

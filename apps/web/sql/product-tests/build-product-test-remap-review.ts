@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const inputPath = process.env.PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH;
@@ -8,41 +8,20 @@ const workOutputDir = ".product-tests-work";
 const outputColumns = [
   "source_key",
   "tested_source_product_id",
-  "source_fingerprint",
-  "source_snapshot_fingerprint",
   "product_test_rows",
   "tested_product_name",
   "tested_product_brand",
   "tested_product_upc",
-  "tested_product_upc_raw",
-  "tested_package_size",
-  "canonical_source_gtin",
-  "exact_upc_canonical_groups",
-  "contaminant_keys",
-  "current_food_id",
-  "current_supplement_id",
-  "current_match_method",
-  "current_remap_revision",
-  "expected_current_state_fingerprint",
-  "desired_remap_revision",
   "candidate_kind",
   "candidate_id",
-  "candidate_canonical_key",
   "candidate_name",
   "candidate_brand",
   "candidate_upc",
-  "candidate_data_origin",
-  "candidate_data_origin_id",
   "candidate_reason",
   "candidate_score",
-  "runner_up_score",
-  "candidate_score_margin",
-  "target_fingerprint",
-  "candidate_options_json",
   "suggested_food_id",
   "suggested_supplement_id",
   "suggested_match_method",
-  "source_id_namespace",
   "review_note",
 ] as const;
 
@@ -60,15 +39,6 @@ async function main(): Promise<void> {
   assertSafeOutputPath(outputPath);
 
   const rows = parseTsv(await readFile(inputPath, "utf8"));
-  const rowsBySourceIdentity = new Map<string, CandidateRecord[]>();
-
-  for (const row of rows) {
-    const key = sourceIdentityKey(row);
-    const sourceRows = rowsBySourceIdentity.get(key) ?? [];
-    sourceRows.push(row);
-    rowsBySourceIdentity.set(key, sourceRows);
-  }
-
   const rankOneRows = rows
     .filter((row) => row.candidate_rank === "1")
     .sort((left, right) =>
@@ -79,76 +49,30 @@ async function main(): Promise<void> {
   const reviewRows = rankOneRows.map((row) => {
     const isFood = row.candidate_kind === "food";
     const isSupplement = row.candidate_kind === "supplement";
-    const candidateOptions = (rowsBySourceIdentity.get(sourceIdentityKey(row)) ?? [])
-      .slice()
-      .sort((left, right) =>
-        Number(left.candidate_rank || "0") - Number(right.candidate_rank || "0"),
-      )
-      .slice(0, 5)
-      .map((candidate) => ({
-        rank: candidate.candidate_rank,
-        kind: candidate.candidate_kind,
-        id: candidate.candidate_id,
-        canonicalKey: candidate.candidate_canonical_key,
-        name: candidate.candidate_name,
-        brand: candidate.candidate_brand,
-        upc: candidate.candidate_upc,
-        dataOrigin: candidate.candidate_data_origin,
-        dataOriginId: candidate.candidate_data_origin_id,
-        reason: candidate.candidate_reason,
-        score: candidate.candidate_score,
-        targetFingerprint: candidate.target_fingerprint,
-      }));
 
     return {
       source_key: row.source_key,
       tested_source_product_id: row.tested_source_product_id,
-      source_fingerprint: row.source_fingerprint,
-      source_snapshot_fingerprint: row.source_snapshot_fingerprint,
       product_test_rows: row.product_test_rows,
       tested_product_name: row.tested_product_name,
       tested_product_brand: row.tested_product_brand,
       tested_product_upc: row.tested_product_upc,
-      tested_product_upc_raw: row.tested_product_upc_raw,
-      tested_package_size: row.tested_package_size,
-      canonical_source_gtin: row.canonical_source_gtin,
-      exact_upc_canonical_groups: row.exact_upc_canonical_groups,
-      contaminant_keys: row.contaminant_keys,
-      current_food_id: row.current_food_id,
-      current_supplement_id: row.current_supplement_id,
-      current_match_method: row.current_match_method,
-      current_remap_revision: row.current_remap_revision,
-      expected_current_state_fingerprint: row.current_state_fingerprint,
-      desired_remap_revision: String(Number(row.current_remap_revision || "0") + 1),
       candidate_kind: row.candidate_kind,
       candidate_id: row.candidate_id,
-      candidate_canonical_key: row.candidate_canonical_key,
       candidate_name: row.candidate_name,
       candidate_brand: row.candidate_brand,
       candidate_upc: row.candidate_upc,
-      candidate_data_origin: row.candidate_data_origin,
-      candidate_data_origin_id: row.candidate_data_origin_id,
       candidate_reason: row.candidate_reason,
       candidate_score: row.candidate_score,
-      runner_up_score: row.runner_up_score,
-      candidate_score_margin: row.candidate_score_margin,
-      target_fingerprint: row.target_fingerprint,
-      candidate_options_json: JSON.stringify(candidateOptions),
       suggested_food_id: isFood ? row.candidate_id : "",
       suggested_supplement_id: isSupplement ? row.candidate_id : "",
       suggested_match_method: row.suggested_match_method || "manual_confirmed",
-      source_id_namespace: "",
       review_note: "",
     };
   });
 
-  await mkdir(path.dirname(outputPath), { recursive: true, mode: 0o700 });
-  await writeFile(outputPath, serializeTsv(reviewRows), { encoding: "utf8", mode: 0o600 });
-  await chmod(outputPath, 0o600);
-}
-
-function sourceIdentityKey(row: CandidateRecord): string {
-  return `${row.source_key}\u0000${row.tested_source_product_id}`;
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, serializeTsv(reviewRows), "utf8");
 }
 
 function assertSafeOutputPath(candidatePath: string): void {

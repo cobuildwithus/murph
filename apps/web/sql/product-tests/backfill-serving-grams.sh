@@ -5,24 +5,20 @@ usage() {
   cat <<'USAGE'
 Usage: apps/web/sql/product-tests/backfill-serving-grams.sh [--dry-run|--apply]
 
-Reconciles foods.serving_grams and supplements.serving_grams from deterministic
-gram evidence only. Exact retired reviewed values are cleared with guarded
-compare-and-set updates. Dry-run is the default and rolls the transaction back.
+Backfills foods.serving_grams and supplements.serving_grams from deterministic
+gram evidence only. Dry-run is the default and rolls the transaction back.
 
 Required env:
   MURPH_LABELS_DB_URL  Postgres URL for the labels database.
 
 Optional env:
   REVIEWED_SERVING_GRAMS_TSV_PATH  Reviewed exact-label serving grams TSV.
-  RETIRED_REVIEWED_SERVING_GRAMS_TSV_PATH
-                                   Retired stale serving grams CAS cleanup TSV.
 USAGE
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 apply=false
 reviewed_serving_grams_tsv_path="${REVIEWED_SERVING_GRAMS_TSV_PATH:-$script_dir/reviewed-serving-grams.tsv}"
-retired_reviewed_serving_grams_tsv_path="${RETIRED_REVIEWED_SERVING_GRAMS_TSV_PATH:-$script_dir/retired-reviewed-serving-grams.tsv}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -66,11 +62,6 @@ if [ ! -f "$reviewed_serving_grams_tsv_path" ]; then
   exit 66
 fi
 
-if [ ! -f "$retired_reviewed_serving_grams_tsv_path" ]; then
-  echo "Retired reviewed serving grams TSV not found" >&2
-  exit 66
-fi
-
 if [ "$apply" = true ]; then
   echo "Applying serving_grams backfill."
 else
@@ -78,11 +69,9 @@ else
 fi
 
 reviewed_serving_grams_tsv_literal="$(labels_db_psql_copy_literal "$reviewed_serving_grams_tsv_path")"
-retired_reviewed_serving_grams_tsv_literal="$(labels_db_psql_copy_literal "$retired_reviewed_serving_grams_tsv_path")"
 prepared_sql="$(mktemp "${TMPDIR:-/tmp}/murph-serving-grams-backfill.XXXXXX.sql")"
 sed \
-  -e "s#__REVIEWED_SERVING_GRAMS_TSV__#$reviewed_serving_grams_tsv_literal#g" \
-  -e "s#__RETIRED_REVIEWED_SERVING_GRAMS_TSV__#$retired_reviewed_serving_grams_tsv_literal#g" \
+  "s#__REVIEWED_SERVING_GRAMS_TSV__#$reviewed_serving_grams_tsv_literal#g" \
   "$script_dir/backfill-serving-grams.sql" > "$prepared_sql"
 
 run_labels_psql \

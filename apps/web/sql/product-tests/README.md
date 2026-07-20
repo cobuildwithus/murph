@@ -7,13 +7,6 @@ by exact UPC, exact source id, or manual confirmation, or it remains
 summaries only for linked rows and never infer contaminants from names, brands,
 tags, categories, or fuzzy matches.
 
-The catalog registry in `product-test-source-registry.ts` contains only sources
-with executable import adapters and the attribution fields those adapters use.
-Deferred source research and rights decisions stay in planning or documentation
-until an adapter has a current product need. Public visibility alone is not
-permission for bulk reuse, and a recall, certification, allegation, or anonymous
-survey is not silently converted into a product measurement.
-
 ## PlasticList
 
 PlasticList data is licensed under CC BY 4.0. You may freely share and adapt it
@@ -106,14 +99,9 @@ Existing product-test link targets are preserved on default reruns only while
 the refreshed source row still names the same source product id, tested product
 name, tested brand, and tested UPC. If a source refresh reuses a result id for
 a different tested source product, the row is repaired back to `source_only`
-before the new source facts are applied, while retaining the group's reviewed
-generation high-watermark. Any
+before the new source facts are applied. Any
 legacy contaminant-source-backed product link is also repaired back to
-`source_only` by the schema before source-backed placeholder cleanup runs, with
-the same high-watermark retention.
-That cleanup uses the closed set of historical placeholder origins rather than
-the current catalog-key set: a future source key that happens to equal a real
-label origin must not hide or invalidate that label.
+`source_only` by the schema before source-backed placeholder cleanup runs.
 `--replace-source` prunes PlasticList rows absent from the complete prepared
 source input, but it does not clear curated product links whose source identity
 still matches; identity drift still repairs those rows back to `source_only`.
@@ -220,33 +208,6 @@ appears at most once in the TSV. If the upstream source product identity drifts,
 the source import repairs affected rows back to `source_only`, and this remap
 import fails until the reviewed TSV is regenerated or manually re-reviewed.
 
-Committed remaps are portable reviewed decisions, not database-instance
-commands. Each artifact carries a portable source-observation snapshot, its
-expected current decision state, and an absolute positive
-`desired_remap_revision`. It never fingerprints operational `imported_at`
-timestamps. Revision zero means genuinely unreviewed `source_only` state;
-applying a reviewed decision assigns its exact artifact-owned revision to every
-covered observation instead of incrementing database-local history. Later
-source observations that inherit a reviewed group decision inherit that same
-revision. Source identity drift or schema demotion clears a disproven link but
-retains the nondecreasing reviewed-generation high-watermark, so restoring old
-source facts cannot make an obsolete artifact valid again. This preserves all
-required outcomes with the existing
-`product_tests` owner:
-
-- the same committed artifact can bootstrap independently imported equivalent
-  databases even when their import timestamps or operation ordering differ;
-- the latest artifact can bootstrap source-proven revision-zero rows directly,
-  while an older or same-generation contradictory decision fails closed;
-- a source-observation change or an intervening contradictory remap invalidates
-  an obsolete mutating artifact;
-- an artifact whose desired link and revision are already present remains a
-  zero-write replay.
-
-Do not add a separate remap history table or service. The committed decision
-plus its source snapshot and row-owned absolute revision are the complete
-mutation preimage.
-
 Import reviewed remaps with:
 
 ```sh
@@ -304,25 +265,14 @@ data-level sources:
   weight
 - exact reviewed rows in
   `apps/web/sql/product-tests/reviewed-serving-grams.tsv`, used when the linked
-  label's independent official or public nutrition source gives a clear serving
-  mass
+  contaminant-test source itself publishes a serving mass for the tested product
+  or when a reviewed public nutrition source gives a clear serving mass
 
 It does not scan the full catalog and does not convert volume, count, or
 container servings automatically. Reviewed rows are exact label ids with source
 URLs and notes. Automatic parsed candidates update only rows where
 `serving_grams IS NULL`; exact reviewed rows update rows where the stored value
 differs from the reviewed value.
-
-Product-test study portions, comparison amounts, prepared-sample masses, and
-container weights are observation metadata, not label servings. Never copy them
-into `foods.serving_grams` or `supplements.serving_grams` without independent
-label evidence for that exact catalog row.
-
-`retired-reviewed-serving-grams.tsv` records exact stale values that an older
-review overlay wrote without independent label evidence. Dry-run reports those
-rows. Apply clears a value only when the current row still equals the recorded
-stale value; a divergent non-null value aborts the whole transaction for manual
-review.
 
 Routine direct FDC, DSLD, and DailyMed label refreshes overwrite source fields
 from the current source snapshot, then immediately reapply the exact reviewed
@@ -358,8 +308,7 @@ apps/web/sql/product-tests/backfill-serving-grams.sh
 ```
 
 The apply path never deletes label rows. It overwrites an existing serving mass
-only for an exact reviewed row that declares a different value, and clears only
-an exact retired stale value through the guarded comparison above.
+only for an exact reviewed row that declares a different value.
 
 ## Open Product Source Seeds
 
@@ -369,10 +318,6 @@ Generate or place them under ignored local storage:
 ```text
 .product-tests-work/seed-data/open-product-sources/
 ```
-
-One-time source research, parsers, and fixtures may be retained locally under
-`apps/web/sql/product-tests/tmp/`. That directory is ignored and is not a
-supported or reproducible import surface.
 
 The generator imports only source categories that are foods, dietary
 supplements, or source-defined ingestible remedies. Cookware, cosmetics, toys,
@@ -388,19 +333,11 @@ Source posture:
 - King County: public-domain open data.
 - Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
 
-The executable registry contains only imported sources and the attribution
-fields consumed by their adapters. Keep deferred source research in planning or
-documentation until an adapter has a current product need and usable rights.
-
 Refresh the local CSV with:
 
 ```sh
 pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
 ```
-
-The refresh requires `unzip` for the Pure Earth workbook. Every sync-managed
-adapter must produce rows before the CSV is written. The command prints
-per-source counts and skipped-row diagnostics; review both before import.
 
 Import a local CSV with:
 
@@ -408,6 +345,15 @@ Import a local CSV with:
 OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh
+```
+
+For a generated complete source snapshot, use guarded replacement mode:
+
+```sh
+OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
+OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=8147 \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-open-product-sources.sh --replace-source
 ```
 
 Apply schemas only with:
@@ -420,44 +366,13 @@ apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
 Every imported row has `match_method = source_only` and no product link. These
 source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
-product. Re-imports are always additive upserts: rows absent from an
-operator-local or upstream snapshot are never pruned. A source withdrawal or
-correction needs an exact reviewed deletion with preimage proof; a generated
-multi-source refresh is not deletion authority. Existing reviewed links are
-preserved only when the refreshed source row still names the same source
-product id, tested product name, tested brand, canonical UPC, raw reported UPC,
-and published package size; source identity drift repairs the row back to
-`source_only` for review while retaining the group's reviewed-generation
-high-watermark. A replacement decision must use a strictly higher artifact
-generation; older and same-generation contradictory artifacts remain invalid.
-When a stable observation is reassigned between source-product groups, the
-destination keeps its reviewed link and every affected row uses the maximum
-existing generation across destination rows and moving-row preimages. The
-importer never lowers either group's reviewed-generation fence.
-
-Canonical `tested_product_upc` values are checksum-valid GTIN-8/12/13/14 only.
-Formatting copied from a source, including invalid or incomplete identifiers,
-is retained separately as `tested_product_upc_raw` and is never exact-matched.
-Sample count, lot, best-by, package, collection/test dates, evidence and
-sampling context, bounded results, qualifiers, analytical limits, uncertainty,
-lab, and method are preserved when the source publishes them. Missing fields
-remain missing rather than being inferred from recall scope, product imagery,
-or related samples.
-
-## Integrity Audit
-
-Run the aggregate-only audit after schema, source, remap, or label cleanup:
-
-```sh
-MURPH_LABELS_DB_URL=postgres://... \
-apps/web/sql/product-tests/audit-product-tests.sh
-```
-
-The audit opens a read-only transaction and fails on orphan or dual links,
-source identity drift, mixed target state, non-exclusive exact UPC/source-id
-proof, contaminant-source-backed targets, malformed ranges or normalized
-tuples, and incomplete limit/uncertainty metadata. It reports source-level and
-overall counts without printing product rows.
+product. Re-imports are additive upserts by default: rows absent from an
+operator-local CSV are not pruned. With `--replace-source`, the importer requires
+the expected complete CSV row count and deletes rows absent from the complete
+snapshot for the source keys present in the snapshot. Existing reviewed links
+are preserved only when the refreshed source row still names the same source
+product id, tested product name, tested brand, and tested UPC; source identity
+drift repairs the row back to `source_only` for review.
 
 ## Threshold Seeds
 
