@@ -29,7 +29,8 @@ jobs:
           from pathlib import Path
           path = Path("scripts/finalize-persona-review.py")
           text = path.read_text()
-          old = '''    """    const member = {
+
+          fixture = '''    """    const member = {
                 assistantDetail: null as number | null,
           """,
               """    const member = {
@@ -39,10 +40,46 @@ jobs:
           """,
               1,
           )'''
-          new = old.replace("    1,\n)", "    6,\n)")
-          if text.count(old) != 1:
+          if text.count(fixture) != 1:
               raise SystemExit("repeated hosted preference fixture patch did not match")
-          path.write_text(text.replace(old, new))
+          text = text.replace(fixture, fixture.replace("    1,\n)", "    6,\n)"))
+
+          result_pair = '''replace_exact(
+              hosted_preferences_test,
+              """    })).resolves.toMatchObject({
+                assistantTone: "casual",
+                assistantVoice: "warm",
+          """,
+              """    })).resolves.toMatchObject({
+                assistantPersona: "navy-seal",
+                assistantTone: "casual",
+                assistantVoice: "warm",
+          """,
+              1,
+          )'''
+          if text.count(result_pair) != 1:
+              raise SystemExit("persona result pair patch did not match")
+          text = text.replace(result_pair, result_pair.replace("    1,\n)", "    2,\n)"))
+
+          overlapping = '''replace_exact(
+              hosted_preferences_test,
+              """    })).resolves.toMatchObject({
+                assistantTone: "casual",
+                assistantVoice: "warm",
+                dispatch: {
+          """,
+              """    })).resolves.toMatchObject({
+                assistantPersona: "navy-seal",
+                assistantTone: "casual",
+                assistantVoice: "warm",
+                dispatch: {
+          """,
+              1,
+          )
+          '''
+          if text.count(overlapping) != 1:
+              raise SystemExit("overlapping persona result patch did not match")
+          path.write_text(text.replace(overlapping, ""))
           PY
           python scripts/repair-persona-remaining.py
           python scripts/finalize-persona-review.py
