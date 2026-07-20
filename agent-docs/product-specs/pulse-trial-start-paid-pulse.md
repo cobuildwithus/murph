@@ -1,6 +1,6 @@
 # Pulse Trial Start Paid Pulse
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 Status: Implemented
 
@@ -134,6 +134,30 @@ The route must:
 - require local Pulse Trial state
 - call a dedicated trial conversion service
 - return the conversion result
+
+When the confirmed command discovers that the existing subscription has no
+default payment method, the route issues a short-lived HttpOnly continuation
+claim bound to the authenticated member and app session, then returns Stripe's
+payment-method-update Billing Portal URL. Stripe cancel/back returns to ordinary
+Settings. Only Stripe's successful flow completion returns to the marked
+Settings URL, and Settings automatically repeats the protected POST after the
+server validates that claim. The marker is not billing authority by itself; a
+plain or forged GET must remain read-only. The first accepted automatic POST
+clears the claim. Existing Stripe idempotency makes overlapping valid
+continuations converge on the same subscription mutation.
+
+Browser continuation is an explicit, default-off service input owned by
+`POST /api/settings/billing/start-paid-pulse`. The conversational
+`start_pulse_now` and `continue_pulse` tools share the billing service but do
+not own the browser claim, so their Stripe handoffs remain unmarked, including
+paused/no-payment-method recovery. A surviving cookie from a canceled Settings
+flow therefore cannot change a later conversational continue-at-trial-end
+choice into an immediate start.
+
+While the automatic continuation is starting or waiting for billing, Settings
+shows one busy status and suppresses every other Start Pulse action. A terminal
+automatic failure exposes one manual retry; Stripe can reopen only from that
+new user click, so a propagation delay cannot create an automatic portal loop.
 
 Suggested response:
 
@@ -395,6 +419,13 @@ CTA:
 Finish payment
 ```
 
+If payment is required only because the trial subscription has no saved payment
+method, the member's existing confirmation remains the authorization to start
+Pulse. Completing Stripe's payment-method form is the final required
+interaction: the successful Stripe return automatically starts Pulse and shows
+a short status message while billing settles. Canceling or backing out returns
+to Settings without starting billing, and must not loop back into Stripe.
+
 ## Non-Goals
 
 Do not add:
@@ -422,7 +453,10 @@ Do not add:
   with `trial_end: "now"` plus a deterministic idempotency key.
 - Payment recovery: `payment_required` is returned only with a Stripe-hosted
   payment URL for the same subscription/customer and never grants paid
-  allowance.
+  allowance. A missing-card Billing Portal flow uses separate cancel and
+  successful-completion return URLs; automatic continuation requires the
+  short-lived member/session-bound claim, while a return marker without the
+  claim performs no POST.
 - Pending billing: open or created invoices awaiting automatic Stripe
   collection return `billing_pending` and do not grant paid allowance.
 - Reconciliation: paid allowance opens only after a paid, non-initial invoice is
@@ -437,16 +471,19 @@ Use a Test Clock flow:
 2. Verify the subscription is `trialing` and has the Pulse recurring price.
 3. Simulate exhausted trial usage in local state.
 4. Click `Start Pulse`.
-5. Verify Stripe receives `trial_end=now`.
-6. Verify Stripe creates the first paid Pulse invoice and starts a new billing
+5. For a subscription without a default payment method, complete Stripe's
+   payment-method form and verify the app resumes without another click; repeat
+   with cancel/back and verify no billing mutation or redirect loop occurs.
+6. Verify Stripe receives `trial_end=now`.
+7. Verify Stripe creates the first paid Pulse invoice and starts a new billing
    period.
-7. Verify the app returns `billing_pending` while the invoice is open or
+8. Verify the app returns `billing_pending` while the invoice is open or
    collection is awaiting Stripe.
-8. Verify successful payment produces `invoice.paid`.
-9. Verify local billing ref converges to paid Pulse.
-10. Verify hosted AI allowance becomes normal paid Pulse allowance.
-11. Repeat with a card requiring authentication or failed payment.
-12. Verify the app shows `Finish payment` and does not grant paid allowance
+9. Verify successful payment produces `invoice.paid`.
+10. Verify local billing ref converges to paid Pulse.
+11. Verify hosted AI allowance becomes normal paid Pulse allowance.
+12. Repeat with a card requiring authentication or failed payment.
+13. Verify the app shows `Finish payment` and does not grant paid allowance
     until Stripe reports payment success.
 
 ## Open Question
