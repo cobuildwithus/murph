@@ -52,19 +52,22 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("Clearer standings, smoother account setup");
+    expect(markup).toContain("Medical records, without the integration jargon");
+    expect(markup).toContain("Replies that know what they are answering");
+    expect(markup).toContain("Your records and measurements, in one place");
     expect(markup).toContain("More follow-through, less friction");
     expect(markup).toContain("A lighter way to say yes");
     expect(markup).toContain("Your plan, groups, and next appointment");
-    expect(markup).toContain("More control, less waiting");
-    expect(markup).toContain("Health help with more context");
-    expect(markup).toContain("A cleaner fit on every phone");
-    expect(markup).toContain("A Murph that sounds more like you");
+    expect(markup).toContain("Improvements");
+    expect(markup).not.toContain("Under the hood");
+    expect(markup).not.toContain("More control, less waiting");
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-09"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-13"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-12#eye-health-playbook"',
+      'href="/changelog?edition=2026-07-19#medical-records-plain-language"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
@@ -75,14 +78,9 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Thinking settings");
-    expect(markup).toContain("Approve and resume");
-    expect(markup).toContain("Browser login recovery");
-    expect(markup).toContain("A few to start with");
-    expect(markup).toContain("Pick Murph&#x27;s voice");
-    expect(markup).toContain("Classic Murph");
-    expect(markup).toContain("Warm and friendly");
-    expect(markup).toContain("Small-screen pass");
+    expect(markup).toContain("Add usage");
+    expect(markup).toContain("What a product record shows");
+    expect(markup).toContain("Family plan");
   });
 
   it("renders the requested older seven-day window with newer and older links", async () => {
@@ -92,14 +90,14 @@ describe("ChangelogPage", () => {
       }),
     );
 
-    expect(markup).toContain("Murph referees your group challenge");
+    expect(markup).toContain("Advice grounded in your own data");
     expect(markup).not.toContain("A lighter way to say yes");
     expect(markup).toContain(
       "Seven days of features and improvements from the full Murph archive.",
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-01"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-06"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -139,7 +137,7 @@ describe("ChangelogPage", () => {
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-09" },
+        alternates: { canonical: "/changelog?edition=2026-07-13" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageTwoCardUrl })],
         }),

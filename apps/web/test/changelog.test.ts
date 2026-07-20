@@ -22,6 +22,57 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("publishes the complete July 17 through July 20 shipment set", () => {
+    expect(
+      listChangelogEditions().slice(0, 4).map((edition) => ({
+        id: edition.id,
+        itemIds: edition.items.map((item) => item.id),
+      })),
+    ).toEqual([
+      {
+        id: "2026-07-20",
+        itemIds: [
+          "challenge-standings-explain-missing-data",
+          "phone-link-settings-recovery",
+          "weekly-insights-skip-obvious-weekend",
+        ],
+      },
+      {
+        id: "2026-07-19",
+        itemIds: ["medical-records-plain-language"],
+      },
+      {
+        id: "2026-07-18",
+        itemIds: [
+          "native-replies-to-exact-message",
+          "automatic-meal-capture-guidance",
+          "first-plan-launch-song",
+          "medical-records-import-recovery",
+          "cold-replies-drop-finished-media",
+        ],
+      },
+      {
+        id: "2026-07-17",
+        itemIds: [
+          "medical-records-one-time-copy",
+          "measured-biomarker-history",
+          "device-metrics-on-biomarkers",
+          "completed-experiment-results-return",
+          "onboarding-one-health-story",
+          "first-plan-includes-support",
+          "background-imports-reply-first",
+          "computer-handoff-done-faster",
+          "scheduled-messages-name-the-subject",
+          "exercise-images-when-useful",
+          "appointment-calls-start-naturally",
+          "reactions-target-the-message",
+          "whoop-full-sync-guide",
+          "first-hello-available-imessage-number",
+        ],
+      },
+    ]);
+  });
+
   it("keeps internal provider branding out of published changelog copy", () => {
     const copy = listChangelogEditions().flatMap((edition) => [
       edition.title,
@@ -115,8 +166,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-16");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-10");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-20");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-14");
   });
 
   it("resolves only known canonical edition cursors", () => {

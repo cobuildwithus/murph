@@ -47,7 +47,7 @@ function createHarness(): Harness {
   const primary = path.join(root, 'primary')
   const target = path.join(root, 'task-worktree')
   const fakeBin = path.join(root, 'fake-bin')
-  const branch = 'task-retirement-harness'
+  const branch = 'codex/experiment-lifecycle-cards'
 
   mkdirSync(primary, { recursive: true })
   mkdirSync(path.join(primary, 'agent-docs', 'exec-plans', 'active'), {
@@ -268,6 +268,35 @@ describe('retire-worktree', () => {
     }
   })
 
+  it('retires a clean inactive no-PR worktree only through the explicit mode', () => {
+    const harness = createHarness()
+    try {
+      const ordinary = runRetirement(harness, [])
+      expect(ordinary.status).toBe(1)
+      expect(ordinary.stderr).toContain(
+        'target HEAD has no terminal PR and is not contained in origin/main',
+      )
+      expect(existsSync(harness.target)).toBe(true)
+
+      const removal = runRetirement(harness, [], [
+        '--inactive-no-pr',
+        harness.target,
+      ])
+      expect(removal.status, removal.stderr).toBe(0)
+      expect(removal.stdout).toContain('branch preserved')
+      expect(existsSync(harness.target)).toBe(false)
+      expect(
+        runGit(harness.primary, [
+          'show-ref',
+          '--verify',
+          `refs/heads/${harness.branch}`,
+        ]),
+      ).toContain(harness.head)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
   it('refuses open PRs and active-task references', () => {
     const harness = createHarness()
     try {
@@ -280,6 +309,14 @@ describe('retire-worktree', () => {
       const open = runRetirement(harness, [openPullRequest])
       expect(open.status).toBe(1)
       expect(open.stderr).toContain('target branch still has an open PR')
+
+      const explicitOpen = runRetirement(
+        harness,
+        [openPullRequest],
+        ['--inactive-no-pr', harness.target],
+      )
+      expect(explicitOpen.status).toBe(1)
+      expect(explicitOpen.stderr).toContain('target branch still has an open PR')
 
       writeFileSync(
         path.join(
@@ -296,6 +333,35 @@ describe('retire-worktree', () => {
       expect(active.stderr).toContain('still referenced by active task coordination')
       expect(existsSync(harness.target)).toBe(true)
 
+      rmSync(
+        path.join(
+          harness.primary,
+          'agent-docs',
+          'exec-plans',
+          'active',
+          'task.md',
+        ),
+      )
+      writeFileSync(
+        path.join(
+          harness.primary,
+          'agent-docs',
+          'exec-plans',
+          'active',
+          'task.md',
+        ),
+        'Plan: Experiment lifecycle cards\n',
+      )
+      const normalizedActive = runRetirement(
+        harness,
+        [],
+        ['--inactive-no-pr', harness.target],
+      )
+      expect(normalizedActive.status).toBe(1)
+      expect(normalizedActive.stderr).toContain(
+        'still referenced by active task coordination',
+      )
+      expect(existsSync(harness.target)).toBe(true)
       rmSync(
         path.join(
           harness.primary,
