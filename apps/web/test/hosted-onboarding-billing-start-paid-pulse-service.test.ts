@@ -194,13 +194,13 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings",
+            return_url: "https://join.example.test/settings#subscription",
           },
           type: "redirect",
         },
         type: "payment_method_update",
       },
-      return_url: "https://join.example.test/settings",
+      return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
@@ -279,6 +279,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
+      resumeStartAfterPaymentMethodSetup: true,
       status: "payment_required",
     });
 
@@ -287,13 +288,13 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings",
+            return_url: "https://join.example.test/settings?startPulse=complete#subscription",
           },
           type: "redirect",
         },
         type: "payment_method_update",
       },
-      return_url: "https://join.example.test/settings",
+      return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
@@ -1429,11 +1430,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
+      resumeStartAfterPaymentMethodSetup: true,
       status: "payment_required",
     });
 
     expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "https://join.example.test/settings",
+      return_url: "https://join.example.test/settings#subscription",
     }));
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();

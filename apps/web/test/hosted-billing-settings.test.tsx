@@ -489,6 +489,44 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
+  test("suppresses every Start Pulse action while automatic start is pending", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    const usageStatus = buildUsageStatus({
+      accessKind: "trial",
+      planName: "Pulse Trial",
+      recommendedAction: {
+        kind: "start_pulse",
+        label: "Start Pulse from usage",
+        url: "https://example.test/settings#subscription",
+      },
+    });
+
+    const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+      startPaidPulsePending: true,
+      usageStatus,
+    }));
+    const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      startPaidPulsePending: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "trial_conversion_pending",
+        recommendedAction: usageStatus.recommendedAction,
+        status: "unavailable",
+      },
+    }));
+
+    assert.doesNotMatch(availableMarkup, /Start Pulse (?:plan|from usage)/);
+    assert.doesNotMatch(unavailableMarkup, /Start Pulse from usage/);
+    assert.match(unavailableMarkup, /Pulse is starting now/);
+  });
+
   test("does not render Pulse trial affordances for a non-Pulse trial-shaped phase", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -739,6 +777,112 @@ describe("HostedBillingSettings", () => {
     assert.equal(rendered.assign.mock.calls.length, 0);
 
     await rendered.cleanup();
+  });
+
+  test("automatically resumes Start Pulse after Stripe payment-method completion", async () => {
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
+      status: "started",
+    });
+    const { StartPaidPulseContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(StartPaidPulseContinuation),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialStartPaid.mock.calls, [[{
+      automaticContinuation: true,
+    }]]);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Payment method saved\. Starting Pulse/,
+    );
+
+    await rendered.cleanup();
+  });
+
+  test("does not redirect back to Stripe when automatic continuation still lacks payment", async () => {
+    mocks.requestHostedPulseTrialStartPaid
+      .mockResolvedValueOnce({
+        status: "payment_required",
+      })
+      .mockResolvedValueOnce({
+        status: "started",
+      });
+    const { StartPaidPulseContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(StartPaidPulseContinuation),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /payment method is still being confirmed/i,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    const retryButton = findLastButtonByText(
+      rendered.window.document,
+      "Try again",
+      rendered.window,
+    );
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialStartPaid.mock.calls, [
+      [{ automaticContinuation: true }],
+      [{ automaticContinuation: false }],
+    ]);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+
+    await rendered.cleanup();
+  });
+
+  test("refreshes Settings automatically while started billing is settling", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
+      status: "billing_pending",
+    });
+    const { StartPaidPulseContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(StartPaidPulseContinuation),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Checking billing status/,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    await rendered.cleanup();
+    vi.useRealTimers();
   });
 
   test("redirects to Stripe when the upgrade needs payment confirmation", async () => {
