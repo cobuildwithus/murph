@@ -34,7 +34,6 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
     })),
     [
       { connectSourceId: "oura", connectTarget: "oura", provider: "oura", sourceProviderSlug: null },
-      { connectSourceId: "strava", connectTarget: "strava", provider: "strava", sourceProviderSlug: null },
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
       { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
     ],
@@ -46,12 +45,7 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
     label: "Oura",
     provider: "oura",
   });
-  assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
-    connectSourceId: "strava",
-    connectTarget: "strava",
-    label: "Strava",
-    provider: "strava",
-  });
+  assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), null);
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
     connectSourceId: "whoop",
     connectTarget: "whoop",
@@ -91,6 +85,23 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
     ],
   );
+});
+
+test("Strava stays out of connect and reconnect targets while its provider remains configured", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "strava",
+    JUNCTION_REGION: "us",
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+  });
+
+  assert.ok(configs.strava);
+  assert.deepEqual(listConfiguredDeviceSyncConnectTargets(configs), []);
+  assert.deepEqual(listConfiguredDeviceSyncReconnectTargets(configs), []);
+  assert.equal(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "strava"), null);
 });
 
 test("WHOOP stays direct when the Junction provider filter excludes WHOOP", () => {
@@ -169,7 +180,7 @@ test("connect target source-id lookups resolve direct and Junction sources", () 
   });
 });
 
-test("connect targets keep Oura and Strava direct with the default Junction source list", () => {
+test("connect targets keep Oura and WHOOP available with the default Junction source list", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -189,12 +200,7 @@ test("connect targets keep Oura and Strava direct with the default Junction sour
     label: "Oura",
     provider: "oura",
   });
-  assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), {
-    connectSourceId: "strava",
-    connectTarget: "strava",
-    label: "Strava",
-    provider: "strava",
-  });
+  assert.equal(resolveConfiguredDeviceSyncConnectTarget(configs, "Strava"), null);
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTarget(configs, "WHOOP"), {
     connectSourceId: "whoop",
     connectTarget: "whoop",

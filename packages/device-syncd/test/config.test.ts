@@ -237,7 +237,7 @@ test("Junction default connect targets cover the shared provider filter", () => 
     listConfiguredDeviceSyncConnectTargets(configs).map((target) =>
       target.sourceProviderSlug ?? target.connectTarget
     ),
-    JUNCTION_DEFAULT_PROVIDER_FILTER,
+    JUNCTION_DEFAULT_PROVIDER_FILTER.filter((providerSlug) => providerSlug !== "strava"),
   );
 });
 

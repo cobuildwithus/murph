@@ -6,6 +6,7 @@ export type LogoAsset = {
 };
 
 export type ConnectSource = {
+  connectionAvailable?: boolean;
   connectProvider?: string;
   connectTarget?: string;
   connected?: boolean;

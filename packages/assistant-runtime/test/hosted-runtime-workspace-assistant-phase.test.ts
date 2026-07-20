@@ -5680,6 +5680,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             providerFilter: ["fitbit"],
             region: "us",
           },
+          strava: {
+            clientId: "synthetic-strava-client",
+            clientSecret: "synthetic-strava-secret",
+          },
           whoop: {
             clientId: "synthetic-whoop-client",
             clientSecret: "synthetic-whoop-secret",
@@ -5764,6 +5768,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await expect(deviceTool.request({
       action: "connect",
       provider: "unconfigured-provider",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "strava",
     })).rejects.toThrow("not available to connect");
     expect(connectLinkRequests).toHaveLength(1);
     await Promise.resolve();
