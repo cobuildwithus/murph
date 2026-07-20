@@ -94,4 +94,5 @@ agent-docs/product-ideas.md
 .fdc-work/
 .plasticlist-work/
 .product-tests-work/
+apps/web/sql/product-tests/tmp/
 .env*.local

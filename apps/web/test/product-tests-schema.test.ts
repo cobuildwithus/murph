@@ -1172,7 +1172,9 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain(
       'from "./product-test-source-registry"',
     );
-    expect(syncOpenProductSources).toContain("productTestCatalog(");
+    expect(syncOpenProductSources).toContain(
+      "SYNC_MANAGED_PRODUCT_TEST_ADAPTER_KEYS.map",
+    );
     expect(syncOpenProductSources).toContain("data.cityofnewyork.us/resource/da9u-wz3r.json");
     expect(syncOpenProductSources).toContain("data.kingcounty.gov/resource/i6sy-ckp7.json");
     expect(syncOpenProductSources).toContain("zenodo.org/records/10444602");
@@ -1202,13 +1204,6 @@ describe("product test contaminant schema", () => {
       "nyc_dohmh_consumer_products",
       "king_county_consumer_products",
       "pure_earth_rms_2024",
-      "fda_cinnamon_alert_2024_03",
-      "fda_cinnamon_alert_2024_07_25",
-      "fda_cinnamon_alert_2024_07",
-      "fda_wanabana_warning_letter_2024",
-      "fda_wanabana_investigation_2023",
-      "ny_ag_holle_baby_food_2022",
-      "fda_health_fraud_products",
     ]));
     expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");

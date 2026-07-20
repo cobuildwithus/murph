@@ -370,6 +370,10 @@ Generate or place them under ignored local storage:
 .product-tests-work/seed-data/open-product-sources/
 ```
 
+One-time source research, parsers, and fixtures may be retained locally under
+`apps/web/sql/product-tests/tmp/`. That directory is ignored and is not a
+supported or reproducible import surface.
+
 The generator imports only source categories that are foods, dietary
 supplements, or source-defined ingestible remedies. Cookware, cosmetics, toys,
 paint, household products, and other non-food/non-supplement rows are skipped.
@@ -383,11 +387,6 @@ Source posture:
   if they are not misleading and do not imply DOHMH endorsement.
 - King County: public-domain open data.
 - Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
-- FDA ground-cinnamon alerts, WanaBana/Austrofood investigation records, and
-  recent Health Fraud Foods findings: normalized US-government facts only.
-- New York Attorney General Holle report: normalized factual sample fields from
-  the public enforcement record; the third-party report and scans are not
-  mirrored.
 
 The executable registry contains only imported sources and the attribution
 fields consumed by their adapters. Keep deferred source research in planning or
@@ -399,11 +398,9 @@ Refresh the local CSV with:
 pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
 ```
 
-The refresh requires `unzip` for the Pure Earth workbook and `pdftotext` for
-the NYAG report. Every sync-managed adapter must produce rows before the CSV is
-written, and source-specific parsers fail closed when a primary page or report
-changes shape. The command prints per-source counts and skipped-row diagnostics;
-review both before import.
+The refresh requires `unzip` for the Pure Earth workbook. Every sync-managed
+adapter must produce rows before the CSV is written. The command prints
+per-source counts and skipped-row diagnostics; review both before import.
 
 Import a local CSV with:
 

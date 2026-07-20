@@ -8,11 +8,6 @@ import {
   adaptNycRows,
   adaptPureEarthRows,
   assertSyncManagedSourcesPresent,
-  parseFdaCinnamonAlertHtml,
-  parseFdaHealthFraudHtml,
-  parseFdaWanaBanaInvestigationHtml,
-  parseFdaWanaBanaWarningLetterHtml,
-  parseNyAgHollePdfText,
   parseXlsxSheet,
 } from "./product-test-source-adapters";
 import {
@@ -21,7 +16,6 @@ import {
   type JsonRecord,
 } from "./product-test-catalog-types";
 import {
-  productTestCatalog,
   SYNC_MANAGED_PRODUCT_TEST_ADAPTER_KEYS,
   type SyncManagedProductTestAdapterKey,
 } from "./product-test-source-registry";
@@ -45,43 +39,6 @@ const SYNC_ADAPTER_DISPATCH = {
   king_county_consumer_products: async () =>
     adaptKingCountyRows(await fetchJsonArray(KING_COUNTY_API_URL)),
   pure_earth_rms_2024: async () => adaptPureEarthRows(await fetchPureEarthRows()),
-  fda_cinnamon_alert_2024_03: async () => {
-    const source = productTestCatalog("fda_cinnamon_alert_2024_03");
-    return parseFdaCinnamonAlertHtml(
-      await fetchText(source.canonicalUrl),
-      "fda_cinnamon_alert_2024_03",
-    );
-  },
-  fda_cinnamon_alert_2024_07_25: async () => {
-    const source = productTestCatalog("fda_cinnamon_alert_2024_07_25");
-    return parseFdaCinnamonAlertHtml(
-      await fetchText(source.canonicalUrl),
-      "fda_cinnamon_alert_2024_07_25",
-    );
-  },
-  fda_cinnamon_alert_2024_07: async () => {
-    const source = productTestCatalog("fda_cinnamon_alert_2024_07");
-    return parseFdaCinnamonAlertHtml(
-      await fetchText(source.canonicalUrl),
-      "fda_cinnamon_alert_2024_07",
-    );
-  },
-  fda_wanabana_warning_letter_2024: async () => {
-    const source = productTestCatalog("fda_wanabana_warning_letter_2024");
-    return parseFdaWanaBanaWarningLetterHtml(await fetchText(source.canonicalUrl));
-  },
-  fda_wanabana_investigation_2023: async () => {
-    const source = productTestCatalog("fda_wanabana_investigation_2023");
-    return parseFdaWanaBanaInvestigationHtml(await fetchText(source.canonicalUrl));
-  },
-  ny_ag_holle_baby_food_2022: async () => {
-    const source = productTestCatalog("ny_ag_holle_baby_food_2022");
-    return parseNyAgHollePdfText(await fetchPdfText(source.canonicalUrl));
-  },
-  fda_health_fraud_products: async () => {
-    const source = productTestCatalog("fda_health_fraud_products");
-    return parseFdaHealthFraudHtml(await fetchText(source.canonicalUrl), "2024-01-01");
-  },
 } satisfies Record<SyncManagedProductTestAdapterKey, () => Promise<AdapterOutput>>;
 
 async function main(): Promise<void> {
@@ -128,14 +85,6 @@ async function fetchJsonArray(url: string): Promise<JsonRecord[]> {
   return data.filter(isRecord);
 }
 
-async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch public source page: ${response.status}`);
-  }
-  return response.text();
-}
-
 async function fetchPureEarthRows(): Promise<JsonRecord[]> {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-pure-earth-rms-"));
   try {
@@ -156,24 +105,6 @@ async function fetchPureEarthRows(): Promise<JsonRecord[]> {
       { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
     );
     return parseXlsxSheet(sharedStringsXml, sheetXml);
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
-}
-
-async function fetchPdfText(url: string): Promise<string> {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-product-test-pdf-"));
-  try {
-    const pdfPath = path.join(tempRoot, "source.pdf");
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch public source PDF: ${response.status}`);
-    }
-    await writeFile(pdfPath, Buffer.from(await response.arrayBuffer()));
-    return execFileSync("pdftotext", ["-layout", pdfPath, "-"], {
-      encoding: "utf8",
-      maxBuffer: 20 * 1024 * 1024,
-    });
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

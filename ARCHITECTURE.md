@@ -406,9 +406,10 @@ and the production build verifies their exact active configuration.
 
 Product-test ingestion is catalog-driven. Enabled adapters may add open,
 product-identifiable observations from government or permissively licensed
-sources, while the source registry records generic-only, event-only,
-permission-gated, and excluded catalogs so those records are not silently
-treated as measurements. Each observation preserves its evidence and sampling
+sources. The source registry contains only executable adapters and their
+attribution; generic-only, event-only, permission-gated, and excluded research
+stays outside the runtime registry so it cannot be silently treated as
+measurements. Each observation preserves its evidence and sampling
 context, sample or lot identity when published, result bounds and qualifiers,
 analytical limits, and raw reported product identifier. Only checksum-valid
 GTINs enter the canonical UPC field or exact-match path; invalid or ambiguously

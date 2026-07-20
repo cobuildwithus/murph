@@ -12,13 +12,6 @@ const EXPECTED_SYNC_SOURCES = [
   "nyc_dohmh_consumer_products",
   "king_county_consumer_products",
   "pure_earth_rms_2024",
-  "fda_cinnamon_alert_2024_03",
-  "fda_cinnamon_alert_2024_07_25",
-  "fda_cinnamon_alert_2024_07",
-  "fda_wanabana_warning_letter_2024",
-  "fda_wanabana_investigation_2023",
-  "ny_ag_holle_baby_food_2022",
-  "fda_health_fraud_products",
 ] as const;
 
 describe("product-test source registry", () => {
