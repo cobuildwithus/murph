@@ -8,7 +8,7 @@ on:
     branches: [agent/murph-personas]
     paths:
       - .github/workflows/apply-murph-persona-integration.yml
-      - scripts/apply-murph-persona-integration.mjs.gz.b64
+      - scripts/persona-integration-parts/**
 
 concurrency:
   group: murph-persona-integration
@@ -35,7 +35,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
+          cat scripts/persona-integration-parts/*.b64 \
+            | base64 --decode \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs
 
