@@ -60,6 +60,7 @@ export async function handleHostedSubscriptionTool(input: {
         planCode: "launch_monthly",
         result: await continueHostedPulseTrialPaidPlan({
           memberId: input.memberId,
+          paymentMethodContinuation: "conversation",
           prisma,
         }),
       });
@@ -69,6 +70,7 @@ export async function handleHostedSubscriptionTool(input: {
         planCode: "launch_monthly",
         result: await startHostedPulseTrialPaidPlan({
           memberId: input.memberId,
+          paymentMethodContinuation: "conversation",
           prisma,
         }),
       });
