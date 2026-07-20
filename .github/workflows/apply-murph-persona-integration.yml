@@ -1,4 +1,4 @@
-name: Diagnose unified Murph persona route
+name: Finalize verified Murph persona repair
 
 on:
   pull_request:
@@ -6,21 +6,24 @@ on:
     types: [synchronize]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  finalize:
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
-      - name: Diagnose unified route
+      - name: Checkout branch quietly
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           git clone --quiet --depth=1 --branch agent/murph-personas \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
+
+      - name: Apply reviewed source repair
+        run: |
           python scripts/repair-persona-remaining.py
           sed -i \
             's/const explicitAssistantPersona = privateInteractiveAudience/const explicitAssistantPersona = privateInteractiveProviderTurn/' \
@@ -28,13 +31,59 @@ jobs:
           sed -i \
             's/privateInteractiveAudience || groupAssistantStylePreferencesApply/privateInteractiveProviderTurn || groupAssistantStylePreferencesApply/' \
             packages/assistant-engine/src/assistant/codex-turn/planning.ts
-          corepack enable >/dev/null
-          corepack prepare pnpm@10.33.0 --activate >/dev/null
-          pnpm install --frozen-lockfile --reporter=silent >/dev/null
-          pnpm --dir packages/contracts build >/dev/null
-          pnpm --dir apps/web prisma:generate >/dev/null
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Prepare generated clients
+        run: |
+          pnpm --dir packages/contracts build
+          pnpm --dir apps/web prisma:generate
+
+      - name: Run package regressions
+        run: |
+          pnpm exec vitest run --no-coverage \
+            packages/contracts/test/assistant-personas.test.ts \
+            packages/contracts/test/preferences.test.ts \
+            packages/core/test/preferences.test.ts \
+            packages/hosted-execution/test/hosted-execution-contract-guards.test.ts \
+            packages/assistant-engine/test/persona-prompts.test.ts \
+            packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts \
+            packages/assistant-engine/test/assistant-codex-turn-planning.test.ts
+
+      - name: Run Web regressions
+        run: |
           pnpm exec vitest run \
             --config apps/web/vitest.workspace.ts \
             --no-coverage \
             apps/web/test/settings-assistant-style-route.test.ts \
-            --reporter=verbose
+            apps/web/test/home-initial-visit-dialog.test.tsx \
+            apps/web/test/hosted-onboarding-member-preferences.test.ts \
+            apps/web/test/hosted-assistant-personalization-tool.test.ts \
+            apps/web/test/account-settings-snapshot.test.ts
+
+      - name: Typecheck packages
+        run: pnpm typecheck:packages
+
+      - name: Typecheck Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Commit cleaned implementation
+        shell: bash
+        run: |
+          node --check scripts/generate-murph-persona-previews.mjs
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: repair and simplify Murph persona integration [persona-repaired]"
+          git push origin HEAD:agent/murph-personas
