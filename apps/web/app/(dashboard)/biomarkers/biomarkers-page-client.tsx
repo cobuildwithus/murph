@@ -7,13 +7,13 @@ import {
   selectBrowserVaultDeviceMetricSummary,
   selectBrowserVaultMeasuredBiomarkers,
   type BrowserVaultBiomarkerMetricBinding,
-  type BrowserVaultBiomarkerTrendDefaults,
   type BrowserVaultDeviceMetricSummary,
   type BrowserVaultMeasuredBiomarker,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
+import { BiomarkerDeviceReadingCard } from "@/src/components/biomarkers/biomarker-device-reading-card";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Badge } from "@/src/components/ui/badge";
@@ -40,11 +40,11 @@ import {
 import { formatMetricValue } from "@/src/lib/browser-vault/trend-comparison";
 
 export interface DeviceTrackedBiomarker {
-  key: string;
+  category: string | null;
   privateMetricBindings: readonly BrowserVaultBiomarkerMetricBinding[];
   routeId: string;
   shortName: string;
-  trendDefaults: BrowserVaultBiomarkerTrendDefaults;
+  summary: string | null;
   unit: string;
   valuePrecision: number;
 }
@@ -216,13 +216,10 @@ function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
         </span>
       </div>
 
-      <ul className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
+      <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
-          <li
-            className="border-b border-border/60 last:border-b-0"
-            key={item.entry.routeId}
-          >
-            <DeviceMetricRow item={item} />
+          <li className="min-w-0" key={item.entry.routeId}>
+            <DeviceMetricCard item={item} />
           </li>
         ))}
       </ul>
@@ -230,49 +227,22 @@ function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   );
 }
 
-function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
+function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
   const { entry, summary } = item;
 
   return (
-    <Link
-      className="group flex min-h-24 items-center gap-3 px-4 py-4 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 sm:px-5"
-      href={`/biomarkers/${encodeURIComponent(entry.routeId)}`}
-    >
-      <div className="min-w-0 flex-1">
-        <h3 className="break-words font-serif text-lg font-semibold tracking-tight text-foreground">
-          {entry.shortName}
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {summary.readingCount} {summary.readingCount === 1 ? "reading" : "readings"}
-          <span aria-hidden="true"> · </span>
-          {formatDeviceSpan(summary)}
-          {summary.stale ? (
-            <>
-              <span aria-hidden="true"> · </span>
-              Out of date
-            </>
-          ) : null}
-        </p>
-      </div>
-
-      <div className="flex min-w-0 max-w-[55%] flex-col items-end text-right">
-        <span className="break-words font-serif text-xl font-semibold tracking-tight tabular-nums text-foreground">
-          {formatMetricValue(summary.latest.value, entry.valuePrecision)}{labUnitSuffix(summary.latest.unit ?? entry.unit)}
-        </span>
-        <time
-          className="mt-1 block text-xs text-muted-foreground"
-          dateTime={summary.latest.date}
-        >
-          {formatLabDate(summary.latest.date)}
-        </time>
-      </div>
-
-      <ChevronRight
-        aria-hidden="true"
-        className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground"
-        strokeWidth={1.75}
-      />
-    </Link>
+    <BiomarkerDeviceReadingCard
+      category={entry.category}
+      date={summary.latest.date}
+      dateLabel={formatLabDate(summary.latest.date)}
+      historyLabel={formatDeviceSpan(summary)}
+      readingCount={summary.readingCount}
+      routeId={entry.routeId}
+      stale={summary.stale}
+      summary={entry.summary}
+      title={entry.shortName}
+      valueLabel={`${formatMetricValue(summary.latest.value, entry.valuePrecision)}${labUnitSuffix(summary.latest.unit ?? entry.unit)}`}
+    />
   );
 }
 

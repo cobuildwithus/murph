@@ -4311,6 +4311,113 @@ describe('assistant codex runtime', () => {
       .toContain('Second ordinary local prompt')
   })
 
+  it('runs output-only provider work one-shot without evicting resident background work', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-provider-one-shot-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-provider-one-shot-home-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const providerConfig = normalizeAssistantProviderConfig({
+      approvalPolicy: 'never',
+      codexHome,
+      provider: 'codex-cli',
+      sandbox: 'workspace-write',
+    })
+    const baseInput = {
+      developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      env: { PATH: '/custom/bin' },
+      providerConfig,
+      systemPrompt: 'Stable Murph instructions.',
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAssistantTurnAttempt({
+        ...baseInput,
+        userPrompt: 'Start background enrichment and reply.',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+
+    const residentChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    writeSubAgentActivity(
+      residentChild,
+      'thread-warm-identity-1-1',
+      'thread-provider-background-child',
+      'started',
+      {
+        agentPath: '/root/provider-background-child',
+        id: 'spawn-provider-background-child',
+        turnId: 'turn-warm-identity-1-1',
+      },
+    )
+    writeStartedTurn(
+      residentChild,
+      'thread-provider-background-child',
+      'turn-provider-background-child',
+    )
+
+    await expect(
+      executeCodexAssistantTurnAttempt({
+        ...baseInput,
+        codexConfigOverrides: [
+          'features.shell_tool=false',
+          'features.apps=false',
+        ],
+        dynamicTools: [],
+        processLifetime: 'one-shot',
+        userPrompt: 'Format one detached system notification.',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+
+    const oneShotChild = requireMockChildProcess(spawnedChildren[1] ?? null)
+    expect(spawnedChildren).toHaveLength(2)
+    expect(residentChild.signalCode).toBeNull()
+    expect(oneShotChild.signalCode).toBe('SIGTERM')
+    expect(process.kill).not.toHaveBeenCalledWith(-40_000, 'SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-40_001, 'SIGTERM')
+    const oneShotArgs = codexMocks.spawn.mock.calls[1]?.[1]
+    expect(oneShotArgs).toEqual(
+      expect.arrayContaining([
+        'features.shell_tool=false',
+        'features.apps=false',
+      ]),
+    )
+
+    await expect(
+      executeCodexAssistantTurnAttempt({
+        ...baseInput,
+        userPrompt: 'Run the next ordinary turn on the resident process.',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+
+    let boundaryResolved = false
+    const boundary = waitForWarmCodexBackgroundWork().then(() => {
+      boundaryResolved = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(boundaryResolved).toBe(false)
+
+    writeCompletedTurn(
+      residentChild,
+      'thread-provider-background-child',
+      'turn-provider-background-child',
+    )
+    await expect(boundary).resolves.toBeUndefined()
+    expect(boundaryResolved).toBe(true)
+    expect(residentChild.signalCode).toBeNull()
+    expect(
+      readWrittenRpcMessages(residentChild).filter(
+        (message) => message.method === 'turn/start',
+      ),
+    ).toHaveLength(2)
+    expect(spawnedChildren).toHaveLength(2)
+  })
+
   it('uses estimated idle compaction usage when generic token usage arrives before zero recompute updates', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
@@ -18877,6 +18984,15 @@ function mockHostedCodexIdentityServer(children: MockChildProcess[]): void {
                     id: `turn-warm-identity-${processNumber}-${turnCount}`,
                     status: 'completed',
                   },
+                },
+              }))
+              break
+            case 'thread/backgroundTerminals/list':
+              child.stdout.write(jsonLine({
+                id: message.id,
+                result: {
+                  data: [],
+                  nextCursor: null,
                 },
               }))
               break

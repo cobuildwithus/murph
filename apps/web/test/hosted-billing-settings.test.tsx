@@ -9,6 +9,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
+  requestHostedPulseTrialContinuation: vi.fn(),
   requestHostedPulseTrialStartPaid: vi.fn(),
   routerRefresh: vi.fn(),
   routerReplace: vi.fn(),
@@ -34,10 +35,17 @@ function buildUsageStatus(
   };
 }
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-  requestHostedPulseTrialStartPaid: mocks.requestHostedPulseTrialStartPaid,
-}));
+vi.mock("@/src/components/hosted-onboarding/client-api", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >("@/src/components/hosted-onboarding/client-api");
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+    requestHostedPulseTrialContinuation: mocks.requestHostedPulseTrialContinuation,
+    requestHostedPulseTrialStartPaid: mocks.requestHostedPulseTrialStartPaid,
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({
@@ -111,6 +119,9 @@ describe("HostedBillingSettings", () => {
       status: "upgraded",
     });
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValue({
+      status: "started",
+    });
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValue({
       status: "started",
     });
   });
@@ -489,7 +500,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
-  test("suppresses every Start Pulse action while automatic start is pending", async () => {
+  test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const usageStatus = buildUsageStatus({
       accessKind: "trial",
@@ -507,13 +518,13 @@ describe("HostedBillingSettings", () => {
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentBillingPlanCode: "launch_monthly",
-      startPaidPulsePending: true,
+      pulseTrialBillingContinuationPending: true,
       usageStatus,
     }));
     const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
       canStartPaidPulse: true,
-      startPaidPulsePending: true,
+      pulseTrialBillingContinuationPending: true,
       usageStatus: {
         generatedAt: "2026-07-10T12:00:00.000Z",
         reason: "trial_conversion_pending",
@@ -524,7 +535,7 @@ describe("HostedBillingSettings", () => {
 
     assert.doesNotMatch(availableMarkup, /Start Pulse (?:plan|from usage)/);
     assert.doesNotMatch(unavailableMarkup, /Start Pulse from usage/);
-    assert.match(unavailableMarkup, /Pulse is starting now/);
+    assert.match(unavailableMarkup, /Finishing your Pulse update/);
   });
 
   test("does not render Pulse trial affordances for a non-Pulse trial-shaped phase", async () => {
@@ -779,15 +790,15 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("automatically resumes Start Pulse after Stripe payment-method completion", async () => {
-    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
-      status: "started",
+  test("automatically resumes the exact Pulse action after Stripe payment-method completion", async () => {
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "continuing",
     });
-    const { StartPaidPulseContinuation } = await import(
+    const { PulseTrialBillingContinuation } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(StartPaidPulseContinuation),
+      createElement(PulseTrialBillingContinuation),
       { requireButton: false },
     );
 
@@ -795,32 +806,32 @@ describe("HostedBillingSettings", () => {
       await Promise.resolve();
     });
 
-    assert.deepEqual(mocks.requestHostedPulseTrialStartPaid.mock.calls, [[{
-      automaticContinuation: true,
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      redirectIfPaymentRequired: false,
     }]]);
     assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Payment method saved\. Starting Pulse/,
+      /Payment method saved\. Finishing your Pulse update/,
     );
 
     await rendered.cleanup();
   });
 
   test("does not redirect back to Stripe when automatic continuation still lacks payment", async () => {
-    mocks.requestHostedPulseTrialStartPaid
+    mocks.requestHostedPulseTrialContinuation
       .mockResolvedValueOnce({
         status: "payment_required",
       })
       .mockResolvedValueOnce({
         status: "started",
       });
-    const { StartPaidPulseContinuation } = await import(
+    const { PulseTrialBillingContinuation } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(StartPaidPulseContinuation),
+      createElement(PulseTrialBillingContinuation),
       { requireButton: false },
     );
 
@@ -845,25 +856,56 @@ describe("HostedBillingSettings", () => {
       await Promise.resolve();
     });
 
-    assert.deepEqual(mocks.requestHostedPulseTrialStartPaid.mock.calls, [
-      [{ automaticContinuation: true }],
-      [{ automaticContinuation: false }],
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [
+      [{ redirectIfPaymentRequired: false }],
+      [{ redirectIfPaymentRequired: true }],
     ]);
     assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
 
     await rendered.cleanup();
   });
 
-  test("refreshes Settings automatically while started billing is settling", async () => {
-    vi.useFakeTimers();
-    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
-      status: "billing_pending",
-    });
-    const { StartPaidPulseContinuation } = await import(
+  test("returns to ordinary Settings when the continuation claim is terminal", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialContinuation.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_CONTINUATION_INVALID",
+        message: "Your Pulse confirmation expired. Try again.",
+      }),
+    );
+    const { PulseTrialBillingContinuation } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(StartPaidPulseContinuation),
+      createElement(PulseTrialBillingContinuation),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Try again/,
+    );
+
+    await rendered.cleanup();
+  });
+
+  test("refreshes Settings automatically while started billing is settling", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "billing_pending",
+    });
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation),
       { requireButton: false },
     );
 

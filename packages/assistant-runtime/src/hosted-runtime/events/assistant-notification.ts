@@ -550,7 +550,7 @@ function buildAssistantNotificationInput(
     route: wake.notification.route,
     sourceMailboxItemId,
     turnEnvironment,
-    turnTrigger: "automation-cron",
+    turnTrigger: "manual-deliver",
     vault,
     wake,
   });

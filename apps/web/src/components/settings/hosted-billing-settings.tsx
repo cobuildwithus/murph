@@ -74,7 +74,7 @@ export function HostedBillingSettings(props: {
   familyState?: "none" | "owner" | "sponsored";
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
-  startPaidPulsePending?: boolean;
+  pulseTrialBillingContinuationPending?: boolean;
   usageCreditBalanceUsdMicros?: string | null;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
@@ -108,7 +108,8 @@ export function HostedBillingSettings(props: {
 
   const isPulseTrial =
     pulseCurrent && currentPhase !== "paid" && currentOffer === HOSTED_PULSE_TRIAL_OFFER;
-  const startPaidPulsePending = props.startPaidPulsePending === true;
+  const pulseTrialBillingContinuationPending =
+    props.pulseTrialBillingContinuationPending === true;
   const hasPendingPulseSwitch =
     edgeCurrent && scheduledPlanCode === "launch_monthly" && scheduledBillingEffectiveAt !== null;
   const pendingPulseSwitchDate = hasPendingPulseSwitch
@@ -120,7 +121,9 @@ export function HostedBillingSettings(props: {
       action: familyOwner
         ? <FamilyBillingChangeButton block targetPlanName="Pulse" />
         : pulseCurrent
-        ? isPulseTrial && props.canStartPaidPulse === true && !startPaidPulsePending
+        ? isPulseTrial
+          && props.canStartPaidPulse === true
+          && !pulseTrialBillingContinuationPending
           ? <StartPaidPulseButton block>Start Pulse plan</StartPaidPulseButton>
           : <CurrentPlanButton />
         : hasPendingPulseSwitch
@@ -192,7 +195,7 @@ export function HostedBillingSettings(props: {
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
-        startPaidPulsePending={startPaidPulsePending}
+        pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageCreditBalanceUsdMicros={props.usageCreditBalanceUsdMicros}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
@@ -223,7 +226,7 @@ export function HostedBillingSettings(props: {
 }
 
 function PlanUsageBand(props: {
-  startPaidPulsePending: boolean;
+  pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageCreditBalanceUsdMicros?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
@@ -255,7 +258,8 @@ function PlanUsageBand(props: {
 
     const action = status.recommendedAction;
     const hasStartAction = action?.kind === "start_pulse";
-    const canShowStartAction = hasStartAction && !props.startPaidPulsePending;
+    const canShowStartAction =
+      hasStartAction && !props.pulseTrialBillingContinuationPending;
     return (
       <>
         <div
@@ -271,8 +275,8 @@ function PlanUsageBand(props: {
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {hasStartAction
-                ? props.startPaidPulsePending
-                  ? "Pulse is starting now."
+                ? props.pulseTrialBillingContinuationPending
+                  ? "Finishing your Pulse update."
                   : "Start Pulse to keep Murph replying."
                 : "Your included trial usage is no longer active."}
             </p>
@@ -359,7 +363,8 @@ function PlanUsageBand(props: {
 
         {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
-          : action?.kind === "start_pulse" && !props.startPaidPulsePending ? (
+          : action?.kind === "start_pulse"
+            && !props.pulseTrialBillingContinuationPending ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
         ) : action?.kind === "upgrade_edge" ? (
           <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>

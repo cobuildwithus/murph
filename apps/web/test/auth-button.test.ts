@@ -123,6 +123,45 @@ test("AuthButton can require a stronger caller-provided auth condition", async (
   expect(onClick).not.toHaveBeenCalled();
 });
 
+test("AuthButton follows a stronger auth condition when it changes after render", async () => {
+  const onClick = vi.fn();
+  const onConnect = vi.fn();
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthButton,
+      {
+        authSatisfied: true,
+        onClick,
+        onConnect,
+      },
+      "Continue",
+    ),
+  );
+  cleanupRender = rendered.cleanup;
+
+  await rendered.rerender(
+    createElement(
+      AuthButton,
+      {
+        authSatisfied: false,
+        onClick,
+        onConnect,
+      },
+      "Continue",
+    ),
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+  expect(onConnect).not.toHaveBeenCalled();
+  expect(onClick).not.toHaveBeenCalled();
+});
+
 test("AuthButton lets callers handle auth-required clicks", async () => {
   const onAuthRequired = vi.fn();
   const onClick = vi.fn();

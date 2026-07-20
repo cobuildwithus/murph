@@ -4,7 +4,11 @@ import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { requestHostedPulseTrialStartPaid } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedPulseTrialContinuation,
+  requestHostedPulseTrialStartPaid,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
@@ -21,7 +25,7 @@ import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
-type AutomaticStartPaidPulseStatus =
+type PulseTrialBillingContinuationStatus =
   | "billing_pending"
   | "error"
   | "starting";
@@ -137,25 +141,21 @@ export function StartPaidPulseButton(props: {
   );
 }
 
-export function StartPaidPulseContinuation() {
+export function PulseTrialBillingContinuation() {
   const router = useRouter();
   const started = useRef(false);
-  const [status, setStatus] = useState<AutomaticStartPaidPulseStatus>("starting");
+  const [status, setStatus] = useState<PulseTrialBillingContinuationStatus>("starting");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const runStartPaidPulse = useCallback(async (automaticContinuation: boolean) => {
+  const runContinuation = useCallback(async (redirectIfPaymentRequired: boolean) => {
     setStatus("starting");
     setErrorMessage(null);
 
     try {
-      const result = await requestHostedPulseTrialStartPaid({
-        automaticContinuation,
+      const result = await requestHostedPulseTrialContinuation({
+        redirectIfPaymentRequired,
       });
       if (result.status === "redirecting") {
-        if (automaticContinuation) {
-          setStatus("error");
-          setErrorMessage("Could not finish starting Pulse automatically.");
-        }
         return;
       }
 
@@ -172,8 +172,12 @@ export function StartPaidPulseContinuation() {
 
       router.replace("/settings#subscription");
     } catch (error) {
+      if (error instanceof HostedOnboardingApiError && !error.retryable) {
+        router.replace("/settings#subscription");
+        return;
+      }
       setStatus("error");
-      setErrorMessage(toErrorMessage(error, "Could not finish starting Pulse automatically."));
+      setErrorMessage(toErrorMessage(error, "Could not finish your Pulse update automatically."));
     }
   }, [router]);
 
@@ -183,8 +187,8 @@ export function StartPaidPulseContinuation() {
     }
     started.current = true;
 
-    void runStartPaidPulse(true);
-  }, [runStartPaidPulse]);
+    void runContinuation(false);
+  }, [runContinuation]);
 
   useEffect(() => {
     if (status !== "billing_pending") {
@@ -209,7 +213,7 @@ export function StartPaidPulseContinuation() {
           type="button"
           size="sm"
           variant="secondary"
-          onClick={() => void runStartPaidPulse(false)}
+          onClick={() => void runContinuation(true)}
         >
           Try again
         </Button>
@@ -226,8 +230,8 @@ export function StartPaidPulseContinuation() {
     >
       <Spinner aria-hidden="true" />
       {status === "billing_pending"
-        ? "Pulse is starting. Checking billing status…"
-        : "Payment method saved. Starting Pulse…"}
+        ? "Finishing your Pulse update. Checking billing status…"
+        : "Payment method saved. Finishing your Pulse update…"}
     </p>
   );
 }

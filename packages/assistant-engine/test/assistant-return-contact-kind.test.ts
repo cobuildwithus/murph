@@ -69,7 +69,11 @@ describe('assistant return contact kind', () => {
     const currentInputId = `ain_${'b'.repeat(32)}`
     let acceptedInputIds = [firstInputId, currentInputId]
     const hostedToolContext = createAssistantHostedToolContext({
-      getAssistantInputId: () => currentInputId,
+      executionContext: {
+        currentAssistantInputId: () => currentInputId,
+        memberId: 'member-subscription-claim',
+        userEnvKeys: [],
+      },
       getUserActionAcceptedInputIds: () => acceptedInputIds,
       messageInput: createMessageInput({
         channel: 'linq',
@@ -85,7 +89,11 @@ describe('assistant return contact kind', () => {
     acceptedInputIds = [currentInputId, firstInputId]
     expect(hostedToolContext.currentAssistantInputId?.()).toBe(currentInputId)
     const nextHostedToolContext = createAssistantHostedToolContext({
-      getAssistantInputId: () => currentInputId,
+      executionContext: {
+        currentAssistantInputId: () => currentInputId,
+        memberId: 'member-subscription-claim',
+        userEnvKeys: [],
+      },
       getUserActionAcceptedInputIds: () => acceptedInputIds,
       messageInput: createMessageInput({
         channel: 'linq',
@@ -105,7 +113,11 @@ describe('assistant return contact kind', () => {
       ok: true as const,
     }))
     const hostedToolContext = createAssistantHostedToolContext({
-      clinicalRecordsConnectLinkTool: { createConnectLink },
+      executionContext: {
+        clinicalRecordsConnectLinkTool: { createConnectLink },
+        memberId: 'member-clinical-records-link',
+        userEnvKeys: [],
+      },
       messageInput: createMessageInput({
         channel: 'linq',
         hostedDeliveryIdempotency: null,

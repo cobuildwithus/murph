@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type {
   HostedActionApprovalDecisionResponse,
@@ -79,7 +80,11 @@ export function ActionApprovalCard({
   }
 
   const busy = submission !== null;
-  const primaryLabel = authorization.setup.pendingLabel
+  const clientAuthenticationRequired =
+    authorization.setup.ready && !authorization.setup.clientAuthenticated;
+  const primaryLabel = clientAuthenticationRequired
+    ? "Sign in to approve"
+    : authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
   const busyStatus = authorization.setup.pendingLabel
     ?? (submission === "approving"
@@ -112,7 +117,8 @@ export function ActionApprovalCard({
           aria-busy={busy}
           className="flex flex-col gap-3 sm:flex-row sm:items-center"
         >
-          <Button
+          <AuthButton
+            authSatisfied={!clientAuthenticationRequired}
             className="w-full sm:w-auto"
             disabled={busy}
             onClick={approve}
@@ -120,7 +126,7 @@ export function ActionApprovalCard({
             type="button"
           >
             {primaryLabel}
-          </Button>
+          </AuthButton>
           <Button
             className="w-full sm:w-auto sm:px-5"
             disabled={busy}

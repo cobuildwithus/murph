@@ -9,9 +9,9 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
-  hasHostedStartPaidPulseContinuationCookie: vi.fn(),
-  StartPaidPulseContinuation: vi.fn(() =>
-    React.createElement("div", null, "Starting paid Pulse automatically")),
+  readHostedPulseTrialContinuationCookie: vi.fn(),
+  PulseTrialBillingContinuation: vi.fn(() =>
+    React.createElement("div", null, "Finishing Pulse automatically")),
   CustomizeMurphSettings: vi.fn((props: {
     assistant?: unknown;
     murphPhoneNumber?: string | null;
@@ -59,7 +59,7 @@ const mocks = vi.hoisted(() => ({
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
-    startPaidPulsePending?: boolean;
+    pulseTrialBillingContinuationPending?: boolean;
     usageCreditBalanceUsdMicros?: string | null;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
@@ -122,9 +122,9 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation", () => ({
-  hasHostedStartPaidPulseContinuationCookie:
-    mocks.hasHostedStartPaidPulseContinuationCookie,
+vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
+  readHostedPulseTrialContinuationCookie:
+    mocks.readHostedPulseTrialContinuationCookie,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -182,7 +182,7 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-start-paid-pulse-button", () => ({
-  StartPaidPulseContinuation: mocks.StartPaidPulseContinuation,
+  PulseTrialBillingContinuation: mocks.PulseTrialBillingContinuation,
 }));
 
 vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
@@ -266,7 +266,7 @@ beforeEach(() => {
     ledgerVersion: 0n,
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
-  mocks.hasHostedStartPaidPulseContinuationCookie.mockResolvedValue(false);
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -355,7 +355,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
 
-test("SettingsPage resumes Start Pulse only for a marked return with a bound claim", async () => {
+test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -370,7 +370,7 @@ test("SettingsPage resumes Start Pulse only for a marked return with a bound cla
       sessionId: "hws_session_123",
     },
   });
-  mocks.hasHostedStartPaidPulseContinuationCookie.mockResolvedValueOnce(true);
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("continue_pulse");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -380,15 +380,15 @@ test("SettingsPage resumes Start Pulse only for a marked return with a bound cla
     }),
   }));
 
-  expect(mocks.hasHostedStartPaidPulseContinuationCookie).toHaveBeenCalledWith({
+  expect(mocks.readHostedPulseTrialContinuationCookie).toHaveBeenCalledWith({
     memberId: "member_123",
     sessionId: "hws_session_123",
   });
-  expect(mocks.StartPaidPulseContinuation).toHaveBeenCalledTimes(1);
+  expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
-    startPaidPulsePending: true,
+    pulseTrialBillingContinuationPending: true,
   }), undefined);
-  assert.match(markup, /Starting paid Pulse automatically/);
+  assert.match(markup, /Finishing Pulse automatically/);
 });
 
 test("SettingsPage treats the return marker as inert without its bound claim", async () => {
@@ -415,8 +415,8 @@ test("SettingsPage treats the return marker as inert without its bound claim", a
     }),
   }));
 
-  expect(mocks.StartPaidPulseContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Starting paid Pulse automatically/);
+  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
+  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
 });
 
 test("SettingsPage treats a surviving claim as inert without the marked return", async () => {
@@ -434,15 +434,15 @@ test("SettingsPage treats a surviving claim as inert without the marked return",
       sessionId: "hws_session_123",
     },
   });
-  mocks.hasHostedStartPaidPulseContinuationCookie.mockResolvedValueOnce(true);
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("start_pulse_now");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
   const markup = renderToStaticMarkup(await SettingsPage());
 
-  expect(mocks.hasHostedStartPaidPulseContinuationCookie).not.toHaveBeenCalled();
-  expect(mocks.StartPaidPulseContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Starting paid Pulse automatically/);
+  expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
+  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
+  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
 });
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
