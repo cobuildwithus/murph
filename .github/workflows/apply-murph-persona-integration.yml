@@ -25,22 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: agent/murph-personas
-
-      - name: Pin latest branch head
-        run: |
-          git fetch origin agent/murph-personas
-          git checkout -B agent/murph-personas origin/agent/murph-personas
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.14.1
-
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.33.0 --activate
+          show-progress: false
 
       - name: Apply narrow integrations
         id: integrate
@@ -53,17 +40,23 @@ jobs:
           node /tmp/apply-murph-persona-integration.mjs \
             2>&1 | tee murph-persona-integration.log
 
-      - name: Upload integration diagnostic
-        if: ${{ steps.integrate.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: murph-persona-integration-failure
-          path: murph-persona-integration.log
-          if-no-files-found: error
-
       - name: Stop after integration failure
         if: ${{ steps.integrate.outcome == 'failure' }}
-        run: exit 1
+        run: |
+          echo "--- persona integration failure ---"
+          tail -n 80 murph-persona-integration.log
+          exit 1
+
+      - uses: actions/setup-node@v4
+        if: ${{ steps.integrate.outcome == 'success' }}
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pnpm
+        if: ${{ steps.integrate.outcome == 'success' }}
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
 
       - name: Install workspace
         if: ${{ steps.integrate.outcome == 'success' }}
@@ -111,17 +104,12 @@ jobs:
             git diff --check
           } 2>&1 | tee murph-persona-verification.log
 
-      - name: Upload verification diagnostic
-        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: murph-persona-verification-failure
-          path: murph-persona-verification.log
-          if-no-files-found: error
-
       - name: Stop after verification failure
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
-        run: exit 1
+        run: |
+          echo "--- persona verification failure ---"
+          tail -n 120 murph-persona-verification.log
+          exit 1
 
       - name: Commit integrated implementation
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
