@@ -1,8 +1,10 @@
 import {
   assistantPersonalityCausalWritesEnabled,
   assistantPersonalityPreferencesSchema,
+  isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
@@ -28,6 +30,12 @@ import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboa
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 const ASSISTANT_STYLE_REQUEST_BODY_LIMIT_BYTES = 1_024;
+const ASSISTANT_STYLE_REQUEST_FIELDS = new Set([
+  "persona",
+  "personality",
+  "tone",
+  "voice",
+]);
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -39,10 +47,17 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Assistant style request body is too large.",
   });
   const preferences = parseAssistantStyleRequestBody(body);
-  if (
-    preferences.personality !== undefined
-    && !assistantPersonalityCausalWritesEnabled(process.env)
-  ) {
+  const causalWritesEnabled = assistantPersonalityCausalWritesEnabled(process.env);
+
+  if (preferences.persona !== undefined && !causalWritesEnabled) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PERSONA_ROLLOUT_PENDING",
+      httpStatus: 503,
+      message: "Murph personas are temporarily unavailable during rollout.",
+      retryable: true,
+    });
+  }
+  if (preferences.personality !== undefined && !causalWritesEnabled) {
     throw hostedOnboardingError({
       code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
       httpStatus: 503,
@@ -50,11 +65,12 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
+
   const prisma = getPrisma();
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => (
     upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
+      mailboxPayloadMode: causalWritesEnabled
         ? "sparse_delta"
         : "legacy_snapshot",
       memberId: auth.member.id,
@@ -72,6 +88,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   return jsonOk({
+    assistantPersona: result.assistantPersona,
     assistantPersonality: result.assistantPersonality,
     assistantTone: result.assistantTone,
     assistantVoice: result.assistantVoice,
@@ -84,6 +101,19 @@ export const POST = withJsonError(async (request: Request) => {
 function parseAssistantStyleRequestBody(
   body: Record<string, unknown>,
 ): HostedMemberAssistantPreferencesUpdate {
+  for (const key of Object.keys(body)) {
+    if (!ASSISTANT_STYLE_REQUEST_FIELDS.has(key)) {
+      throw hostedOnboardingError({
+        code: "ASSISTANT_STYLE_UNKNOWN_FIELD",
+        httpStatus: 400,
+        message: "Assistant style request contains an unknown field.",
+      });
+    }
+  }
+
+  const persona = body.persona === undefined
+    ? undefined
+    : parseAssistantPersona(body.persona);
   const personality = body.personality === undefined
     ? undefined
     : parseAssistantPersonality(body.personality);
@@ -94,35 +124,50 @@ function parseAssistantStyleRequestBody(
     ? undefined
     : parseAssistantVoice(body.voice);
 
-  if (personality !== undefined && (tone !== undefined || voice !== undefined)) {
+  if (
+    personality !== undefined
+    && (persona !== undefined || tone !== undefined || voice !== undefined)
+  ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_MIXED_UPDATE",
       httpStatus: 400,
-      message: "Update personality separately from tone and voice.",
+      message: "Update personality separately from persona, tone, and voice.",
     });
   }
 
-  if (personality === undefined && tone === undefined && voice === undefined) {
+  if (
+    persona === undefined
+    && personality === undefined
+    && tone === undefined
+    && voice === undefined
+  ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_EMPTY_UPDATE",
       httpStatus: 400,
-      message: "Choose a tone, voice, or personality setting before continuing.",
+      message: "Choose a persona, tone, voice, or personality setting before continuing.",
     });
   }
 
   return {
+    ...(persona === undefined ? {} : { persona }),
     ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
 }
 
+function parseAssistantPersona(value: unknown): AssistantPersonaId {
+  if (isAssistantPersonaId(value)) return value;
+  throw hostedOnboardingError({
+    code: "ASSISTANT_STYLE_INVALID_PERSONA",
+    httpStatus: 400,
+    message: "Choose a valid Murph persona.",
+  });
+}
+
 function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {
   const result = assistantPersonalityPreferencesSchema.safeParse(value);
-  if (result.success && Object.keys(result.data).length > 0) {
-    return result.data;
-  }
-
+  if (result.success && Object.keys(result.data).length > 0) return result.data;
   throw hostedOnboardingError({
     code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
     httpStatus: 400,
@@ -131,10 +176,7 @@ function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferen
 }
 
 function parseAssistantTone(value: unknown): AssistantTonePreference {
-  if (isAssistantTonePreference(value)) {
-    return value;
-  }
-
+  if (isAssistantTonePreference(value)) return value;
   throw hostedOnboardingError({
     code: "ASSISTANT_STYLE_INVALID_TONE",
     httpStatus: 400,
@@ -143,10 +185,7 @@ function parseAssistantTone(value: unknown): AssistantTonePreference {
 }
 
 function parseAssistantVoice(value: unknown): AssistantVoiceOptionId {
-  if (isAssistantVoiceOptionId(value)) {
-    return value;
-  }
-
+  if (isAssistantVoiceOptionId(value)) return value;
   throw hostedOnboardingError({
     code: "ASSISTANT_STYLE_INVALID_VOICE",
     httpStatus: 400,
@@ -159,11 +198,8 @@ async function signalHostedMailboxAppendBestEffort(input: {
   mailboxItemId: string;
 }): Promise<void> {
   try {
-    await signalHostedMailboxAppendRuntime({
-      expectedUserId: input.expectedUserId,
-      mailboxItemId: input.mailboxItemId,
-    });
+    await signalHostedMailboxAppendRuntime(input);
   } catch {
-    // Assistant style saves should not fail if the best-effort runtime wake is unavailable.
+    // The durable save succeeds even when the best-effort runtime wake is unavailable.
   }
 }
