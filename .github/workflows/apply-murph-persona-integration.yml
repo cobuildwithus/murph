@@ -53,19 +53,17 @@ jobs:
           node /tmp/apply-murph-persona-integration.mjs \
             2>&1 | tee /tmp/murph-persona-integration.log
 
-      - name: Persist integration diagnostic
+      - name: Upload integration diagnostic
         if: ${{ steps.integrate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          git reset --hard HEAD
-          tail -n 60 /tmp/murph-persona-integration.log \
-            > agent-docs/exec-plans/active/murph-persona-integration-failure.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent-docs/exec-plans/active/murph-persona-integration-failure.log
-          git commit -m "chore: record persona integration failure [persona-failed]"
-          git push origin HEAD:agent/murph-personas
-          exit 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-persona-integration-failure
+          path: /tmp/murph-persona-integration.log
+          if-no-files-found: error
+
+      - name: Stop after integration failure
+        if: ${{ steps.integrate.outcome == 'failure' }}
+        run: exit 1
 
       - name: Install workspace
         if: ${{ steps.integrate.outcome == 'success' }}
@@ -113,19 +111,17 @@ jobs:
             git diff --check
           } 2>&1 | tee /tmp/murph-persona-verification.log
 
-      - name: Persist verification diagnostic
+      - name: Upload verification diagnostic
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
-        shell: bash
-        run: |
-          git reset --hard HEAD
-          tail -n 120 /tmp/murph-persona-verification.log \
-            > agent-docs/exec-plans/active/murph-persona-verification-failure.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent-docs/exec-plans/active/murph-persona-verification-failure.log
-          git commit -m "chore: record persona verification failure [persona-failed]"
-          git push origin HEAD:agent/murph-personas
-          exit 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-persona-verification-failure
+          path: /tmp/murph-persona-verification.log
+          if-no-files-found: error
+
+      - name: Stop after verification failure
+        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
+        run: exit 1
 
       - name: Commit integrated implementation
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
