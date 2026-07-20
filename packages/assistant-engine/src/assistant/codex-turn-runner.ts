@@ -434,6 +434,8 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
+    const systemNotificationTurn =
+      executionPlan.profile.promptProfile === 'system-notification'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: outputOnlyTurn
@@ -518,6 +520,9 @@ async function executeAssistantCodexAttempt(input: {
         progressDelivery: outputOnlyTurn
           ? null
           : executionPlan.progressDelivery ?? null,
+        ...(systemNotificationTurn
+          ? { processLifetime: 'one-shot' as const }
+          : {}),
         providerFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,

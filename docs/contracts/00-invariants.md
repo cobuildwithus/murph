@@ -356,6 +356,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
   untrusted data, and the platform alone owns final delivery.
+  Its restrictive provider launch configuration uses the existing one-shot
+  process path and must not replace the resident ordinary-turn App Server or
+  terminate valid detached background work.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the

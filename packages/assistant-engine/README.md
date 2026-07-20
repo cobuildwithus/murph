@@ -45,7 +45,10 @@ are usable.
 Detached `assistant.notification.requested` system events are a different kind
 of input, not a scheduled-turn profile. Without a valid occurrence they use one
 isolated output-only formatter with no history, private context, resume
-mutation, tools, or network callbacks; the platform still owns delivery.
+mutation, tools, or network callbacks; the platform still owns delivery. The
+formatter uses the existing one-shot App Server path so its restrictive launch
+configuration cannot replace the resident ordinary-turn process or interrupt
+detached enrichment.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

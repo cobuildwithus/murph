@@ -57,3 +57,7 @@ Updated: 2026-07-20
   receives no user-turn capability surface.
 - The distinction is derived from the existing occurrence field at the shared
   turn boundary, not from a new authority object, service, or persisted state.
+- Restrictive output-only config is launch identity, not request-local state.
+  Detached system notifications therefore use the existing one-shot provider
+  process so they cannot replace the resident ordinary-turn process or kill
+  valid detached enrichment.

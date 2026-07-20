@@ -659,6 +659,7 @@ describe('Codex model catalog', () => {
       generatedImageUploader: null,
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
+      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: null,
       publicInternetFetch: null,
