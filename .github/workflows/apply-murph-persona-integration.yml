@@ -39,6 +39,7 @@ jobs:
             | base64 --decode \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
           sed -i '533s/  4,/  1,/' /tmp/apply-murph-persona-integration.mjs
+          sed -i '535s/, 3);/, 4);/' /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs
 
       - uses: actions/setup-node@v4
