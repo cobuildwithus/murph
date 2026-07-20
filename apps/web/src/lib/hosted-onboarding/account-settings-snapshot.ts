@@ -1,7 +1,6 @@
 import "server-only";
 
 import type {
-  AssistantPersonaId,
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
@@ -35,7 +34,6 @@ export interface HostedAccountSettingsSnapshot {
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
-    persona: AssistantPersonaId | null;
     personality: Record<AssistantPersonalitySettingId, number | null>;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
@@ -152,7 +150,12 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
       id: input.memberId,
     },
   });
-  const assistantPreferences = projectHostedMemberAssistantPreferences(member);
+  const projectedAssistantPreferences = projectHostedMemberAssistantPreferences(member);
+  const assistantPreferences = {
+    personality: projectedAssistantPreferences.personality,
+    tone: projectedAssistantPreferences.tone,
+    voice: projectedAssistantPreferences.voice,
+  };
   const assistantModel = resolveHostedMemberAssistantModel(member);
   const privateSettings = member
     ? await runWithHostedDomainRootUnwrapCache(async () => {

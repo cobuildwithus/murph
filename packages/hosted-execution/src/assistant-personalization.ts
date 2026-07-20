@@ -2,7 +2,6 @@ import {
   assistantPersonalityScoreSchema,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
-  defaultAssistantPersonalityScores,
   type AssistantPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,

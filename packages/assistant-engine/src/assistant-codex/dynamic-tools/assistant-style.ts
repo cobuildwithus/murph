@@ -252,7 +252,7 @@ function validateRequestedPersonalitySettings(input: {
     const actual = input.settings[setting]
     if (
       requested === null
-        ? !isDefaultPersonalitySetting(setting, actual)
+        ? !isDefaultPersonalitySetting(actual)
         : actual.source !== 'custom' || actual.value !== requested
     ) {
       throw new TypeError(
@@ -282,7 +282,6 @@ function hasSavedEffectivePersonalityChange(input: {
 }
 
 function isDefaultPersonalitySetting(
-  setting: AssistantPersonalitySettingId,
   snapshot: HostedRuntimeAssistantPersonalitySettingSnapshot,
 ): boolean {
   return snapshot.source === 'default'

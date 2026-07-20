@@ -1,8 +1,5 @@
 import {
   assistantVoiceOptions,
-  defaultAssistantPersonalityScores,
-  defaultAssistantTonePreference,
-  defaultAssistantVoiceOptionId,
   isAssistantPersonaId,
   isAssistantVoiceOptionId,
   type AssistantPersonaId,
@@ -14,18 +11,7 @@ import {
   type AssistantVoiceOptionId,
 } from "./preferences.ts";
 
-export const assistantPersonaCategoryValues = [
-  "push",
-  "reason",
-  "ground",
-  "relate",
-] as const;
-
-export type AssistantPersonaCategory =
-  (typeof assistantPersonaCategoryValues)[number];
-
 export interface AssistantPersonaOption {
-  category: AssistantPersonaCategory;
   defaultTone: AssistantTonePreference;
   defaultVoiceId: AssistantVoiceOptionId;
   description: string;
@@ -48,7 +34,6 @@ export const defaultAssistantPersonaId = "classic" satisfies AssistantPersonaId;
 
 export const assistantPersonaOptions = [
   {
-    category: "relate",
     defaultTone: "formal",
     defaultVoiceId: "upbeat",
     description: "Balanced, capable, warm, and ready for whatever you need.",
@@ -61,7 +46,6 @@ export const assistantPersonaOptions = [
     sample: "Be balanced and adapt to whatever I need.",
   },
   {
-    category: "push",
     defaultTone: "formal",
     defaultVoiceId: "drill-sergeant",
     description: "Relentless intensity, mental toughness, and immediate action.",
@@ -80,7 +64,6 @@ export const assistantPersonaOptions = [
     sample: "Push me hard. Do not let me negotiate with myself.",
   },
   {
-    category: "ground",
     defaultTone: "formal",
     defaultVoiceId: "deep-calm",
     description: "Disciplined, emotionally steady, and focused on what you control.",
@@ -99,7 +82,6 @@ export const assistantPersonaOptions = [
     sample: "Keep me steady and focused on what I control.",
   },
   {
-    category: "ground",
     defaultTone: "formal",
     defaultVoiceId: "grandpa",
     description: "Patient perspective, durable principles, and the long view.",
@@ -112,7 +94,6 @@ export const assistantPersonaOptions = [
     sample: "Give me perspective and help me play the long game.",
   },
   {
-    category: "reason",
     defaultTone: "formal",
     defaultVoiceId: "narrator",
     description: "Investigates symptoms, habits, labs, and wearables like evidence.",
@@ -131,7 +112,6 @@ export const assistantPersonaOptions = [
     sample: "Investigate the clues and tell me what the evidence says.",
   },
   {
-    category: "reason",
     defaultTone: "formal",
     defaultVoiceId: "radio-host",
     description: "Mechanisms, biomarkers, research quality, and careful optimization.",
@@ -150,7 +130,6 @@ export const assistantPersonaOptions = [
     sample: "Go deep on mechanisms, evidence, and healthy longevity.",
   },
   {
-    category: "push",
     defaultTone: "casual",
     defaultVoiceId: "football-announcer",
     description: "Big energy, real celebration, and comeback momentum.",
@@ -169,7 +148,6 @@ export const assistantPersonaOptions = [
     sample: "Bring energy, celebrate my wins, and get me moving.",
   },
   {
-    category: "ground",
     defaultTone: "formal",
     defaultVoiceId: "smooth",
     description: "Quiet, present, nonjudgmental, and radically simple.",
@@ -182,7 +160,6 @@ export const assistantPersonaOptions = [
     sample: "Reduce the noise and help me do one thing at a time.",
   },
   {
-    category: "relate",
     defaultTone: "casual",
     defaultVoiceId: "classic",
     description: "Blunt, familiar, funny, and clearly on your side.",
@@ -195,7 +172,6 @@ export const assistantPersonaOptions = [
     sample: "Be honest, practical, and call me out when I need it.",
   },
   {
-    category: "push",
     defaultTone: "formal",
     defaultVoiceId: "husky",
     description: "High standards, film review, smart adjustments, and another rep.",
@@ -214,7 +190,6 @@ export const assistantPersonaOptions = [
     sample: "Hold me to a high standard and help me adjust the game plan.",
   },
   {
-    category: "reason",
     defaultTone: "formal",
     defaultVoiceId: "british-warm",
     description: "Clear teaching, mechanisms, examples, and honest uncertainty.",
@@ -233,7 +208,6 @@ export const assistantPersonaOptions = [
     sample: "Teach me what is happening without dumbing it down.",
   },
   {
-    category: "ground",
     defaultTone: "formal",
     defaultVoiceId: "storyteller",
     description: "Calm preparation, material risks, and the next safe milestone.",
@@ -252,7 +226,6 @@ export const assistantPersonaOptions = [
     sample: "Keep me prepared and moving toward the next safe milestone.",
   },
   {
-    category: "relate",
     defaultTone: "formal",
     defaultVoiceId: "sweet",
     description: "Warm, protective, practical, and attentive to the basics.",
@@ -265,7 +238,6 @@ export const assistantPersonaOptions = [
     sample: "Look after me warmly and make sure I handle the basics.",
   },
   {
-    category: "reason",
     defaultTone: "casual",
     defaultVoiceId: "expressive",
     description: "Devices, protocols, experiments, measurements, and stop rules.",
@@ -278,7 +250,6 @@ export const assistantPersonaOptions = [
     sample: "Help me test protocols, tools, and interventions on myself.",
   },
   {
-    category: "push",
     defaultTone: "formal",
     defaultVoiceId: "drill-sergeant",
     description: "Clear standards, crisp orders, preparation, and repetition.",
@@ -301,20 +272,15 @@ export const assistantPersonaOptions = [
 const assistantPersonaOptionById = new Map<AssistantPersonaId, AssistantPersonaOption>(
   assistantPersonaOptions.map((option) => [option.id, option]),
 );
-
-export const defaultAssistantPersonaOption: AssistantPersonaOption =
-  assistantPersonaOptionById.get(defaultAssistantPersonaId) ?? {
-    category: "relate",
-    defaultTone: defaultAssistantTonePreference,
-    defaultVoiceId: defaultAssistantVoiceOptionId,
-    description: "Balanced, capable, warm, and ready for whatever you need.",
-    id: defaultAssistantPersonaId,
-    label: "Classic Murph",
-    personality: defaultAssistantPersonalityScores,
-    previewText: "Want to work on the next useful step together?",
-    recommendedVoiceIds: [defaultAssistantVoiceOptionId],
-    sample: "Be balanced and adapt to whatever I need.",
-  };
+const assistantVoiceOptionById = new Map(
+  assistantVoiceOptions.map((option) => [option.id, option]),
+);
+const resolvedDefaultAssistantPersonaOption =
+  assistantPersonaOptionById.get(defaultAssistantPersonaId);
+if (!resolvedDefaultAssistantPersonaOption) {
+  throw new TypeError("Classic Murph is missing from the persona catalog.");
+}
+export const defaultAssistantPersonaOption = resolvedDefaultAssistantPersonaOption;
 
 export function resolveAssistantPersonaOption(
   value: string | null | undefined,
@@ -327,10 +293,13 @@ export function resolveAssistantPersonaOption(
 export function resolveAssistantPersonaRecommendedVoiceOptions(
   persona: string | null | undefined,
 ): AssistantVoiceOption[] {
-  const recommended = new Set(
-    resolveAssistantPersonaOption(persona).recommendedVoiceIds,
-  );
-  return assistantVoiceOptions.filter((voice) => recommended.has(voice.id));
+  return resolveAssistantPersonaOption(persona).recommendedVoiceIds.map((voiceId) => {
+    const option = assistantVoiceOptionById.get(voiceId);
+    if (!option) {
+      throw new TypeError(`Persona voice ${voiceId} is missing from the voice catalog.`);
+    }
+    return option;
+  });
 }
 
 export function resolveAssistantEffectiveStyle(

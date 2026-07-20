@@ -27,7 +27,7 @@ Effective style resolves in this order for each primitive:
 
 1. explicit saved tone, voice, or dial override
 2. selected persona default
-3. Classic Murph default when persona is absent or invalid
+3. the existing Classic Murph baseline when persona is absent; stale voice ids retain the existing provider fallback
 
 No prompt body, inferred profile, or conversation excerpt is stored. Persona prompt behavior stays code-owned in the assistant engine.
 
@@ -37,4 +37,23 @@ Personal personas apply to private Murph conversations. Hosted room Murph remain
 
 ## Existing members
 
-No backfill is required. Missing persona resolves to Classic Murph, while any existing tone, voice, Humor, Push, or Detail values remain explicit overrides. Existing members therefore keep their current behavior.
+No backfill is required. Missing persona adds no persona or dial overlay to the prompt. The existing static Classic Murph baseline and any saved tone, voice, Humor, Push, or Detail overrides remain unchanged, so existing members keep their current behavior.
+
+## Preview delivery
+
+The picker asks for a persona-specific clip first at
+`/audio/murph-personas/<persona-id>/<voice-id>.mp3`. Until generated clips are
+published, the shared voice sample at `/audio/murph-voices/<voice-id>.mp3` is
+the deterministic fallback. Both paths use the same canonical voice id; a
+missing preview never blocks selection or saving. The generator writes only the
+persona-specific assets and requires the existing ElevenLabs credentials.
+
+## Deployment
+
+Apply the additive database migration first. Deploy the contracts/runtime reader
+next and converge warm hosted containers before Web can emit `persona` deltas;
+then deploy Web. An older runtime rejects the new `requestedFields: ["persona"]`
+member-preference event instead of consuming and losing it, so Web-first skew is
+fail-closed but can block later preference mailbox work for that member. Verify
+one onboarding save produces one consumed mailbox item and that
+`bank/preferences.json` contains the selected persona, tone, and voice.

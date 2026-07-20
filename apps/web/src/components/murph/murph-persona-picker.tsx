@@ -2,9 +2,10 @@
 
 import {
   assistantPersonaOptions,
-  assistantVoiceOptions,
   resolveAssistantPersonaOption,
+  resolveAssistantPersonaRecommendedVoiceOptions,
   type AssistantPersonaId,
+  type AssistantVoiceOption,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -83,15 +84,12 @@ export function MurphPersonaPicker({
   }, []);
 
   const selected = resolveAssistantPersonaOption(persona);
-  const voices = selected.recommendedVoiceIds.flatMap((voiceId) => {
-    const option = assistantVoiceOptions.find((candidate) => candidate.id === voiceId);
-    return option
-      ? [{
-          ...option,
-          previewPath: `/audio/murph-personas/${selected.id}/${option.id}.mp3`,
-        }]
-      : [];
-  });
+  const voices = resolveAssistantPersonaRecommendedVoiceOptions(selected.id).map(
+    (option) => ({
+      ...option,
+      previewPath: `/audio/murph-personas/${selected.id}/${option.id}.mp3`,
+    }),
+  );
 
   const selectPersona = (nextPersona: AssistantPersonaId) => {
     const next = resolveAssistantPersonaOption(nextPersona);
@@ -213,7 +211,7 @@ export function MurphPersonaPicker({
           <Mic2Icon className="size-4" aria-hidden="true" /> Voice
         </legend>
         <p className="text-xs leading-5 text-muted-foreground">
-          Each preview uses {selected.label}’s own sample line.
+          Preview voices that fit {selected.label}.
         </p>
         <div
           className="grid grid-cols-1 gap-2 sm:grid-cols-2"
@@ -283,7 +281,7 @@ export function MurphPersonaPicker({
               Who do you want in your corner?
             </DrawerTitle>
             <DrawerDescription className="text-sm leading-6">
-              Choose how Murph should show up. You can change or fine-tune this anytime.
+              Choose how Murph should show up. You can fine-tune the writing style, voice, and personality later.
             </DrawerDescription>
           </DrawerHeader>
           {content}
@@ -307,7 +305,7 @@ export function MurphPersonaPicker({
             Who do you want in your corner?
           </DialogTitle>
           <DialogDescription className="text-sm leading-6">
-            Choose how Murph should show up. You can change or fine-tune this anytime.
+            Choose how Murph should show up. You can fine-tune the writing style, voice, and personality later.
           </DialogDescription>
         </DialogHeader>
         {content}
@@ -327,7 +325,7 @@ function PersonaVoiceCard({
   disabled: boolean;
   groupId: string;
   onSelect: () => void;
-  option: (typeof assistantVoiceOptions)[number] & { previewPath: string };
+  option: AssistantVoiceOption & { previewPath: string };
   selected: boolean;
 }) {
   const playerRef = useRef<VoiceMemoPlayerHandle | null>(null);
@@ -375,10 +373,11 @@ function PersonaVoiceCard({
         <VoiceMemoPlayer
           ref={playerRef}
           src={option.previewPath}
+          fallbackSrc={`/audio/murph-voices/${option.id}.mp3`}
           bars={12}
           exclusiveGroupId={groupId}
-          preload="none"
-          unavailableLabel="Preview pending"
+          preload="metadata"
+          unavailableLabel="Preview unavailable"
           containerClassName="rounded-lg bg-background px-2.5 py-1.5 ring-1 ring-border"
           accentClassName="bg-primary"
           fillClassName="bg-primary"
@@ -408,7 +407,7 @@ function SelectedCheck({ selected }: { selected: boolean }) {
 async function saveAssistantPersonaPreference(
   preferences: MurphPersonaPreferences,
 ): Promise<MurphPersonaPreferences> {
-  const response = await fetch("/api/settings/assistant-persona", {
+  const response = await fetch("/api/settings/assistant-style", {
     body: JSON.stringify(preferences),
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },

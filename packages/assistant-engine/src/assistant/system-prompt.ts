@@ -581,8 +581,8 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
-    conversationScope === "direct"
-      ? buildAssistantPersonaPrompt(input.assistantPersona ?? null)
+    conversationScope === "direct" && input.assistantPersona
+      ? buildAssistantPersonaPrompt(input.assistantPersona)
       : null,
     assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
@@ -1067,8 +1067,8 @@ Delight is care. Use earned callbacks, reactions, or celebrations; use an image,
 Scope boundary:
 Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup. Work and life context is relevant when it affects health, schedule, stress, travel, or routines. Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research; tool availability does not expand scope.
 
-Behavioral baseline:
-Support judgment and name uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a partner rather than claiming authority over the user. Saved persona, tone, and personality settings may change expression and emphasis, never facts, evidence standards, safety, privacy, consent, authorization, or required warnings.`;
+Personality:
+Calm, observant, direct, plainspoken. Defaults: Humor 3—deadpan; at most one earned beat when playful; no canned bits, laughing emojis, or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context. Support judgment; name uncertainty. Never moralize, shame, use purity language, or treat the body as a failing project. Be a peer, not an authority: outside safety concerns, offer one better idea at most, then back an informed choice without veto or lecture.`;
 }
 
 function buildAssistantGroupIdentityAndScopeText(): string {

@@ -34,6 +34,8 @@ describe("hosted member assistant preferences", () => {
 
   it("updates changed preferences and appends a member preferences wake", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -58,11 +60,13 @@ describe("hosted member assistant preferences", () => {
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
+        persona: "navy-seal",
         tone: "casual",
         voice: "warm",
       },
       prisma,
     })).resolves.toMatchObject({
+      assistantPersona: "navy-seal",
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: {
@@ -79,9 +83,11 @@ describe("hosted member assistant preferences", () => {
         kind: "member.preferences.updated",
         occurredAt: "2026-07-08T12:00:00.000Z",
         preferences: {
+          persona: "navy-seal",
           tone: "casual",
           voice: "warm",
         },
+        requestedFields: ["persona", "tone", "voice"],
         userId: "member_123",
       }),
       tx: prisma,
@@ -97,6 +103,7 @@ describe("hosted member assistant preferences", () => {
       },
       prisma,
     })).resolves.toMatchObject({
+      assistantPersona: "navy-seal",
       assistantTone: "casual",
       assistantVoice: "warm",
       dispatch: {
@@ -114,6 +121,8 @@ describe("hosted member assistant preferences", () => {
 
   it("uses a durable unique wake identity for same-millisecond preference writes", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -172,6 +181,8 @@ describe("hosted member assistant preferences", () => {
 
   it("stale conversation intent no-ops field-locally behind newer Settings state", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -222,6 +233,8 @@ describe("hosted member assistant preferences", () => {
 
   it("uses a same-value Settings save as a causal barrier", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -508,6 +521,7 @@ describe("hosted member assistant preferences", () => {
         assistantHumorCausalSeq: 1n,
       },
       select: {
+        assistantPersona: true,
         assistantDetail: true,
         assistantHumor: true,
         assistantPush: true,
@@ -651,6 +665,7 @@ describe("hosted member assistant preferences", () => {
     expect(prisma.hostedMember.update).toHaveBeenCalledWith({
       data: expectedData,
       select: {
+        assistantPersona: true,
         assistantDetail: true,
         assistantHumor: true,
         assistantPush: true,
@@ -719,6 +734,8 @@ describe("hosted member assistant preferences", () => {
 
   it("treats a newer conversation sequence as saved when a null watermark hides historical divergence", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -1002,6 +1019,8 @@ describe("hosted member assistant preferences", () => {
 
   it("fails retryably when the preference wake identity conflicts", async () => {
     const member = {
+      assistantPersona: null as string | null,
+      assistantPersonaCausalSeq: null as bigint | null,
       assistantDetail: null as number | null,
       assistantDetailCausalSeq: null as bigint | null,
       assistantHumor: null as number | null,
@@ -1047,6 +1066,8 @@ describe("hosted member assistant preferences", () => {
 });
 
 function createPreferencesPrismaDouble(member: {
+  assistantPersona?: string | null;
+  assistantPersonaCausalSeq?: bigint | null;
   assistantDetail: number | null;
   assistantDetailCausalSeq: bigint | null;
   assistantHumor: number | null;
@@ -1064,6 +1085,8 @@ function createPreferencesPrismaDouble(member: {
       findUnique: vi.fn(async () => ({ ...member })),
       update: vi.fn(async (input: {
         data: {
+          assistantPersona?: string;
+          assistantPersonaCausalSeq?: bigint;
           assistantDetail?: number | null;
           assistantDetailCausalSeq?: bigint;
           assistantHumor?: number | null;
@@ -1076,6 +1099,13 @@ function createPreferencesPrismaDouble(member: {
           assistantVoiceCausalSeq?: bigint;
         };
       }) => {
+        if (input.data.assistantPersona !== undefined) {
+          member.assistantPersona = input.data.assistantPersona;
+        }
+        if (input.data.assistantPersonaCausalSeq !== undefined) {
+          member.assistantPersonaCausalSeq =
+            input.data.assistantPersonaCausalSeq;
+        }
         if (input.data.assistantDetail !== undefined) {
           member.assistantDetail = input.data.assistantDetail;
         }
@@ -1107,6 +1137,7 @@ function createPreferencesPrismaDouble(member: {
           member.assistantVoiceCausalSeq = input.data.assistantVoiceCausalSeq;
         }
         return {
+          assistantPersona: member.assistantPersona,
           assistantDetail: member.assistantDetail,
           assistantHumor: member.assistantHumor,
           assistantPush: member.assistantPush,
