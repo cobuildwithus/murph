@@ -21,6 +21,11 @@ through `scripts/verification-dispatch.mjs`:
   Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
   unavailable. The `:local` package aliases exist for executor diagnosis, not as
   a normal way to skip remote proof.
+- The Testbox hydration workflow must exist on the repository default branch
+  before GitHub accepts a delegated `workflow_dispatch`. The change that first
+  introduces `.github/workflows/crabbox.yml` therefore uses local verification
+  and PR gates; after that bootstrap lands, canonical commands can create or
+  reuse Testboxes from feature branches normally.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,

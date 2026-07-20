@@ -25,6 +25,9 @@ fresh one-shot Testbox without another target variable.
 
 - Authenticate once with `blacksmith auth login`. This direct provider does not
   use a Crabbox coordinator, `crabbox login`, or a coordinator token.
+- GitHub can dispatch the hydration workflow only after it exists on the default
+  branch. The PR that first adds `.github/workflows/crabbox.yml` must finish on
+  local verification; after it lands, feature branches can use the remote lane.
 - Never add `--allow-env`, `--env-from-profile`, broad env globs, `.env` files,
   Vercel tokens, provider tokens, model keys, or product credentials. Blacksmith
   Testbox deliberately rejects Crabbox environment forwarding.
