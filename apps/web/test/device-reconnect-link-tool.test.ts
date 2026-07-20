@@ -68,6 +68,25 @@ describe("hosted device reconnect link tool", () => {
     expect(result.status === "ambiguous" ? result.matches : []).toHaveLength(2);
   });
 
+  it("does not issue a hosted reconnect target for configured Strava routes", async () => {
+    const { resolveHostedDeviceReconnectLinkTarget } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+
+    expect(resolveHostedDeviceReconnectLinkTarget({
+      ...configuredWhoopEnv,
+      JUNCTION_PROVIDER_FILTER: "strava",
+      STRAVA_CLIENT_ID: "strava-client",
+      STRAVA_CLIENT_SECRET: "strava-secret",
+      WHOOP_CLIENT_ID: "",
+      WHOOP_CLIENT_SECRET: "",
+    }, {
+      connectSourceId: "strava",
+      connectTarget: null,
+      sourceProviderSlug: null,
+    })).toEqual({ status: "missing" });
+  });
+
   it("creates a long-lived source-specific connect intent for the selected target", async () => {
     mocks.createHostedDeviceConnectIntentTx.mockResolvedValueOnce({
       claim: "dc_opaque",

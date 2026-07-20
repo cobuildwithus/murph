@@ -170,7 +170,6 @@ function addDeviceSyncConnectTarget(
   if (
     !connectSourceId
     || !connectTarget
-    || !isDeviceConnectSourceAvailableForConnection(connectSourceId)
     || (options.dedupeBySourceId && targetsBySourceId.has(connectSourceId))
   ) {
     return;

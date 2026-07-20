@@ -6077,6 +6077,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 },
               ],
             },
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-28T00:00:00.000Z",
+                createdAt: "2026-04-28T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-strava-account",
+                id: "conn_synthetic_strava",
+                metadata: {},
+                provider: "strava",
+                scopes: ["activity:read"],
+                setupPhase: "source_confirmed",
+                status: "reauthorization_required",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "none",
+              },
+              localState: {
+                lastErrorCode: "TOKEN_REFRESH_FAILED",
+                lastErrorMessage: "refresh failed",
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: "2026-04-29T00:00:00.000Z",
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+            },
           ],
           generatedAt: "2026-04-29T00:00:00.000Z",
           userId: "member_synthetic_phase",
@@ -6104,6 +6132,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             clientId: "synthetic-oura-client",
             clientSecret: "synthetic-oura-secret",
           },
+          strava: {
+            clientId: "synthetic-strava-client",
+            clientSecret: "synthetic-strava-secret",
+          },
         },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
@@ -6119,6 +6151,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("source `oura`");
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
+    expect(prompt).toContain("Strava currently needs reconnect");
+    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
   it("skips lazy device context when pending input appears before the automation lane", async () => {

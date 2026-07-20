@@ -68,6 +68,7 @@ import {
   resolveDeliveryCandidates,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
@@ -6730,10 +6731,14 @@ function resolveHostedWorkspaceDeviceConnectProviders(
     return [];
   }
 
-  return listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => ({
-    label: target.label,
-    provider: target.connectTarget,
-  }));
+  return listConfiguredDeviceSyncConnectTargets(providerConfigs)
+    .filter((target) =>
+      isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+    )
+    .map((target) => ({
+      label: target.label,
+      provider: target.connectTarget,
+    }));
 }
 
 function resolveHostedWorkspaceDeviceReconnectTargets(
@@ -6746,10 +6751,14 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
 
   const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
   const publicTargetsByConnectTarget = new Map(
-    listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => [
-      target.connectTarget,
-      target,
-    ]),
+    listConfiguredDeviceSyncConnectTargets(providerConfigs)
+      .filter((target) =>
+        isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+      )
+      .map((target) => [
+        target.connectTarget,
+        target,
+      ]),
   );
   const connectTargetCounts = new Map<string, number>();
   for (const target of targets) {
@@ -6760,6 +6769,9 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }
 
   return targets.map((target) => ({
+    connectionAvailable: isDeviceConnectSourceAvailableForConnection(
+      target.connectSourceId,
+    ),
     connectTarget: target.connectTarget,
     connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
     connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
