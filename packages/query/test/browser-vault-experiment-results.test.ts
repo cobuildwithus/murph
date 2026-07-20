@@ -318,6 +318,62 @@ test("reports missing browser setup without pretending wearable data is missing"
   });
 });
 
+test("keeps elapsed progress for a paused run whose intervention end is unknown", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          status: "paused",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "paused");
+  assert.equal(result.progress?.dayInRun, 5);
+  assert.deepEqual(result.progress?.setupReadiness, {
+    status: "incomplete",
+    blockingReasons: ["missing_intervention_window"],
+  });
+});
+
+test("derives intervention progress from a known start when the end is unknown", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          status: "active",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "intervention");
+  assert.equal(result.progress?.dayInRun, 5);
+  assert.deepEqual(result.progress?.setupReadiness, {
+    status: "incomplete",
+    blockingReasons: ["missing_intervention_window"],
+  });
+});
+
 test("builds active intervention progress and treats skipped sessions as missed in adherence v1", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({

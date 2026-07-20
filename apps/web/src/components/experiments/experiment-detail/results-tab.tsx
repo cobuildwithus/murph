@@ -35,7 +35,7 @@ export interface ResultsTabExperiment {
   conclusions?: ExperimentConclusionSection[];
   dateRange?: string;
   day?: number;
-  durationDays: number;
+  durationDays?: number;
   nextStep?: ExperimentRunProjection["nextStep"];
   privateRun?: ExperimentRunProjection;
   schedule?: ExperimentScheduleModel;
@@ -77,7 +77,7 @@ export function ResultsTab({
           Your results
         </h2>
         <p className="text-sm/6 text-muted-foreground sm:text-base/7">
-          Your progress, measurements, and conclusions for this protocol stay private in your vault.
+          Your progress, measurements, and conclusions for this experiment stay private in your vault.
         </p>
       </header>
 
@@ -115,7 +115,10 @@ export function ResultsTab({
               <StartExperimentButton
                 initialContactChannels={initialContactChannels}
                 murphPhoneNumber={murphPhoneNumber}
-                protocolDays={formatProtocolDays(experiment.durationDays, experiment.baselineDays)}
+                protocolDays={formatProtocolDays(
+                  experiment.durationDays ?? experiment.baselineDays + 1,
+                  experiment.baselineDays,
+                )}
                 protocolTitle={experiment.title}
               />
             )
