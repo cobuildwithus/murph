@@ -9,7 +9,7 @@
     "pnpm": "10.33.0"
   },
   "scripts": {
-    "prepare": "if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi",
+    "prepare": "if [ -z \"${CI:-}\" ] && [ -z \"${VERCEL:-}\" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi",
     "hosted-local": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     "dev": "pnpm hosted-local up",
     "dev:worktree": "pnpm hosted-local worktree up",
