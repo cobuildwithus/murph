@@ -261,10 +261,13 @@ export async function requireFreshPrivyMemberAuthForHostedAppSession(
 }> {
   const [appSession, freshPrivy] = await Promise.all([
     requireHostedAppSessionFromRequest(request),
-    requirePrivyMemberAuth(request, prisma),
+    requireVerifiedPrivyMemberAuth(request, prisma),
   ]);
 
-  if (freshPrivy.member.id !== appSession.member.id) {
+  if (
+    freshPrivy.identity.userId !== appSession.privyUserId
+    || (freshPrivy.member && freshPrivy.member.id !== appSession.member.id)
+  ) {
     throw hostedOnboardingError({
       code: "PRIVY_SESSION_MEMBER_MISMATCH",
       message:
@@ -273,7 +276,16 @@ export async function requireFreshPrivyMemberAuthForHostedAppSession(
     });
   }
 
-  return { appSession, freshPrivy };
+  // Account linking proves the fresh Privy identity before Murph can persist
+  // its new login method, so the exact Privy-user match lets the app session
+  // supply the already-authenticated hosted member during that handoff.
+  return {
+    appSession,
+    freshPrivy: {
+      ...freshPrivy,
+      member: appSession.member,
+    },
+  };
 }
 
 export async function requireFreshActivePrivyMemberAuthForHostedAppSession(

@@ -12,6 +12,7 @@ import {
   resolveMurphVitestMaxWorkers,
 } from "./vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
+import { murphVitestTempGlobalSetup } from "./vitest-temp-lifecycle.js";
 import { createVitestAliasesFromTsconfigPaths } from "./workspace-source-resolution.js";
 
 type MurphVitestTestOptions = Omit<
@@ -50,6 +51,7 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
       environment: "node",
       ...(input.useDefaultConcurrency === false ? {} : resolveMurphVitestConcurrency()),
       maxWorkers: resolveMurphVitestMaxWorkers(),
+      globalSetup: [murphVitestTempGlobalSetup],
       include: [...(input.include ?? ["test/**/*.test.ts"])],
       ...(input.test ?? {}),
       coverage:

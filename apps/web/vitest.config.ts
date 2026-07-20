@@ -5,6 +5,7 @@ import { defineProject } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 
 import {
   createVitestWorkspaceRuntimeAliases,
@@ -28,6 +29,7 @@ export default defineProject({
     ...murphVitestNoTimeouts,
     name: "hosted-web",
     environment: "node",
+    globalSetup: [murphVitestTempGlobalSetup],
     ...resolveMurphVitestConcurrency(),
     include: ["apps/web/test/**/*.test.ts", "apps/web/test/**/*.test.tsx"],
     setupFiles: [path.join(appDir, "test", "setup-env.ts")],

@@ -6,10 +6,20 @@
 # from the generator output. When a commit touches packages/cli/, regenerate
 # those artifacts and re-stage them so a stale copy can never be committed.
 #
-# Installed by the root `prepare` script (sets core.hooksPath=.githooks).
+# Installed by the root `prepare` script from the branch-independent primary checkout.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
+guard_root="$(
+  git worktree list --porcelain |
+    awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
+)"
+[[ -n "$guard_root" ]] || {
+  printf 'pre-commit: primary checkout could not be resolved\n' >&2
+  exit 1
+}
+
+"$guard_root/scripts/worktree-storage-guard"
 
 # Fast no-op unless the staged change touches the CLI package.
 if ! git diff --cached --name-only | grep -q '^packages/cli/'; then

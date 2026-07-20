@@ -97,6 +97,8 @@ describe("hosted runtime Temporal worker", () => {
     expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
     expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBeUndefined();
     expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBeUndefined();
+    expect(workerOptions.maxCachedWorkflows).toBeUndefined();
+    expect(workerOptions.reuseV8Context).toBeUndefined();
   });
 
   it("uses the prebuilt workflow bundle and shutdown policy when NODE_ENV is production", async () => {
@@ -126,6 +128,8 @@ describe("hosted runtime Temporal worker", () => {
       expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
       expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(20);
       expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(5);
+      expect(workerOptions.maxCachedWorkflows).toBe(100);
+      expect(workerOptions.reuseV8Context).toBe(true);
     } finally {
       await rm(bundleDir, { force: true, recursive: true });
     }
@@ -178,21 +182,28 @@ describe("hosted runtime Temporal worker", () => {
     const workerOptions = readCreatedWorkerOptions();
     expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(3);
     expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
+    expect(workerOptions.maxCachedWorkflows).toBe(100);
     expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(12);
     expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(6);
+    expect(workerOptions.reuseV8Context).toBe(true);
     expect(readHostedUserRuntimeWorkerPerformanceOptions({
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "2",
     })).toEqual({
       maxConcurrentActivityTaskExecutions: 1,
       maxConcurrentActivityTaskPolls: 1,
+      maxCachedWorkflows: 100,
       maxConcurrentWorkflowTaskExecutions: 2,
       maxConcurrentWorkflowTaskPolls: 2,
+      reuseV8Context: true,
     });
     expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS: "2",
     })).toThrow(/less than or equal/u);
+    expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "101",
+    })).toThrow(/fixed 100-Workflow cache limit/u);
   });
 
   it("fails production startup when the workflow bundle is missing", async () => {
@@ -248,10 +259,12 @@ describe("hosted runtime Temporal worker", () => {
 
 interface CreatedWorkerOptions {
   activities?: unknown;
+  maxCachedWorkflows?: unknown;
   maxConcurrentActivityTaskExecutions?: unknown;
   maxConcurrentActivityTaskPolls?: unknown;
   maxConcurrentWorkflowTaskExecutions?: unknown;
   maxConcurrentWorkflowTaskPolls?: unknown;
+  reuseV8Context?: unknown;
   shutdownForceTime?: unknown;
   shutdownGraceTime?: unknown;
   taskQueue?: unknown;
