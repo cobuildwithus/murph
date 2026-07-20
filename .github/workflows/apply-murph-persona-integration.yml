@@ -52,10 +52,15 @@ jobs:
           corepack prepare pnpm@10.33.0 --activate
 
       - name: Install workspace
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=silent
 
       - name: Build contracts
-        run: pnpm --dir packages/contracts build
+        shell: bash
+        run: |
+          pnpm --dir packages/contracts build > /tmp/persona-contract-build.log 2>&1 || {
+            tail -n 120 /tmp/persona-contract-build.log
+            exit 1
+          }
 
       - name: Generate preview MP3s when credentials are configured
         env:
@@ -65,15 +70,17 @@ jobs:
         shell: bash
         run: |
           if [[ -n "$ELEVENLABS_API_KEY" && -n "$MURPH_ELEVENLABS_VOICE_ID" ]]; then
-            node scripts/generate-murph-persona-previews.mjs
+            node scripts/generate-murph-persona-previews.mjs > /tmp/persona-previews.log 2>&1 || {
+              tail -n 120 /tmp/persona-previews.log
+              exit 1
+            }
           else
             echo "Preview credentials unavailable; retaining deterministic generator and paths."
           fi
 
-      - name: Verify integration
+      - name: Run focused tests
         shell: bash
         run: |
-          set -o pipefail
           pnpm exec vitest run --no-coverage \
             packages/contracts/test/assistant-personas.test.ts \
             packages/contracts/test/preferences.test.ts \
@@ -84,10 +91,30 @@ jobs:
             packages/assistant-engine/test/assistant-codex-turn-planning.test.ts \
             apps/web/test/home-initial-visit-dialog.test.tsx \
             apps/web/test/hosted-onboarding-member-preferences.test.ts \
-            apps/web/test/account-settings-snapshot.test.ts
-          pnpm typecheck:packages
-          pnpm --dir apps/web typecheck
-          git diff --check
+            apps/web/test/account-settings-snapshot.test.ts \
+            > /tmp/persona-focused-tests.log 2>&1 || {
+              tail -n 180 /tmp/persona-focused-tests.log
+              exit 1
+            }
+
+      - name: Typecheck packages
+        shell: bash
+        run: |
+          pnpm typecheck:packages > /tmp/persona-package-typecheck.log 2>&1 || {
+            tail -n 180 /tmp/persona-package-typecheck.log
+            exit 1
+          }
+
+      - name: Typecheck Web
+        shell: bash
+        run: |
+          pnpm --dir apps/web typecheck > /tmp/persona-web-typecheck.log 2>&1 || {
+            tail -n 180 /tmp/persona-web-typecheck.log
+            exit 1
+          }
+
+      - name: Check diff
+        run: git diff --check
 
       - name: Commit integrated implementation
         run: |
