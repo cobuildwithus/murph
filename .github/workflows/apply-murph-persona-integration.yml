@@ -28,18 +28,29 @@ jobs:
           sed -i \
             's/privateInteractiveAudience || groupAssistantStylePreferencesApply/privateInteractiveProviderTurn || groupAssistantStylePreferencesApply/' \
             packages/assistant-engine/src/assistant/codex-turn/planning.ts
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/web/test/hosted-onboarding-member-preferences.test.ts")
+          text = path.read_text()
+          old = """      select: {
+                assistantDetail: true,
+          """
+          new = """      select: {
+                assistantPersona: true,
+                assistantDetail: true,
+          """
+          count = text.count(old)
+          if count != 4:
+              raise SystemExit(f"expected four hosted preference select assertions, found {count}")
+          path.write_text(text.replace(old, new))
+          PY
           corepack enable >/dev/null
           corepack prepare pnpm@10.33.0 --activate >/dev/null
           pnpm install --frozen-lockfile --reporter=silent >/dev/null
           pnpm --dir packages/contracts build >/dev/null
           pnpm --dir apps/web prisma:generate >/dev/null
-          if ! pnpm exec vitest run \
+          pnpm exec vitest run \
             --config apps/web/vitest.workspace.ts \
             --no-coverage \
             apps/web/test/hosted-onboarding-member-preferences.test.ts \
-            --reporter=verbose > /tmp/persona-persistence-test.log 2>&1; then
-            grep -nE 'FAIL|Error|error|Assertion|expected|received|Caused by|Test Files|Tests|Unhandled|failed' \
-              /tmp/persona-persistence-test.log | tail -n 120
-            exit 1
-          fi
-          grep -nE 'Test Files|Tests' /tmp/persona-persistence-test.log
+            --reporter=verbose
