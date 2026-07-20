@@ -124,6 +124,15 @@ describe('worktree storage guard', () => {
     )
   })
 
+  it('avoids process substitution in the install-time guard', () => {
+    const guard = readFileSync(
+      path.join(sourceRoot, 'scripts', 'worktree-storage-guard'),
+      'utf8',
+    )
+
+    expect(guard).not.toContain('< <(')
+  })
+
   it('requires isolated state for a custom ratchet maximum', () => {
     const harness = createHarness()
     const result = runScript(harness, 'worktree-storage-guard', [], {
