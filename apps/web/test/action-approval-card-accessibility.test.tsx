@@ -16,8 +16,10 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({
   useSensitiveActionAuthorization: () => ({
     setup: {
+      clientAuthenticated: true,
       error: null,
       pendingLabel: null,
+      ready: true,
     },
     signChallenge: mocks.signChallenge,
   }),
