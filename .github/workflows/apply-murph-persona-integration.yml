@@ -1,6 +1,13 @@
 name: Apply Murph persona integration
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
   push:
     branches:
       - agent/murph-personas
@@ -13,7 +20,7 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[persona-applied]') && !contains(github.event.head_commit.message, '[persona-failed]') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -22,17 +29,31 @@ jobs:
           fetch-depth: 0
           ref: agent/murph-personas
 
+      - name: Detect a settled integration head
+        id: settled
+        shell: bash
+        run: |
+          message="$(git log -1 --pretty=%B)"
+          if [[ "$message" == *"[persona-applied]"* || "$message" == *"[persona-failed]"* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: ${{ steps.settled.outputs.skip != 'true' }}
         with:
           node-version: 24.14.1
 
       - name: Enable pnpm
+        if: ${{ steps.settled.outputs.skip != 'true' }}
         run: |
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
 
       - name: Apply narrow source integrations
         id: integrate
+        if: ${{ steps.settled.outputs.skip != 'true' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -43,7 +64,7 @@ jobs:
             2>&1 | tee /tmp/murph-persona-integration.log
 
       - name: Record integration failure
-        if: ${{ steps.integrate.outcome == 'failure' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'failure' }}
         shell: bash
         run: |
           git reset --hard HEAD
@@ -57,15 +78,15 @@ jobs:
           exit 1
 
       - name: Install workspace
-        if: ${{ steps.integrate.outcome == 'success' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
         run: pnpm install --frozen-lockfile
 
       - name: Build contracts
-        if: ${{ steps.integrate.outcome == 'success' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
         run: pnpm --dir packages/contracts build
 
       - name: Generate persona voice previews when credentials are configured
-        if: ${{ steps.integrate.outcome == 'success' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           MURPH_ELEVENLABS_MODEL_ID: ${{ secrets.MURPH_ELEVENLABS_MODEL_ID }}
@@ -80,7 +101,7 @@ jobs:
 
       - name: Verify persona integration
         id: verify
-        if: ${{ steps.integrate.outcome == 'success' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -103,7 +124,7 @@ jobs:
           } 2>&1 | tee /tmp/murph-persona-verification.log
 
       - name: Record verification failure
-        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
         shell: bash
         run: |
           git reset --hard HEAD
@@ -117,7 +138,7 @@ jobs:
           exit 1
 
       - name: Commit integrated implementation
-        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
+        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
