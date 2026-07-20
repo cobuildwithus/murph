@@ -166,6 +166,13 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('Reject tautological findings')
     expect(insightRecord?.instructions).toContain('direct or obvious input')
     expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
+    expect(insightRecord?.instructions).toContain('Never infer alcohol use from a bad night')
+    expect(insightRecord?.instructions).toContain(
+      'Do not send a weekly insight whose main point is that drinking or a late Friday/Saturday night hurt sleep or recovery',
+    )
+    expect(insightRecord?.instructions).not.toContain('rough portions, alcohol')
+    expect(insightRecord?.instructions).not.toContain('drink count')
+    expect(insightRecord?.instructions).not.toContain('alcohol plus travel day')
     expect(insightRecord?.instructions).toContain('compare independent signals')
     expect(insightRecord?.instructions).toContain('one or two credible studies')
     expect(insightRecord?.instructions).toContain('outbound note URL-free')
