@@ -40,7 +40,7 @@ interface CrudHints {
   importJson?: string
 }
 
-export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status'
+export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status' | 'text'
 
 type CrudCommandName = keyof CrudDescriptions
 type ServiceMethod<TInput, TResult> = (input: TInput) => Promise<TResult>
@@ -526,6 +526,13 @@ export function registerHealthCrudCommands<
         limit: commonListLimitOptionSchema,
         status: config.listStatusDescription
           ? statusOptionSchema.describe(config.listStatusDescription)
+          : undefined,
+        text: config.listFilterCapabilities?.includes('text')
+          ? z
+              .string()
+              .min(1)
+              .optional()
+              .describe('Optional case-insensitive text filter across blood-test labels and result data.')
           : undefined,
         to: config.listFilterCapabilities?.includes('date-range')
           ? {

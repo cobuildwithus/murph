@@ -1322,6 +1322,7 @@ export function createExplicitHealthQueryServices(
       const records = await query.listBloodTests(input.vault, {
         from: input.from,
         status: input.status,
+        text: input.text,
         to: input.to,
         limit: input.limit,
       });
@@ -1331,6 +1332,7 @@ export function createExplicitHealthQueryServices(
         {
           from: input.from,
           status: input.status,
+          text: input.text,
           to: input.to,
           limit: input.limit ?? 10,
         },

@@ -1784,6 +1784,7 @@ describe("HostedUserRunner execution coordination", () => {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
         orchestration: {
+          activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
@@ -1833,6 +1834,7 @@ describe("HostedUserRunner execution coordination", () => {
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
       orchestration: {
+        activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
       },
@@ -3770,6 +3772,7 @@ describe("HostedUserRunner execution coordination", () => {
         attemptId: token.attemptId,
         leaseGeneration: String(token.generation),
         orchestration: {
+          activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
@@ -3784,6 +3787,14 @@ describe("HostedUserRunner execution coordination", () => {
         active_attempt_id: null,
         wake_at: null,
       });
+    });
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
+      activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+      activeWakeFinishedAtEpochMs: Date.parse(FIXED_NOW),
+      replacementFenceClearStartedAtEpochMs: Date.parse(FIXED_NOW),
+      replacementFenceClearedAtEpochMs: Date.parse(FIXED_NOW),
+      replacedStaleFence: true,
     });
   });
 

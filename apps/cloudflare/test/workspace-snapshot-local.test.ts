@@ -103,6 +103,9 @@ describe("workspace snapshot local restore", () => {
         "utf8",
       );
       await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "projection-shm\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "projection-wal\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "inboxd.sqlite"), "other-projection\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".git", "config"), "git config\n", "utf8");
       await writeFile(
@@ -202,7 +205,13 @@ describe("workspace snapshot local restore", () => {
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, "vault-share")))
         .rejects.toThrow();
-      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite")))
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"))
+        .resolves.toBe("projection\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"))
+        .resolves.toBe("projection-shm\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"))
+        .resolves.toBe("projection-wal\n");
+      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "inboxd.sqlite")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "cache", "cache.txt")))
         .rejects.toThrow();

@@ -1775,6 +1775,8 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
       "list",
       "--status",
       "mixed",
+      "--text",
+      "Apolipoprotein B",
       "--limit",
       "5",
       "--vault",
@@ -1799,6 +1801,7 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
 
     assert.equal(nounList.ok, true);
     assert.equal(requireData(nounList).filters.status, "mixed");
+    assert.equal(requireData(nounList).filters.text, "Apolipoprotein B");
     assert.equal("kind" in requireData(nounList).filters, false);
     assert.equal(requireData(nounList).filters.limit, 5);
     assert.equal(requireData(nounList).count, 1);

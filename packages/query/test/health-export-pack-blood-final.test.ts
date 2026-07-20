@@ -550,6 +550,9 @@ test("blood test helpers keep only blood-like records and support deterministic 
     status: "mixed",
     text: "Function Health",
   });
+  const targetedBloodTests = await listBloodTests(vaultRoot, {
+    text: "functional_panel",
+  });
 
   assert.deepEqual(allBloodTests.map((record) => record.id), [
     "evt_blood_category",
@@ -559,6 +562,9 @@ test("blood test helpers keep only blood-like records and support deterministic 
     "evt_blood_category",
   ]);
   assert.deepEqual(mixedBloodTests.map((record) => record.id), [
+    "evt_blood_category",
+  ]);
+  assert.deepEqual(targetedBloodTests.map((record) => record.id), [
     "evt_blood_category",
   ]);
   assert.equal((await readBloodTest(vaultRoot, "evt_blood_category"))?.labName, "Function Health");
