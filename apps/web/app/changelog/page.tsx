@@ -1943,7 +1943,7 @@ export default async function ChangelogPage({
                     {improvements.length > 0 ? (
                       <div className={features.length > 0 ? "mt-10" : ""}>
                         <ItemGroup
-                          label="Under the hood"
+                          label="Improvements"
                           items={improvements}
                           tryItByItemId={tryItByItemId}
                         />

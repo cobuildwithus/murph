@@ -63,6 +63,331 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-20",
+    publishedOn: "2026-07-20",
+    title: "Clearer standings, smoother account setup",
+    summary:
+      "Group standings now explain partial coverage, phone linking starts in the right state, and weekly insights skip obvious weekend conclusions that do not help.",
+    items: [
+      {
+        id: "challenge-standings-explain-missing-data",
+        kind: "feature",
+        priority: 5,
+        title: "Challenge standings show who is still waiting",
+        summary:
+          "Scheduled group updates now separate current scores from participants whose data is missing, state the coverage clearly, and explain the next useful step for each person instead of silently leaving them out.",
+        details:
+          "A real zero still counts. Missing sharing permission, a stale sync, a disconnected source, and a source that needs attention stay distinct. When an exact required share has not been granted, Murph may offer one separate Like-or-heart permission card; the standings message itself never becomes a consent surface.",
+        relevanceTags: ["groups", "challenges", "sharing", "wearables"],
+        sourcePullRequests: [769],
+        tryIt: {
+          label: "Review missing standings data",
+          prompt:
+            "Help me review what may be missing from my current challenge standings.",
+        },
+      },
+      {
+        id: "phone-link-settings-recovery",
+        kind: "improvement",
+        priority: 5,
+        title: "Linking a phone no longer stalls in Settings",
+        summary:
+          "An authenticated member can now link or replace a phone number without a false signup-completion error, and the dialog opens directly on the focused phone field instead of repeating the Settings status card.",
+        details:
+          "The fix still requires a fresh login for the exact same account and continues to reject a phone identity that resolves to another member.",
+        relevanceTags: ["settings", "phone", "auth", "reliability"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "weekly-insights-skip-obvious-weekend",
+        kind: "improvement",
+        priority: 4,
+        title: "Weekly insights skip the obvious weekend lecture",
+        summary:
+          "Murph no longer turns one bad night into an alcohol assumption or sends a weekly insight whose main point is that drinking or a late weekend hurt sleep or recovery.",
+        details:
+          "That conclusion is treated as obvious and unhelpful here, so Murph can choose a different evidence-backed candidate while keeping causal claims appropriately cautious.",
+        relevanceTags: ["insights", "sleep", "recovery", "assistant"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-07-19",
+    publishedOn: "2026-07-19",
+    title: "Medical records, without the integration jargon",
+    summary:
+      "Medical records now starts from where you get care and the patient portal you already use. The page explains what Murph can copy, how often it checks, and what actually happened after the import.",
+    items: [
+      {
+        id: "medical-records-plain-language",
+        kind: "improvement",
+        priority: 5,
+        title: "Medical records now speaks in patient-portal language",
+        summary:
+          "The connection flow now asks where you get care, describes supported patient portals plainly, and keeps search, return, retry, and disconnect states understandable on both phone and desktop.",
+        details:
+          "Before sign-in, Murph explains that the beta copies available lab results and report summaries once, does not keep checking your chart, never receives your patient-portal password, and does not claim to copy a complete chart. Finished imports also say when zero records were added instead of implying success from status alone.",
+        relevanceTags: ["medical-records", "labs", "dashboard", "privacy"],
+        sourcePullRequests: [792],
+        tryIt: {
+          href: "/records",
+          label: "Open Medical records",
+        },
+      },
+    ],
+  },
+  {
+    id: "2026-07-18",
+    publishedOn: "2026-07-18",
+    title: "Replies that know what they are answering",
+    summary:
+      "Murph can anchor a reply or reaction to the exact message it means, guide automatic iPhone meal capture more reliably, and celebrate an eligible first plan with a short original song. Medical-record imports and cold replies also recover with less friction.",
+    items: [
+      {
+        id: "native-replies-to-exact-message",
+        kind: "feature",
+        priority: 5,
+        title: "Replies and reactions can target the exact message",
+        summary:
+          "In supported iMessage and Telegram conversations, Murph can send a native threaded reply to one specific message or react to an earlier message from the same turn.",
+        details:
+          "Ordinary replies stay flat unless anchoring helps. If a selected message is stale, invented, or belongs to another conversation, the marked action stops instead of replying or reacting to the wrong thing.",
+        relevanceTags: ["messaging", "imessage", "telegram", "reactions"],
+        sourcePullRequests: [779],
+      },
+      {
+        id: "automatic-meal-capture-guidance",
+        kind: "improvement",
+        priority: 5,
+        title: "Meal capture has a real setup and recovery guide",
+        summary:
+          "Murph now knows the supported iPhone setup, photo-permission and background limits, the on-device review list, and the checks that distinguish a delayed import from a failed upload.",
+        details:
+          "When calorie or macro tracking is active, Murph can review unresolved device meal photos on the next nutrition conversation and enrich the existing meal without logging the same eating occasion twice. It never promises instant background work, historical scanning, Android support, or indefinite uploads without reopening the app.",
+        relevanceTags: ["nutrition", "meals", "iphone", "assistant"],
+        sourcePullRequests: [791],
+        tryIt: {
+          label: "Set up meal capture",
+          prompt: "Help me set up automatic meal capture on my iPhone.",
+        },
+      },
+      {
+        id: "first-plan-launch-song",
+        kind: "improvement",
+        priority: 4,
+        title: "Your first plan can get its own launch song",
+        summary:
+          "After an eligible first habit or experiment and its finite support are safely saved, Murph now includes a short original launch song alongside the practical confirmation and next touchpoint.",
+        details:
+          "The text confirmation always comes first. A no-music preference, sensitive context, time-sensitive help, an unsupported route, or a generation failure skips the song without blocking the plan or its reminders.",
+        relevanceTags: ["onboarding", "music", "plans", "delight"],
+        sourcePullRequests: [787],
+      },
+      {
+        id: "medical-records-import-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Medical-record imports are harder to strand",
+        summary:
+          "The one-time patient-portal beta now protects against stale browser actions, separates a member denial from a provider failure, validates supported record pages more strictly, and can nudge the same stuck import to resume when its first signal is missed.",
+        details:
+          "The beta still does not add continuous access, ongoing sync, or a second import attempt. Ambiguous lab ranges stay out of your Murph record until they can be reviewed safely.",
+        relevanceTags: ["medical-records", "labs", "reliability"],
+        sourcePullRequests: [793],
+      },
+      {
+        id: "cold-replies-drop-finished-media",
+        kind: "improvement",
+        priority: 3,
+        title: "Cold replies carry less finished media",
+        summary:
+          "Once a one-time generated file is safely delivered and no retry still needs it, Murph clears the temporary copy so a later reply after a quiet stretch has less to restore.",
+        details:
+          "Active deliveries remain restart-safe, and ordinary files are untouched. The change makes those later replies lighter without weakening approval or retry behavior.",
+        relevanceTags: ["assistant", "performance", "reliability", "media"],
+        sourcePullRequests: [764],
+      },
+    ],
+  },
+  {
+    id: "2026-07-17",
+    publishedOn: "2026-07-17",
+    title: "Your records and measurements, in one place",
+    summary:
+      "A new Medical records beta can copy supported evidence from selected patient portals, Biomarkers now shows your measured lab and device history, and completed experiment results open again. Onboarding also gathers the broader story in one voice memo and turns an accepted first step into concrete support. Computer handoffs and bounded background work keep the conversation moving too.",
+    items: [
+      {
+        id: "medical-records-one-time-copy",
+        kind: "feature",
+        priority: 5,
+        title: "Copy supported medical records into Murph",
+        summary:
+          "When the beta is available for your patient portal, Medical records guides a private sign-in and one-time copy of supported lab results and diagnostic report summaries into your Murph record.",
+        details:
+          "You can start from the web page or ask private Murph for a short-lived connection link. The beta does not request ongoing chart access, copy a complete chart, or delete already imported records when you disconnect.",
+        relevanceTags: ["medical-records", "labs", "patient-portals", "privacy"],
+        sourcePullRequests: [757],
+        tryIt: {
+          href: "/records",
+          label: "Open Medical records",
+        },
+      },
+      {
+        id: "measured-biomarker-history",
+        kind: "feature",
+        priority: 5,
+        title: "See your measured biomarkers in private history",
+        summary:
+          "The Biomarkers page now groups the lab markers you have actually measured, with the dated readings saved in Murph for each analyte and a chart only when those values are truly comparable.",
+        details:
+          "Qualitative results, comparator values, unit changes, custom analytes, and lab-reported reference ranges stay visible without being forced into a misleading numeric series. Raw reports and external identifiers stay out of the browser view.",
+        relevanceTags: ["biomarkers", "labs", "history", "dashboard"],
+        sourcePullRequests: [771],
+        tryIt: {
+          href: "/biomarkers",
+          label: "Open your biomarkers",
+        },
+      },
+      {
+        id: "device-metrics-on-biomarkers",
+        kind: "improvement",
+        priority: 4,
+        title: "Device-backed metrics join the Biomarkers index",
+        summary:
+          "A new From your devices section shows only metrics with real private readings, including the latest value, reading count, history span, and an out-of-date label when the source is stale.",
+        details:
+          "Manual entries and lab values never qualify a metric for this section. Signed-out members and members without device readings do not see an empty catalog of things they could track.",
+        relevanceTags: ["biomarkers", "wearables", "dashboard"],
+        sourcePullRequests: [780],
+      },
+      {
+        id: "completed-experiment-results-return",
+        kind: "improvement",
+        priority: 4,
+        title: "Completed experiment results open again",
+        summary:
+          "From a protocol page, Your results now opens the matching active run or newest completed run, including the exact saved conclusion, confidence, caveats, confounders, metrics, and analysis window.",
+        details:
+          "Finished outcomes stay tied to the evidence saved when the run ended. Early-stopped runs remain partial, and later measurements cannot leak backward into the result.",
+        relevanceTags: ["experiments", "results", "history", "reliability"],
+        sourcePullRequests: [759],
+      },
+      {
+        id: "onboarding-one-health-story",
+        kind: "improvement",
+        priority: 5,
+        title: "One voice memo replaces the long health intake",
+        summary:
+          "After you name what matters, Murph now asks for one natural voice memo about the health and life context that could change the help, instead of walking through a long sequence of intake questions.",
+        details:
+          "Murph extracts and saves the useful pieces through their existing private owners, asks only for consequential gaps afterward, and can send one check-in if setup pauses early instead of starting a nagging loop.",
+        relevanceTags: ["onboarding", "voice", "context", "assistant"],
+        sourcePullRequests: [782, 783],
+      },
+      {
+        id: "first-plan-includes-support",
+        kind: "improvement",
+        priority: 4,
+        title: "The first plan starts with real follow-through",
+        summary:
+          "Before saving a repeated behavior or experiment, Murph now shows the useful recommendation, proposes the next real occurrence, and names the finite reminders and early review it will create.",
+        details:
+          "One clear yes authorizes the plan and the exact support package together. Session details arrive near the moment of action instead of as a setup text wall, and onboarding stays open if the promised support could not be saved.",
+        relevanceTags: ["onboarding", "plans", "reminders", "follow-through"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "background-imports-reply-first",
+        kind: "improvement",
+        priority: 5,
+        title: "Long imports can keep moving while Murph replies",
+        summary:
+          "When an upload, lab file, or other data import does not need to finish before Murph can answer, Murph can now hand off that bounded background work and keep the conversation moving.",
+        details:
+          "The source is saved first, the background task stays one-shot and narrowly scoped, and Murph does not treat an extracted result as confirmed until it can read it back.",
+        relevanceTags: ["assistant", "imports", "files", "performance"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "computer-handoff-done-faster",
+        kind: "improvement",
+        priority: 4,
+        title: "Done gets you back to Messages sooner",
+        summary:
+          "After you finish a direct login handoff in Murph's browser, the Done screen now returns to Messages once the durable completion is saved instead of making you wait for the remaining browser work.",
+        details:
+          "Murph finishes securing the private login state before the next authorized browser use. If that work is still in progress, a new browser request retries instead of reusing stale state.",
+        relevanceTags: ["computer", "handoff", "performance", "reliability"],
+        sourcePullRequests: [707],
+      },
+      {
+        id: "scheduled-messages-name-the-subject",
+        kind: "improvement",
+        priority: 4,
+        title: "Scheduled messages name what they are about",
+        summary:
+          "Reminders, check-ins, and reviews now name the specific task, habit, or plan they refer to, so the message still makes sense when it arrives outside the conversation that created it.",
+        relevanceTags: ["reminders", "notifications", "clarity", "assistant"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "exercise-images-when-useful",
+        kind: "improvement",
+        priority: 4,
+        title: "Exercise images arrive when they help",
+        summary:
+          "Murph now judges familiarity movement by movement, includes catalog images for unfamiliar or uncommon exercises, and waits for a form, cue, or just-in-time instruction turn instead of attaching them during setup.",
+        details:
+          "Common movements can stay text-only when your experience makes the instruction clear. An image supports the action without crowding the conversation that created the plan.",
+        relevanceTags: ["exercise", "media", "coaching", "onboarding"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "appointment-calls-start-naturally",
+        kind: "improvement",
+        priority: 3,
+        title: "Appointment calls start more naturally",
+        summary:
+          "When Murph is preparing to call about an appointment, it now asks for a missing date of birth before the task is ready and lets the call agent open naturally instead of reading a fixed introduction.",
+        relevanceTags: ["appointments", "phone-calls", "assistant"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "reactions-target-the-message",
+        kind: "improvement",
+        priority: 3,
+        title: "Reactions land on the message that earned them",
+        summary:
+          "A laugh reaction now targets the actual joke or playful message, not a later haha or other laughter marker that merely refers back to it.",
+        relevanceTags: ["messaging", "groups", "reactions", "clarity"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "whoop-full-sync-guide",
+        kind: "improvement",
+        priority: 3,
+        title: "WHOOP full sync gets a friendlier guide",
+        summary:
+          "The Apple Health full-sync completion flow now opens a guided dialog, explains what happens next, and can play the explanation in your selected Murph voice instead of leaving you with a terse status screen.",
+        relevanceTags: ["whoop", "apple-health", "wearables", "onboarding"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "first-hello-available-imessage-number",
+        kind: "improvement",
+        priority: 3,
+        title: "The first hello uses an available iMessage number",
+        summary:
+          "When Murph starts a new conversation after setup, it now stays within each number's daily conversation limit and can choose another available number when needed.",
+        details:
+          "If every available number is at its limit, setup still finishes and Text Murph remains available. A person-started message or an existing conversation is never blocked by this limit.",
+        relevanceTags: ["imessage", "onboarding", "reliability", "messaging"],
+        sourcePullRequests: [766],
+      },
+    ],
+  },
+  {
     id: "2026-07-16",
     publishedOn: "2026-07-16",
     title: "More follow-through, less friction",
