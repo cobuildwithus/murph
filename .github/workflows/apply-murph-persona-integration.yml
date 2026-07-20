@@ -42,8 +42,8 @@ jobs:
               ),
               text,
           )
-          if count != 4:
-              raise SystemExit(f"expected four hosted preference select assertions, found {count}")
+          if count != 2:
+              raise SystemExit(f"expected two hosted preference select assertions, found {count}")
           path.write_text(text)
           PY
           corepack enable >/dev/null
