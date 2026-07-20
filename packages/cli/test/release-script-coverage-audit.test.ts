@@ -2425,12 +2425,13 @@ cobuild_repo_tool_bin() {
           true,
         )
       }
+
       writeHarnessFile(
         harnessRoot,
         'scripts/install-git-hooks',
         `#!/usr/bin/env bash
 set -euo pipefail
-touch .fake-tools/install-git-hooks-called
+touch .fake-tools/install-git-hooks.called
 `,
         true,
       )
@@ -2539,6 +2540,8 @@ Updated: 2026-04-24
         )
       }
 
+      expect(existsSync(path.join(harnessRoot, '.fake-tools/install-git-hooks.called'))).toBe(true)
+
       expect(
         existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/2026-04-24-harness.md')),
       ).toBe(false)
@@ -2554,7 +2557,6 @@ Updated: 2026-04-24
       expect(result.stdout).toContain(
         'finish-task: commit includes only this task\'s ledger-row removal',
       )
-      expect(existsSync(path.join(harnessRoot, '.fake-tools/install-git-hooks-called'))).toBe(true)
 
       const closeArgs = readFileSync(
         path.join(harnessRoot, '.fake-tools', 'close-exec-plan.args'),
