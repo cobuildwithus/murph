@@ -1,4 +1,6 @@
-# Product Specs Index
+# Product Specs
+
+- [Murph Personas](./murph-personas.md) — Persona-first onboarding and code-owned style defaults. Index
 
 Last verified: 2026-07-16
 

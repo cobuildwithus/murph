@@ -5,7 +5,9 @@ Status: Implemented for onboarding, personal Settings, hosted mailbox handoff, p
 
 ## Product Contract
 
-Murph's speaking style has five controls:
+Murph's speaking style has one persona baseline and five composable controls. Persona-first onboarding is defined in [Murph Personas](./murph-personas.md).
+
+The five controls remain:
 
 1. Tone: `casual` or `formal`.
 2. Voice: one option from the shared voice roster.
@@ -17,10 +19,10 @@ Tone and voice appear during the hosted first visit and under **How Murph talks*
 
 The first-visit sequence remains:
 
-1. Text-line members: contact card picker, tone, voice, welcome.
-2. Members without a text line: tone, voice, welcome.
+1. Text-line members: contact card picker, persona with tone and voice, welcome.
+2. Members without a text line: persona with tone and voice, welcome.
 
-Skip advances without writing a tone or voice preference. Continue writes the selected step. Personality dials do not add onboarding steps.
+Skip advances without writing a style preference. Continue writes persona, tone, and voice in one preference update. Personality dials do not add onboarding steps or separate signup writes.
 
 ## Canonical Preferences
 

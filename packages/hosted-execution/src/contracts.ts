@@ -8,6 +8,7 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonaId,
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
@@ -164,6 +165,7 @@ export type HostedExecutionMemberPersonalityPreferences = {
 };
 
 export interface HostedExecutionMemberPreferences {
+  persona?: AssistantPersonaId;
   personality?: HostedExecutionMemberPersonalityPreferences;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
@@ -175,7 +177,7 @@ export interface HostedExecutionMemberPreferencesUpdatedEvent
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
-  requestedFields?: Array<"tone" | "voice">;
+  requestedFields?: Array<"persona" | "tone" | "voice">;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -567,7 +569,7 @@ export interface HostedExecutionMemberPreferencesUpdatedWake
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
-  requestedFields?: Array<"tone" | "voice">;
+  requestedFields?: Array<"persona" | "tone" | "voice">;
 }
 
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {

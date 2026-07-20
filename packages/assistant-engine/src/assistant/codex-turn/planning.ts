@@ -3,7 +3,9 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   normalizeIanaTimeZone,
@@ -269,12 +271,14 @@ export interface AssistantCodexAttemptPlan {
 }
 
 export interface AssistantTurnPreferenceContext {
+  assistantPersona: AssistantPersonaId | null
   assistantPersonality: AssistantPersonalityPreferences | null
   assistantTone: AssistantTonePreference | null
   assistantVoice: string | null
 }
 
 const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+  assistantPersona: null,
   assistantPersonality: null,
   assistantTone: null,
   assistantVoice: null,
@@ -493,6 +497,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
+  const effectiveAssistantStyle = resolveAssistantEffectiveStyle({
+    ...(privateInteractiveAudience && preferenceContext.assistantPersona
+      ? { persona: preferenceContext.assistantPersona }
+      : {}),
+    ...(preferenceContext.assistantTone
+      ? { tone: preferenceContext.assistantTone }
+      : {}),
+    ...(preferenceContext.assistantVoice
+      ? { voice: preferenceContext.assistantVoice }
+      : {}),
+    ...(preferenceContext.assistantPersonality
+      ? { personality: preferenceContext.assistantPersonality }
+      : {}),
+  })
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -577,7 +595,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantToolNameAliases,
-            assistantTone: preferenceContext.assistantTone,
+            assistantTone: effectiveAssistantStyle.tone,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
@@ -604,12 +622,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantToolNameAliases,
+            assistantPersona: privateInteractiveAudience
+              ? effectiveAssistantStyle.persona
+              : null,
             assistantPersonality:
-              assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
-                ? preferenceContext.assistantPersonality
+              privateInteractiveAudience || groupAssistantStylePreferencesApply
+                ? effectiveAssistantStyle.personality
                 : null,
             assistantStyleSettingsAvailable,
-            assistantTone: preferenceContext.assistantTone,
+            assistantTone: effectiveAssistantStyle.tone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -863,7 +884,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
         ? resolveAssistantVoiceOptionElevenLabsVoiceId(
-            preferenceContext.assistantVoice,
+            effectiveAssistantStyle.voice,
           )
         : null,
     voiceMemoDeliveryChannel,
@@ -1135,12 +1156,14 @@ export async function resolveAssistantTurnPreferenceContext(
   try {
     const preferences = await readPreferencesDocument(vaultRoot)
     return {
+      assistantPersona: preferences.assistant?.persona ?? null,
       assistantPersonality: preferences.assistant?.personality ?? null,
       assistantTone: preferences.assistant?.tone ?? null,
       assistantVoice: preferences.assistant?.voice ?? null,
     }
   } catch {
     return {
+      assistantPersona: null,
       assistantPersonality: null,
       assistantTone: null,
       assistantVoice: null,

@@ -178,20 +178,7 @@ const hostedRuntimeAssistantPersonalitySettingsSchema = z.object({
   detail: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
   humor: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
   push: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
-}).strict().superRefine((settings, context) => {
-  for (const setting of ["detail", "humor", "push"] as const) {
-    if (
-      settings[setting].source === "default"
-      && settings[setting].value !== defaultAssistantPersonalityScores[setting]
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Assistant personality ${setting} default source has the wrong value.`,
-        path: [setting],
-      });
-    }
-  }
-});
+}).strict();
 
 const hostedRuntimeAssistantPersonalityUpdateOutcomesSchema = z
   .object({

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AssistantPersonaId,
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
@@ -34,6 +35,7 @@ export interface HostedAccountSettingsSnapshot {
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
+    persona: AssistantPersonaId | null;
     personality: Record<AssistantPersonalitySettingId, number | null>;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
@@ -87,6 +89,7 @@ export interface HostedAccountSettingsRouting {
 const hostedAccountSettingsMemberSelect =
   Prisma.validator<Prisma.HostedMemberSelect>()({
     ...HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
+    assistantPersona: true,
     assistantDetail: true,
     assistantHumor: true,
     assistantPush: true,

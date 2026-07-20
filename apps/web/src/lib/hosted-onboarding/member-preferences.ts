@@ -6,9 +6,11 @@ import {
 } from "@murphai/hosted-execution";
 import {
   assistantPersonalitySettingIds,
+  isAssistantPersonaId,
   isAssistantPersonalityScore,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  type AssistantPersonaId,
   type AssistantPreferenceFieldId,
   type AssistantPersonalitySettingId,
   type AssistantTonePreference,
@@ -33,6 +35,7 @@ export type HostedMemberAssistantPersonalitySnapshot = Record<
 >;
 
 export interface HostedMemberAssistantPreferencesUpdate {
+  persona?: AssistantPersonaId;
   personality?: HostedMemberAssistantPersonalityUpdate;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
@@ -44,6 +47,7 @@ export type HostedMemberAssistantPreferencesMailboxPayloadMode =
 
 export interface HostedMemberAssistantPreferencesResult {
   appliedFields: AssistantPreferenceFieldId[];
+  assistantPersona: AssistantPersonaId | null;
   assistantPersonality: HostedMemberAssistantPersonalitySnapshot;
   assistantTone: AssistantTonePreference | null;
   assistantVoice: AssistantVoiceOptionId | null;
@@ -77,6 +81,8 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       id: input.memberId,
     },
     select: {
+      assistantPersona: true,
+      assistantPersonaCausalSeq: true,
       assistantDetail: true,
       assistantDetailCausalSeq: true,
       assistantHumor: true,
@@ -104,6 +110,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     : BigInt(input.preferenceCausalSeq);
   const applicablePreferences = resolveApplicableAssistantPreferences({
     current: {
+      persona: member.assistantPersona,
       personality: member,
       tone: member.assistantTone,
       voice: member.assistantVoice,
@@ -114,6 +121,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       : {
           causalSeq: requestedCausalSeq,
           currentCausalSeq: {
+            persona: member.assistantPersonaCausalSeq,
             personality: {
               detail: member.assistantDetailCausalSeq,
               humor: member.assistantHumorCausalSeq,
@@ -128,6 +136,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   if (!applicablePreferences) {
     return {
       appliedFields: [],
+      assistantPersona: normalizeStoredAssistantPersona(member.assistantPersona),
       assistantPersonality: normalizeStoredAssistantPersonality(member),
       assistantTone: normalizeStoredAssistantTone(member.assistantTone),
       assistantVoice: normalizeStoredAssistantVoice(member.assistantVoice),
@@ -140,10 +149,10 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
 
   if (
     input.mailboxPayloadMode === "legacy_snapshot"
-    && preferences.personality !== undefined
+    && (preferences.persona !== undefined || preferences.personality !== undefined)
   ) {
     throw new TypeError(
-      "Assistant personality updates require the sparse mailbox payload rollout.",
+      "Assistant persona and personality updates require the sparse mailbox payload rollout.",
     );
   }
 
@@ -165,6 +174,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
           voice: preferences.voice ?? member.assistantVoice,
         }),
     requestedFields: [
+      ...(preferences.persona === undefined ? [] : ["persona" as const]),
       ...(preferences.tone === undefined ? [] : ["tone" as const]),
       ...(preferences.voice === undefined ? [] : ["voice" as const]),
     ],
@@ -182,9 +192,14 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
   const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
+  const projectedPersona = wake.preferences.persona;
   const projectedTone = wake.preferences.tone;
   const projectedVoice = wake.preferences.voice;
   const visibleValueChanged = (
+    preferences.persona !== undefined
+    && preferences.persona !== member.assistantPersona
+  )
+    || (
     preferences.personality?.humor !== undefined
     && preferences.personality.humor !== member.assistantHumor
   )
@@ -209,6 +224,15 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       id: input.memberId,
     },
     data: {
+      ...(projectedPersona === undefined
+        ? {}
+        : {
+            assistantPersona: projectedPersona,
+            assistantPersonaCausalSeq: maxCausalSeq(
+              member.assistantPersonaCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
       ...(projectedTone === undefined
         ? {}
         : {
@@ -256,6 +280,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
           }),
     },
     select: {
+      assistantPersona: true,
       assistantDetail: true,
       assistantHumor: true,
       assistantPush: true,
@@ -266,6 +291,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
 
   return {
     appliedFields: applicablePreferences.appliedFields,
+    assistantPersona: normalizeStoredAssistantPersona(updatedMember.assistantPersona),
     assistantPersonality: normalizeStoredAssistantPersonality(updatedMember),
     assistantTone: normalizeStoredAssistantTone(updatedMember.assistantTone),
     assistantVoice: normalizeStoredAssistantVoice(updatedMember.assistantVoice),
@@ -280,12 +306,14 @@ export async function readHostedMemberAssistantPreferences(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<{
+  persona: AssistantPersonaId | null;
   personality: HostedMemberAssistantPersonalitySnapshot;
   tone: AssistantTonePreference | null;
   voice: AssistantVoiceOptionId | null;
 }> {
   const member = await input.prisma.hostedMember.findUnique({
     select: {
+      assistantPersona: true,
       assistantDetail: true,
       assistantHumor: true,
       assistantPush: true,
@@ -302,15 +330,18 @@ export async function readHostedMemberAssistantPreferences(input: {
 
 export function projectHostedMemberAssistantPreferences(
   member: (HostedMemberPersonalityColumns & {
+    assistantPersona: string | null;
     assistantTone: string | null;
     assistantVoice: string | null;
   }) | null,
 ): {
+  persona: AssistantPersonaId | null;
   personality: HostedMemberAssistantPersonalitySnapshot;
   tone: AssistantTonePreference | null;
   voice: AssistantVoiceOptionId | null;
 } {
   return {
+    persona: normalizeStoredAssistantPersona(member?.assistantPersona ?? null),
     personality: normalizeStoredAssistantPersonality(member),
     tone: normalizeStoredAssistantTone(member?.assistantTone ?? null),
     voice: normalizeStoredAssistantVoice(member?.assistantVoice ?? null),
@@ -331,11 +362,13 @@ export function buildHostedMemberPreferencesUpdatedEventId(input: {
 function resolveApplicableAssistantPreferences(input: {
   causalSeq?: bigint;
   current: {
+    persona: string | null;
     personality: HostedMemberPersonalityColumns;
     tone: string | null;
     voice: string | null;
   };
   currentCausalSeq?: {
+    persona: bigint | null;
     personality: Record<AssistantPersonalitySettingId, bigint | null>;
     tone: bigint | null;
     voice: bigint | null;
@@ -345,6 +378,10 @@ function resolveApplicableAssistantPreferences(input: {
   appliedFields: AssistantPreferenceFieldId[];
   preferences: HostedExecutionMemberPreferences;
 } | null {
+  const personaApplicable = input.causalSeq === undefined
+    || input.currentCausalSeq?.persona === null
+    || input.currentCausalSeq?.persona === undefined
+    || input.causalSeq >= input.currentCausalSeq.persona;
   const toneApplicable = input.causalSeq === undefined
     || input.currentCausalSeq?.tone === null
     || input.currentCausalSeq?.tone === undefined
@@ -353,6 +390,9 @@ function resolveApplicableAssistantPreferences(input: {
     || input.currentCausalSeq?.voice === null
     || input.currentCausalSeq?.voice === undefined
     || input.causalSeq >= input.currentCausalSeq.voice;
+  const persona = personaApplicable && input.preferences.persona !== undefined
+    ? input.preferences.persona
+    : undefined;
   const tone = toneApplicable && input.preferences.tone !== undefined
     ? input.preferences.tone
     : undefined;
@@ -361,6 +401,7 @@ function resolveApplicableAssistantPreferences(input: {
     : undefined;
   const personality: HostedMemberAssistantPersonalityUpdate = {};
   const appliedFields: AssistantPreferenceFieldId[] = [
+    ...(persona === undefined ? [] : ["persona" as const]),
     ...(tone === undefined ? [] : ["tone" as const]),
     ...(voice === undefined ? [] : ["voice" as const]),
   ];
@@ -387,13 +428,19 @@ function resolveApplicableAssistantPreferences(input: {
   }
   const personalityChanged = Object.keys(personality).length > 0;
 
-  if (tone === undefined && voice === undefined && !personalityChanged) {
+  if (
+    persona === undefined
+    && tone === undefined
+    && voice === undefined
+    && !personalityChanged
+  ) {
     return null;
   }
 
   return {
     appliedFields,
     preferences: {
+      ...(persona === undefined ? {} : { persona }),
       ...(personalityChanged ? { personality } : {}),
       ...(tone === undefined ? {} : { tone }),
       ...(voice === undefined ? {} : { voice }),
@@ -443,6 +490,12 @@ function buildHostedMemberAssistantPreferencesSnapshot(input: {
     ...(tone === null ? {} : { tone }),
     ...(voice === null ? {} : { voice }),
   };
+}
+
+function normalizeStoredAssistantPersona(
+  value: string | null | undefined,
+): AssistantPersonaId | null {
+  return isAssistantPersonaId(value) ? value : null;
 }
 
 function normalizeStoredAssistantPersonality(

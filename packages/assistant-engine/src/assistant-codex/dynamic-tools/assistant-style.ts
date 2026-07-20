@@ -4,7 +4,6 @@ import {
   assistantPersonalitySettingIds,
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingSchema,
-  defaultAssistantPersonalityScores,
   type AssistantPersonalitySettingId,
 } from '@murphai/contracts'
 import {
@@ -286,8 +285,7 @@ function isDefaultPersonalitySetting(
   setting: AssistantPersonalitySettingId,
   snapshot: HostedRuntimeAssistantPersonalitySettingSnapshot,
 ): boolean {
-  return snapshot.source === 'default' &&
-    snapshot.value === defaultAssistantPersonalityScores[setting]
+  return snapshot.source === 'default'
 }
 
 function haveSameKeys(
