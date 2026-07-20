@@ -79,11 +79,16 @@ import type {
 } from '../active-turn-input-journal.js'
 import type {
   AssistantProviderConversationMessage,
+  AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
 import {
-  supportsAssistantCurrentAudienceMessageReaction,
+  resolveAssistantCurrentAudienceDeliveryFields,
 } from '../delivery-service.js'
+import {
+  supportsAssistantAcceptedMessageTargetingRoute,
+  type AssistantAcceptedMessageTargetAuthorizer,
+} from '../message-target-selection.js'
 import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
   resolveMurphDynamicTools,
@@ -125,9 +130,9 @@ export interface AssistantRoutePlanningDiagnostics {
   assistantContextSnapshotElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
   dynamicToolCount: number
-  messageReactionsAvailable: boolean
+  messageTargetingAvailable: boolean
   primarySystemPromptElapsedMs: number | null
-  reactionDynamicToolAvailable: boolean
+  messageTargetDynamicToolsAvailable: boolean
   routePlanningElapsedMs: number
   routePlanningMeasuredElapsedMs: number
   routePlanningSlowestStage: AssistantRoutePlanningStage | null
@@ -237,11 +242,12 @@ export interface AssistantCodexTurnExecutionPlan {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((
+    event: AssistantProviderFinishWithoutReplyAcceptedEvent
+  ) => Promise<void> | void) | null
   onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -322,10 +328,11 @@ export async function buildCodexTurnExecutionPlan(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((
+    event: AssistantProviderFinishWithoutReplyAcceptedEvent
+  ) => Promise<void> | void) | null
   onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -351,6 +358,8 @@ export async function buildCodexTurnExecutionPlan(input: {
     activeTurnSteering: input.activeTurnSteering ?? null,
     allowFinishWithoutReply:
       input.allowFinishWithoutReply ?? profile.toolProfile === 'provider-turn',
+    authorizeAcceptedMessageTarget:
+      input.authorizeAcceptedMessageTarget ?? null,
     executionContext,
     input: input.input,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
@@ -390,6 +399,8 @@ export async function buildCodexTurnAttemptPlan(input: {
       sharedPlan: input.executionPlan.sharedPlan,
       progressDelivery: input.executionPlan.progressDelivery ?? null,
       hostedToolContext: input.executionPlan.hostedToolContext ?? null,
+      messageTargetAuthorizerAvailable:
+        input.executionPlan.authorizeAcceptedMessageTarget != null,
     }),
     session: input.session,
   }
@@ -408,6 +419,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   sharedPlan: AssistantTurnSharedPlan
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
+  messageTargetAuthorizerAvailable?: boolean | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
   const preferenceContext =
@@ -637,11 +649,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
-  const messageReactionsAvailable = supportsAssistantCurrentAudienceMessageReaction({
-    input: input.input,
-    session: input.session,
-    sharedPlan: input.sharedPlan,
-  })
+  const currentAudienceDeliveryFields =
+    resolveAssistantCurrentAudienceDeliveryFields({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    })
+  const messageTargetingAvailable =
+    input.messageTargetAuthorizerAvailable === true &&
+    supportsAssistantAcceptedMessageTargetingRoute({
+      channel: currentAudienceDeliveryFields.channel,
+      explicitTarget: currentAudienceDeliveryFields.explicitTarget,
+      threadId: currentAudienceDeliveryFields.threadId,
+      threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
+    })
   const productFeedbackAcceptedInputIds =
     resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
@@ -658,7 +679,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
-        allowMessageReactions: messageReactionsAvailable,
+        messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
@@ -674,6 +695,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         deviceAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.deviceTool != null,
+        clinicalRecordsConnectLinkAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
@@ -706,9 +731,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-  const reactionDynamicToolAvailable = dynamicTools.some(
-    (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
-  )
+  const messageTargetDynamicToolsAvailable =
+    dynamicTools.some(
+      (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
+    ) &&
+    dynamicTools.some(
+      (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
+    )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
@@ -801,10 +830,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantContextSnapshotElapsedMs,
       cliBootstrapElapsedMs,
       dynamicToolCount: dynamicTools.length,
-      messageReactionsAvailable,
+      messageTargetingAvailable,
       primarySystemPromptElapsedMs:
         routePlanningSpans.primarySystemPromptElapsedMs ?? null,
-      reactionDynamicToolAvailable,
+      messageTargetDynamicToolsAvailable,
       routePlanningElapsedMs,
       routePlanningMeasuredElapsedMs,
       routePlanningSlowestStage: routePlanningSlowestSpan?.stage ?? null,

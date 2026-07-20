@@ -19,7 +19,7 @@ describe('configureSetupOperatorDefaults', () => {
           preset: 'codex',
           enabled: true,
           provider: 'codex-cli',
-          model: 'gpt-5.5',
+          model: 'gpt-5.6-terra',
           modelProvider: 'vercel-ai-gateway',
           codexCommand: 'codex',
           codexHome: null,

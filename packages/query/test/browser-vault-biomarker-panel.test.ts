@@ -261,6 +261,7 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     },
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
+    labResultRows: [],
     metricGoalProgressRows: [],
     metricRows: [],
     metricSelectionRows: [],

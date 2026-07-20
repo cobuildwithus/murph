@@ -695,7 +695,8 @@ describe('assistant auto-reply event-first path', () => {
     replyEventPathMocks.sendAssistantMessage.mockReset().mockImplementation(async (input) => {
       await input.onFinishWithoutReplyAccepted?.({
         acceptedInputIds: [candidate.event.inputId],
-        messageReactionsAvailable: false,
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
       })
       throw new Error('provider connection dropped after final action')
     })

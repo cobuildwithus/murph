@@ -8,6 +8,9 @@ export type {
   BrowserVaultEntityFamily,
   BrowserVaultEntityFilters,
   BrowserVaultEntityLink,
+  BrowserVaultLabResultFilters,
+  BrowserVaultLabResultReferenceRange,
+  BrowserVaultLabResultRow,
   BrowserVaultMetricFilters,
   BrowserVaultMetricGoalProgressRow,
   BrowserVaultMetricRow,
@@ -33,6 +36,19 @@ export {
 } from "./browser-replica/build.ts";
 export { parseBrowserVaultReplica } from "./browser-replica/parse.ts";
 export { createBrowserVaultQueryClient } from "./browser-replica/query.ts";
+export {
+  BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA,
+  labResultRowMatchesFilters,
+  selectBrowserVaultLabBiomarkerDetail,
+  selectBrowserVaultMeasuredBiomarkers,
+  sortBrowserVaultLabResultRows,
+  toBrowserVaultLabResultRows,
+} from "./browser-replica/lab-results.ts";
+export type {
+  BrowserVaultLabBiomarkerDetail,
+  BrowserVaultLabBiomarkerSeriesPoint,
+  BrowserVaultMeasuredBiomarker,
+} from "./browser-replica/lab-results.ts";
 export {
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
@@ -77,6 +93,7 @@ export type {
   BrowserVaultExperimentMetricSource,
   BrowserVaultExperimentMetricWindowSummary,
   BrowserVaultExperimentOutcomeResult,
+  BrowserVaultExperimentSavedOutcomeStatus,
   BrowserVaultExperimentOutcomeStatus,
   BrowserVaultExperimentProgressPhase,
   BrowserVaultExperimentProgressResult,

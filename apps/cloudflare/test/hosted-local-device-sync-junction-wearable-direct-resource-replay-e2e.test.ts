@@ -84,7 +84,7 @@ const experimentActivityNudgeInstructions = [
   "Skip silently when the activity is already covered or no progress moment is useful.",
 ].join(" ");
 const experimentActivityNudgeReplyText = "Nice run — that's 1 of 6 for your running block.";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
 const junctionWebhookSecret = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
 const linqApiToken = "linq-local-test-token";

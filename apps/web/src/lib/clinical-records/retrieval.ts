@@ -35,15 +35,16 @@ import {
   openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret,
   openClinicalPageCursor,
-  sealClinicalConnectionSecret,
   sealClinicalPageCursor,
-  toClinicalJsonArray,
 } from "./secrets";
 import {
   clinicalRecordsError,
   isClinicalRecordsControlPlaneError,
 } from "./errors";
-import { refreshSmartAccessToken } from "./smart";
+import {
+  buildEpicBetaInitialFhirPageUrl,
+  buildEpicBetaRetrievalQueryFingerprintInput,
+} from "./epic-beta-policy";
 import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,
@@ -55,7 +56,7 @@ const FHIR_PAGE_COUNT = "100";
 const FHIR_NEXT_URL_MAX_CHARS = 1_024;
 const PAGE_REQUEST_CLAIM_STALE_MS = 30_000;
 const PAGE_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS;
-const TOKEN_REFRESH_LEEWAY_MS = 60_000;
+const TOKEN_EXPIRY_LEEWAY_MS = 60_000;
 const RETRIEVAL_REQUEST_ID_PREFIX = "crq_";
 const FHIR_PATIENT_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
 const TERMINAL_RUN_STATUSES = new Set([
@@ -81,20 +82,15 @@ interface RunnableClinicalRun {
   connection: {
     accessTokenEncrypted: string | null;
     accessTokenExpiresAt: Date | null;
-    clientId: string;
     fhirBaseHash: string;
     fhirBaseUrlEncrypted: string;
-    grantedScopesJson: Prisma.JsonValue;
     id: string;
-    memberId: string;
     patientIdEncrypted: string | null;
     providerDirectoryEntryId: string;
-    refreshTokenEncrypted: string | null;
     requestedScopesJson: Prisma.JsonValue;
     retrievalGeneration: number;
     sourceSystem: ClinicalSourceSystem;
     status: string;
-    tokenEndpoint: string;
     tokenVersion: number;
   };
   createdAt: Date;
@@ -241,7 +237,6 @@ export async function fetchClinicalRetrievalPage(input: {
   let providerRequestStarted = false;
   try {
     const accessToken = await requireCurrentAccessToken({
-      fetchImpl: input.fetchImpl,
       memberId: input.memberId,
       run,
     });
@@ -460,7 +455,10 @@ export async function appendClinicalRetrievalWakeTx(input: {
 }): Promise<ClinicalMailboxCheckpoint> {
   const appended = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionClinicalRecordsSyncRequestedWake({
-      eventId: `clinical-records:sync:v1:${input.runId}:${input.generation}`,
+      eventId: buildClinicalRetrievalWakeEventId({
+        generation: input.generation,
+        runId: input.runId,
+      }),
       generation: input.generation,
       occurredAt: input.occurredAt.toISOString(),
       runId: input.runId,
@@ -482,6 +480,13 @@ export async function appendClinicalRetrievalWakeTx(input: {
     laneSeq: appended.item.laneSeq,
     userId: input.memberId,
   };
+}
+
+export function buildClinicalRetrievalWakeEventId(input: {
+  generation: number;
+  runId: string;
+}): string {
+  return `clinical-records:sync:v1:${input.runId}:${input.generation}`;
 }
 
 export async function signalClinicalRetrievalWake(
@@ -511,9 +516,10 @@ function buildRetrievalScopes(
   return resourceTypes.map((resourceType) => ({
     coverage: "whole-family",
     queryFingerprint: sha256Hex(
-      resourceType === "Patient"
-        ? "fhir-r4:Patient:read-by-launch-patient:v1"
-        : `fhir-r4:${resourceType}:search:patient:_count=${FHIR_PAGE_COUNT}:v1`,
+      buildEpicBetaRetrievalQueryFingerprintInput({
+        pageCount: FHIR_PAGE_COUNT,
+        resourceType,
+      }),
     ),
     resourceType,
   }));
@@ -528,7 +534,35 @@ async function loadRunnableClinicalRun(input: {
   | { retryable: boolean; unavailable: string }
 > {
   const record = await getPrisma().clinicalRecordRetrievalRun.findFirst({
-    include: { connection: true },
+    select: {
+      connection: {
+        select: {
+          accessTokenEncrypted: true,
+          accessTokenExpiresAt: true,
+          fhirBaseHash: true,
+          fhirBaseUrlEncrypted: true,
+          id: true,
+          patientIdEncrypted: true,
+          providerDirectoryEntryId: true,
+          requestedScopesJson: true,
+          retrievalGeneration: true,
+          sourceSystem: true,
+          status: true,
+          tokenVersion: true,
+        },
+      },
+      createdAt: true,
+      egressBytes: true,
+      fetchedBytes: true,
+      generation: true,
+      grantedScopesJson: true,
+      id: true,
+      memberId: true,
+      pageCount: true,
+      providerRequestCount: true,
+      resourceTypesJson: true,
+      status: true,
+    },
     where: {
       generation: input.generation,
       id: input.runId,
@@ -591,14 +625,12 @@ function buildInitialFhirPageUrl(input: {
   patientId: string;
   resourceType: string;
 }): URL {
-  const base = input.fhirBaseUrl.replace(/\/+$/u, "");
-  if (input.resourceType === "Patient") {
-    return new URL(`${base}/Patient/${encodeURIComponent(input.patientId)}`);
-  }
-  const url = new URL(`${base}/${input.resourceType}`);
-  url.searchParams.set("_count", FHIR_PAGE_COUNT);
-  url.searchParams.set("patient", input.patientId);
-  return url;
+  return buildEpicBetaInitialFhirPageUrl({
+    fhirBaseUrl: input.fhirBaseUrl,
+    pageCount: FHIR_PAGE_COUNT,
+    patientId: input.patientId,
+    resourceType: input.resourceType,
+  });
 }
 
 function parsePageCursor(plaintext: string): ValidatedFhirPageUrl {
@@ -640,101 +672,25 @@ function assertFhirPageUrlAllowed(input: {
 }
 
 async function requireCurrentAccessToken(input: {
-  fetchImpl?: typeof fetch;
   memberId: string;
   run: RunnableClinicalRun;
 }): Promise<string> {
   const connection = input.run.connection;
-  const patientId = requireFhirPatientId(await openClinicalConnectionSecret({
-    connectionId: connection.id,
-    encrypted: connection.patientIdEncrypted,
-    field: "patientId",
-    memberId: input.memberId,
-    tokenVersion: connection.tokenVersion,
-  }));
-  const shouldRefresh = connection.accessTokenExpiresAt !== null
-    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_REFRESH_LEEWAY_MS;
-  if (!shouldRefresh) {
-    const accessToken = await openClinicalConnectionSecret({
-      connectionId: connection.id,
-      encrypted: connection.accessTokenEncrypted,
-      field: "accessToken",
-      memberId: input.memberId,
-      tokenVersion: connection.tokenVersion,
-    });
-    if (!accessToken) throw reauthRequiredError();
-    return accessToken;
+  if (
+    connection.accessTokenExpiresAt !== null
+    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS
+  ) {
+    throw reauthRequiredError();
   }
-  const refreshToken = await openClinicalConnectionSecret({
+  const accessToken = await openClinicalConnectionSecret({
     connectionId: connection.id,
-    encrypted: connection.refreshTokenEncrypted,
-    field: "refreshToken",
-    memberId: input.memberId,
-    tokenVersion: connection.tokenVersion,
-  });
-  if (!refreshToken) throw reauthRequiredError();
-  const grantedScopes = parseStoredStringArray(connection.grantedScopesJson, "granted scopes");
-  const refreshed = await refreshSmartAccessToken({
-    clientId: connection.clientId,
-    fetchImpl: input.fetchImpl,
-    grantedScopes,
-    refreshToken,
-    resourceTypes: input.run.resourceTypes,
-    tokenEndpoint: connection.tokenEndpoint,
-  });
-  const nextTokenVersion = connection.tokenVersion + 1;
-  const nextPatientEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
-    field: "patientId",
-    memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: patientId,
-  });
-  const nextAccessEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
+    encrypted: connection.accessTokenEncrypted,
     field: "accessToken",
     memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: refreshed.accessToken,
+    tokenVersion: connection.tokenVersion,
   });
-  const nextRefreshEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
-    field: "refreshToken",
-    memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: refreshed.refreshToken ?? refreshToken,
-  });
-  if (!nextPatientEncrypted || !nextAccessEncrypted || !nextRefreshEncrypted) {
-    throw new TypeError("Clinical Records refreshed credential encryption failed.");
-  }
-  const updated = await getPrisma().clinicalRecordConnection.updateMany({
-    data: {
-      accessTokenEncrypted: nextAccessEncrypted,
-      accessTokenExpiresAt: refreshed.expiresInSeconds
-        ? new Date(Date.now() + refreshed.expiresInSeconds * 1_000)
-        : null,
-      grantedScopesJson: toClinicalJsonArray(refreshed.grantedScopes),
-      patientIdEncrypted: nextPatientEncrypted,
-      refreshTokenEncrypted: nextRefreshEncrypted,
-      tokenVersion: nextTokenVersion,
-    },
-    where: {
-      id: connection.id,
-      memberId: input.memberId,
-      retrievalGeneration: input.run.generation,
-      status: { in: ["active", "error"] },
-      tokenVersion: connection.tokenVersion,
-    },
-  });
-  if (updated.count !== 1) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_CREDENTIALS_UPDATED",
-      httpStatus: 409,
-      message: "Clinical Records credentials changed during refresh.",
-      retryable: true,
-    });
-  }
-  return refreshed.accessToken;
+  if (!accessToken) throw reauthRequiredError();
+  return accessToken;
 }
 
 async function fetchFhirPage(input: {
@@ -828,7 +784,10 @@ async function readSanitizedFhirPage(input: {
     entries.forEach((entry) => {
       const entryRecord = requireRecord(entry);
       const resource = requireRecord(entryRecord.resource);
-      if (resource.resourceType !== input.resourceType) throw invalidFhirResponseError();
+      if (
+        resource.resourceType !== input.resourceType
+        && !isMarkedFhirSearchOutcomeEntry(entryRecord, resource)
+      ) throw invalidFhirResponseError();
     });
     nextUrl = readNextFhirUrl(record.link, input.fhirBaseUrl, input.resourceType);
     validated = record;
@@ -839,6 +798,15 @@ async function readSanitizedFhirPage(input: {
     throw invalidFhirResponseError();
   }
   return { body, bodyBytes, nextUrl };
+}
+
+function isMarkedFhirSearchOutcomeEntry(
+  entry: Record<string, unknown>,
+  resource: Record<string, unknown>,
+): boolean {
+  if (resource.resourceType !== "OperationOutcome") return false;
+  const search = requireRecord(entry.search);
+  return search.mode === "outcome";
 }
 
 function readNextFhirUrl(
@@ -987,7 +955,12 @@ async function completeRetrievalPageRequest(input: {
   const now = new Date();
   return getPrisma().$transaction(async (tx) => {
     const completed = await tx.clinicalRecordRetrievalRequest.updateMany({
-      data: { completedAt: now, reservedBytes: 0, responseBytes: input.bodyBytes },
+      data: {
+        claimVersion: { increment: 1 },
+        completedAt: now,
+        reservedBytes: 0,
+        responseBytes: input.bodyBytes,
+      },
       where: {
         claimVersion: input.claimVersion,
         completedAt: null,

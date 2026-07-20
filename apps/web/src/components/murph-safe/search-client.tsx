@@ -156,15 +156,21 @@ export function MurphSafeSearchClient() {
     : null;
   const resultCount = counts ? counts.foods + counts.supplements : 0;
   const inputError = state.status === "error" && state.source === "input";
+  const showResultsHeading =
+    state.status === "loading" ||
+    state.status === "success" ||
+    (state.status === "error" && state.source === "request");
 
   return (
-    <div className="mt-10 w-full">
-      <form role="search" aria-label="Search Murph Safe" onSubmit={submitSearch}>
-        <label
-          htmlFor="murph-safe-product-search"
-          className="mb-3 block font-mono text-[10px] font-medium tracking-[0.12em] text-muted-foreground"
-        >
-          SEARCH PRODUCTS
+    <div className="w-full">
+      <form
+        role="search"
+        aria-label="Search Murph Safe"
+        onSubmit={submitSearch}
+        className="mx-auto max-w-2xl"
+      >
+        <label htmlFor="murph-safe-product-search" className="sr-only">
+          Search products
         </label>
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Input
@@ -200,14 +206,14 @@ export function MurphSafeSearchClient() {
             ) : "Check product"}
           </Button>
         </div>
-        <p id="murph-safe-search-hint" className="mt-3 text-sm leading-6 text-muted-foreground">
+        <p id="murph-safe-search-hint" className="mt-4 text-center text-sm leading-6 text-muted-foreground">
           Try: AG1 · RXBAR · creatine monohydrate · 123456789012
         </p>
         {inputError ? (
           <p
             id="murph-safe-search-error"
             role="alert"
-            className="mt-3 max-w-2xl text-sm leading-6 text-destructive sm:text-base"
+            className="mt-3 text-center text-sm leading-6 text-destructive sm:text-base"
           >
             {state.message}
           </p>
@@ -217,18 +223,18 @@ export function MurphSafeSearchClient() {
       <section
         aria-busy={state.status === "loading"}
         aria-labelledby="murph-safe-results-heading"
-        className="mt-10 border-t border-border pt-7"
+        className={showResultsHeading ? "mt-10 border-t border-border pt-7" : undefined}
       >
-        <h2
-          id="murph-safe-results-heading"
-          ref={resultsHeading}
-          tabIndex={-1}
-          className="font-serif text-2xl font-semibold tracking-[-0.025em] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background sm:text-3xl"
-        >
-          {state.status === "idle" || inputError
-            ? "Search the product record"
-            : "Search results"}
-        </h2>
+        {showResultsHeading ? (
+          <h2
+            id="murph-safe-results-heading"
+            ref={resultsHeading}
+            tabIndex={-1}
+            className="font-serif text-2xl font-semibold tracking-[-0.025em] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background sm:text-3xl"
+          >
+            Search results
+          </h2>
+        ) : null}
 
         <div aria-live="polite" aria-atomic="true" className="sr-only">
           {state.status === "loading" ? "Searching products…" : null}
@@ -236,13 +242,6 @@ export function MurphSafeSearchClient() {
             ? `Search complete. ${resultCount} matching ${resultCount === 1 ? "product" : "products"}.`
             : null}
         </div>
-
-        {state.status === "idle" ? (
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-            Results are grouped into supplements and branded foods. Product
-            tests appear only when they are linked to the exact product record.
-          </p>
-        ) : null}
 
         {state.status === "loading" ? <SearchSkeleton /> : null}
 
@@ -302,7 +301,7 @@ function ProductResultGroup(input: {
             key={result.productRef}
             href={`/search/products/${encodeURIComponent(result.productRef)}`}
             prefetch={false}
-            className="group grid min-h-24 gap-4 border-b border-border py-5 outline-none transition-colors hover:bg-card/60 focus-visible:bg-card/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.38fr)] sm:items-center sm:px-3"
+            className="group grid min-h-24 gap-4 border-b border-border py-5 outline-none transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.38fr)] sm:items-center sm:px-3"
           >
             <span className="min-w-0">
               <span className="block font-mono text-[10px] font-medium tracking-[0.11em] text-muted-foreground">
@@ -329,10 +328,10 @@ function formatProductTestSummary(result: PublicProductSearchHit): string {
   const total = result.productTests.total;
 
   if (result.productTests.status === "no_known_product_tests") {
-    return "No linked test observations found";
+    return "No product tests found";
   }
 
-  return `${total} linked test ${total === 1 ? "observation" : "observations"}`;
+  return `${total} product test${total === 1 ? "" : "s"}`;
 }
 
 function SearchSkeleton() {

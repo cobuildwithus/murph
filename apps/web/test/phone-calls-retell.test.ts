@@ -117,7 +117,6 @@ describe("Retell phone-call runtime", () => {
       retell_llm_dynamic_variables: {
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_timezone: "America/New_York",
-        opening_line: "Hi, this is Murph. I'm calling for Alex to schedule a routine eye examination for Friday, June 26, 2026.",
         transfer_number: "+12125550000",
       },
       to_number: "+12125550123",
@@ -214,7 +213,7 @@ describe("Retell phone-call runtime", () => {
     });
   });
 
-  it("does not invent a caller name for the opening line", async () => {
+  it("does not send a scripted opening line to Retell", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
     vi.stubEnv("RETELL_AGENT_ID", "agent_123");
@@ -238,19 +237,14 @@ describe("Retell phone-call runtime", () => {
     };
 
     await createRetellPhoneCallRuntime({ fetchImpl }).start({
-      brief: {
-        ...VALID_BRIEF,
-        callerName: undefined,
-      },
+      brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
       transferNumber: null,
     });
 
     const body = JSON.parse(String(fetchCalls[0]!.init?.body));
-    expect(body.retell_llm_dynamic_variables.opening_line).toBe(
-      "Hi, this is Murph. I'm calling to schedule a routine eye examination for Friday, June 26, 2026.",
-    );
+    expect(body.retell_llm_dynamic_variables).not.toHaveProperty("opening_line");
   });
 
   it("rejects malformed Retell webhook public bases before creating a call", async () => {

@@ -18,6 +18,7 @@ import {
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
+import { hasStagedClinicalRecordsConnectIntentForCurrentPath } from "@/src/lib/clinical-records/browser-connect-intent";
 
 import {
   navigateHostedAuthRedirect,
@@ -111,9 +112,30 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
   return (
     shouldResumeCurrentActionApprovalUrl(payload)
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
+    || shouldResumeCurrentClinicalRecordsIndexUrl(payload)
+    || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+  );
+}
+
+function shouldResumeCurrentClinicalRecordsIndexUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && typeof window !== "undefined"
+    && window.location.pathname === "/records"
+  );
+}
+
+function shouldResumeCurrentClinicalRecordsConnectUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  return (
+    isHostedOnboardingAccessibleStage(payload.stage)
+    && hasStagedClinicalRecordsConnectIntentForCurrentPath()
   );
 }
 

@@ -77,7 +77,7 @@ const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

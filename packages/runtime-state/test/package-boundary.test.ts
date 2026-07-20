@@ -113,6 +113,7 @@ describe("@murphai/runtime-state package boundary", () => {
     };
 
     expect(runtimeStateNodeAssistantRuntimeIssues.parseAssistantRuntimeIssueRecord).toBeTypeOf("function");
+    expect(runtimeStateNodeAssistantStateFs.adoptAssistantStateFile).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantStateFs.ensureAssistantStateDir).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantStateFs.writeAssistantStateJson).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantStateFs.appendAssistantStateJsonLine).toBeTypeOf("function");

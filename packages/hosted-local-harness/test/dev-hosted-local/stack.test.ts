@@ -187,7 +187,7 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
           name: "Priority",
         },
       ],
-      slug: "gpt-5.5",
+      slug: "gpt-5.6-terra",
     },
     {
       display_name: "GPT-5.4-Mini",
@@ -411,7 +411,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
   resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
-    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.5",
+    HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
@@ -662,7 +662,7 @@ describe("hosted local dev stack", () => {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
-        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
@@ -816,7 +816,7 @@ describe("hosted local dev stack", () => {
     );
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
@@ -2698,7 +2698,7 @@ describe("hosted local dev stack", () => {
                     name: "Priority",
                   },
                 ],
-                slug: "gpt-5.5",
+                slug: "gpt-5.6-terra",
               },
               {
                 display_name: "GPT-5.4-Mini",
@@ -2778,7 +2778,7 @@ describe("hosted local dev stack", () => {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
           ]),
-          slug: "gpt-5.5",
+          slug: "gpt-5.6-terra",
         },
         {
           display_name: "GPT-5.4-Mini",
@@ -2810,12 +2810,12 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.5.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-terra.",
       stdout: JSON.stringify({ models: [] }),
     },
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
-      stdout: JSON.stringify({ models: [{ slug: "gpt-5.5" }] }),
+      stdout: JSON.stringify({ models: [{ slug: "gpt-5.6-terra" }] }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
@@ -3445,7 +3445,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.5");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.6-terra");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
@@ -3467,7 +3467,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),

@@ -277,8 +277,19 @@ describe("HostedDataPrivacySettings", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:vault-export");
     expect(clickDownloadLink).toHaveBeenCalledTimes(1);
     assert.equal(downloadedBlobs.length, 1);
-    await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"schema\": \"murph.browser-vault-replica\"");
-    await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"entity-title\"");
+    const downloadedBlob = downloadedBlobs[0];
+    assert.ok(downloadedBlob);
+    const exportedJson = await downloadedBlob.text();
+    expect(exportedJson).toContain("\"schema\": \"murph.browser-vault-replica\"");
+    expect(exportedJson).toContain("\"entity-title\"");
+    expect(JSON.parse(exportedJson).labResultRows).toEqual([
+      expect.objectContaining({
+        analyte: "Hemoglobin A1c",
+        biomarkerKey: "biomarker:hba1c",
+        metricKey: "hba1c",
+        value: 5.4,
+      }),
+    ]);
   });
 
   test("does not download the vault when the replica is stale or a refresh is still pending", async () => {
@@ -716,6 +727,31 @@ function createBrowserVaultReplicaForTest() {
       },
     ],
     generatedAt: "2026-04-29T01:02:03.000Z",
+    labResultRows: [
+      {
+        analyte: "Hemoglobin A1c",
+        biomarkerKey: "biomarker:hba1c",
+        comparator: null,
+        date: "2024-09-18",
+        flag: "normal",
+        id: "lab-result-row:synthetic-hba1c",
+        labName: "Example Laboratory",
+        metricKey: "hba1c",
+        normalizedUnit: "percent",
+        normalizedValue: 5.4,
+        observedAt: "2024-09-18T08:30:00.000Z",
+        referenceRange: {
+          high: 5.6,
+          low: 4,
+          text: "4.0-5.6",
+        },
+        rowSchema: "murph.browser-vault.lab-result-row.v1",
+        sourceLabel: "Clinical records",
+        textValue: null,
+        unit: "%",
+        value: 5.4,
+      },
+    ],
     metricGoalProgressRows: [],
     metricRows: [],
     metricSelectionRows: [],

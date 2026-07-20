@@ -3,18 +3,31 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
+if [[ -n "${MURPH_VERIFY_SHARED_HOST+x}" ]]; then
+  shared_host_mode="$MURPH_VERIFY_SHARED_HOST"
+elif [[ -z "${CI:-}" && -n "${CODEX_THREAD_ID:-}" ]]; then
+  shared_host_mode="1"
+else
+  shared_host_mode="0"
+fi
+if [[ "$shared_host_mode" != "0" && "$shared_host_mode" != "1" ]]; then
+  printf '[apps/cloudflare verify] ERROR: MURPH_VERIFY_SHARED_HOST must be 0 or 1.\n' >&2
+  exit 1
+fi
+readonly shared_host_mode
+export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
 
 if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/cloudflare verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
 fi
 
-if [[ "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
+if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "apps/cloudflare verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
 fi
 
-verify_step_parallel_default="$([[ -n "${CI:-}" || "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" ]] && echo 0 || echo 1)"
+verify_step_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 skip_typecheck="${MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK:-0}"
 tracked_background_pids=()

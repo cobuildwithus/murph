@@ -1,4 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -46,6 +47,7 @@ import {
   toBrowserVaultMetricRows,
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
+import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -77,6 +79,10 @@ export async function createBrowserVaultReplica(
       isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
   );
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
+  const labResultRows = toBrowserVaultLabResultRows({
+    entities: defaultProjectedVault.entities,
+    points: allMetricPoints,
+  });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
@@ -90,7 +96,11 @@ export async function createBrowserVaultReplica(
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
+    experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
+      experimentOutcomeSchema.parse(outcome)
+    ),
     generatedAt,
+    labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,

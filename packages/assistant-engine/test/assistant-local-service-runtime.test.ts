@@ -1179,6 +1179,486 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 })
 
+test('sendAssistantMessageLocal resolves one accepted-message ref for reply and reaction delivery', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-selected-reply-target-',
+  )
+  tempRoots.push(context.parentRoot)
+  const acceptedMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Reply to this message.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654321',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_selected_reply_target',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+            targetInputId: acceptedMessage.inputId,
+          },
+        ],
+        response: 'Targeted response.',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        targetInputId: acceptedMessage.inputId,
+        transcriptResponse: 'Targeted response.',
+      },
+    },
+    adapter: {
+      setMessageReaction: vi.fn(async () => {
+        throw new Error('Reaction adapter should not be called by this harness.')
+      }),
+    },
+    realMessageTargetSelection: true,
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: acceptedMessage.inputId,
+            version: acceptedMessage.schema,
+          },
+          id: acceptedMessage.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    deliverResponse: true,
+    prompt: 'Reply to the selected message.',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
+    deliveryNativeReplyRequested: true,
+    deliveryReplyToMessageId: '987654321',
+  })
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledTimes(1)
+  expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
+    deliveryReplyToMessageId: '987654321',
+  })
+})
+
+test('sendAssistantMessageLocal fails closed before reply delivery when second-pass target authority is lost', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-stale-reply-target-',
+  )
+  tempRoots.push(context.parentRoot)
+  const acceptedMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'This remains the only accepted message.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654322',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_stale_reply_target',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'This must not be delivered.',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        targetInputId: 'ain_ffffffffffffffffffffffffffffffff',
+        transcriptResponse: 'This must not be delivered.',
+      },
+    },
+    realMessageTargetSelection: true,
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: acceptedMessage.inputId,
+            version: acceptedMessage.schema,
+          },
+          id: acceptedMessage.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    deliverResponse: true,
+    prompt: 'Attempt a stale target.',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'The selected message is not available for this action.',
+    },
+    deliveryIntentId: null,
+  })
+})
+
+test('sendAssistantMessageLocal fails closed before reaction delivery when second-pass target authority is lost', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-stale-reaction-target-',
+  )
+  tempRoots.push(context.parentRoot)
+  const acceptedMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'This reaction target is accepted now.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654323',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_stale_reaction_target',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      setMessageReaction: vi.fn(async () => {
+        throw new Error('Reaction adapter should not be called by this harness.')
+      }),
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        finalAction: {
+          kind: 'none',
+        },
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+            targetInputId: 'ain_ffffffffffffffffffffffffffffffff',
+          },
+        ],
+        response: 'suppressed provider text',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        transcriptResponse: null,
+      },
+    },
+    realMessageTargetSelection: true,
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: acceptedMessage.inputId,
+            version: acceptedMessage.schema,
+          },
+          id: acceptedMessage.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    deliverResponse: true,
+    prompt: 'Attempt a stale reaction target without replying.',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantReaction).not.toHaveBeenCalled()
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'The selected message is not available for this action.',
+    },
+    deliveryIntentId: null,
+    responseDisposition: 'none',
+  })
+})
+
+test('sendAssistantMessageLocal carries the provider reaction patch into the no-reply fence', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-no-reply-reaction-fence-',
+  )
+  tempRoots.push(context.parentRoot)
+  const storeLinqMessage = async (input: {
+    eventId: string
+    laneSeq: string
+    messageId: string
+    reactionEligible: boolean
+    text: string
+  }) => await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:03.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: input.text,
+      },
+      conversation: {
+        accountId: 'linq-account',
+        actorId: `actor-${input.laneSeq}`,
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: `2026-04-22T10:00:0${input.laneSeq}.000Z`,
+      receivedAt: `2026-04-22T10:00:0${input.laneSeq}.000Z`,
+      replyTarget: {
+        channel: 'linq',
+        messageId: input.messageId,
+        threadId: 'linq-chat-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: input.reactionEligible,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: input.eventId,
+        laneSeq: input.laneSeq,
+      }),
+    },
+  })
+  const olderEligibleMessage = await storeLinqMessage({
+    eventId: 'evt_older_reaction_target',
+    laneSeq: '1',
+    messageId: 'linq-message-older-eligible',
+    reactionEligible: true,
+    text: 'Older reaction-eligible message.',
+  })
+  const newerIneligibleMessage = await storeLinqMessage({
+    eventId: 'evt_newer_ineligible_ambient',
+    laneSeq: '2',
+    messageId: 'linq-message-newer-ineligible',
+    reactionEligible: false,
+    text: 'Newer ambient message with no reaction support.',
+  })
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-chat-1',
+      },
+      identityId: 'linq-account',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-no-reply-reaction-fence',
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: null,
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'linq-chat-1',
+    },
+    channel: 'linq',
+    deliveryPolicy: 'binding-target-only',
+    effectiveThreadIsDirect: false,
+    explicitTarget: 'linq-chat-1',
+    identityId: 'linq-account',
+    replyToMessageId: 'linq-message-newer-ineligible',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+  }
+  const reactionOutcome: AssistantDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-older-target-reaction',
+    kind: 'queued',
+    media: [],
+    session,
+  }
+  const noReplyAccepted = vi.fn()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      setMessageReaction: vi.fn(async () => {
+        throw new Error('Reaction adapter should not be called by this harness.')
+      }),
+    },
+    plan,
+    reactionOutcome,
+    realMessageTargetSelection: true,
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+      messageReactionPending: true,
+    })
+    await providerInput.onFinishWithoutReplyRecorded?.({
+      deliveryContextOrdinal: 0,
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-no-reply-reaction-fence',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+            targetInputId: olderEligibleMessage.inputId,
+          },
+        ],
+        response: 'suppressed provider text',
+        responseDeliveryContextOrdinal: 0,
+        route: {
+          routeId: 'route-no-reply-reaction-fence',
+        },
+        session,
+        transcriptResponse: null,
+      },
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [olderEligibleMessage, newerIneligibleMessage].map(
+        (message) => ({
+          contentRef: {
+            kind: 'assistant-input-event' as const,
+            refId: message.inputId,
+            version: message.schema,
+          },
+          id: message.inputId,
+          source: 'assistant-input' as const,
+        }),
+      ),
+    },
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryMessageReactionsAvailable: false,
+    deliveryReplyToMessageId: 'linq-message-newer-ineligible',
+    deliveryTarget: 'linq-chat-1',
+    identityId: 'linq-account',
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+    prompt: 'React to the older message without replying.',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+    vault: context.vaultRoot,
+  })
+
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: [
+      olderEligibleMessage.inputId,
+      newerIneligibleMessage.inputId,
+    ],
+    deliveryContextOrdinal: 0,
+    messageReactionPending: true,
+  })
+  expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
+    deliveryReplyToMessageId: 'linq-message-older-eligible',
+  })
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(result).toMatchObject({
+    deliveryDeferred: true,
+    deliveryIntentId: 'intent-older-target-reaction',
+    responseDisposition: 'none',
+  })
+})
+
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
@@ -1769,7 +2249,7 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-5.5-mini',
+    model: 'gpt-5.6-terra-mini',
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
@@ -5598,6 +6078,7 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
         {
           deliveryContextOrdinal: 0,
           reaction: 'heart',
+          targetInputId: 'initial',
         },
       ],
       route: {
@@ -5658,6 +6139,7 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
           {
             deliveryContextOrdinal: 0,
             reaction: 'heart',
+            targetInputId: 'initial',
           },
         ],
       }),
@@ -5743,6 +6225,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
     await providerRelease.promise
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
+      messageReactionPending: true,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -5764,10 +6247,12 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
         {
           deliveryContextOrdinal: 0,
           reaction: 'heart',
+          targetInputId: 'initial',
         },
         {
           deliveryContextOrdinal: 1,
           reaction: 'thumbs_up',
+          targetInputId: 'manual-1',
         },
       ],
       route: {
@@ -5833,6 +6318,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
     {
       deliveryContextOrdinal: 0,
       reaction: 'heart',
+      targetInputId: 'initial',
     },
   ])
   expect(
@@ -6362,6 +6848,7 @@ test('sendAssistantMessageLocal traces hosted reaction-only no-reply delivery ou
           {
             deliveryContextOrdinal: 0,
             reaction: 'heart',
+            targetInputId: 'initial',
           },
         ],
         response: 'suppressed provider text',
@@ -6438,6 +6925,7 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
+      messageReactionPending: false,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -6522,6 +7010,7 @@ test('sendAssistantMessageLocal writes no-reply markers after caller retry fence
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
+      messageReactionPending: false,
     })
     throw new Error('unreachable after no-reply callback failure')
   })
@@ -6565,6 +7054,7 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
     try {
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
+        messageReactionPending: false,
       })
       await providerInput.onFinishWithoutReplyRecorded?.({
         deliveryContextOrdinal: 0,
@@ -6704,6 +7194,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
     await providerRelease.promise
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 1,
+      messageReactionPending: false,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
@@ -6849,6 +7340,7 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
     await providerRelease.promise
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 1,
+      messageReactionPending: false,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
@@ -7035,7 +7527,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       codexHome: '/tmp/codex-home',
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'prod',
@@ -7049,7 +7541,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       approvalPolicy: 'never',
       codexCommand: '/opt/murph/bin/custom-codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'prod',
@@ -7096,7 +7588,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
   const result = await updateAssistantSessionOptionsLocal({
     providerOptions: {
       provider: 'codex-cli',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
     },
     sessionId: 'session-codex-updated',
     vault: '/vaults/test',
@@ -7111,7 +7603,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
     mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.codexHome,
     '/tmp/codex-home',
   )
-  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.model, 'gpt-5.5')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.model, 'gpt-5.6-terra')
 })
 
 test('openAssistantConversationLocal forwards defaults into session resolution', async () => {
@@ -7134,10 +7626,12 @@ test('openAssistantConversationLocal forwards defaults into session resolution',
 })
 
 async function loadLocalServiceModule(input?: {
-  adapter?: {
-    startTypingIndicator?: NonNullable<AssistantChannelAdapter['startTypingIndicator']>
-  } | null
+  adapter?: Pick<
+    AssistantChannelAdapter,
+    'setMessageReaction' | 'startTypingIndicator'
+  > | null
   realAcceptedInputPersistence?: boolean
+  realMessageTargetSelection?: boolean
   useRealRuntimeMaintenance?: boolean
   plan?: ReturnType<typeof createSharedPlan>
   providerOutcome?:
@@ -7162,6 +7656,7 @@ async function loadLocalServiceModule(input?: {
         reactions?: readonly {
           deliveryContextOrdinal: number
           reaction: 'heart' | 'laugh' | 'thumbs_up'
+          targetInputId: string
         }[] | null
         session: AssistantSession
         usage: AssistantProviderUsage | null
@@ -7183,6 +7678,7 @@ async function loadLocalServiceModule(input?: {
           reactions?: readonly {
             deliveryContextOrdinal: number
             reaction: 'heart' | 'laugh' | 'thumbs_up'
+            targetInputId: string
           }[] | null
           rawEvents?: unknown[]
           route?: {
@@ -7192,6 +7688,7 @@ async function loadLocalServiceModule(input?: {
           responseDeliveryContextOrdinal: number
           responseMedia?: readonly AssistantResponseMedia[] | null
           session: AssistantSession
+          targetInputId?: string | null
           transcriptResponse: string | null
         }
       }
@@ -7227,6 +7724,8 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const useRealMessageTargetSelection =
+    input?.realMessageTargetSelection === true
   const useRealRuntimeMaintenance = input?.useRealRuntimeMaintenance === true
   const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
     '../src/assistant/store.js',
@@ -7458,6 +7957,16 @@ async function loadLocalServiceModule(input?: {
       message: error.message,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value ?? null),
+    resolveAssistantAcceptedMessageTarget: vi.fn(async (targetInput: {
+      action: 'native-reply' | 'reaction'
+      messageRef: string
+    }) => ({
+      ...(targetInput.action === 'reaction'
+        ? { deliveryMessageReactionsAvailable: true as const }
+        : {}),
+      deliveryReplyToMessageId: 'provider-message-target',
+      targetInputId: targetInput.messageRef,
+    })),
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
     ),
@@ -7810,6 +8319,17 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantExecutionOperatorDefaults:
       mocks.resolveAssistantExecutionOperatorDefaults,
   }))
+  if (useRealMessageTargetSelection) {
+    vi.doUnmock('../src/assistant/message-target-selection.js')
+  } else {
+    vi.doMock('../src/assistant/message-target-selection.js', async () => ({
+      ...(await vi.importActual<
+        typeof import('../src/assistant/message-target-selection.js')
+      >('../src/assistant/message-target-selection.js')),
+      resolveAssistantAcceptedMessageTarget:
+        mocks.resolveAssistantAcceptedMessageTarget,
+    }))
+  }
   vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
     resolveAssistantCodexThreadScope: vi.fn(
@@ -7982,7 +8502,7 @@ function createAssistantSession(input?: {
       codexHome: null,
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
@@ -8010,7 +8530,7 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,

@@ -14,8 +14,6 @@ const mocks = vi.hoisted(() => ({
   openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
-  refreshSmartAccessToken: vi.fn(),
-  sealClinicalConnectionSecret: vi.fn(),
   sealClinicalPageCursor: vi.fn(),
 }));
 
@@ -24,12 +22,7 @@ vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalConnectionFhirBaseUrl: mocks.openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   openClinicalPageCursor: mocks.openClinicalPageCursor,
-  sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
   sealClinicalPageCursor: mocks.sealClinicalPageCursor,
-  toClinicalJsonArray: (values: readonly string[]) => [...values],
-}));
-vi.mock("@/src/lib/clinical-records/smart", () => ({
-  refreshSmartAccessToken: mocks.refreshSmartAccessToken,
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -43,7 +36,6 @@ import {
   readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
-import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 
 const MEMBER_ID = "member_clinical_1";
 const RUN_ID = "crr_run_1";
@@ -67,6 +59,40 @@ describe("Clinical Records retrieval control plane", () => {
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
     expect(result.run.patientIdHash).toBe(hashClinicalFhirPatientId("patient-1"));
+  });
+
+  it("declares exact Epic beta acquisition fingerprints", async () => {
+    createHarness(["Patient", "Observation", "DiagnosticReport"]);
+
+    const result = await readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    });
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
+    expect(result.run.retrievalScopes).toEqual([
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex("epic-fhir-r4:Patient:read-by-launch-patient:v1"),
+        resourceType: "Patient",
+      },
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex(
+          "epic-fhir-r4:Observation:search:patient:category=laboratory:_count=100:v1",
+        ),
+        resourceType: "Observation",
+      },
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex(
+          "epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1",
+        ),
+        resourceType: "DiagnosticReport",
+      },
+    ]);
   });
 
   it("lets transient patient-context decryption failures remain retryable", async () => {
@@ -325,6 +351,40 @@ describe("Clinical Records retrieval control plane", () => {
     );
   });
 
+  it.each([
+    [
+      "Observation",
+      "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=laboratory&_count=100",
+    ],
+    [
+      "DiagnosticReport",
+      "https://fhir.example.test/FHIR/R4/DiagnosticReport?patient=patient-1&_count=100",
+    ],
+  ] as const)("uses the exact Epic beta root query for %s", async (resourceType, expectedUrl) => {
+    const harness = createHarness(["Patient", resourceType]);
+    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() + 120_000);
+    const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
+      entry: [],
+      resourceType: "Bundle",
+      type: "searchset",
+    }));
+
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        requestId: `request_${resourceType.toLowerCase()}`,
+        resourceType,
+      }),
+    });
+
+    expect(result.status).toBe("page");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL(expectedUrl),
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
+    );
+  });
+
   it("rejects another member, run, or generation before opening patient context", async () => {
     createHarness(["Patient", "Observation"]);
 
@@ -571,6 +631,37 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.pageCount).toBe(0);
   });
 
+  it("accepts a formally marked search OperationOutcome without treating it as the requested family", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
+        entry: [
+          {
+            resource: {
+              resourceType: "Observation",
+              id: "observation-1",
+            },
+            search: { mode: "match" },
+          },
+          {
+            resource: {
+              resourceType: "OperationOutcome",
+              issue: [{ code: "informational", severity: "warning" }],
+            },
+            search: { mode: "outcome" },
+          },
+        ],
+        resourceType: "Bundle",
+        type: "searchset",
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_search_outcome", resourceType: "Observation" }),
+    });
+
+    expect(result).toMatchObject({ status: "page" });
+    expect(harness.state.run.pageCount).toBe(1);
+  });
+
   it("deduplicates concurrent claims for the same page across distinct caller request ids", async () => {
     const harness = createHarness(["Patient", "Observation"]);
     const fetchStarted = deferred<void>();
@@ -602,6 +693,41 @@ describe("Clinical Records retrieval control plane", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(harness.state.run.providerRequestCount).toBe(1);
     expect(harness.state.run.pageCount).toBe(1);
+  });
+
+  it("cannot reclaim a page from a snapshot taken before another claimant completes", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const firstFetchStarted = deferred<void>();
+    const releaseFirstFetch = deferred<Response>();
+    const staleSnapshotTaken = deferred<void>();
+    const releaseStaleSnapshot = deferred<void>();
+    const fetchImpl = vi.fn(async () => {
+      firstFetchStarted.resolve();
+      return releaseFirstFetch.promise;
+    });
+    const request = pageRequest({ requestId: "request_completion_race", resourceType: "Observation" });
+
+    const first = fetchClinicalRetrievalPage({ fetchImpl, memberId: MEMBER_ID, request });
+    await firstFetchStarted.promise;
+    harness.hooks.afterRequestUpsert = async () => {
+      staleSnapshotTaken.resolve();
+      await releaseStaleSnapshot.promise;
+    };
+    const racingClaim = fetchClinicalRetrievalPage({ fetchImpl, memberId: MEMBER_ID, request });
+    await staleSnapshotTaken.promise;
+
+    releaseFirstFetch.resolve(fhirResponse({ entry: [], resourceType: "Bundle", type: "searchset" }));
+    await expect(first).resolves.toMatchObject({ status: "page" });
+    releaseStaleSnapshot.resolve();
+
+    await expect(racingClaim).resolves.toEqual({
+      errorCode: "request-in-progress",
+      retryable: true,
+      status: "unavailable",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(harness.state.run.pageCount).toBe(1);
+    expect([...harness.state.requests.values()][0]?.claimVersion).toBe(3);
   });
 
   it("charges completed same-page replays without double-counting the logical page", async () => {
@@ -679,111 +805,37 @@ describe("Clinical Records retrieval control plane", () => {
     });
     expect(harness.state.run.pageCount).toBe(1);
     expect([...harness.state.requests.values()][0]).toMatchObject({
-      claimVersion: 3,
+      claimVersion: 4,
       responseBytes: expect.any(Number),
     });
   });
 
-  it("does not let a stale invalid-grant response erase concurrently rotated credentials", async () => {
+  it("requires authorization without provider egress when the access token is near expiry", async () => {
     const harness = createHarness(["Patient", "Observation"]);
-    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() - 1_000);
-    const refreshesStarted = deferred<void>();
-    const successfulRefresh = deferred<{
-      accessToken: string;
-      expiresInSeconds: number;
-      grantedScopes: string[];
-      refreshToken: string;
-    }>();
-    const staleInvalidGrant = deferred<void>();
-    let refreshCallCount = 0;
-    mocks.refreshSmartAccessToken.mockImplementation(async () => {
-      refreshCallCount += 1;
-      if (refreshCallCount === 2) refreshesStarted.resolve();
-      if (refreshCallCount === 1) return successfulRefresh.promise;
-      await staleInvalidGrant.promise;
-      throw clinicalRecordsError({
-        code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED",
-        httpStatus: 401,
-        message: "Authorization expired.",
-      });
-    });
+    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() + 30_000);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
       resourceType: "Bundle",
       type: "searchset",
     }));
 
-    const winner = fetchClinicalRetrievalPage({
+    await expect(fetchClinicalRetrievalPage({
       fetchImpl,
       memberId: MEMBER_ID,
-      request: pageRequest({ requestId: "request_refresh_winner", resourceType: "Observation" }),
-    });
-    const stale = fetchClinicalRetrievalPage({
-      fetchImpl,
-      memberId: MEMBER_ID,
-      request: pageRequest({ requestId: "request_refresh_stale", resourceType: "Patient" }),
-    });
-    await refreshesStarted.promise;
-    successfulRefresh.resolve({
-      accessToken: "rotated-access-token",
-      expiresInSeconds: 3_600,
-      grantedScopes: ["patient/Patient.rs", "patient/Observation.rs"],
-      refreshToken: "rotated-refresh-token",
-    });
-    await vi.waitFor(() => expect(harness.state.run.connection.tokenVersion).toBe(2));
-    staleInvalidGrant.resolve();
-
-    await expect(winner).resolves.toMatchObject({ status: "page" });
-    await expect(stale).resolves.toEqual({
-      errorCode: "credentials-updated-retry",
-      retryable: true,
+      request: pageRequest({ requestId: "request_expiring", resourceType: "Observation" }),
+    })).resolves.toEqual({
+      errorCode: "authorization-required",
+      retryable: false,
       status: "unavailable",
     });
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(harness.state.run.connection).toMatchObject({
-      accessTokenEncrypted: "sealed-accessToken-2",
-      refreshTokenEncrypted: "sealed-refreshToken-2",
-      status: "active",
-      tokenVersion: 2,
+      accessTokenEncrypted: null,
+      patientIdEncrypted: null,
+      refreshTokenEncrypted: null,
+      status: "needs_reauth",
     });
-    expect(harness.state.run.status).not.toBe("needs_reauth");
-  });
-
-  it.each([
-    [["patient/Observation.rs", "patient/Patient.rs"]],
-    [["patient/Patient.rs"]],
-  ])("keeps the run scope snapshot immutable when refresh changes connection scopes: %j", async (
-    refreshedScopes,
-  ) => {
-    const harness = createHarness(["Patient", "Observation"]);
-    const originalScopes = ["patient/Patient.rs", "patient/Observation.rs"];
-    harness.state.run.grantedScopesJson = [...originalScopes];
-    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() - 1_000);
-    mocks.refreshSmartAccessToken.mockResolvedValue({
-      accessToken: "rotated-access-token",
-      expiresInSeconds: 3_600,
-      grantedScopes: refreshedScopes,
-      refreshToken: "rotated-refresh-token",
-    });
-
-    await expect(fetchClinicalRetrievalPage({
-      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
-        entry: [],
-        resourceType: "Bundle",
-        type: "searchset",
-      })),
-      memberId: MEMBER_ID,
-      request: pageRequest({ requestId: "request_scope_snapshot", resourceType: "Observation" }),
-    })).resolves.toMatchObject({ status: "page" });
-    expect(harness.state.run.connection.grantedScopesJson).toEqual(refreshedScopes);
-
-    await expect(readClinicalRetrievalRun({
-      generation: 1,
-      memberId: MEMBER_ID,
-      runId: RUN_ID,
-    })).resolves.toMatchObject({
-      run: { grantedScopes: originalScopes },
-      status: "ready",
-    });
+    expect(harness.state.run.status).toBe("needs_reauth");
   });
 
   it("requeues a preempted run and accepts a reordered idempotent completion", async () => {
@@ -884,9 +936,11 @@ function createHarness(resourceTypes: string[]) {
   const cursorPlaintexts = new Map<string, string>();
   const runUpdateCalls: Array<Record<string, unknown>> = [];
   const hooks: {
+    afterRequestUpsert: (() => Promise<void>) | null;
     beforeConnectionUpdateMany: (() => void) | null;
     beforeRunUpdateMany: (() => void) | null;
   } = {
+    afterRequestUpsert: null,
     beforeConnectionUpdateMany: null,
     beforeRunUpdateMany: null,
   };
@@ -906,16 +960,24 @@ function createHarness(resourceTypes: string[]) {
     }) => {
       const key = requestKey(args.where.runId_requestFingerprint);
       const existing = state.requests.get(key);
-      if (existing) return { ...existing };
-      const created: RetrievalRequestRow = {
-        ...args.create,
-        claimVersion: 1,
-        completedAt: null,
-        reservedBytes: 0,
-        responseBytes: null,
-      };
-      state.requests.set(key, created);
-      return { ...created };
+      let result: RetrievalRequestRow;
+      if (existing) {
+        result = { ...existing };
+      } else {
+        const created: RetrievalRequestRow = {
+          ...args.create,
+          claimVersion: 1,
+          completedAt: null,
+          reservedBytes: 0,
+          responseBytes: null,
+        };
+        state.requests.set(key, created);
+        result = { ...created };
+      }
+      const hook = hooks.afterRequestUpsert;
+      hooks.afterRequestUpsert = null;
+      await hook?.();
+      return result;
     }),
   };
   const runApi = {
@@ -1007,7 +1069,6 @@ function createHarness(resourceTypes: string[]) {
   mocks.openClinicalConnectionSecret.mockImplementation(async (input: { field: string }) => {
     if (input.field === "patientId") return "patient-1";
     if (input.field === "accessToken") return "access-token";
-    if (input.field === "refreshToken") return "refresh-token";
     return null;
   });
   mocks.openClinicalPageCursor.mockImplementation(async (input: { value: string }) => {
@@ -1021,16 +1082,6 @@ function createHarness(resourceTypes: string[]) {
     const cursor = `cursor-${cursorSequence}`;
     cursorPlaintexts.set(cursor, input.value);
     return cursor;
-  });
-  mocks.sealClinicalConnectionSecret.mockImplementation(async (input: {
-    field: string;
-    tokenVersion: number;
-  }) => `sealed-${input.field}-${input.tokenVersion}`);
-  mocks.refreshSmartAccessToken.mockResolvedValue({
-    accessToken: "refreshed-access-token",
-    expiresInSeconds: 3_600,
-    grantedScopes: ["patient/Patient.rs", "patient/Observation.rs"],
-    refreshToken: "refreshed-refresh-token",
   });
   return { cursorPlaintexts, hooks, runUpdateCalls, state };
 }
@@ -1063,6 +1114,22 @@ function updateRetrievalRequest(
   };
   const row = [...requests.values()].find((candidate) => candidate.id === where.id);
   if (!row) return { count: 0 };
+  if (typeof data.responseBytes === "number") {
+    const expectsFirstCompletion = where.responseBytes === null;
+    if (
+      row.claimVersion !== where.claimVersion
+      || row.completedAt !== null
+      || row.reservedBytes !== where.reservedBytes
+      || (expectsFirstCompletion ? row.responseBytes !== null : row.responseBytes === null)
+    ) return { count: 0 };
+    row.completedAt = data.completedAt as Date;
+    if (data.claimVersion && typeof data.claimVersion === "object") {
+      row.claimVersion += 1;
+    }
+    row.reservedBytes = data.reservedBytes as number;
+    row.responseBytes = data.responseBytes;
+    return { count: 1 };
+  }
   if (data.claimVersion && typeof data.claimVersion === "object") {
     const staleBefore = new Date(Date.now() - 30_000);
     const completedReplay = row.completedAt !== null && row.reservedBytes === 0;
@@ -1075,19 +1142,6 @@ function updateRetrievalRequest(
     row.claimedAt = data.claimedAt as Date;
     row.completedAt = null;
     row.reservedBytes = data.reservedBytes as number;
-    return { count: 1 };
-  }
-  if (typeof data.responseBytes === "number") {
-    const expectsFirstCompletion = where.responseBytes === null;
-    if (
-      row.claimVersion !== where.claimVersion
-      || row.completedAt !== null
-      || row.reservedBytes !== where.reservedBytes
-      || (expectsFirstCompletion ? row.responseBytes !== null : row.responseBytes === null)
-    ) return { count: 0 };
-    row.completedAt = data.completedAt as Date;
-    row.reservedBytes = data.reservedBytes as number;
-    row.responseBytes = data.responseBytes;
     return { count: 1 };
   }
   if (data.claimedAt instanceof Date) {
@@ -1110,20 +1164,16 @@ function buildRun(resourceTypes: string[]) {
     connection: {
       accessTokenEncrypted: "encrypted-access-token",
       accessTokenExpiresAt: null as Date | null,
-      clientId: "epic-client-id",
       fhirBaseHash: sha256Hex("https://fhir.example.test/FHIR/R4"),
       fhirBaseUrlEncrypted: "encrypted-fhir-base-url",
-      grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
       id: CONNECTION_ID,
       memberId: MEMBER_ID,
       patientIdEncrypted: "encrypted-patient-id",
       providerDirectoryEntryId: "epic-test",
-      refreshTokenEncrypted: "encrypted-refresh-token" as string | null,
       requestedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
       retrievalGeneration: 1,
       sourceSystem: "epic-fhir",
       status: "active",
-      tokenEndpoint: "https://fhir.example.test/oauth2/token",
       tokenVersion: 1,
     },
     createdAt: new Date("2026-07-10T15:00:00.000Z"),

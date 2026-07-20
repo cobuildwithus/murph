@@ -1,8 +1,8 @@
-import { CLINICAL_FHIR_RESOURCE_TYPES } from "@murphai/clinical-records";
 import type {
   ClinicalProviderFacilityContract,
   ClinicalProviderSearchResultContract,
 } from "./client-contracts";
+import { EPIC_BETA_RESOURCE_TYPES } from "./epic-beta-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA =
   "murph.clinical-provider-directory.v1" as const;
@@ -14,7 +14,9 @@ const MAX_PROVIDER_RESULTS = 20;
 const MAX_SEARCH_TEXT_LENGTH = 120;
 
 export type ClinicalProviderSourceSystem = "epic-fhir";
-export type ClinicalProviderClientIdEnvironmentKey = "EPIC_SMART_CLIENT_ID";
+export type ClinicalProviderClientIdEnvironmentKey =
+  | "EPIC_SMART_CLIENT_ID"
+  | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
 
 export type ClinicalProviderFacility = ClinicalProviderFacilityContract;
 
@@ -94,6 +96,13 @@ function rankFacilities(input: {
         .map(normalizeSearchText);
       let score = 0;
       if (input.query && fields.some((field) => field.includes(input.query))) score += 100;
+      if (
+        input.query
+        && searchTextContainsEveryToken(
+          [input.entry.brandName, ...input.entry.aliases, ...fields].join(" "),
+          input.query,
+        )
+      ) score += 80;
       if (input.city && normalizeSearchText(facility.city) === input.city) score += 30;
       if (input.state && normalizeSearchText(facility.state) === input.state) score += 20;
       return { facility, index, score };
@@ -146,7 +155,10 @@ function parseDirectoryEntry(value: unknown, index: number): ClinicalProviderDir
   if (record.sourceSystem !== "epic-fhir") {
     throw new TypeError(`Clinical provider directory entry ${index} source system is unsupported.`);
   }
-  if (record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID") {
+  if (
+    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
+    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
+  ) {
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
 
@@ -207,12 +219,13 @@ function parseResourceTypes(value: unknown, index: number): readonly string[] {
     32,
     80,
   );
-  const allowed = new Set<string>(CLINICAL_FHIR_RESOURCE_TYPES);
   if (
-    resources.length === 0
-    || resources.some((resource) => !allowed.has(resource))
+    resources.length !== EPIC_BETA_RESOURCE_TYPES.length
+    || resources.some((resource, resourceIndex) =>
+      resource !== EPIC_BETA_RESOURCE_TYPES[resourceIndex]
+    )
   ) {
-    throw new TypeError(`Clinical provider directory entry ${index} has invalid FHIR resource types.`);
+    throw new TypeError(`Clinical provider directory entry ${index} does not match the Epic beta FHIR policy.`);
   }
   return resources;
 }
@@ -226,14 +239,40 @@ function scoreDirectoryEntry(input: {
   let score = 0;
   const brand = normalizeSearchText(input.entry.brandName);
   const aliases = input.entry.aliases.map(normalizeSearchText);
+  const identitySearchText = [input.entry.brandName, ...input.entry.aliases].join(" ");
+  const partialQueryAllowed = normalizeSearchText(input.query)
+    .split(" ")
+    .filter(Boolean)
+    .every((token) => token.length > 2);
   if (input.query) {
     if (brand === input.query || aliases.includes(input.query)) score += 100;
-    else if (brand.startsWith(input.query) || aliases.some((alias) => alias.startsWith(input.query))) score += 60;
-    else if (brand.includes(input.query) || aliases.some((alias) => alias.includes(input.query))) score += 35;
+    else if (
+      partialQueryAllowed
+      && (brand.startsWith(input.query) || aliases.some((alias) => alias.startsWith(input.query)))
+    ) score += 60;
+    else if (
+      partialQueryAllowed
+      && (brand.includes(input.query) || aliases.some((alias) => alias.includes(input.query)))
+    ) score += 35;
     if (input.entry.facilities.some((facility) =>
       [facility.name, facility.city, facility.state, facility.postalCode]
-        .some((field) => normalizeSearchText(field).includes(input.query))
+        .some((field) => searchTextContainsEveryToken(field ?? "", input.query))
     )) score += 30;
+    if (
+      searchTextContainsEveryToken(identitySearchText, input.query)
+      || input.entry.facilities.some((facility) =>
+        searchTextContainsEveryToken(
+          [
+            identitySearchText,
+            facility.name,
+            facility.city,
+            facility.state,
+            facility.postalCode,
+          ].join(" "),
+          input.query,
+        )
+      )
+    ) score += 25;
   }
   if (input.city && input.entry.facilities.some((facility) => normalizeSearchText(facility.city) === input.city)) {
     score += 25;
@@ -246,7 +285,22 @@ function scoreDirectoryEntry(input: {
 
 function normalizeSearchText(value: string | null | undefined): string {
   if (typeof value !== "string") return "";
-  return value.trim().slice(0, MAX_SEARCH_TEXT_LENGTH).toLocaleLowerCase("en-US");
+  return value
+    .trim()
+    .slice(0, MAX_SEARCH_TEXT_LENGTH)
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+function searchTextContainsEveryToken(value: string, query: string): boolean {
+  const normalizedValue = normalizeSearchText(value);
+  const tokens = normalizeSearchText(query).split(" ").filter(Boolean);
+  const words = new Set(normalizedValue.split(" ").filter(Boolean));
+  return tokens.length > 0 && tokens.every((token) =>
+    token.length <= 2 ? words.has(token) : normalizedValue.includes(token)
+  );
 }
 
 function requireCanonicalPublicHttpsUrl(value: unknown, label: string): string {

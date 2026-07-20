@@ -1,4 +1,5 @@
 import type {
+  HostedClinicalRecordsConnectLinkResponse,
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
@@ -250,6 +251,7 @@ export interface HostedRuntimeLinqSendRequest {
   idempotencyKey?: string | null;
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
+  nativeReplyRequested?: true;
   replyToMessageId?: string | null;
   target: string;
   targetKind?: HostedRuntimeProviderTargetKind | null;
@@ -387,6 +389,9 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
+  createConnectLink?(
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsConnectLinkResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
     options?: { signal?: AbortSignal | null },

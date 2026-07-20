@@ -619,6 +619,49 @@ type ReviewGptDomTestNode = {
   tagName?: string
 }
 
+type ReviewGptModelPickerTarget = {
+  desiredVersion: string
+  wantsInstant: boolean
+  wantsPro: boolean
+  wantsSol: boolean
+  wantsThinking: boolean
+}
+
+type ReviewGptModelPickerSummary = {
+  label: string
+  opensSubmenu: boolean
+  testId?: string
+  unavailable: boolean
+  visible: boolean
+}
+
+const reviewGptModelPickerModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft.js',
+  ),
+) as {
+  modelPickerOptionCanTraverseTarget: (
+    label: string,
+    testId: string,
+    target: ReviewGptModelPickerTarget,
+    opensSubmenu?: boolean,
+  ) => boolean
+  modelPickerOptionMatchesTarget: (
+    label: string,
+    testId: string,
+    target: ReviewGptModelPickerTarget,
+  ) => boolean
+  modelPickerSummarySelectionProof: (
+    summary: ReviewGptModelPickerSummary,
+    target: ReviewGptModelPickerTarget,
+  ) => boolean
+}
+
 const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
   path.join(
     repoRoot,
@@ -930,8 +973,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.109')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.109')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.110')
+    expect(
+      pnpmWorkspace
+        .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
+        ?.split('\n')
+        .filter((line) => line.includes('@cobuild/review-gpt')),
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.110'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -995,6 +1043,84 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
     )
+    const solTarget: ReviewGptModelPickerTarget = {
+      desiredVersion: '5-6',
+      wantsInstant: false,
+      wantsPro: false,
+      wantsSol: true,
+      wantsThinking: false,
+    }
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionMatchesTarget(
+        'GPT-5.6 Sol',
+        '',
+        solTarget,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'ModelGPT-5.6 Sol',
+          opensSubmenu: true,
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionCanTraverseTarget(
+        'ModelGPT-5.5',
+        '',
+        solTarget,
+        true,
+      ),
+    ).toBe(true)
+    expect(
+      reviewGptModelPickerModule.modelPickerOptionCanTraverseTarget(
+        'EffortHigh',
+        '',
+        solTarget,
+        true,
+      ),
+    ).toBe(false)
+    for (const invalidLabel of [
+      'GPT-5.5 Sol',
+      'GPT-15.6 Sol',
+      'GPT-5.60 Sol',
+      'GPT-5.6 Sol Extended Pro',
+    ]) {
+      expect(
+        reviewGptModelPickerModule.modelPickerOptionMatchesTarget(
+          invalidLabel,
+          '',
+          solTarget,
+        ),
+      ).toBe(false)
+    }
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'ModelGPT-5.5GPT-5.6 Sol',
+          opensSubmenu: true,
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(false)
+    expect(
+      reviewGptModelPickerModule.modelPickerSummarySelectionProof(
+        {
+          label: 'Model',
+          opensSubmenu: true,
+          testId: 'model-switcher-pro-submenu',
+          unavailable: false,
+          visible: true,
+        },
+        solTarget,
+      ),
+    ).toBe(false)
     expect(reviewGptDriver).toContain(
       'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS;',
     )
@@ -1070,7 +1196,19 @@ describe('monorepo release flow coverage audit', () => {
         '  let ownedTargetId = pageTargetId;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
+        '  let releasePageFocusEmulation = async () => {};',
         '  try {',
+      ].join('\n'),
+    )
+    expect(reviewGptDriver).toContain('  releasePageFocusEmulation = async () => {')
+    expect(reviewGptDriver).toContain(
+      [
+        '  let focusReleaseError = null;',
+        '  try {',
+        '    await releasePageFocusEmulation();',
+        '  } catch (error) {',
+        '    focusReleaseError = error;',
+        '  }',
       ].join('\n'),
     )
     expect(reviewGptDriver).toContain(
@@ -1340,7 +1478,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
-    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.6-terra')
     expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('scope-anomaly signal')
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')

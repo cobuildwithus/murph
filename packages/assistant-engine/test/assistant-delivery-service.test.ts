@@ -736,7 +736,7 @@ function createAssistantSession(input?: {
 }): AssistantSession {
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',

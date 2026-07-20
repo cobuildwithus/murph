@@ -123,6 +123,7 @@ export interface HostedAssistantDeliveryPayload {
   identityId: string | null;
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
+  nativeReplyRequested?: true;
   newsletterAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
@@ -685,6 +686,14 @@ function parseHostedAssistantDeliveryPayload(
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),
+    ...(record.nativeReplyRequested === undefined
+      ? {}
+      : {
+          nativeReplyRequested: requireTrue(
+            record.nativeReplyRequested,
+            `${label}.nativeReplyRequested`,
+          ),
+        }),
     ...(record.newsletterAuthorizationProof === undefined
       ? {}
       : {
@@ -1190,6 +1199,14 @@ function requireBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
+}
+
+function requireTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true when present.`);
+  }
+
+  return true;
 }
 
 function requireNullableBoolean(value: unknown, label: string): boolean | null {

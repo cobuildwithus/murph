@@ -162,7 +162,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-a'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
         // Spawn evidence without a model: bills, stays unattributed.
         spawnEndEvent({
@@ -191,8 +191,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
         outputTokens: 1_000,
         providerName: 'openai',
         reasoningTokens: 120,
-        requestedModel: 'gpt-5.5-mini',
-        servedModel: 'gpt-5.5-mini',
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.6-terra-mini',
         totalTokens: 5_000,
         usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
       },
@@ -342,7 +342,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
         // A spawned child later also receives sendInput: the spawn model wins.
         spawnEndEvent({
           receiverThreadIds: ['thread-spawned-child'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
         {
           method: 'item/completed',
@@ -374,8 +374,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
     expect(drafts[1]).toMatchObject({
       usage: {
-        requestedModel: 'gpt-5.5-mini',
-        servedModel: 'gpt-5.5-mini',
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.6-terra-mini',
       },
     })
   })
@@ -452,7 +452,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
               type: 'collabAgentToolCall',
               tool: 'spawn_agent',
               receiver_thread_ids: ['thread-child-snake', 'thread-other'],
-              model: 'gpt-5.5',
+              model: 'gpt-5.6-terra',
             },
           },
         },
@@ -467,8 +467,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
       usage: {
         inputTokens: 40,
         outputTokens: 10,
-        requestedModel: 'gpt-5.5',
-        servedModel: 'gpt-5.5',
+        requestedModel: 'gpt-5.6-terra',
+        servedModel: 'gpt-5.6-terra',
         totalTokens: 50,
       },
     })
@@ -485,7 +485,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-a'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
       ],
       subagentTokenUsageByThread: new Map([
@@ -537,7 +537,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       parentRawEvents: [
         spawnEndEvent({
           receiverThreadIds: ['thread-child-empty'],
-          model: 'gpt-5.5-mini',
+          model: 'gpt-5.6-terra-mini',
         }),
       ],
       subagentTokenUsageByThread: new Map([
@@ -553,5 +553,137 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
 
     expect(drafts).toEqual([])
+  })
+
+  // Multi-agent V2 emits subAgentActivity items instead of collab tool
+  // calls; those items are the only spawn evidence a V2 turn produces, carry
+  // no model, and the child inherits the parent model by default. This case
+  // is pinned because V2 shipping a different item shape than V1 silently
+  // un-metered every delegated turn between June 29 and July 17, 2026.
+  it('authorizes billing via multi-agent V2 subAgentActivity items and falls back to the parent model', () => {
+    const childEvents = [
+      tokenUsageEvent({
+        threadId: 'thread-child-v2',
+        turnId: 'turn-child-v2',
+        total: {
+          totalTokens: 900,
+          inputTokens: 700,
+          cachedInputTokens: 300,
+          outputTokens: 200,
+          reasoningOutputTokens: 40,
+        },
+        last: {
+          totalTokens: 900,
+          inputTokens: 700,
+          cachedInputTokens: 300,
+          outputTokens: 200,
+          reasoningOutputTokens: 40,
+        },
+      }),
+    ]
+    const snakeCaseChildEvents = [
+      tokenUsageEvent({
+        threadId: 'thread-child-v2-snake',
+        turnId: 'turn-child-v2-snake',
+        total: {
+          totalTokens: 300,
+          inputTokens: 250,
+          cachedInputTokens: 0,
+          outputTokens: 50,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 300,
+          inputTokens: 250,
+          cachedInputTokens: 0,
+          outputTokens: 50,
+          reasoningOutputTokens: 0,
+        },
+      }),
+    ]
+    const ghostEvents = [
+      tokenUsageEvent({
+        threadId: 'thread-child-ghost',
+        turnId: 'turn-child-ghost',
+        total: {
+          totalTokens: 400,
+          inputTokens: 300,
+          cachedInputTokens: 0,
+          outputTokens: 100,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 400,
+          inputTokens: 300,
+          cachedInputTokens: 0,
+          outputTokens: 100,
+          reasoningOutputTokens: 0,
+        },
+      }),
+    ]
+
+    const drafts = extractCodexSubagentUsageDrafts({
+      droppedThreadCount: 0,
+      modelProvider: 'openai',
+      ordinalStart: 3,
+      parentModel: 'gpt-5.6-terra',
+      parentRawEvents: [
+        {
+          method: 'item/completed',
+          params: {
+            threadId: 'thread-parent',
+            turnId: 'turn-parent',
+            item: {
+              id: 'activity-1',
+              type: 'subAgentActivity',
+              kind: 'started',
+              agentThreadId: 'thread-child-v2',
+              agentPath: 'root/child-1',
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            threadId: 'thread-parent',
+            turnId: 'turn-parent',
+            item: {
+              id: 'activity-2',
+              type: 'sub_agent_activity',
+              kind: 'interacted',
+              agent_thread_id: 'thread-child-v2-snake',
+              agent_path: 'root/child-2',
+            },
+          },
+        },
+      ],
+      subagentTokenUsageByThread: new Map([
+        ['thread-child-v2', sampleFromEvents(childEvents)],
+        ['thread-child-v2-snake', sampleFromEvents(snakeCaseChildEvents)],
+        ['thread-child-ghost', sampleFromEvents(ghostEvents)],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(2)
+    expect(drafts[0]?.usage.servedModel).toBe('gpt-5.6-terra')
+    expect(drafts[0]?.usage.requestedModel).toBe('gpt-5.6-terra')
+    expect(drafts[0]?.providerRequestOrdinal).toBe(3)
+    expect(drafts[0]?.usage.inputTokens).toBe(700)
+    expect(drafts[0]?.usage.outputTokens).toBe(200)
+    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
+      codexSubagentThreadId: 'thread-child-v2',
+      unattributedSubagentUsageThreadCount: 1,
+    })
+    expect(drafts[1]?.usage.servedModel).toBe('gpt-5.6-terra')
+    expect(drafts[1]?.usage.rawUsageJson).toMatchObject({
+      codexSubagentThreadId: 'thread-child-v2-snake',
+    })
+    expect(
+      drafts.some(
+        (draft) =>
+          (draft.usage.rawUsageJson as Record<string, unknown>)
+            .codexSubagentThreadId === 'thread-child-ghost',
+      ),
+    ).toBe(false)
   })
 })

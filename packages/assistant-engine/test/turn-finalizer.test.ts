@@ -115,7 +115,7 @@ describe('applyAssistantSessionCodexResumeStateAction', () => {
         approvalPolicy: 'never',
         codexCommand: null,
         codexHome: null,
-        model: 'gpt-5.5',
+        model: 'gpt-5.6-terra',
         modelProvider: null,
         oss: false,
         profile: null,

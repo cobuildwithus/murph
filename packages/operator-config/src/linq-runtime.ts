@@ -344,6 +344,7 @@ export async function sendLinqChatMessage(
     idempotencyKey?: string | null
     media?: readonly LinqMessageMediaInput[] | null
     message: string
+    nativeReplyRequested?: true
     replyToMessageId?: string | null
   },
   dependencies: {
@@ -360,13 +361,15 @@ export async function sendLinqChatMessage(
     idempotencyKey: input.idempotencyKey,
     media: input.media ?? [],
     message,
+    ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
     replyToMessageId,
   })
 
   return requestLinqJson<MessageSendResponse>({
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
-      hasReplyToMessageId: replyToMessageId !== null,
+      hasReplyToMessageId:
+        input.nativeReplyRequested === true && replyToMessageId !== null,
       operation: 'send_message',
       provider: 'linq',
     },
@@ -1568,9 +1571,13 @@ function buildLinqMessageBody(input: {
   idempotencyKey?: string | null
   media?: readonly LinqMessageMediaInput[] | null
   message: string
+  nativeReplyRequested?: true
   replyToMessageId?: string | null
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const replyToMessageId = input.nativeReplyRequested === true
+    ? normalizeRequiredString(input.replyToMessageId, 'native reply target message id')
+    : null
   const media = normalizeLinqMediaList(input.media ?? [])
   const renderedText = renderMarkdownMessageText(
     normalizeRequiredString(input.message, 'message'),
@@ -1595,6 +1602,13 @@ function buildLinqMessageBody(input: {
       ...(idempotencyKey
         ? {
             idempotency_key: idempotencyKey,
+          }
+        : {}),
+      ...(replyToMessageId
+        ? {
+            reply_to: {
+              message_id: replyToMessageId,
+            },
           }
         : {}),
     },

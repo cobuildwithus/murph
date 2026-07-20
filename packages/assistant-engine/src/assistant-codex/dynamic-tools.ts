@@ -106,6 +106,12 @@ import type {
   AssistantProgressDelivery,
   AssistantTurnProductFeedbackRecorder,
 } from '../assistant/turn-progress.js'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../assistant/generated-delivery-files.js'
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from '../assistant/message-target-selection.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
@@ -154,6 +160,14 @@ import {
   type LabsDynamicToolRequest,
 } from './dynamic-tools/labs.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+import {
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+  readClinicalRecordsConnectLinkDynamicToolRequest,
+  type ClinicalRecordsConnectLinkDynamicToolRequest,
+} from './dynamic-tools/clinical-records.js'
+export {
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+} from './dynamic-tools/clinical-records.js'
 import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
@@ -805,7 +819,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -815,7 +829,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Normalized vault-relative path, for example documents/report.pdf. Hidden paths, traversal, absolute paths, and unsupported file types are rejected.',
+          `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
       },
     },
     required: ['ref'],
@@ -834,21 +848,45 @@ export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   },
 } as const
 
-export const MURPH_REACT_TO_MESSAGE_TOOL = {
-  namespace: 'murph',
-  name: 'react_to_message',
+const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
+const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
+  type: 'string',
+  pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'React to the current inbound message when the active channel supports reactions. This does not send text and does not finish the turn.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
+} as const
+
+export const MURPH_SELECT_REPLY_TARGET_TOOL = {
+  namespace: 'murph',
+  name: 'select_reply_target',
+  description:
+    'Select one accepted inbound message as the native reply target for the current normal response. Use this only when anchoring the response to a specific message improves clarity; ordinary responses stay flat. This does not send text and does not finish the turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+    },
+    required: ['message_ref'],
+  },
+} as const
+
+export const MURPH_REACT_TO_MESSAGE_TOOL = {
+  namespace: 'murph',
+  name: 'react_to_message',
+  description:
+    'React to one accepted inbound message identified by its Message ref when the active channel supports reactions. This does not send text and does not finish the turn.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
       reaction: {
         type: 'string',
         enum: ['heart', 'thumbs_up', 'laugh'],
       },
     },
-    required: ['reaction'],
+    required: ['message_ref', 'reaction'],
   },
 } as const
 
@@ -1019,7 +1057,9 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_LABS_TOOL,
 ] as const
@@ -1044,19 +1084,20 @@ export interface MurphDynamicToolAvailability {
   assistantStyleSettingsAvailable?: boolean | null
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
-  allowMessageReactions?: boolean | null
   automationAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
   deviceAvailable?: boolean | null
+  clinicalRecordsConnectLinkAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
+  messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
@@ -1087,7 +1128,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
-    [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
+    [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
+    [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
@@ -1109,6 +1151,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
       a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
     [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
+    [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL, defaultOff((a) =>
+      a.clinicalRecordsConnectLinkAvailable)],
   ])
 
 export function resolveMurphDynamicTools(
@@ -1579,7 +1623,14 @@ const computerFinishRunArgumentsSchema = z
 
 const reactToMessageArgumentsSchema = z
   .object({
+    message_ref: z.string().regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')),
     reaction: assistantMessageReactionSchema,
+  })
+  .strict()
+
+const selectReplyTargetArgumentsSchema = z
+  .object({
+    message_ref: z.string().regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')),
   })
   .strict()
 
@@ -1594,6 +1645,11 @@ export type MurphDynamicToolFinalActionPatch = {
 
 export type MurphDynamicToolReactionPatch = {
   reaction: AssistantMessageReaction
+  targetInputId: string
+}
+
+export type MurphDynamicToolReplyTargetPatch = {
+  targetInputId: string
 }
 
 type MurphDynamicToolRpcResult = {
@@ -1615,6 +1671,7 @@ type HostedComputerToolPayloadSanitizer =
 export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
+  replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
@@ -1693,9 +1750,11 @@ export type MurphDynamicToolRequest =
       args: HostedComputerFinishRunRequest & { runId: string }
     }
   | PhoneCallDynamicToolRequest
+  | ClinicalRecordsConnectLinkDynamicToolRequest
   | {
       kind: 'send-vault-file'
       ref: string
+      toolCallId?: string
     }
   | {
       kind: 'invalid-send-vault-file-arguments'
@@ -1731,6 +1790,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-reaction-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-reply-target-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1803,7 +1866,12 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'react-to-message'
+      messageRef: string
       reaction: AssistantMessageReaction
+    }
+  | {
+      kind: 'select-reply-target'
+      messageRef: string
     }
   | {
       kind: 'finish-without-reply'
@@ -1880,6 +1948,15 @@ export function readMurphDynamicToolRequest(
   })
   if (phoneCallRequest) {
     return phoneCallRequest
+  }
+
+  const clinicalRecordsConnectLinkRequest =
+    readClinicalRecordsConnectLinkDynamicToolRequest({
+      arguments: request.arguments,
+      tool: request.tool,
+    })
+  if (clinicalRecordsConnectLinkRequest) {
+    return clinicalRecordsConnectLinkRequest
   }
 
   switch (request.tool) {
@@ -1965,6 +2042,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name: {
@@ -2095,7 +2173,22 @@ export function readMurphDynamicToolRequest(
 
       return {
         kind: 'react-to-message',
+        messageRef: parsed.messageRef,
         reaction: parsed.reaction,
+      }
+    }
+    case MURPH_SELECT_REPLY_TARGET_TOOL.name: {
+      const parsed = parseSelectReplyTargetArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-reply-target-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'select-reply-target',
+        messageRef: parsed.messageRef,
       }
     }
     case MURPH_COMPUTER_OPEN_TOOL.name: {
@@ -2239,6 +2332,7 @@ function readGeneratedImageToolCallId(
 }
 
 export async function executeMurphDynamicToolRequest(input: {
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   assistantStyleSettingsAvailable?: boolean | null
   abortSignal?: AbortSignal | null
@@ -2250,6 +2344,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  deliveryContextOrdinal?: number | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
@@ -2291,6 +2386,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
       return toolTextResult(false, 'invalid reaction arguments')
+    case 'invalid-reply-target-arguments':
+      return toolTextResult(false, 'invalid reply target arguments')
     case 'invalid-product-feedback-arguments':
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
@@ -2315,6 +2412,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-clinical-records-connect-link-arguments':
+      return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
@@ -2417,7 +2516,12 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = await sendVaultFile(input.request.ref)
+        const result = input.request.toolCallId === undefined
+          ? await sendVaultFile(input.request.ref)
+          : await sendVaultFile(
+              input.request.ref,
+              input.request.toolCallId,
+            )
         switch (result.status) {
           case 'pending':
             return {
@@ -2498,6 +2602,40 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'phone call could not be started')
       }
     }
+    case 'create-clinical-records-connect-link': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const connectLinkTool = hostedToolContext?.clinicalRecordsConnectLinkTool ?? null
+      if (!hostedToolContext || !connectLinkTool) {
+        return toolTextResult(
+          false,
+          'Clinical Records connection links are unavailable without hosted transport',
+        )
+      }
+
+      const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
+      if (
+        !userActionScope
+        || userActionScope.conversationScope !== 'direct'
+        || userActionScope.acceptedInputIds.length === 0
+      ) {
+        return toolTextResult(
+          false,
+          'Clinical Records connection links require current user input in a private conversation',
+        )
+      }
+
+      try {
+        const result = await connectLinkTool.createConnectLink({
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, safeToolPayloadText({
+          connectUrl: result.connectUrl,
+          expiresAt: result.expiresAt,
+        }))
+      } catch {
+        return toolTextResult(false, 'Clinical Records connection link could not be created')
+      }
+    }
     case 'submit-product-feedback':
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
@@ -2554,11 +2692,41 @@ export async function executeMurphDynamicToolRequest(input: {
         },
       }
     case 'react-to-message':
-      return {
-        ...toolTextResult(true, 'reaction queued'),
-        reactionPatch: {
-          reaction: input.request.reaction,
-        },
+      {
+        const target = await authorizeDynamicToolMessageTarget({
+          action: 'reaction',
+          authorizer: input.authorizeAcceptedMessageTarget ?? null,
+          deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+          messageRef: input.request.messageRef,
+        })
+        if (!target) {
+          return toolTextResult(false, 'message target unavailable')
+        }
+        return {
+          ...toolTextResult(true, 'reaction queued'),
+          reactionPatch: {
+            reaction: input.request.reaction,
+            targetInputId: target.targetInputId,
+          },
+        }
+      }
+    case 'select-reply-target':
+      {
+        const target = await authorizeDynamicToolMessageTarget({
+          action: 'native-reply',
+          authorizer: input.authorizeAcceptedMessageTarget ?? null,
+          deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+          messageRef: input.request.messageRef,
+        })
+        if (!target) {
+          return toolTextResult(false, 'message target unavailable')
+        }
+        return {
+          ...toolTextResult(true, 'selection recorded'),
+          replyTargetPatch: {
+            targetInputId: target.targetInputId,
+          },
+        }
       }
     case 'generate-image': {
       if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
@@ -4507,7 +4675,7 @@ function parseFinishWithoutReplyArguments(
 function parseReactToMessageArguments(
   value: unknown,
 ):
-  | { ok: true; reaction: AssistantMessageReaction }
+  | { messageRef: string; ok: true; reaction: AssistantMessageReaction }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = reactToMessageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -4524,9 +4692,58 @@ function parseReactToMessageArguments(
   }
 
   return {
+    messageRef: parsed.data.message_ref,
     ok: true,
     reaction: parsed.data.reaction,
   }
+}
+
+function parseSelectReplyTargetArguments(
+  value: unknown,
+):
+  | { messageRef: string; ok: true }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = selectReplyTargetArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.select_reply_target.input',
+        schemaRootKeys: readZodObjectRootKeys(selectReplyTargetArgumentsSchema),
+        toolName: 'murph.select_reply_target',
+      }),
+    }
+  }
+
+  return {
+    messageRef: parsed.data.message_ref,
+    ok: true,
+  }
+}
+
+async function authorizeDynamicToolMessageTarget(input: {
+  action: 'native-reply' | 'reaction'
+  authorizer: AssistantAcceptedMessageTargetAuthorizer | null
+  deliveryContextOrdinal: number | null
+  messageRef: string
+}): Promise<{ targetInputId: string } | null> {
+  if (
+    !input.authorizer ||
+    input.deliveryContextOrdinal === null ||
+    !Number.isInteger(input.deliveryContextOrdinal) ||
+    input.deliveryContextOrdinal < 0
+  ) {
+    return null
+  }
+
+  const target = await input.authorizer({
+    action: input.action,
+    deliveryContextOrdinal: input.deliveryContextOrdinal,
+    messageRef: input.messageRef,
+  })
+  return target?.targetInputId === input.messageRef ? target : null
 }
 
 function parseComputerArguments<TArgs>(input: {

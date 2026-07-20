@@ -98,7 +98,7 @@ describe("MurphSafeSearchClient", () => {
     expect(rendered.container.textContent).toContain("BRANDED FOODS");
     expect(rendered.container.textContent).toContain("Creatine Monohydrate");
     expect(rendered.container.textContent).toContain("Cocoa Protein Bar");
-    expect(rendered.container.textContent).toContain("2 linked test observations");
+    expect(rendered.container.textContent).toContain("2 product tests");
     expect(rendered.container.textContent).not.toContain("SUPPLEMENT ·");
 
     const resultLink = rendered.container.querySelector(
@@ -139,9 +139,7 @@ describe("MurphSafeSearchClient", () => {
     expect(
       rendered.container.querySelector("section #murph-safe-search-error"),
     ).toBeNull();
-    expect(rendered.container.querySelector("h2")?.textContent).toBe(
-      "Search the product record",
-    );
+    expect(rendered.container.querySelector("h2")).toBeNull();
     expect(focus).toHaveBeenCalledOnce();
   });
 
@@ -255,7 +253,7 @@ describe("MurphSafeSearchClient", () => {
     await changeSearchValue(rendered.window, rendered.container, "edited product");
 
     expect(signal?.aborted).toBe(true);
-    expect(rendered.container.textContent).toContain("Search the product record");
+    expect(rendered.container.querySelector("h2")).toBeNull();
 
     await act(async () => {
       pending.resolve(jsonResponse(makeSearchResponse({

@@ -129,9 +129,10 @@ function executeCodexAppServerTurn(
     ...input,
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
-      allowMessageReactions: input.allowMessageReactions,
       automationAvailable:
         input.hostedToolContext?.automationTool != null,
+      messageTargetingAvailable:
+        input.authorizeAcceptedMessageTarget != null,
       assistantConfigurationAvailable:
         input.hostedToolContext?.assistantConfigurationTool != null,
       computerToolsAvailable:
@@ -2457,7 +2458,10 @@ describe('assistant codex runtime', () => {
     let nextApprovalIndex = 0
     const onFinishWithoutReplyAccepted = vi.fn()
     const onFinishWithoutReplyRecorded = vi.fn()
-    const sendVaultFile = vi.fn(async () => {
+    const sendVaultFile = vi.fn(async (
+      _ref: string,
+      _toolCallId?: string | null,
+    ) => {
       const approvalUrl = exactApprovalUrls[nextApprovalIndex]
       if (!approvalUrl) {
         throw new Error('Unexpected vault approval request.')
@@ -2516,6 +2520,7 @@ describe('assistant codex runtime', () => {
               method: 'item/tool/call',
               params: {
                 arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
+                callId: `call-vault-approval-${approvalIndex + 1}`,
                 namespace: 'murph',
                 tool: 'send_vault_file',
               },
@@ -2601,6 +2606,12 @@ describe('assistant codex runtime', () => {
       expect(result.transcriptMessage ?? '').not.toContain(exactApprovalUrl)
     }
     expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
+    expect(sendVaultFile.mock.calls).toEqual(
+      Array.from({ length: approvalCount }, (_, index) => [
+        `documents/report-${index + 1}.pdf`,
+        `call-vault-approval-${index + 1}`,
+      ]),
+    )
     expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
     expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   }
@@ -2609,6 +2620,126 @@ describe('assistant codex runtime', () => {
     '$name for a pending vault approval',
     runVaultApprovalUrlScenario,
   )
+
+  it('serializes overlapping vault-file sends before a second approval can start', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-vault-send-order-work-',
+    )
+    const firstSendStarted = createDeferred<void>()
+    const releaseFirstSend = createDeferred<void>()
+    const approvedFile = {
+      approvalGeneration: 'f'.repeat(64),
+      approvalId: `haa_${'f'.repeat(32)}`,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+      kind: 'vault_file' as const,
+      ref: 'documents/report.pdf',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }
+    const sendVaultFile = vi.fn(async () => {
+      firstSendStarted.resolve()
+      await releaseFirstSend.promise
+      return {
+        file: approvedFile,
+        filename: approvedFile.filename,
+        status: 'approved' as const,
+      }
+    })
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
+      sendVaultFile,
+      vaultFileSendAvailable: true,
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-vault-send-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-vault-send-order' } },
+          }))
+
+          for (const requestId of [91, 92]) {
+            child.stdout.write(jsonLine({
+              id: requestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: { ref: 'documents/report.pdf' },
+                callId: `call-vault-send-order-${requestId}`,
+                namespace: 'murph',
+                tool: 'send_vault_file',
+              },
+            }))
+          }
+
+          await firstSendStarted.promise
+          try {
+            expect(sendVaultFile).toHaveBeenCalledOnce()
+          } finally {
+            releaseFirstSend.resolve()
+          }
+
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 92)).resolves.toEqual({
+            id: 92,
+            result: {
+              contentItems: [{
+                text: 'vault-file sending cannot be combined with other response media',
+                type: 'inputText',
+              }],
+              success: false,
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-vault-send-order',
+                message: 'Here is the report.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-vault-send-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      prompt: 'send the report twice',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Here is the report.',
+      responseMedia: [approvedFile],
+    })
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+  })
 
   it('leaves an earlier no-reply unsettled when the provider fails after creating a vault approval', async () => {
     const workingDirectory = await createTempDir(
@@ -6930,9 +7061,10 @@ describe('assistant codex runtime', () => {
       ...stableInput,
       prompt: 'turn with failed teardown',
     })
-    const failureExpectation = expect(failedTurn).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
-    })
+    const failureError = failedTurn.then(
+      () => null,
+      (error: unknown) => error,
+    )
     await firstTurnReady.promise
 
     try {
@@ -6940,7 +7072,9 @@ describe('assistant codex runtime', () => {
       requireMockChildProcess(spawnedChildren[0] ?? null).stdout.write('not-json\n')
       await waitForProcessKillWithFakeTimers(-25_500, 'SIGTERM')
       await vi.advanceTimersByTimeAsync(6_000)
-      await failureExpectation
+      expect(await failureError).toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -9519,15 +9653,18 @@ describe('assistant codex runtime', () => {
     vi.useFakeTimers()
     try {
       const externalStop = stopWarmCodexAppServer('operator-stop')
-      const externalStopExpectation = expect(externalStop).rejects.toMatchObject({
+      const externalStopError = externalStop.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await externalStopError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
-      await vi.advanceTimersByTimeAsync(6_000)
-      await externalStopExpectation
       vi.mocked(process.kill).mockClear()
 
       const replacementAttempt = executeCodexAppServerTurn({
@@ -9538,15 +9675,18 @@ describe('assistant codex runtime', () => {
         prompt: 'second stop failure launch',
         workingDirectory,
       })
-      const replacementExpectation = expect(replacementAttempt).rejects.toMatchObject({
+      const replacementError = replacementAttempt.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await replacementError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
-      await vi.advanceTimersByTimeAsync(6_000)
-      await replacementExpectation
     } finally {
       vi.useRealTimers()
     }
@@ -12610,6 +12750,13 @@ describe('assistant codex runtime', () => {
 
   it('requires exact active-turn identity for invocation-scoped root tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-root-tool-scope-')
+    const replyMessageRef = `ain_${'a'.repeat(32)}`
+    const reactionMessageRef = `ain_${'b'.repeat(32)}`
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      messageRef: string
+    }) => ({
+      targetInputId: input.messageRef,
+    }))
     const deviceTool: NonNullable<AssistantHostedToolContext['deviceTool']> = {
       request: vi.fn(async () => ({
         accounts: [],
@@ -12773,6 +12920,139 @@ describe('assistant codex runtime', () => {
             },
           })
 
+          writeSubAgentActivity(
+            child,
+            'thread-root-tool-scope',
+            'thread-root-tool-scope-descendant',
+            'started',
+            { turnId: 'turn-root-tool-scope' },
+          )
+          const messageTargetToolVariants = [
+            {
+              arguments: { message_ref: replyMessageRef },
+              tool: 'select_reply_target',
+            },
+            {
+              arguments: { message_ref: 'invalid' },
+              tool: 'select_reply_target',
+            },
+            {
+              arguments: {
+                message_ref: reactionMessageRef,
+                reaction: 'heart',
+              },
+              tool: 'react_to_message',
+            },
+            {
+              arguments: {
+                message_ref: reactionMessageRef,
+                reaction: 'invalid',
+              },
+              tool: 'react_to_message',
+            },
+          ] as const
+
+          let messageTargetRequestId = 104
+          for (const variant of messageTargetToolVariants) {
+            child.stdout.write(jsonLine({
+              id: messageTargetRequestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: variant.arguments,
+                namespace: 'murph',
+                threadId: 'thread-root-tool-scope-descendant',
+                tool: variant.tool,
+                turnId: 'turn-root-tool-scope-descendant',
+              },
+            }))
+            await expect(
+              waitForRpcResponse(child, messageTargetRequestId),
+            ).resolves.toEqual({
+              error: {
+                code: -32000,
+                message: 'Server requests from codex subagent threads are not supported.',
+              },
+              id: messageTargetRequestId,
+            })
+            messageTargetRequestId += 1
+          }
+
+          for (const variant of messageTargetToolVariants) {
+            child.stdout.write(jsonLine({
+              id: messageTargetRequestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: variant.arguments,
+                namespace: 'murph',
+                threadId: 'thread-root-tool-scope',
+                tool: variant.tool,
+                turnId: 'turn-stale-root-tool-scope',
+              },
+            }))
+            await expect(
+              waitForRpcResponse(child, messageTargetRequestId),
+            ).resolves.toEqual({
+              error: {
+                code: -32000,
+                message: 'Codex message turn id does not match the active turn.',
+              },
+              id: messageTargetRequestId,
+            })
+            messageTargetRequestId += 1
+          }
+
+          child.stdout.write(jsonLine({
+            id: messageTargetRequestId,
+            method: 'item/tool/call',
+            params: {
+              arguments: { message_ref: replyMessageRef },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'select_reply_target',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(
+            waitForRpcResponse(child, messageTargetRequestId),
+          ).resolves.toEqual({
+            id: messageTargetRequestId,
+            result: {
+              success: true,
+              contentItems: [{
+                type: 'inputText',
+                text: 'selection recorded',
+              }],
+            },
+          })
+          messageTargetRequestId += 1
+
+          child.stdout.write(jsonLine({
+            id: messageTargetRequestId,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                message_ref: reactionMessageRef,
+                reaction: 'heart',
+              },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'react_to_message',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(
+            waitForRpcResponse(child, messageTargetRequestId),
+          ).resolves.toEqual({
+            id: messageTargetRequestId,
+            result: {
+              success: true,
+              contentItems: [{
+                type: 'inputText',
+                text: 'reaction queued',
+              }],
+            },
+          })
+
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -12789,12 +13069,16 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      authorizeAcceptedMessageTarget,
       hostedToolContext: {
         ...createHostedToolContext(),
         automationTool,
         deviceTool,
       },
-      dynamicTools: resolveMurphDynamicTools({ deviceAvailable: true }),
+      dynamicTools: resolveMurphDynamicTools({
+        deviceAvailable: true,
+        messageTargetingAvailable: true,
+      }),
       prompt: 'inspect connected devices',
       workingDirectory,
     })).resolves.toMatchObject({
@@ -12803,6 +13087,17 @@ describe('assistant codex runtime', () => {
     })
     expect(deviceTool.request).toHaveBeenCalledTimes(1)
     expect(automationTool.request).not.toHaveBeenCalled()
+    expect(authorizeAcceptedMessageTarget).toHaveBeenNthCalledWith(1, {
+      action: 'native-reply',
+      deliveryContextOrdinal: 0,
+      messageRef: replyMessageRef,
+    })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenNthCalledWith(2, {
+      action: 'reaction',
+      deliveryContextOrdinal: 0,
+      messageRef: reactionMessageRef,
+    })
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledTimes(2)
   })
 
   it('returns a tool failure for invalid progress arguments without sending progress', async () => {
@@ -13785,14 +14080,17 @@ describe('assistant codex runtime', () => {
         closeStdin: () => null,
         processGroupPid: process.platform === 'win32' ? null : child.pid,
       })
-      const stopExpectation = expect(stopped).rejects.toMatchObject({
+      const stopError = stopped.then(
+        () => null,
+        (error: unknown) => error,
+      )
+      await vi.advanceTimersByTimeAsync(6_000)
+      expect(await stopError).toMatchObject({
         code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
         context: {
           retryable: false,
         },
       })
-      await vi.advanceTimersByTimeAsync(6_000)
-      await stopExpectation
     } finally {
       vi.useRealTimers()
     }
@@ -14784,7 +15082,7 @@ describe('assistant codex event shaping', () => {
                   senderThreadId: 'thread-subagent-parent',
                   receiverThreadIds: ['thread-subagent-child-a'],
                   prompt: 'crunch the export',
-                  model: 'gpt-5.5-mini',
+                  model: 'gpt-5.6-terra-mini',
                 },
                 threadId: 'thread-subagent-parent',
                 turnId: 'turn-subagent-parent',
@@ -14935,8 +15233,8 @@ describe('assistant codex event shaping', () => {
           outputTokens: 1_000,
           providerName: 'local-test-provider',
           reasoningTokens: 120,
-          requestedModel: 'gpt-5.5-mini',
-          servedModel: 'gpt-5.5-mini',
+          requestedModel: 'gpt-5.6-terra-mini',
+          servedModel: 'gpt-5.6-terra-mini',
           totalTokens: 5_000,
         },
       })
@@ -15055,7 +15353,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-fail-parent',
                   receiverThreadIds: ['thread-subagent-fail-child'],
-                  model: 'gpt-5.5-mini',
+                  model: 'gpt-5.6-terra-mini',
                 },
                 threadId: 'thread-subagent-fail-parent',
                 turnId: 'turn-subagent-fail-parent',
@@ -15143,6 +15441,7 @@ describe('assistant codex event shaping', () => {
       const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
       const onFinishWithoutReplyAccepted = vi.fn()
       const onFinishWithoutReplyRecorded = vi.fn()
+      const messageRef = `ain_${'d'.repeat(32)}`
       const spawnedChildren: MockChildProcess[] = []
       mockProcessGroupSignalsForChildren(spawnedChildren)
 
@@ -15168,6 +15467,7 @@ describe('assistant codex event shaping', () => {
                 namespace: 'murph',
                 tool: 'react_to_message',
                 arguments: {
+                  message_ref: messageRef,
                   reaction: 'heart',
                 },
                 threadId: 'thread-reaction-fail-parent',
@@ -15217,9 +15517,14 @@ describe('assistant codex event shaping', () => {
         env: {
           PATH: '/custom/bin',
         },
+        authorizeAcceptedMessageTarget: async () => ({
+          targetInputId: messageRef,
+        }),
+        dynamicTools: resolveMurphDynamicTools({
+          messageTargetingAvailable: true,
+        }),
         onFinishWithoutReplyAccepted,
         onFinishWithoutReplyRecorded,
-        allowMessageReactions: true,
         prompt: 'react and then finish without reply',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -15239,12 +15544,14 @@ describe('assistant codex event shaping', () => {
           {
             deliveryContextOrdinal: 0,
             reaction: 'heart',
+            targetInputId: messageRef,
           },
         ],
       })
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
+        messageReactionPending: true,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
@@ -15255,6 +15562,147 @@ describe('assistant codex event shaping', () => {
       ).toBeLessThan(
         onFinishWithoutReplyRecorded.mock.invocationCallOrder[0],
       )
+    })
+
+    it('keeps an earlier-context reaction pending for a later-context no-reply settlement', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-cross-context-reaction-work-')
+      const codexHome = await createTempDir('assistant-codex-cross-context-reaction-home-')
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const onFinishWithoutReplyRecorded = vi.fn()
+      const messageRef = `ain_${'e'.repeat(32)}`
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_550 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-cross-context-reaction',
+              turnId: 'turn-cross-context-reaction',
+            })
+            child.stdout.write(jsonLine({
+              id: 45,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'react_to_message',
+                arguments: {
+                  message_ref: messageRef,
+                  reaction: 'heart',
+                },
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 45)).resolves.toMatchObject({
+              id: 45,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'user-cross-context-initial',
+                  type: 'user_message',
+                  message: 'react to my earlier message',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'user-cross-context-steered',
+                  type: 'user_message',
+                  message: 'steered follow up',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              id: 46,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 46)).resolves.toMatchObject({
+              id: 46,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                status: 'failed',
+                threadId: 'thread-cross-context-reaction',
+                turnId: 'turn-cross-context-reaction',
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        authorizeAcceptedMessageTarget: async () => ({
+          targetInputId: messageRef,
+        }),
+        dynamicTools: resolveMurphDynamicTools({
+          messageTargetingAvailable: true,
+        }),
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        prompt: 'react then no-reply in a later steered context',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the Codex turn to fail')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+      })
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+            targetInputId: messageRef,
+          },
+        ],
+      })
+      // The accepted event settles the cumulative prefix through ordinal 1,
+      // so the ordinal-0 reaction must keep suppression evidence deferred.
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 1,
+        messageReactionPending: true,
+      })
     })
 
     it('preserves accepted no-reply and rollout context when the recorded hook fails', async () => {
@@ -15350,6 +15798,7 @@ describe('assistant codex event shaping', () => {
       expect(error).toBe(markerFailure)
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
+        messageReactionPending: false,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
@@ -15403,7 +15852,7 @@ describe('assistant codex event shaping', () => {
                     { length: trackedThreadCount + 1 },
                     (_, index) => `thread-subagent-cap-${index + 1}`,
                   ),
-                  model: 'gpt-5.5-mini',
+                  model: 'gpt-5.6-terra-mini',
                 },
                 threadId: 'thread-subagent-cap-parent',
                 turnId: 'turn-subagent-cap-parent',
@@ -15558,7 +16007,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-ordinal-parent',
                   receiverThreadIds: ['thread-subagent-ordinal-child'],
-                  model: 'gpt-5.5-mini',
+                  model: 'gpt-5.6-terra-mini',
                 },
                 threadId: 'thread-subagent-ordinal-parent',
                 turnId: 'turn-subagent-ordinal-parent',
@@ -16440,7 +16889,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-evict-parent',
                   receiverThreadIds: ['thread-subagent-evict-child'],
-                  model: 'gpt-5.5-mini',
+                  model: 'gpt-5.6-terra-mini',
                 },
                 threadId: 'thread-subagent-evict-parent',
                 turnId: 'turn-subagent-evict-parent',
@@ -16500,8 +16949,8 @@ describe('assistant codex event shaping', () => {
         usage: {
           inputTokens: 2_000,
           outputTokens: 500,
-          requestedModel: 'gpt-5.5-mini',
-          servedModel: 'gpt-5.5-mini',
+          requestedModel: 'gpt-5.6-terra-mini',
+          servedModel: 'gpt-5.6-terra-mini',
           totalTokens: 2_500,
         },
       })
@@ -16536,6 +16985,21 @@ describe('steered final segments', () => {
         kind: 'finish-without-reply'
       }
     | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'react-to-message'
+        messageRef: string
+        reaction: 'heart' | 'thumbs_up' | 'laugh'
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'select-reply-target'
+        messageRef: string
+      }
+    | {
         expectedText: string
         id: number
         kind: 'list-memberships'
@@ -16559,6 +17023,18 @@ describe('steered final segments', () => {
     return 'kind' in step && step.kind === 'list-memberships'
   }
 
+  function isReactToMessageStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
+    return 'kind' in step && step.kind === 'react-to-message'
+  }
+
+  function isSelectReplyTargetStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'select-reply-target' }> {
+    return 'kind' in step && step.kind === 'select-reply-target'
+  }
+
   function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
   }
@@ -16578,6 +17054,8 @@ describe('steered final segments', () => {
   async function runScriptedSteeredFinalSegmentsTurn(
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
+      authorizeAcceptedMessageTarget?:
+        CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
@@ -16705,6 +17183,63 @@ describe('steered final segments', () => {
               continue
             }
 
+            if (isReactToMessageStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'react_to_message',
+                  arguments: {
+                    message_ref: step.messageRef,
+                    reaction: step.reaction,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            if (isSelectReplyTargetStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'select_reply_target',
+                  arguments: {
+                    message_ref: step.messageRef,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
             child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
           }
 
@@ -16725,6 +17260,8 @@ describe('steered final segments', () => {
 
     return await executeCodexAppServerTurn({
       approvalPolicy: 'never',
+      authorizeAcceptedMessageTarget:
+        input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
@@ -16789,6 +17326,138 @@ describe('steered final segments', () => {
 
     expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
+  })
+
+  it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
+    const firstReplyRef = `ain_${'1'.repeat(32)}`
+    const firstReactionRef = `ain_${'2'.repeat(32)}`
+    const rejectedRef = `ain_${'3'.repeat(32)}`
+    const finalReplyRef = `ain_${'4'.repeat(32)}`
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      action: 'native-reply' | 'reaction'
+      deliveryContextOrdinal: number
+      messageRef: string
+    }) => input.messageRef === rejectedRef
+      ? null
+      : { targetInputId: input.messageRef })
+
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 90,
+        kind: 'select-reply-target',
+        messageRef: firstReactionRef,
+      },
+      {
+        expectedText: 'selection recorded',
+        id: 91,
+        kind: 'select-reply-target',
+        messageRef: firstReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'message target unavailable',
+        id: 92,
+        kind: 'select-reply-target',
+        messageRef: rejectedRef,
+      },
+      {
+        expectedText: 'reaction queued',
+        id: 93,
+        kind: 'react-to-message',
+        messageRef: firstReactionRef,
+        reaction: 'heart',
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 94,
+        kind: 'select-reply-target',
+        messageRef: finalReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+    ], { authorizeAcceptedMessageTarget })
+
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        media: [],
+        response: 'Answer one.',
+        targetInputId: firstReplyRef,
+      },
+    ])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.targetInputId).toBe(finalReplyRef)
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        reaction: 'heart',
+        targetInputId: firstReactionRef,
+      },
+    ])
+  })
+
+  it('clears only the reply selection when finish_without_reply wins', async () => {
+    const replyRef = `ain_${'5'.repeat(32)}`
+    const reactionRef = `ain_${'6'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: 'selection recorded',
+        id: 95,
+        kind: 'select-reply-target',
+        messageRef: replyRef,
+      },
+      {
+        expectedText: 'reaction queued',
+        id: 96,
+        kind: 'react-to-message',
+        messageRef: reactionRef,
+        reaction: 'thumbs_up',
+      },
+      {
+        expectedText: 'finished without reply',
+        id: 97,
+        kind: 'finish-without-reply',
+      },
+      completedItemEvent({
+        id: 'assistant-suppressed',
+        type: 'assistant_message',
+        message: 'Do not deliver this.',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(result.targetInputId).toBeNull()
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        reaction: 'thumbs_up',
+        targetInputId: reactionRef,
+      },
+    ])
   })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {

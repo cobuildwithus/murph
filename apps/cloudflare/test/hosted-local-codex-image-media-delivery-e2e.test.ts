@@ -32,7 +32,7 @@ const assistantReplyText = "Here is the setup image.";
 const assistantMediaUrl = "https://assets.example.test/assistant-media/dead-bug-setup.png";
 const generatedImageReplyText = "Here is the generated setup image.";
 const generatedImageUrl = "https://imagedelivery.net/hosted-local/generated-image/public";
-const productionLikeAssistantModel = "gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -142,6 +142,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
+      messageTargetingAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       vaultFileSendAvailable: true,

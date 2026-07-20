@@ -285,7 +285,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
   assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
   assert.match(markup, /target="_blank"/);
@@ -501,7 +500,6 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
@@ -875,7 +873,6 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
   assert.match(markup, /Apple Health not connected/u);
-  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
@@ -2256,7 +2253,7 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
@@ -2268,16 +2265,23 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /More → App Settings → Integrations → Apple Health/,
+    /the Murph app brings in your WHOOP data through Apple Health\./,
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /Tap Connect, choose the categories you want to share, then tap Allow/,
+    /Download it, sign in, and it walks you through the rest\./,
   );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Download or open Murph, sign in, and connect Apple Health/,
+  assert.doesNotMatch(rendered.container.textContent ?? "", /full right now/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Junction/);
+
+  const memoButton = rendered.container.querySelector(
+    "button[aria-label='Play voice memo']",
   );
+  assert.ok(memoButton instanceof rendered.window.HTMLButtonElement);
+  const memoAudio = rendered.container.querySelector(
+    "audio[src='/audio/whoop-sync-memos/upbeat.mp3']",
+  );
+  assert.ok(memoAudio, "expected the default-voice WHOOP sync memo");
 
   const appStoreLink = rendered.container.querySelector(
     "a[href='https://apps.apple.com/us/app/murph-ai/id6786145859']",
@@ -2300,7 +2304,7 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
   });
 
   assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Murph left you a message/);
 
   await rendered.cleanup();
 });
@@ -2339,6 +2343,7 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
         name: "Whoop",
       },
     ],
+    whoopSyncVoiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
   }));
 
   await act(async () => {
@@ -2346,12 +2351,16 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
   });
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connection could not be started/);
+  assert.ok(
+    rendered.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
+    "expected the member's picked-voice WHOOP sync memo",
+  );
 
   await rendered.cleanup();
 });

@@ -1,12 +1,15 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import type { TimelineEntry } from "../timeline.ts";
+import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
   type BrowserVaultEntityLink,
+  type BrowserVaultLabResultReferenceRange,
+  type BrowserVaultLabResultRow,
   type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultMetricSelectionRow,
@@ -17,6 +20,7 @@ import {
   type BrowserVaultSourceHealthRow,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
+import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 
 export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);
@@ -28,7 +32,15 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
   return {
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) => parseEntity(entry, `${label}.entities[${index}]`)),
+    experimentOutcomes: record.experimentOutcomes === undefined
+      ? []
+      : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
+          experimentOutcomeSchema.parse(entry)
+        ),
     generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
+    labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
+      parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
+    ),
     metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
     metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
@@ -89,6 +101,47 @@ function parseEntity(value: unknown, label: string): BrowserVaultEntity {
 function parseEntityLink(value: unknown, label: string): BrowserVaultEntityLink {
   const record = requireRecord(value, label);
   return { targetId: requireString(record.targetId, `${label}.targetId`), type: requireString(record.type, `${label}.type`) };
+}
+
+function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResultRow {
+  const record = requireRecord(value, label);
+  const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
+  if (rowSchema !== BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA) {
+    throw new TypeError(`${label}.rowSchema must be ${BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA}.`);
+  }
+  const valueNumber = readNullableFiniteNumber(record.value);
+  const textValue = readNullableString(record.textValue);
+  if (valueNumber === null && textValue === null) {
+    throw new TypeError(`${label} must include a numeric value or textValue.`);
+  }
+  const normalizedValue = readNullableFiniteNumber(record.normalizedValue);
+  const normalizedUnit = readNullableString(record.normalizedUnit);
+  if ((normalizedValue === null) !== (normalizedUnit === null)) {
+    throw new TypeError(`${label} normalizedValue and normalizedUnit must be provided together.`);
+  }
+  if (normalizedValue !== null && valueNumber === null) {
+    throw new TypeError(`${label}.normalizedValue requires a numeric value.`);
+  }
+
+  return {
+    analyte: requireString(record.analyte, `${label}.analyte`),
+    biomarkerKey: readNullableString(record.biomarkerKey),
+    comparator: readNullableMetricComparator(record.comparator, `${label}.comparator`),
+    date: requireString(record.date, `${label}.date`),
+    flag: readNullableString(record.flag),
+    id: requireString(record.id, `${label}.id`),
+    labName: readNullableString(record.labName),
+    metricKey: requireString(record.metricKey, `${label}.metricKey`),
+    normalizedUnit,
+    normalizedValue,
+    observedAt: requireString(record.observedAt, `${label}.observedAt`),
+    referenceRange: readNullableReferenceRange(record.referenceRange, `${label}.referenceRange`),
+    rowSchema,
+    sourceLabel: readNullableString(record.sourceLabel),
+    textValue,
+    unit: readNullableString(record.unit),
+    value: valueNumber,
+  };
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
@@ -240,6 +293,9 @@ function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
   return value.slice();
 }
+function readOptionalArray(value: unknown, label: string): unknown[] {
+  return value === undefined ? [] : requireArray(value, label);
+}
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} must be a non-empty string.`);
   return value;
@@ -297,6 +353,24 @@ function readNullableMetricComparator(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "<" || text === "<=" || text === ">" || text === ">=") return text;
   throw new TypeError(`${label} must be a metric comparator.`);
+}
+function readNullableReferenceRange(
+  value: unknown,
+  label: string,
+): BrowserVaultLabResultReferenceRange | null {
+  if (value === null || value === undefined) return null;
+  const record = requireRecord(value, label);
+  const low = readNullableFiniteNumber(record.low);
+  const high = readNullableFiniteNumber(record.high);
+  const text = readNullableString(record.text);
+  if (low === null && high === null && text === null) {
+    throw new TypeError(`${label} must include low, high, or text.`);
+  }
+  return {
+    ...(low !== null ? { low } : {}),
+    ...(high !== null ? { high } : {}),
+    ...(text !== null ? { text } : {}),
+  };
 }
 function requireMetricSelectionStatus(value: unknown, label: string) {
   const text = requireString(value, label);

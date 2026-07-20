@@ -50,7 +50,7 @@ const conversationAheadInboundText = "conversation input appended during checkpo
 const firstReplyText = "First reply captured before shutdown.";
 const conversationAheadReplyText = "Conversation-ahead input restored exactly once.";
 const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
-const assistantModel = "gpt-5.5";
+const assistantModel = "gpt-5.6-terra";
 const idleCheckpointDelayMs = 180_000;
 const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
 

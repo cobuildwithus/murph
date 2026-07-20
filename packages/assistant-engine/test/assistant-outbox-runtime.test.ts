@@ -167,6 +167,237 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
+  it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-state-')
+    const legacy = await createIntent(vaultRoot, {
+      channel: 'linq',
+      message: 'legacy contextual message',
+      replyToMessageId: 'linq-context-message',
+      sessionId: 'session-native-reply-legacy',
+      turnId: 'turn-native-reply-legacy',
+    })
+    const marked = await createIntent(vaultRoot, {
+      channel: 'linq',
+      message: 'selected native reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-selected-message',
+      sessionId: 'session-native-reply-marked',
+      turnId: 'turn-native-reply-marked',
+    })
+
+    expect(legacy.nativeReplyRequested).toBeUndefined()
+    expect(marked.nativeReplyRequested).toBe(true)
+    await expect(readRawOutboxIntent(vaultRoot, legacy.intentId)).resolves.not
+      .toHaveProperty('nativeReplyRequested')
+    await expect(readRawOutboxIntent(vaultRoot, marked.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+      })
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...marked,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-04-12T01:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-12T00:30:00.000Z',
+    })
+    expect(retryable.nativeReplyRequested).toBe(true)
+    await expect(readAssistantOutboxIntent(vaultRoot, marked.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+        status: 'retryable',
+      })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-native-reply-delivered',
+        target: 'thread-1',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: marked.intentId,
+      vault: vaultRoot,
+    })
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding.mock.calls[0]?.[0])
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-selected-message',
+      })
+
+    for (const channel of ['linq', 'telegram'] as const) {
+      for (const replyToMessageId of [
+        'ain_private-ref',
+        'hid_private-ref',
+        'hbid:private-ref',
+        'hbidx:private-ref',
+        'linq:ain_private-ref',
+        'linq:hid_private-ref',
+        'provider:hbid:private-ref',
+        'provider:hbidx:private-ref',
+        'h1_0123456789abcdef01234567',
+        '[REDACTED message]',
+      ]) {
+        await expect(createAssistantOutboxIntent({
+          channel,
+          message: 'invalid native reply target',
+          nativeReplyRequested: true,
+          replyToMessageId,
+          sessionId: `session-native-reply-invalid-${channel}`,
+          turnId: `turn-native-reply-invalid-${channel}`,
+          vault: vaultRoot,
+        })).rejects.toMatchObject({
+          code: 'ASSISTANT_NATIVE_REPLY_TARGET_INVALID',
+        })
+      }
+    }
+  })
+
+  it('fails closed before mutating a same-token message target or native reply marker', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-dedupe-')
+    const first = await createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })
+    const exactRetry = await createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })
+    expect(exactRetry.intentId).toBe(first.intentId)
+
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:02:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      replyToMessageId: 'linq-message-a',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      createdAt: '2026-04-08T00:03:00.000Z',
+      dedupeToken: 'stable-native-reply-token',
+      message: 'selected reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-b',
+      sessionId: 'session-native-reply-dedupe',
+      threadId: 'linq-thread-native-reply',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'stable-native-reply-token',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-thread-native-reply',
+      reaction: 'thumbs_up',
+      sessionId: 'session-native-reply-dedupe',
+      targetMessageId: 'linq-message-a',
+      turnId: 'turn-native-reply-dedupe',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        nativeReplyRequested: true,
+        replyToMessageId: 'linq-message-a',
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      })
+  })
+
+  it('fails closed when delivery-idempotency fallback finds a different marked effect', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-native-reply-idempotency-fallback-',
+    )
+    const legacy = await createAssistantOutboxIntent({
+      channel: 'linq',
+      dedupeToken: null,
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      message: 'legacy contextual message',
+      replyToMessageId: 'linq-message-fallback',
+      sessionId: 'session-native-reply-fallback',
+      threadId: 'linq-thread-fallback',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })
+
+    await expect(createAssistantOutboxIntent({
+      channel: 'linq',
+      dedupeToken: 'hosted-native-reply-fallback',
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      message: 'legacy contextual message',
+      nativeReplyRequested: true,
+      replyToMessageId: 'linq-message-fallback',
+      sessionId: 'session-native-reply-fallback',
+      threadId: 'linq-thread-fallback',
+      threadIsDirect: true,
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dedupeToken: 'hosted-native-reply-fallback',
+      deliveryIdempotencyKey: 'hosted-native-reply-fallback',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-thread-fallback',
+      reaction: 'thumbs_up',
+      sessionId: 'session-native-reply-fallback',
+      targetMessageId: 'linq-message-fallback',
+      turnId: 'turn-native-reply-fallback',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, legacy.intentId)).resolves
+      .toMatchObject({
+        operation: null,
+        replyToMessageId: 'linq-message-fallback',
+      })
+  })
+
   it('persists answered mailbox item ids and defaults other sends to none', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-answered-mailbox-')
     const groupedMailboxItemIds = Array.from(
@@ -321,7 +552,7 @@ describe('assistant outbox runtime', () => {
     ).resolves.toEqual(new Set([legacyIntent.intentId]))
   })
 
-  it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
+  it('repairs a targetless unmarked queued dedupe hit before the first dispatch attempt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
     const stale = await createAssistantOutboxIntent({
@@ -1871,6 +2102,60 @@ describe('assistant outbox runtime', () => {
       target: '123',
       targetMessageId: '45',
     })
+  })
+
+  it('rejects a deduped reaction target change after its safe mutation window', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-reaction-target-immutable-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-target-immutable',
+      dispatchMode: 'queue-only',
+      explicitTarget: '123',
+      reaction: 'heart',
+      sessionId: 'session-reaction-target-immutable',
+      targetMessageId: '45',
+      turnId: 'turn-reaction-target-immutable',
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      nextAttemptAt: null,
+      preparedDispatchToken: 'prepared-reaction-target-immutable',
+      status: 'sending',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+    const setTelegramMessageReaction = vi.fn()
+
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-target-immutable',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: 'session-reaction-target-immutable',
+      targetMessageId: '46',
+      turnId: 'turn-reaction-target-immutable',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    expect(setTelegramMessageReaction).not.toHaveBeenCalled()
+    await expect(readAssistantOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
+      .toMatchObject({
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+        },
+        preparedDispatchToken: 'prepared-reaction-target-immutable',
+        replyToMessageId: '45',
+        status: 'sending',
+      })
   })
 
   it('dispatches and persists media-only Linq voice memo intents', async () => {
@@ -4059,6 +4344,7 @@ async function createIntent(
     explicitTarget: string | null
     identityId: string | null
     message: string
+    nativeReplyRequested: true
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
     sessionId: string
@@ -4086,6 +4372,9 @@ async function createIntent(
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
+    ...(overrides.nativeReplyRequested === undefined
+      ? {}
+      : { nativeReplyRequested: overrides.nativeReplyRequested }),
     replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
     threadId: overrides.threadId ?? 'thread-1',

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
@@ -27,13 +28,14 @@ beforeEach(() => {
 });
 
 describe("hosted browser-vault replica refresh preparation", () => {
-  it("builds metric rows from projection points while readVault stays sparse", async () => {
+  it("builds lab and metric rows from projection points while readVault stays sparse", async () => {
     const {
       listMetricPoints,
       readVault,
     } = await import("@murphai/query");
     const {
       createHostedBrowserVaultReplicaForSourceState,
+      summarizeHostedBrowserVaultReplicaContent,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
 
@@ -59,6 +61,79 @@ describe("hosted browser-vault replica refresh preparation", () => {
                 value: 87,
               },
             ],
+          }),
+          "",
+        ].join("\n"),
+      );
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/events/2020/2020-02.jsonl",
+        [
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_live_lab",
+            kind: "test",
+            occurredAt: "2020-02-01T08:00:00.000Z",
+            recordedAt: "2020-02-01T18:00:00.000Z",
+            dayKey: "2020-02-01",
+            source: "manual",
+            title: "Older blood panel",
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 5.1,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_live_lab",
+            kind: "test",
+            occurredAt: "2020-02-01T08:00:00.000Z",
+            recordedAt: "2020-02-02T18:00:00.000Z",
+            dayKey: "2020-02-01",
+            source: "manual",
+            title: "Corrected older blood panel",
+            lifecycle: { revision: 2 },
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 5.3,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_deleted_lab",
+            kind: "test",
+            occurredAt: "2020-02-03T08:00:00.000Z",
+            recordedAt: "2020-02-03T18:00:00.000Z",
+            dayKey: "2020-02-03",
+            source: "manual",
+            title: "Removed older blood panel",
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 9.9,
+            }],
+          }),
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_old_deleted_lab",
+            kind: "test",
+            occurredAt: "2020-02-03T08:00:00.000Z",
+            recordedAt: "2020-02-04T18:00:00.000Z",
+            dayKey: "2020-02-03",
+            source: "manual",
+            title: "Removed older blood panel",
+            lifecycle: { revision: 2, state: "deleted" },
+            results: [{
+              analyte: "Hemoglobin A1c",
+              biomarkerSlug: "hba1c",
+              unit: "percent",
+              value: 9.9,
+            }],
           }),
           "",
         ].join("\n"),
@@ -91,10 +166,276 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(vault.entities.some((entity) => entity.entityId === "smp_dense_glucose")).toBe(false);
       expect(vault.samples.some((sample) => sample.entityId === "smp_dense_glucose")).toBe(false);
       expect(points.some((point) => point.metricKey === "apob" && point.value === 87)).toBe(true);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 5.3)).toBe(true);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 5.1)).toBe(false);
+      expect(points.some((point) => point.metricKey === "hba1c" && point.value === 9.9)).toBe(false);
       expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
       expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
       expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
+      expect(replica.metricRows.some((row) => row.metricKey === "hba1c")).toBe(false);
       expect(replica.metricRows.some((row) => row.metricKey === "glucose" && row.value === 101)).toBe(false);
+      expect(replica.labResultRows).toHaveLength(2);
+      expect(replica.labResultRows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          analyte: "Apolipoprotein B",
+          metricKey: "apob",
+          value: 87,
+        }),
+        expect.objectContaining({
+          analyte: "Hemoglobin A1c",
+          metricKey: "hba1c",
+          value: 5.3,
+        }),
+      ]));
+      expect(replica.labResultRows.some((row) => row.value === 5.1 || row.value === 9.9)).toBe(false);
+
+      const labOnlyContent = summarizeHostedBrowserVaultReplicaContent({
+        ...replica,
+        entities: [],
+        metricGoalProgressRows: [],
+        metricRows: [],
+        searchRows: [],
+        sourceHealthRows: [],
+        timelineRows: [],
+        weeklySampleSummaries: [],
+      });
+      expect(labOnlyContent).toMatchObject({
+        hasPrivateContent: true,
+        labResultRows: 2,
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("projects a validated referenced outcome and hashes changes to its bytes", async () => {
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+      hashHostedBrowserVaultReplicaSources,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-outcome-"));
+    const experimentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const outcomePath = "bank/experiments/outcomes/private-trial-2026-05-14.json";
+    const outcome = createCanonicalOutcome({ experimentId });
+
+    try {
+      await writeVaultFile(
+        vaultRoot,
+        "bank/experiments/private-trial.md",
+        createExperimentDocument({
+          experimentId,
+          outcomePath,
+          outcomeId: outcome.outcomeId,
+          outcomeGeneratedAt: outcome.generatedAt,
+          slug: "private-trial",
+          status: "completed",
+        }),
+      );
+      await writeVaultFile(vaultRoot, outcomePath, `${JSON.stringify(outcome, null, 2)}\n`);
+
+      const firstHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2027-06-20T12:00:00.000Z",
+        sourceStateHash: firstHash.hash,
+        vaultRoot,
+      });
+
+      expect(replica.experimentOutcomes).toEqual([outcome]);
+      expect(firstHash.fileCount).toBe(2);
+
+      const revisedOutcome = {
+        ...outcome,
+        conclusion: {
+          ...outcome.conclusion,
+          headline: "The revised saved headline",
+        },
+      };
+      await writeVaultFile(
+        vaultRoot,
+        outcomePath,
+        `${JSON.stringify(revisedOutcome, null, 2)}\n`,
+      );
+      const secondHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(secondHash.hash).not.toBe(firstHash.hash);
+      expect(secondHash.fileCount).toBe(firstHash.fileCount);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("projects the output of the canonical experiment outcome writer", async () => {
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+      hashHostedBrowserVaultReplicaSources,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-writer-"));
+
+    try {
+      const services = createIntegratedVaultServices();
+      await services.core.init({ requestId: null, timezone: "UTC", vault: vaultRoot });
+      await services.core.startExperiment({
+        payload: {
+          analysisPlan: {
+            desiredDirection: "decrease",
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          experiment: {
+            slug: "writer-projection",
+            startedOn: "2026-06-01",
+            title: "Writer projection",
+          },
+          runPlan: {
+            baselineEnd: "2026-06-03",
+            baselineStart: "2026-06-01",
+            interventionEnd: "2026-06-10",
+            interventionStart: "2026-06-04",
+          },
+          source: { kind: "custom" },
+        },
+        requestId: null,
+        vault: vaultRoot,
+      });
+      const written = await services.core.writeExperimentOutcome({
+        asOf: "2026-06-15",
+        lookup: "writer-projection",
+        requestId: null,
+        vault: vaultRoot,
+      });
+      await services.core.stopExperiment({
+        lookup: "writer-projection",
+        occurredAt: "2026-06-15T12:00:00.000Z",
+        requestId: null,
+        vault: vaultRoot,
+      });
+      await services.core.updateExperiment({
+        lookup: "writer-projection",
+        requestId: null,
+        runPlan: {
+          baselineEnd: "2026-06-04",
+          baselineStart: "2026-06-02",
+          interventionEnd: "2026-06-20",
+          interventionStart: "2026-06-05",
+        },
+        status: "paused",
+        title: "Renamed writer projection",
+        vault: vaultRoot,
+      });
+      const sourceHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2027-06-20T12:00:00.000Z",
+        sourceStateHash: sourceHash.hash,
+        vaultRoot,
+      });
+
+      expect(replica.experimentOutcomes).toEqual([written.outcome]);
+
+      const {
+        createBrowserVaultQueryClient,
+        selectBrowserVaultExperimentResults,
+      } = await import("@murphai/query/browser");
+      const results = selectBrowserVaultExperimentResults(
+        createBrowserVaultQueryClient(replica),
+        "writer-projection",
+      );
+      expect(results?.savedOutcomeStatus).toBe("available");
+      expect(results?.persistedOutcome).toEqual(written.outcome);
+      expect(results?.experiment.commonsProtocolRef).toEqual(
+        written.outcome.commonsProtocolRef,
+      );
+      expect(results?.experiment.effectiveProtocolSnapshot).toEqual(
+        written.outcome.effectiveProtocolSnapshot,
+      );
+      expect(results?.experiment.phase).toBe("completed");
+      expect(results?.experiment.protocolRef).toEqual(written.outcome.protocolRef);
+      expect(results?.experiment.status).toBe(written.outcome.experiment.status);
+      expect(results?.experiment.title).toBe(written.outcome.experiment.title);
+      expect(results?.experiment.windows).toEqual(written.outcome.windows);
+      expect(results?.persistedOutcome?.windows).toEqual({
+        baselineEnd: "2026-06-03",
+        baselineStart: "2026-06-01",
+        interventionEnd: "2026-06-10",
+        interventionStart: "2026-06-04",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed for missing escaping mismatched and invalid outcome references", async () => {
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-invalid-outcome-"));
+    const cases = [
+      {
+        experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        outcomePath: "bank/experiments/outcomes/missing.json",
+        slug: "missing-outcome",
+      },
+      {
+        experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        outcomePath: "../outside.json",
+        slug: "escaping-outcome",
+      },
+      {
+        experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        outcomePath: "bank/experiments/outcomes/mismatched.json",
+        slug: "mismatched-outcome",
+      },
+      {
+        experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+        outcomePath: "bank/experiments/outcomes/invalid.json",
+        slug: "invalid-outcome",
+      },
+    ];
+
+    try {
+      for (const entry of cases) {
+        await writeVaultFile(
+          vaultRoot,
+          `bank/experiments/${entry.slug}.md`,
+          createExperimentDocument({
+            ...entry,
+            outcomeGeneratedAt: "2026-05-15T12:00:00.000Z",
+            outcomeId: `outcome_${entry.slug}`,
+            status: "completed",
+          }),
+        );
+      }
+      await writeVaultFile(
+        vaultRoot,
+        "bank/experiments/unrelated-run.md",
+        createExperimentDocument({
+          experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+          slug: "unrelated-run",
+          status: "active",
+        }),
+      );
+      await writeVaultFile(
+        vaultRoot,
+        "bank/experiments/outcomes/mismatched.json",
+        `${JSON.stringify(createCanonicalOutcome({
+          experimentId: "exp_01ARZ3NDEKTSV4RRFFQ69G5FB1",
+          outcomeId: "outcome_mismatched-outcome",
+          slug: "different-run",
+        }), null, 2)}\n`,
+      );
+      await writeVaultFile(
+        vaultRoot,
+        "bank/experiments/outcomes/invalid.json",
+        "{\"schemaVersion\":\"not-an-outcome\"}\n",
+      );
+
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2026-05-20T12:00:00.000Z",
+        sourceStateHash: "invalid-outcome-test",
+        vaultRoot,
+      });
+
+      expect(replica.experimentOutcomes).toEqual([]);
+      expect(replica.entities.some((entity) => entity.id ===
+        "exp_01ARZ3NDEKTSV4RRFFQ69G5FB0")).toBe(true);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -102,9 +443,10 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
   it("summarizes restored canonical source separately from default metric selection rows", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
-    const { hashCanonicalQuerySources, listCanonicalSourceManifest } = await import("@murphai/query");
+    const { listCanonicalSourceManifest } = await import("@murphai/query");
     const {
       createHostedBrowserVaultReplicaRefreshFromWorkspace,
+      hashHostedBrowserVaultReplicaSources,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
     const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
@@ -124,7 +466,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       ].join("\n"));
 
       const directManifest = await listCanonicalSourceManifest(vaultRoot);
-      const directSourceHash = await hashCanonicalQuerySources(vaultRoot);
+      const directSourceHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
       expect(directManifest.map((entry) => entry.relativePath)).toEqual([experimentPath]);
 
       const prepared = await createHostedBrowserVaultReplicaRefreshFromWorkspace({
@@ -383,6 +725,94 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 });
+
+function createCanonicalOutcome(input: {
+  experimentId: string;
+  outcomeId?: string;
+  slug?: string;
+}) {
+  const slug = input.slug ?? "private-trial";
+
+  return {
+    adherenceSummary: {
+      completedSessions: 5,
+      minimumUsefulSessions: 4,
+      status: "met_target" as const,
+      targetSessions: 5,
+    },
+    asOf: "2026-05-14",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: ["Travel overlapped one intervention day."],
+      headline: "The exact saved headline",
+      plainLanguage: "This is the exact saved plain-language conclusion.",
+    },
+    confidence: {
+      level: "medium" as const,
+      reasons: ["The saved analysis accounted for travel."],
+    },
+    confounders: ["Travel"],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: input.experimentId,
+      slug,
+      status: "completed" as const,
+      title: slug,
+    },
+    generatedAt: "2026-05-15T12:00:00.000Z",
+    metricResults: [],
+    outcomeId: input.outcomeId ?? "outcome_private-trial",
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v1" as const,
+    windows: {
+      baselineEnd: "2026-05-03",
+      baselineStart: "2026-05-01",
+      interventionEnd: "2026-05-14",
+      interventionStart: "2026-05-04",
+    },
+  };
+}
+
+function createExperimentDocument(input: {
+  experimentId: string;
+  outcomeGeneratedAt?: string;
+  outcomeId?: string;
+  outcomePath?: string;
+  slug: string;
+  status: "active" | "completed";
+}): string {
+  const outcomeRef = input.outcomePath && input.outcomeId
+    ? [
+        "outcomeRef:",
+        `  outcomeId: ${input.outcomeId}`,
+        ...(input.outcomeGeneratedAt
+          ? [`  generatedAt: ${input.outcomeGeneratedAt}`]
+          : []),
+        `  relativePath: ${input.outcomePath}`,
+      ]
+    : [];
+
+  return [
+    "---",
+    "schemaVersion: murph.frontmatter.experiment.v1",
+    "docType: experiment",
+    `experimentId: ${input.experimentId}`,
+    `slug: ${input.slug}`,
+    `title: ${input.slug}`,
+    `status: ${input.status}`,
+    "startedOn: 2026-05-01",
+    ...(input.status === "completed" ? ["endedOn: 2026-05-14"] : []),
+    "runPlan:",
+    "  baselineStart: 2026-05-01",
+    "  baselineEnd: 2026-05-03",
+    "  interventionStart: 2026-05-04",
+    "  interventionEnd: 2026-05-14",
+    ...outcomeRef,
+    "---",
+    `# ${input.slug}`,
+    "",
+  ].join("\n");
+}
 
 async function writeVaultFile(
   vaultRoot: string,

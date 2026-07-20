@@ -663,7 +663,7 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.5",
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-5.6-terra",
     );
     const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
     const request = new Request(url, {

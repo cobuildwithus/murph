@@ -61,7 +61,7 @@ const DEFAULT_MEMBER_CHANNELS = {
 } as const;
 const HOSTED_ASSISTANT_SEED_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
-  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
@@ -70,7 +70,7 @@ const HOSTED_CODEX_VERCEL_GATEWAY_TARGET = {
   adapter: "codex-cli",
   approvalPolicy: "never",
   codexCommand: null,
-  model: "gpt-5.5",
+  model: "gpt-5.6-terra",
   modelProvider: "openai",
   oss: false,
   profile: null,

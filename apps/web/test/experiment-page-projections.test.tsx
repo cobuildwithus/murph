@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import { resolveHealthCommonsExperimentResultsPublic } from "@/src/lib/health-commons/experiment-projections";
 import type { ProtocolTabExperiment } from "@/src/components/experiments/experiment-detail/protocol-tab";
+import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 
 const mocks = vi.hoisted(() => ({
   getHostedDashboardPageAuthSnapshot: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   }),
   hostedStart: vi.fn(),
   protocolTab: vi.fn(),
+  resultsTabClient: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -54,6 +56,24 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/active-run-summary-client
   },
 }));
 
+vi.mock("../app/(dashboard)/experiments/[experimentId]/results/results-tab-client", () => ({
+  ResultsTabClient({
+    protocol,
+    startAction,
+  }: {
+    protocol: ExperimentResultsPublicProjection;
+    startAction?: ReactNode;
+  }) {
+    mocks.resultsTabClient({ protocol, startAction });
+
+    return createElement(
+      "div",
+      { "data-experiment-id": protocol.id },
+      protocol.title,
+    );
+  },
+}));
+
 vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server", () => ({
   ExperimentStartButtonFallback({ protocolTitle }: { protocolTitle: string }) {
     return createElement("button", { type: "button" }, protocolTitle);
@@ -76,6 +96,9 @@ import ExperimentDetailLayout from "../app/(dashboard)/experiments/[experimentId
 import ExperimentDetailPage, {
   generateMetadata,
 } from "../app/(dashboard)/experiments/[experimentId]/page";
+import ExperimentResultsPage, {
+  generateMetadata as generateResultsMetadata,
+} from "../app/(dashboard)/experiments/[experimentId]/results/page";
 
 describe("experiment page projections", () => {
   beforeEach(() => {
@@ -88,6 +111,7 @@ describe("experiment page projections", () => {
     mocks.notFound.mockClear();
     mocks.hostedStart.mockClear();
     mocks.protocolTab.mockClear();
+    mocks.resultsTabClient.mockClear();
   });
 
   it("keeps experiment route entrypoints on generated projections instead of the full resolver", () => {
@@ -103,14 +127,53 @@ describe("experiment page projections", () => {
       new URL("../app/(dashboard)/experiments/[experimentId]/experiment-layout-client.tsx", import.meta.url),
       "utf8",
     );
+    const resultsSource = readFileSync(
+      new URL("../app/(dashboard)/experiments/[experimentId]/results/page.tsx", import.meta.url),
+      "utf8",
+    );
 
     expect(pageSource).toContain("resolveHealthCommonsExperimentProtocolTab");
     expect(pageSource).not.toContain("resolveHealthCommonsExperimentProtocol(");
     expect(pageSource).not.toContain("ExperimentDetailClient");
     expect(layoutSource).toContain("resolveHealthCommonsExperimentShell");
     expect(layoutSource).not.toContain("resolveHealthCommonsExperimentProtocol");
+    expect(resultsSource).toContain("resolveHealthCommonsExperimentResultsPublic");
+    expect(resultsSource).not.toContain("resolveHealthCommonsExperimentProtocol");
     expect(layoutClientSource).not.toContain("BrowserVaultProvider");
     expect(layoutClientSource).not.toContain("resolveBrowserVaultExperimentRun");
+  });
+
+  it("renders the authenticated results route from the narrow public projection", async () => {
+    await expect(generateResultsMetadata({
+      params: Promise.resolve({
+        experimentId: "finnish-sauna",
+      }),
+    })).resolves.toEqual(expect.objectContaining({
+      description: expect.stringContaining("steady, tolerable heat"),
+      title: "Finnish Dry Sauna results | Murph Experiments",
+    }));
+
+    const element = await ExperimentResultsPage({
+      params: Promise.resolve({
+        experimentId: "murph-finnish-standard-3x-week",
+      }),
+    });
+    const markup = renderToStaticMarkup(element);
+    const protocol = mocks.resultsTabClient.mock.calls.at(-1)?.[0]
+      ?.protocol as ExperimentResultsPublicProjection;
+
+    expect(mocks.getHostedDashboardPageAuthSnapshot).toHaveBeenCalled();
+    expect(protocol).toEqual(expect.objectContaining({
+      baselineDays: 7,
+      commons: expect.objectContaining({
+        key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+        routeId: "finnish-sauna",
+      }),
+      durationDays: 21,
+      id: "finnish-sauna",
+      title: "Finnish Dry Sauna",
+    }));
+    expect(markup).toContain('data-experiment-id="finnish-sauna"');
   });
 
   it("uses the shell projection for metadata and shared layout props", async () => {

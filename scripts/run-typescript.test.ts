@@ -100,6 +100,30 @@ describe("TypeScript runner arguments", () => {
     ]);
   });
 
+  it("automatically selects the shared profile for Codex with an explicit opt-out", () => {
+    expect(
+      runner.buildTypeScriptInvocation(
+        "package",
+        ["-p", "tsconfig.json"],
+        { CODEX_THREAD_ID: "thread" },
+      ).args,
+    ).toEqual(["-p", "tsconfig.json", "--checkers", "1"]);
+    expect(
+      runner.buildTypeScriptInvocation(
+        "package",
+        ["-p", "tsconfig.json"],
+        { CODEX_THREAD_ID: "thread", MURPH_VERIFY_SHARED_HOST: "0" },
+      ).args,
+    ).toEqual(["-p", "tsconfig.json"]);
+    expect(
+      runner.buildTypeScriptInvocation(
+        "package",
+        ["-p", "tsconfig.json"],
+        { CI: "1", CODEX_THREAD_ID: "thread" },
+      ).args,
+    ).toEqual(["-p", "tsconfig.json"]);
+  });
+
   it("keeps package builders at one for shared build-mode invocations", () => {
     expect(runner.containsBuildFlag(["-b", "tsconfig.json"])).toBe(true);
     expect(runner.containsBuildFlag(["--build", "tsconfig.json"])).toBe(true);

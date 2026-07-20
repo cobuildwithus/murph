@@ -545,29 +545,38 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'explain naturally that approval is required',
+      'Only after this turn establishes an obligation to send a newly generated file now',
     )
     expect(prompt).toContain(
-      'The file is not attached yet.',
+      '.runtime/operations/assistant/generated-deliveries/<flat-filename>',
     )
     expect(prompt).toContain(
-      'The runtime appends the exact approval link outside model context',
-    )
-    expect(prompt).toContain('do not invent, request, or print an approval URL')
-    expect(prompt).toContain(
-      'When `murph.send_vault_file` returns `status: "approved"`',
+      'Do not use runtime staging for "prepare now, maybe send later,"',
     )
     expect(prompt).toContain(
-      'write a concise, natural reply using the returned filename when useful',
+      'never move or copy existing, user-owned, canonical, or durable files there.',
     )
     expect(prompt).toContain(
-      'such as "Here it is: report.pdf."',
+      'say approval is required and the file is not attached',
     )
     expect(prompt).toContain(
-      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+      'the runtime adds the exact approval link outside model context',
+    )
+    expect(prompt).toContain('Never invent or print a link')
+    expect(prompt).toContain(
+      'On `status: "approved"`',
     )
     expect(prompt).toContain(
-      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
+      'reply naturally with the filename',
+    )
+    expect(prompt).toContain(
+      'for example, "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Never expose `deliveryStatus`, approval/queue mechanics, or stock "delivery is not confirmed" copy',
+    )
+    expect(prompt).toContain(
+      'claim success only after later evidence says `sent`.',
     )
   })
 
@@ -585,6 +594,23 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).not.toContain('regimen with `kind=habit`')
     expect(prompt).not.toContain('baseline/current state, target/date, ladder')
+  })
+
+  it('requires generated automation instructions to carry a clear subject anchor', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'include a privacy-safe user-facing subject anchor in the stored instructions',
+    )
+    expect(prompt).toContain(
+      'after hours of unrelated conversation, the recipient should still know what it is about from the message itself',
+    )
+    expect(prompt).toContain(
+      'A title, slug, metadata, or preserved thread is not enough.',
+    )
+    expect(prompt).toContain(
+      'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+    )
   })
 
   it('guides explicit structured product feedback capture', () => {
@@ -1168,7 +1194,7 @@ describe('assistant consumption lookup guidance', () => {
       'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
-      'When any domain owner presents a named movement, let it choose the movement, then read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` for lookup and presentation.',
+      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
     )
     expect(prompt).toContain(
       'follow the owning skill\'s label or exercise-catalog workflow instead of estimating from memory or inventing details.',
@@ -1185,6 +1211,12 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).not.toContain('attach available catalog images')
     expect(prompt).not.toContain('Use returned catalog `images[]` as response media')
     expect(prompt).not.toContain('images are unavailable, or safety requires it')
+    expect(prompt).not.toContain(
+      'attach at least one useful returned catalog image',
+    )
+    expect(prompt).not.toContain(
+      'omit exercise images unless the user asks for them',
+    )
   })
 })
 
@@ -1197,19 +1229,53 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).toContain('Message reactions:')
     expect(prompt).toContain('Use reactions sparingly')
     expect(prompt).toContain(
+      'Message refs label accepted messages visible now',
+    )
+    expect(prompt).toContain(
+      '`murph.select_reply_target` annotates the eventual response, including every `---` bubble',
+    )
+    expect(prompt).toContain(
+      '`murph.react_to_message` reacts independently',
+    )
+    expect(prompt).toContain('never invent or force one')
+    expect(prompt).toContain(
+      'With a message ref you can react to that exact accepted message, not only the newest one',
+    )
+    expect(prompt).toContain(
+      'A reaction is a public stance toward the exact message it lands on',
+    )
+    expect(prompt).toContain(
+      'mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣"',
+    )
+    expect(prompt).toContain(
+      'If what remains is not independently funny',
+    )
+    expect(prompt).toContain(
+      'A bare or mostly laughter reply usually points back to an earlier turn',
+    )
+    expect(prompt).toContain(
+      'Do not laugh-react to it as a proxy',
+    )
+    expect(prompt).toContain(
+      'Laughter can also signal affiliation, politeness, tension relief, disbelief, embarrassment, or topic closure',
+    )
+    expect(prompt).toContain(
       'A reaction can stand alone only when it fully satisfies the turn',
     )
     expect(prompt).toContain(
-      'if no text reply should be sent after reacting, also use `finish_without_reply`',
+      'also use `finish_without_reply`',
     )
     expect(prompt).toContain(
-      'Use `heart` when Murph genuinely loves what the user said or finds it really funny',
+      'Use `heart` for genuine warmth, affection, pride, or strong celebration',
     )
     expect(prompt).toContain(
-      'Use `laugh` for a dry or mildly funny joke',
+      'Use `laugh` only for a clearly shared joke or comic moment in the targeted message',
     )
     expect(prompt).toContain(
       'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',
+    )
+    expect(prompt).not.toContain(
+      'Use `laugh` for a dry or mildly funny joke',
     )
     expect(prompt).not.toContain('`question_mark`')
     expect(prompt).not.toContain('`exclamation`')
@@ -1318,7 +1384,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(63_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1888,7 +1954,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
-      'When any domain owner presents a named movement, let it choose the movement, then read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` for lookup and presentation.',
+      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
     )
     expect(prompt).toContain(
       'behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.',
@@ -1990,6 +2056,36 @@ describe('assistant notification decision guidance', () => {
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
+  })
+
+  it('requires scheduled messages to identify their subject without thread context', () => {
+    const directPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({ channel: 'linq' }),
+      ).prompt
+    const groupPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          channel: 'linq',
+          conversationScope: 'group',
+        }),
+      ).prompt
+
+    expect(directPrompt).toContain(
+      'Apply a standalone-interruption test to `text`',
+    )
+    expect(directPrompt).toContain(
+      'after hours of unrelated conversation, the user must still know what this message is about from the message itself',
+    )
+    expect(directPrompt).toContain(
+      'Do not let generic referents such as "it", "this", "the timing", or "the plan" be the only subject.',
+    )
+    expect(groupPrompt).toContain(
+      'Apply a standalone-interruption test to `text`',
+    )
+    expect(groupPrompt).toContain(
+      'name the specific group-owned task, behavior, plan, or item',
+    )
   })
 
   it('keeps group notification decisions on room-owned context and actions', () => {

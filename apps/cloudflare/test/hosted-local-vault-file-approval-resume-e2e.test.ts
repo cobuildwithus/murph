@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import {
   approveHostedSensitiveActionChallengeForTest,
@@ -7,7 +7,22 @@ import {
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
+import {
+  isHostedWorkspaceSnapshotV2Ref,
+  readHostedExecutionSnapshotDeltaRef,
+  readHostedExecutionSnapshotHotRef,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -34,16 +49,14 @@ const userId = `member_local_vault_file_approval_${runId}`;
 const chatId = `chat_local_vault_file_approval_${runId}`;
 const linqApiToken = "linq-local-vault-file-token";
 const linqWebhookSecret = "linq-local-vault-file-webhook-secret";
-const assistantModel = "gpt-5.5";
-const prepareInboundText = "Prepare the synthetic report PDF for this conversation.";
-const requestInboundText = "Please attach the prepared report.";
-const approvedInboundText = "I approved it. Attach the report now.";
-const preparedReplyText = "The synthetic report is prepared.";
+const assistantModel = "gpt-5.6-terra";
+const requestInboundText = "Create the synthetic report PDF and attach it here.";
 const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
-const attachedReplyText = "Here it is: report.pdf.";
-const reportRef = "documents/report.pdf";
+const attachedReplyText = "Here it is: report.pdf";
+const reportRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`;
 const attachmentUploadLogMessage = "Hosted-local Linq attachment upload accepted.";
+const approvalGenerationVersion = "murph-action-approval-generation-v1";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -62,6 +75,7 @@ describe("hosted local vault-file approval resume e2e", () => {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -71,6 +85,7 @@ describe("hosted local vault-file approval resume e2e", () => {
         OPENAI_API_KEY: "stub-local-openai-key",
       },
       assistantProviderStubModelId: assistantModel,
+      faultInjection: true,
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-vault-file-approval-",
@@ -109,39 +124,13 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     });
     const attachmentUploadBaseline = countAttachmentUploadLogs();
-    const prepareReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
+    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
+    const preTurnStatus = await requireScenario().harness.readUserStatus(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
-        "mkdir -p documents && printf '%s\\n' '%PDF-1.7 synthetic hosted-local report' > documents/report.pdf",
+        `mkdir -p '${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}' && printf '%s\\n' '%PDF-1.7 synthetic hosted-local report' > '${reportRef}'`,
       ),
-      preparedReplyText,
-    ], {
-      matchInputContains: prepareInboundText,
-    });
-
-    const prepareResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_vault_file_prepare_${runId}`,
-        messageId: `msg_vault_file_prepare_${runId}`,
-        text: prepareInboundText,
-      },
-    ));
-    expect(prepareResponse.status).toBe(202);
-    const preparedReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: prepareReplyBaseline,
-      expectedPath: replyPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(readObservedLinqMessageParts(preparedReply)).toEqual([
-      { type: "text", value: preparedReplyText },
-    ]);
-    await requireScenario().waitForHostedCompletion(userId);
-
-    const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
       pendingReplyText,
     ], {
@@ -188,29 +177,38 @@ describe("hosted local vault-file approval resume e2e", () => {
       expectedPath: "/attachments",
     })).toBe(attachmentCreateBaseline);
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
-    await approveHostedSensitiveActionChallengeForTest({
+    const approvalEffectId = buildApprovalOutcomeEffectId(challenge);
+    const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
+      baselineCleanupCount: baselineIdleShutdownCleanupCount,
+      previousWorkspaceVersion: requireWorkspaceVersion(preTurnStatus),
+    });
+    expect(readHostedExecutionSnapshotHotRef(
+      idleShutdownStatus.workspace?.snapshotRef ?? null,
+    )).toBeNull();
+    expect(readHostedExecutionSnapshotDeltaRef(
+      idleShutdownStatus.workspace?.snapshotRef ?? null,
+    )).toBeNull();
+
+    const providerRequestCountBeforeResume = countAssistantProviderResponsesApiRequests();
+    const containerStartCountBeforeResume = countStructuredLogMessage(
+      "Hosted execution container starting.",
+    );
+    const approvedChallenge = await approveHostedSensitiveActionChallengeForTest({
       environment: requireScenario().runtimeEnv,
       tokenHash: challenge.tokenHash,
     });
+    expect(approvedChallenge.approvalStatus).toBe("approved");
 
     const approvedReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("send_vault_file", { ref: reportRef }),
-      attachedReplyText,
-    ], {
-      matchInputContains: approvedInboundText,
-    });
-
-    const approvedResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+    await requireScenario().runWake(
+      buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId: approvalEffectId,
+        eventId: `runtime-control:pending-effects-reconcile:local:${runId}`,
+        occurredAt: new Date().toISOString(),
+        userId,
+      }),
       userId,
-      chatId,
-      {
-        eventId: `evt_vault_file_resume_${runId}`,
-        messageId: `msg_vault_file_resume_${runId}`,
-        text: approvedInboundText,
-      },
-    ));
-    expect(approvedResponse.status).toBe(202);
+    );
     const attachedReply = await requireLinqStub().waitForAdditionalSend({
       baselineCount: approvedReplyBaseline,
       expectedPath: replyPath,
@@ -232,6 +230,11 @@ describe("hosted local vault-file approval resume e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(countAssistantProviderResponsesApiRequests()).toBe(
+      providerRequestCountBeforeResume,
+    );
+    expect(countStructuredLogMessage("Hosted execution container starting."))
+      .toBeGreaterThan(containerStartCountBeforeResume);
     const consumedChallenge = await waitForLatestChallenge((candidate) =>
       candidate.tokenHash === challenge.tokenHash && candidate.consumedAt !== null
     );
@@ -313,6 +316,150 @@ function countAttachmentUploadLogs(): number {
     requireScenario().harness.stderrTail(2_000_000),
   ].join("\n");
   return output.split(attachmentUploadLogMessage).length - 1;
+}
+
+function buildApprovalOutcomeEffectId(
+  challenge: HostedSensitiveActionChallengeForTest,
+): string {
+  if (!challenge.approvalKey || !challenge.actionHash) {
+    throw new Error("Hosted vault-file approval identity was incomplete.");
+  }
+  const approvalGeneration = createHash("sha256")
+    .update([
+      approvalGenerationVersion,
+      challenge.approvalKey,
+      challenge.actionHash,
+      challenge.tokenHash,
+    ].join("\n"))
+    .digest("hex");
+  return buildHostedActionApprovalOutcomeEffectId({
+    approvalGeneration,
+    approvalId: challenge.approvalKey,
+    expiresAt: challenge.expiresAt.toISOString(),
+  });
+}
+
+async function waitForIdleShutdownCheckpoint(input: {
+  baselineCleanupCount: number;
+  previousWorkspaceVersion: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastActivityExpiryError: unknown = null;
+  let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastStatusReadError: unknown = null;
+
+  while (Date.now() - startedAt < 120_000) {
+    let status: HostedRunnerStatusResponse;
+    try {
+      status = await requireScenario().harness.readUserStatus(userId);
+      lastStatusReadError = null;
+    } catch (error) {
+      lastStatusReadError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
+    lastStatus = status;
+    const hotRef = status.workspace
+      ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
+      : null;
+    const deltaRef = status.workspace
+      ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
+      : null;
+    if (
+      status.workspace
+      && status.workspace.version !== input.previousWorkspaceVersion
+      && isHostedWorkspaceSnapshotV2Ref(status.workspace.snapshotRef)
+      && hotRef === null
+      && deltaRef === null
+      && !status.inFlight
+      && !status.lastErrorCode
+      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
+    ) {
+      return status;
+    }
+
+    try {
+      await requireScenario().harness.expireRunnerActivityForTest(userId);
+      lastActivityExpiryError = null;
+    } catch (error) {
+      lastActivityExpiryError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for the approval-pending idle-shutdown checkpoint.",
+    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+    ...(lastActivityExpiryError
+      ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
+    ...(lastStatusReadError
+      ? [`last status read error: ${formatErrorMessage(lastStatusReadError)}`]
+      : []),
+  ]));
+}
+
+function requireWorkspaceVersion(status: HostedRunnerStatusResponse): string {
+  const version = status.workspace?.version ?? null;
+  if (!version) {
+    throw new Error("Hosted status did not include a workspace version.");
+  }
+  return version;
+}
+
+function countActivityExpiredDestroyRequestLogs(): number {
+  return countStructuredLogMessage(
+    "Hosted execution container destroy requested.",
+    (record) => record.details?.destroyRequestReason === "activity-expired",
+  );
+}
+
+function countStructuredLogMessage(
+  message: string,
+  predicate: (record: HostedStructuredLogRecord) => boolean = () => true,
+): number {
+  const output = [
+    requireScenario().harness.stdoutTail(2_000_000),
+    requireScenario().harness.stderrTail(2_000_000),
+  ].join("\n");
+  let count = 0;
+  for (const line of output.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      continue;
+    }
+    const record = parsed as HostedStructuredLogRecord;
+    if (record.message === message && predicate(record)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+interface HostedStructuredLogRecord {
+  details?: {
+    destroyRequestReason?: unknown;
+  };
+  message?: unknown;
+}
+
+function countAssistantProviderResponsesApiRequests(): number {
+  return requireScenario().assistantProviderRequests.filter((request) =>
+    request.url === "/v1/responses"
+  ).length;
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

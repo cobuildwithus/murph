@@ -187,6 +187,172 @@ test("AuthProvider keeps a pending device connect intent ahead of the first-visi
   await rendered.cleanup();
 });
 
+test("AuthProvider resumes a scrubbed Clinical Records connect intent after sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const { takeClinicalRecordsConnectIntentFromBrowser } = await import(
+    "@/src/lib/clinical-records/browser-connect-intent"
+  );
+  const claim = `cr_${"a".repeat(32)}`;
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: `#clinicalRecordsIntent=${claim}`,
+        href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+    },
+  );
+
+  expect(takeClinicalRecordsConnectIntentFromBrowser({
+    preserveForAuthReload: true,
+  })).toBe(claim);
+  const stagedState = rendered.replaceState.mock.lastCall?.[0];
+  Object.defineProperty(rendered.window.history, "state", {
+    configurable: true,
+    value: stagedState,
+  });
+  rendered.window.location.hash = "";
+  rendered.window.location.href = "https://join.example.test/records/connect";
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: true,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider does not resume Clinical Records connect without a valid staged intent", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records/connect",
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+    },
+  );
+  Object.defineProperty(rendered.window.history, "state", {
+    configurable: true,
+    value: null,
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  expect(completeButton).toBeTruthy();
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(rendered.assign).toHaveBeenCalledWith("/home");
+  expect(rendered.reload).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider returns an unauthenticated medical-records viewer to that page", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      initialVisitEligible: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
 test("AuthProvider resumes a private computer handoff after sign-in completion", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

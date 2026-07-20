@@ -99,7 +99,7 @@ const opaqueLocator = {
 const modelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
-  model: 'gpt-5.5',
+  model: 'gpt-5.6-terra',
   modelProvider: 'vercel-ai-gateway',
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',

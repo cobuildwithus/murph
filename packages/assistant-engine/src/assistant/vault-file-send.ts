@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type {
@@ -20,6 +21,10 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isNormalizedAssistantVaultFileRef,
 } from '@murphai/runtime-state/assistant-generated-deliveries'
+import {
+  adoptAssistantStateFile,
+  adoptAssistantStateFileIntoExclusiveName,
+} from '@murphai/runtime-state/node/assistant-state-fs'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import {
@@ -30,13 +35,12 @@ import {
   buildAssistantOutboxRawTargetIdentity,
   hashAssistantOutboxTargetFingerprint,
 } from './outbox/intents.js'
-import {
-  normalizeNullableString,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import {
+  buildAssistantGeneratedDeliveryOwnedRef,
   isAssistantGeneratedDeliveryRef,
   resolveSupportedAssistantVaultFileContentType,
 } from './generated-delivery-files.js'
@@ -71,13 +75,29 @@ export async function requestAssistantVaultFileSend(input: {
   sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
+  toolCallId?: string | null
   turnId: string
   turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
+  const normalizedRef = normalizeVaultFileRef(input.ref)
+  let mediaRef = normalizedRef
+  let displayFilename: string | undefined
+  if (isAssistantGeneratedDeliveryRef(normalizedRef)) {
+    const consumed = await consumeAssistantGeneratedDeliveryStagingRef({
+      ref: normalizedRef,
+      sessionId: input.sessionId,
+      toolCallId: normalizeNullableString(input.toolCallId),
+      turnId: input.turnId,
+      vaultRoot: input.vault,
+    })
+    mediaRef = consumed.ownedRef
+    displayFilename = consumed.displayFilename
+  }
   const file = await resolveAssistantVaultFileResponseMedia({
-    ref: input.ref,
+    ...(displayFilename === undefined ? {} : { displayFilename }),
+    ref: mediaRef,
     vaultRoot: input.vault,
   })
   const approval = await input.actionApprovalPort.request(
@@ -165,13 +185,71 @@ export function buildAssistantVaultFileApprovalFallbackWakeAt(
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {
+  displayFilename?: string
   ref: string
   vaultRoot: string
 }): Promise<AssistantVaultFileResponseMedia> {
-  return (await readAssistantVaultFileSnapshot({
-    ...input,
-    allowAssistantGeneratedDeliveryRef: false,
-  })).file
+  return (await readAssistantVaultFileSnapshot(input)).file
+}
+
+// Consuming the model-selected staging file into a deterministic per-tool-call
+// name happens before hashing or approval. The owned ref is keyed on the call
+// identity, so distinct sends reusing one friendly name never collide and an
+// exact re-delivery of the same call idempotently re-adopts its own bytes.
+// Accepted limitation (see agent-docs/references/hosted-runtime-protocol.md):
+// the key is attempt-scoped, so a model in-turn recovery after a pre-persist
+// failure arrives as a new provider call with a new toolCallId and does not
+// recover the earlier owned file, which is then pruned as unclaimed. The
+// exposed bytes are a regenerable one-time artifact only; the persisted-outbox
+// retry path is unaffected.
+async function consumeAssistantGeneratedDeliveryStagingRef(input: {
+  ref: string
+  sessionId: string
+  toolCallId: string | null
+  turnId: string
+  vaultRoot: string
+}): Promise<{ displayFilename: string; ownedRef: string }> {
+  const displayFilename = path.posix.basename(input.ref)
+  resolveAssistantVaultFileContentType(displayFilename)
+  if (input.toolCallId === null) {
+    throw new VaultCliError(
+      'ASSISTANT_GENERATED_DELIVERY_IDENTITY_REQUIRED',
+      'Generated delivery files require a provider tool-call identity before '
+        + 'they can be sent.',
+    )
+  }
+  const ownedRef = buildAssistantGeneratedDeliveryOwnedRef({
+    displayFilename,
+    ref: input.ref,
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    turnId: input.turnId,
+  })
+  const sourcePath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    input.ref,
+    'file path',
+  )
+  const targetPath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    ownedRef,
+    'file path',
+  )
+  await adoptAssistantGeneratedDeliveryIntoStableName({
+    sourcePath,
+    targetPath,
+  })
+  return { displayFilename, ownedRef }
+}
+
+async function adoptAssistantGeneratedDeliveryIntoStableName(input: {
+  sourcePath: string
+  targetPath: string
+}): Promise<void> {
+  await adoptAssistantStateFileIntoExclusiveName(
+    input.sourcePath,
+    input.targetPath,
+  )
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {
@@ -179,7 +257,7 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
   vaultRoot: string
 }): Promise<Uint8Array> {
   const snapshot = await readAssistantVaultFileSnapshot({
-    allowAssistantGeneratedDeliveryRef: true,
+    displayFilename: input.file.filename,
     ref: input.file.ref,
     vaultRoot: input.vaultRoot,
   })
@@ -495,37 +573,34 @@ export function deferAssistantVaultFileApprovalCheck(input: {
 }
 
 async function readAssistantVaultFileSnapshot(input: {
-  allowAssistantGeneratedDeliveryRef: boolean
+  displayFilename?: string
   ref: string
   vaultRoot: string
 }): Promise<{
   bytes: Uint8Array
   file: AssistantVaultFileResponseMedia
 }> {
-  const ref = normalizeVaultFileRef(
-    input.ref,
-    input.allowAssistantGeneratedDeliveryRef,
-  )
+  const ref = normalizeVaultFileRef(input.ref)
   const absolutePath = await resolveAssistantVaultPath(
     input.vaultRoot,
     ref,
     'file path',
   )
-  const metadata = await stat(absolutePath)
-  if (!metadata.isFile()) {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
-      'The requested vault path is not a regular file.',
-    )
+  let metadata: Stats
+  let bytes: Uint8Array
+  if (isAssistantGeneratedDeliveryRef(ref)) {
+    const snapshot = await readAdoptedAssistantGeneratedDeliveryFile({
+      absolutePath,
+      ref,
+      vaultRoot: input.vaultRoot,
+    })
+    metadata = snapshot.metadata
+    bytes = snapshot.bytes
+  } else {
+    metadata = await stat(absolutePath)
+    assertAssistantVaultFileMetadataSupported(metadata)
+    bytes = await readFile(absolutePath)
   }
-  if (metadata.size <= 0 || metadata.size > assistantVaultFileMaxBytes) {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
-      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
-    )
-  }
-
-  const bytes = await readFile(absolutePath)
   if (bytes.byteLength <= 0 || bytes.byteLength > assistantVaultFileMaxBytes) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
@@ -538,7 +613,7 @@ async function readAssistantVaultFileSnapshot(input: {
     bytes,
     file: {
       contentType: resolveAssistantVaultFileContentType(filename),
-      filename,
+      filename: input.displayFilename ?? filename,
       kind: 'vault_file',
       approvalGeneration: null,
       approvalId: null,
@@ -547,6 +622,118 @@ async function readAssistantVaultFileSnapshot(input: {
       sizeBytes: bytes.byteLength,
     },
   }
+}
+
+async function readAdoptedAssistantGeneratedDeliveryFile(input: {
+  absolutePath: string
+  ref: string
+  vaultRoot: string
+}): Promise<{
+  bytes: Uint8Array
+  metadata: Stats
+}> {
+  await adoptAssistantStateFile(input.absolutePath)
+  const fileHandle = await open(
+    input.absolutePath,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  )
+  try {
+    const openedMetadata = await fileHandle.stat()
+    assertAssistantVaultFileMetadataSupported(openedMetadata)
+    assertAdoptedAssistantGeneratedDeliveryMetadata(openedMetadata)
+    await assertAssistantGeneratedDeliveryPathMatchesHandle({
+      ...input,
+      handleMetadata: openedMetadata,
+    })
+
+    const bytes = await fileHandle.readFile()
+    const readMetadata = await fileHandle.stat()
+    if (!assistantVaultFileStatsMatch(openedMetadata, readMetadata)) {
+      throw assistantVaultFileChangedDuringReadError()
+    }
+    assertAdoptedAssistantGeneratedDeliveryMetadata(readMetadata)
+    await assertAssistantGeneratedDeliveryPathMatchesHandle({
+      ...input,
+      handleMetadata: readMetadata,
+    })
+    return {
+      bytes,
+      metadata: readMetadata,
+    }
+  } finally {
+    await fileHandle.close()
+  }
+}
+
+async function assertAssistantGeneratedDeliveryPathMatchesHandle(input: {
+  absolutePath: string
+  handleMetadata: Stats
+  ref: string
+  vaultRoot: string
+}): Promise<void> {
+  const resolvedPath = await resolveAssistantVaultPath(
+    input.vaultRoot,
+    input.ref,
+    'file path',
+  )
+  if (resolvedPath !== input.absolutePath) {
+    throw assistantVaultFileChangedDuringReadError()
+  }
+  const pathMetadata = await lstat(resolvedPath)
+  if (
+    pathMetadata.isSymbolicLink()
+    || !pathMetadata.isFile()
+    || !assistantVaultFileIdentityMatches(input.handleMetadata, pathMetadata)
+  ) {
+    throw assistantVaultFileChangedDuringReadError()
+  }
+  assertAdoptedAssistantGeneratedDeliveryMetadata(pathMetadata)
+}
+
+function assertAssistantVaultFileMetadataSupported(metadata: Stats): void {
+  if (!metadata.isFile()) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
+      'The requested vault path is not a regular file.',
+    )
+  }
+  if (metadata.size <= 0 || metadata.size > assistantVaultFileMaxBytes) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
+      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
+    )
+  }
+}
+
+function assertAdoptedAssistantGeneratedDeliveryMetadata(metadata: Stats): void {
+  if ((metadata.mode & 0o777) !== 0o600 || metadata.nlink !== 1) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_PERMISSIONS_UNSAFE',
+      'The generated delivery file ownership or permissions changed before it could be read.',
+    )
+  }
+}
+
+function assistantVaultFileIdentityMatches(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+}
+
+function assistantVaultFileStatsMatch(left: Stats, right: Stats): boolean {
+  return (
+    assistantVaultFileIdentityMatches(left, right)
+    && left.mode === right.mode
+    && left.size === right.size
+    && left.nlink === right.nlink
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
+  )
+}
+
+function assistantVaultFileChangedDuringReadError(): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_VAULT_FILE_CHANGED_DURING_READ',
+    'The generated delivery file changed while it was being prepared.',
+  )
 }
 
 function applyAssistantVaultFileApprovalToMedia(input: {
@@ -560,19 +747,12 @@ function applyAssistantVaultFileApprovalToMedia(input: {
   }
 }
 
-function normalizeVaultFileRef(
-  value: string,
-  allowAssistantGeneratedDeliveryRef: boolean,
-): string {
+function normalizeVaultFileRef(value: string): string {
   const ref = value.trim().replace(/\\/gu, '/')
   if (
     ref.length === 0
     || ref.length > 1024
     || !isNormalizedAssistantVaultFileRef(ref)
-    || (
-      isAssistantGeneratedDeliveryRef(ref)
-      && !allowAssistantGeneratedDeliveryRef
-    )
   ) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_REF_INVALID',

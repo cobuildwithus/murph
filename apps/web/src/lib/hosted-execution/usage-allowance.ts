@@ -398,8 +398,6 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 }
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
-const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
-  "openai-api-pricing-2026-05-05-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
   "openai-api-pricing-2026-07-09-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
@@ -468,12 +466,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE = 150_000n;
 
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 500_000n,
-  inputUsdMicrosPerMillionTokens: 5_000_000n,
-  outputUsdMicrosPerMillionTokens: 30_000_000n,
-} as const;
-
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 500_000n,
   cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
@@ -499,28 +491,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
-  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
-
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
-  "openai-flex": {
-    multiplierDenominator: 2n,
-    multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
-    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION,
-    requiredProviderKind: "openai",
-  },
-  standard: {
-    multiplierDenominator: 1n,
-    multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
-    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
-    requiredProviderKind: null,
-  },
-} as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
@@ -540,7 +514,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
-  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES,
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,

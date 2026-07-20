@@ -6,6 +6,7 @@ import {
   parseClinicalProviderDirectory,
   searchClinicalProviderDirectorySnapshot,
 } from "@/src/lib/clinical-records/provider-directory";
+import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-beta-policy";
 
 const generatedAt = "2026-07-10T00:00:00.000Z";
 
@@ -16,9 +17,65 @@ describe("Clinical Records provider directory", () => {
       "utf8",
     )));
 
-    expect(directory.entries).toHaveLength(1_243);
-    expect(directory.version).toMatch(/^2026-07-11\.epic-brands-r4$/u);
+    expect(directory.entries).toHaveLength(1_246);
+    expect(directory.version).toMatch(/^2026-07-18\.epic-brands-r4-beta-v1$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
+    expect(directory.entries.every((entry) =>
+      JSON.stringify(entry.resourceTypes) === JSON.stringify(EPIC_BETA_RESOURCE_TYPES)
+    )).toBe(true);
+    expect(directory.entries.find((entry) => entry.id === "epic-sandbox")).toMatchObject({
+      brandName: "Epic Sandbox (test data only)",
+      clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
+      fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+    });
+  });
+
+  it("matches compound organization and location searches across fields", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [["Downtown Clinic", "Atlanta", "GA", "30309"]],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Test Health, Atlanta, GA",
+    }).providers).toHaveLength(1);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta, GA",
+    }).providers[0]?.facilities[0]).toMatchObject({
+      city: "Atlanta",
+      state: "GA",
+    });
+  });
+
+  it("does not combine compound location tokens from different facilities", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [
+        ["Atlanta Clinic", "Atlanta", "GA", "30309"],
+        ["Austin Clinic", "Austin", "TX", "78701"],
+      ],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta TX",
+    }).providers).toEqual([]);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "Atlanta IN",
+    }).providers).toEqual([]);
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "IN",
+    }).providers).toEqual([]);
+  });
+
+  it("matches a standalone state abbreviation only as an exact word", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({
+      locations: [["Indiana Clinic", "Indianapolis", "IN", "46202"]],
+    }));
+
+    expect(searchClinicalProviderDirectorySnapshot(directory, {
+      query: "IN",
+    }).providers[0]?.facilities[0]).toMatchObject({
+      city: "Indianapolis",
+      state: "IN",
+    });
   });
 
   it("finds current Atlanta facilities and the Piedmont brand in the committed registry", () => {
@@ -84,6 +141,12 @@ describe("Clinical Records provider directory", () => {
       expect(() => parseClinicalProviderDirectory(makeDirectory({ fhirBaseUrl })))
         .toThrow(/private host/u);
     }
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
+      clientIdEnvironmentKey: "EPIC_SMART_OTHER_CLIENT_ID",
+    }))).toThrow(/client-id configuration is unsupported/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
+      resourceTypes: ["Patient", "Observation", "DiagnosticReport", "DocumentReference"],
+    }))).toThrow(/does not match the Epic beta FHIR policy/u);
   });
 });
 
@@ -95,19 +158,21 @@ function readCommittedDirectory() {
 }
 
 function makeDirectory(overrides: {
+  clientIdEnvironmentKey?: string;
   locations?: Array<Array<string | null>>;
   fhirBaseUrl?: string;
+  resourceTypes?: string[];
 }) {
   return {
     entries: [{
       aliases: ["Test Health"],
       brandName: "Test Health System",
-      clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID",
+      clientIdEnvironmentKey: overrides.clientIdEnvironmentKey ?? "EPIC_SMART_CLIENT_ID",
       locations: overrides.locations ?? [],
       fhirBaseUrl: overrides.fhirBaseUrl ?? "https://fhir.example.test/FHIR/R4",
       id: "epic-test-brand",
       requestedBaseScopes: ["openid", "fhirUser", "launch/patient"],
-      resourceTypes: ["Patient", "Observation"],
+      resourceTypes: overrides.resourceTypes ?? [...EPIC_BETA_RESOURCE_TYPES],
       sourceSystem: "epic-fhir",
     }],
     generatedAt,
