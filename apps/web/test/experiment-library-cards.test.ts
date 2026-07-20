@@ -23,6 +23,7 @@ test("buildExperimentLibraryCards maps tracked run statuses to runStatus and bad
 
   assert.equal(byId.get("exp:running")?.runStatus, "active");
   assert.equal(byId.get("exp:running")?.statusVariant, "default");
+  assert.equal(byId.get("exp:running")?.href, "/experiments/runs/exp%3Arunning");
   assert.equal(byId.get("exp:paused")?.runStatus, "paused");
   assert.equal(byId.get("exp:paused")?.statusVariant, "secondary");
   assert.equal(byId.get("exp:closed")?.runStatus, "stopped");
@@ -49,6 +50,7 @@ test("buildExperimentLibraryCards keeps protocol-only cards public and sorts pri
   assert.equal(protocolCard?.runStatus, undefined);
   assert.equal(protocolCard?.statusVariant, undefined);
   assert.equal(protocolCard?.href, "/experiments/sauna-protocol");
+  assert.equal(cards[0]?.href, "/experiments/runs/exp%3Atracked");
 });
 
 function trackedExperiment(input: {
