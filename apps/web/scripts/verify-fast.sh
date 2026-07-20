@@ -83,7 +83,7 @@ compose_hosted_mailbox_fingerprint_key_for_build() {
 
 verify_step_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
-tracked_background_pids=()
+owned_background_job_pids=()
 
 verify_log() {
   printf '[apps/web verify] %s\n' "$*" >&2
@@ -116,100 +116,136 @@ run_timed_step() {
   verify_log "done ${label} ($((SECONDS - started_at))s step)"
 }
 
-register_background_pid() {
-  tracked_background_pids+=("$1")
+register_owned_background_job() {
+  owned_background_job_pids+=("$1")
 }
 
-unregister_background_pid() {
+unregister_owned_background_job() {
   local target_pid="$1"
   local remaining_pids=()
   local pid
 
-  if [[ ${#tracked_background_pids[@]} -eq 0 ]]; then
+  if [[ ${#owned_background_job_pids[@]} -eq 0 ]]; then
     return
   fi
 
-  for pid in "${tracked_background_pids[@]}"; do
+  for pid in "${owned_background_job_pids[@]}"; do
     if [[ "$pid" != "$target_pid" ]]; then
       remaining_pids+=("$pid")
     fi
   done
 
   if [[ ${#remaining_pids[@]} -eq 0 ]]; then
-    tracked_background_pids=()
+    owned_background_job_pids=()
   else
-    tracked_background_pids=("${remaining_pids[@]}")
+    owned_background_job_pids=("${remaining_pids[@]}")
   fi
 }
 
-terminate_background_pid() {
+start_owned_background_job() {
+  local output_variable="$1"
+  shift
+  local monitor_was_enabled=0
+  local pid
+
+  if [[ "$-" == *m* ]]; then
+    monitor_was_enabled=1
+  else
+    set -m
+  fi
+
+  "$@" &
+  pid="$!"
+
+  if [[ "$monitor_was_enabled" -eq 0 ]]; then
+    set +m
+  fi
+
+  register_owned_background_job "$pid"
+  printf -v "$output_variable" '%s' "$pid"
+}
+
+owned_background_job_is_running() {
+  local target_pid="$1"
+  local running_pid
+
+  while IFS= read -r running_pid; do
+    if [[ "$running_pid" == "$target_pid" ]]; then
+      return 0
+    fi
+  done < <(jobs -pr)
+
+  return 1
+}
+
+signal_owned_background_job() {
+  local pid="$1"
+  local signal="$2"
+
+  if ! owned_background_job_is_running "$pid"; then
+    return 1
+  fi
+
+  if [[ "$pid" -gt 0 && "${OSTYPE:-}" != msys* && "${OSTYPE:-}" != cygwin* ]]; then
+    if kill "-$signal" "-$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  if owned_background_job_is_running "$pid"; then
+    kill "-$signal" "$pid" 2>/dev/null || true
+  fi
+}
+
+wait_for_owned_background_job_exit() {
+  local pid="$1"
+  local attempts="$2"
+  local attempt
+
+  for ((attempt = 0; attempt < attempts; attempt += 1)); do
+    if ! owned_background_job_is_running "$pid"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  ! owned_background_job_is_running "$pid"
+}
+
+terminate_owned_background_job() {
   local pid="$1"
 
-  if ! kill -0 "$pid" 2>/dev/null; then
+  if ! owned_background_job_is_running "$pid"; then
+    wait "$pid" 2>/dev/null || true
     return
   fi
 
-  terminate_pid_tree_with_signal "$pid" TERM
-  sleep 1
-  terminate_pid_tree_with_signal "$pid" KILL
-}
-
-terminate_pid_tree_with_signal() {
-  local pid="$1"
-  local signal="$2"
-  local descendant_pid
-
-  for descendant_pid in $(list_descendant_pids "$pid"); do
-    kill "-$signal" "$descendant_pid" 2>/dev/null || true
-  done
-
-  if [[ "$pid" -gt 0 && "${OSTYPE:-}" != msys* && "${OSTYPE:-}" != cygwin* ]]; then
-    kill "-$signal" "-$pid" 2>/dev/null || true
+  signal_owned_background_job "$pid" TERM || true
+  if wait_for_owned_background_job_exit "$pid" 10; then
+    wait "$pid" 2>/dev/null || true
+    return
   fi
 
-  kill "-$signal" "$pid" 2>/dev/null || true
-}
+  signal_owned_background_job "$pid" KILL || true
+  if wait_for_owned_background_job_exit "$pid" 10; then
+    wait "$pid" 2>/dev/null || true
+    return
+  fi
 
-list_descendant_pids() {
-  local root_pid="$1"
-
-  ps -axo pid=,ppid= | awk -v root_pid="$root_pid" '
-    {
-      pid = $1
-      ppid = $2
-      children[ppid] = children[ppid] " " pid
-    }
-    END {
-      queue[1] = root_pid
-      head = 1
-      tail = 1
-      while (head <= tail) {
-        parent = queue[head]
-        head++
-        child_count = split(children[parent], child_pids, " ")
-        for (child_index = 1; child_index <= child_count; child_index++) {
-          child_pid = child_pids[child_index]
-          if (child_pid == "") {
-            continue
-          }
-          print child_pid
-          tail++
-          queue[tail] = child_pid
-        }
-      }
-    }
-  '
+  verify_log "WARNING: owned background job ${pid} did not exit after SIGKILL"
 }
 
 cleanup_background_jobs() {
+  local background_pids=("${owned_background_job_pids[@]}")
   local pid
 
-  if [[ ${#tracked_background_pids[@]} -eq 0 ]]; then
+  if [[ ${#background_pids[@]} -eq 0 ]]; then
     return
   fi
 
-  for pid in "${tracked_background_pids[@]}"; do
-    terminate_background_pid "$pid"
+  owned_background_job_pids=()
+  for pid in "${background_pids[@]}"; do
+    terminate_owned_background_job "$pid"
   done
 }
 
@@ -229,27 +265,17 @@ handle_termination_signal() {
 }
 
 wait_for_background_jobs() {
-  local failed=0
   local pid
-  local other_pid
 
   for pid in "$@"; do
     if ! wait "$pid"; then
-      failed=1
-      for other_pid in "$@"; do
-        if [[ "$other_pid" != "$pid" ]]; then
-          terminate_background_pid "$other_pid"
-          wait "$other_pid" 2>/dev/null || true
-        fi
-      done
+      unregister_owned_background_job "$pid"
+      cleanup_background_jobs
+      return 1
     fi
 
-    unregister_background_pid "$pid"
+    unregister_owned_background_job "$pid"
   done
-
-  if [[ "$failed" -ne 0 ]]; then
-    return 1
-  fi
 
   return 0
 }
@@ -351,20 +377,12 @@ trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
 if [[ "$hosted_web_build_memory_guard" != "1" ]]; then
-  run_timed_step "next build" run_next_build &
-  build_pid="$!"
-  register_background_pid "$build_pid"
+  start_owned_background_job build_pid run_timed_step "next build" run_next_build
 fi
 
-run_timed_step "dev smoke" run_dev_smoke &
-smoke_pid="$!"
-register_background_pid "$smoke_pid"
-run_timed_step "test" run_web_tests &
-test_pid="$!"
-register_background_pid "$test_pid"
-run_timed_step "lint" pnpm lint &
-lint_pid="$!"
-register_background_pid "$lint_pid"
+start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke
+start_owned_background_job test_pid run_timed_step "test" run_web_tests
+start_owned_background_job lint_pid run_timed_step "lint" pnpm lint
 if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
   wait_for_background_jobs "$smoke_pid" "$test_pid" "$lint_pid"
 else

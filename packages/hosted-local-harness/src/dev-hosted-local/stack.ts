@@ -1,4 +1,4 @@
-import { spawnSync, execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -69,7 +69,7 @@ import {
 } from "./minio.ts";
 import {
   assertHostedWebDevServerAvailable,
-  assertHostedWebPortAvailable,
+  assertPortAvailable,
   cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
   cleanupHostedRunnerImages,
@@ -95,7 +95,6 @@ import {
 import {
   buildHostedLocalTemporalRuntimeEnv,
   startHostedLocalTemporalRuntime,
-  waitForHostedLocalTemporalPortRelease,
   type HostedLocalTemporalRuntime,
 } from "./temporal.ts";
 import type {
@@ -202,16 +201,6 @@ type HostedLocalWorkspacePackage = {
   packageJsonPath: string;
 };
 
-export interface HostedLocalProcessResidueOwnership {
-  cloudflareWorker: boolean;
-  healthCommons: boolean;
-  linqTunnel: boolean;
-  stripe: boolean;
-  temporalServer: boolean;
-  temporalWorker: boolean;
-  web: boolean;
-}
-
 export async function startHostedLocalDevStack(input: {
   abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
@@ -242,15 +231,14 @@ export async function startHostedLocalDevStack(input: {
   throwIfAbortSignalAborted(input.abortSignal);
   if (!config.skipWeb) {
     await assertHostedWebDevServerAvailable(initialEnv);
-    await assertHostedWebPortAvailable({
-      host: config.webHost,
-      message: [
+    await assertPortAvailable(
+      config.webHost,
+      config.webPort,
+      [
         `Local hosted web port ${config.webPort} is already in use on ${config.webHost}.`,
         "Stop the existing listener or set MURPH_DEV_WEB_PORT to a free port before running `pnpm dev`.",
       ].join(" "),
-      port: config.webPort,
-      stderrTarget: input.stderrTarget,
-    });
+    );
   }
   throwIfAbortSignalAborted(input.abortSignal);
   const workerPortMode = await resolveHostedLocalWorkerPortMode({
@@ -262,12 +250,6 @@ export async function startHostedLocalDevStack(input: {
     ].join(" "),
     port: config.workerPort,
     protocol: config.workerProtocol,
-  });
-  throwIfAbortSignalAborted(input.abortSignal);
-  await maybeResetHostedLocalTemporalDevState({
-    abortSignal: input.abortSignal,
-    config,
-    stderrTarget: input.stderrTarget,
   });
   throwIfAbortSignalAborted(input.abortSignal);
   const tempDir = tempDirOverride
@@ -940,22 +922,6 @@ export async function startHostedLocalDevStack(input: {
       if (dockerEventsProcess !== null) {
         terminateChildProcess(dockerEventsProcess.child, childSignal);
       }
-      terminateKnownHostedLocalProcessResidue({
-        config,
-        owned: {
-          cloudflareWorker: cloudflareProcess !== null,
-          healthCommons: healthCommonsWatcher !== null,
-          linqTunnel: linqTunnelProcess !== null,
-          stripe: stripeListener !== null,
-          temporalServer: temporalRuntime?.serverProcess !== null,
-          // Child termination already targets this worker. Broad worker residue
-          // sweeps are reserved for explicit local Temporal reset.
-          temporalWorker: false,
-          web: webProcess !== null,
-        },
-        signal: childSignal,
-        stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
-      });
     };
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
@@ -1010,24 +976,6 @@ export async function startHostedLocalDevStack(input: {
         const terminationFailure = terminationResults.find(
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
-        if (childSignal !== "SIGKILL") {
-          terminateKnownHostedLocalProcessResidue({
-            config,
-            owned: {
-              cloudflareWorker: cloudflareProcess !== null,
-              healthCommons: healthCommonsWatcher !== null,
-              linqTunnel: linqTunnelProcess !== null,
-              stripe: stripeListener !== null,
-              temporalServer: temporalRuntime?.serverProcess !== null,
-              // Child termination already targets this worker. Broad worker residue
-              // sweeps are reserved for explicit local Temporal reset.
-              temporalWorker: false,
-              web: webProcess !== null,
-            },
-            signal: "SIGKILL",
-            stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
-          });
-        }
         if (workerRuntimeEnv && workerPortMode === "start") {
           await cleanupHostedRunnerContainers({
             cwd: repoRoot,
@@ -2833,140 +2781,6 @@ function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>
   return value === "1" || value === "true" || value === "yes";
 }
 
-async function maybeResetHostedLocalTemporalDevState(input: {
-  abortSignal?: AbortSignal;
-  config: HostedLocalDevConfig;
-  stderrTarget?: NodeJS.WritableStream;
-}): Promise<void> {
-  if (!input.config.forceResetLocalTemporal || input.config.temporal.mode === "disabled") {
-    return;
-  }
-
-  if (input.config.temporal.mode === "external") {
-    throw new Error(
-      "MURPH_DEV_FORCE_RESET_TEMPORAL=1 only supports local Temporal modes. Set MURPH_DEV_TEMPORAL=managed or auto, or unset the reset flag.",
-    );
-  }
-
-  const stderrTarget = input.stderrTarget ?? process.stderr;
-  stderrTarget.write("[setup] Resetting local Temporal dev server and worker residue.\n");
-  terminateKnownHostedLocalProcessResidue({
-    config: input.config,
-    owned: {
-      cloudflareWorker: false,
-      healthCommons: false,
-      linqTunnel: false,
-      stripe: false,
-      temporalServer: true,
-      temporalWorker: true,
-      web: false,
-    },
-    signal: "SIGTERM",
-    stripeForwardUrl: null,
-  });
-
-  try {
-    await waitForHostedLocalTemporalPortRelease({
-      host: input.config.temporal.host,
-      port: input.config.temporal.port,
-      signal: input.abortSignal,
-      timeoutMs: 2_500,
-    });
-  } catch (error) {
-    if (input.abortSignal?.aborted) {
-      throw error;
-    }
-    terminateKnownHostedLocalProcessResidue({
-      config: input.config,
-      owned: {
-        cloudflareWorker: false,
-        healthCommons: false,
-        linqTunnel: false,
-        stripe: false,
-        temporalServer: true,
-        temporalWorker: true,
-        web: false,
-      },
-      signal: "SIGKILL",
-      stripeForwardUrl: null,
-    });
-    await waitForHostedLocalTemporalPortRelease({
-      host: input.config.temporal.host,
-      port: input.config.temporal.port,
-      signal: input.abortSignal,
-      timeoutMs: 5_000,
-    });
-  }
-}
-
 function resolveHostedLocalChildShutdownSignal(signal: NodeJS.Signals): NodeJS.Signals {
   return signal === "SIGINT" ? "SIGTERM" : signal;
-}
-
-export function terminateKnownHostedLocalProcessResidue(input: {
-  config: HostedLocalDevConfig;
-  owned: HostedLocalProcessResidueOwnership;
-  signal: NodeJS.Signals;
-  stripeForwardUrl: string | null;
-}): void {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  const workerHostPort = `${input.config.workerHost}:${input.config.workerPort}`;
-  const temporal = input.config.temporal;
-  const linqTunnelConfigPath = resolveRepoRelativeChildArg(
-    input.config.linqWebhookTunnelConfigPath,
-  );
-  const repoRootPattern = escapeRegExp(repoRoot);
-  const patterns = [
-    ...(input.owned.cloudflareWorker
-      ? [
-        `pnpm --dir apps/cloudflare worker:dev:prepared.*--port ${input.config.workerPort}`,
-        `apps/cloudflare/scripts/dev-worker\\.ts.*--port ${input.config.workerPort}`,
-        `wrangler dev.*--port ${input.config.workerPort}`,
-        `workerd.*${escapeRegExp(workerHostPort)}`,
-      ]
-      : []),
-    ...(!input.owned.web
-      ? []
-      : [
-        `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
-        `pnpm --dir apps/web exec next start .*--port ${input.config.webPort}`,
-        `next/dist/bin/next start .*--port ${input.config.webPort}`,
-        "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
-      ]),
-    ...(!input.owned.linqTunnel
-      ? []
-      : [
-        [
-          "cloudflared tunnel --no-autoupdate --config",
-          escapeRegExp(linqTunnelConfigPath),
-          "run",
-          escapeRegExp(input.config.linqWebhookTunnelName),
-        ].join(".*"),
-      ]),
-    ...(!input.owned.temporalServer
-      ? []
-      : [`temporal server start-dev .*--port ${temporal.port}`]),
-    ...(!input.owned.temporalWorker
-      ? []
-      : [
-        "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
-        `${repoRootPattern}.*node_modules.*tsx.*src/worker\\.ts`,
-      ]),
-    ...(input.stripeForwardUrl === null || !input.owned.stripe
-      ? []
-      : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),
-  ];
-
-  for (const pattern of patterns) {
-    spawnSync("pkill", [`-${input.signal}`, "-f", pattern], {
-      stdio: "ignore",
-    });
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

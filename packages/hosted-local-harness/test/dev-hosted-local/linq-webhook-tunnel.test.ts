@@ -72,7 +72,6 @@ afterEach(() => {
 const config: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
-  forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
   linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",

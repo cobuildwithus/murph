@@ -227,10 +227,9 @@ test("hosted web dev removes a stale Next dev lock when its pid is no longer run
   }
 });
 
-test("hosted web dev refuses to terminate non-Next processes from a Next dev lock", async () => {
+test("hosted web dev fails closed for every live Next dev lock", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-next-dev-lock-"));
   const lockPath = path.join(tempDir, "lock");
-  const terminated: string[] = [];
 
   try {
     await writeFile(lockPath, `${JSON.stringify({ pid: 12345, port: 3060 })}\n`, "utf8");
@@ -238,13 +237,10 @@ test("hosted web dev refuses to terminate non-Next processes from a Next dev loc
     await assert.rejects(
       clearConflictingNextDevLock(lockPath, {
         isProcessRunning: () => true,
-        processCommand: () => "node unrelated-server.js",
-        terminateProcess: (_pid, signal) => terminated.push(signal),
       }),
-      /active non-Next process/u,
+      /active process/u,
     );
 
-    assert.deepEqual(terminated, []);
     assert.equal(
       await readFile(lockPath, "utf8"),
       `${JSON.stringify({ pid: 12345, port: 3060 })}\n`,
@@ -254,27 +250,19 @@ test("hosted web dev refuses to terminate non-Next processes from a Next dev loc
   }
 });
 
-test("hosted web dev terminates a stale live Next dev lock owner", async () => {
+test("hosted web dev removes a malformed Next dev lock without process inspection", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-next-dev-lock-"));
   const lockPath = path.join(tempDir, "lock");
-  const signals: NodeJS.Signals[] = [];
-  let running = true;
 
   try {
-    await writeFile(lockPath, `${JSON.stringify({ pid: 12345, port: 3060 })}\n`, "utf8");
+    await writeFile(lockPath, "not-json\n", "utf8");
 
     await clearConflictingNextDevLock(lockPath, {
-      isProcessRunning: () => running,
-      processCommand: () => "next-server (v16.2.4)",
-      sleep: async () => {},
-      stderr: { write: () => true },
-      terminateProcess: (_pid, signal) => {
-        signals.push(signal);
-        running = false;
+      isProcessRunning: () => {
+        throw new Error("malformed locks must not trigger process inspection");
       },
     });
 
-    assert.deepEqual(signals, ["SIGINT"]);
     await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/u);
   } finally {
     await rm(tempDir, { force: true, recursive: true });

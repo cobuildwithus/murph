@@ -81,7 +81,6 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
 const baseConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
-  forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
   linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
