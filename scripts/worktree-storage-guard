@@ -118,6 +118,7 @@ count_record() {
   fi
 }
 
+worktree_output="$(git -C "$repo_root" worktree list --porcelain)"
 while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ -z "$line" ]]; then
     count_record
@@ -130,7 +131,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     locked\ *) record_locked="${line#locked }" ;;
     locked) record_locked='locked' ;;
   esac
-done < <(git -C "$repo_root" worktree list --porcelain)
+done <<<"$worktree_output"
 count_record
 
 if (( unauthorized_count > 0 )); then
@@ -361,6 +362,16 @@ minimum_kib=$((min_free_gib * 1024 * 1024))
 available_percent=101
 disk_rows=0
 disk_floor_failed=0
+disk_capacity_rows="$(awk '
+  NR > 1 {
+    for (field = 1; field <= NF; field++) {
+      if ($field ~ /^[0-9]+%$/ && field >= 4) {
+        print $(field - 3), $(field - 1)
+        break
+      }
+    }
+  }
+' <<<"$df_output")"
 while read -r disk_kib available_kib; do
   [[ -n "$disk_kib" && -n "$available_kib" ]] || continue
   if [[ ! "$disk_kib" =~ ^[0-9]+$ || ! "$available_kib" =~ ^[0-9]+$ || "$disk_kib" == 0 ]]; then
@@ -373,16 +384,7 @@ while read -r disk_kib available_kib; do
   if (( available_kib < minimum_kib || row_percent < min_free_percent )); then
     disk_floor_failed=1
   fi
-done < <(awk '
-  NR > 1 {
-    for (field = 1; field <= NF; field++) {
-      if ($field ~ /^[0-9]+%$/ && field >= 4) {
-        print $(field - 3), $(field - 1)
-        break
-      }
-    }
-  }
-' <<<"$df_output")
+done <<<"$disk_capacity_rows"
 if (( disk_rows == 0 )); then
   printf 'worktree storage guard: could not read filesystem capacity\n' >&2
   exit 1
