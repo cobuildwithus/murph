@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+
 import {
   encodeHostedExecutionSignedRequestPayload,
   readHostedExecutionSignatureHeaders,
@@ -138,6 +140,7 @@ describe("hosted execution coverage gaps", () => {
       byteLength: 128,
       dataVersion: "browser-data-v1",
       generatedAt: "2026-04-27T00:00:00.000Z",
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
       keyId: "browser-vault-replica:key",
       objectKey: "users/browser-vault-replicas/user/replica.json",
       replicaSchema: "murph.browser-vault-replica",
@@ -175,6 +178,13 @@ describe("hosted execution coverage gaps", () => {
       dataKeyRef.dataKeyEnvelope.dataKeyId,
     );
     expect(parseHostedBrowserVaultReplicaRef(null)).toBeNull();
+    const legacyRef: Record<string, unknown> = { ...ref };
+    delete legacyRef.generation;
+    expect(parseHostedBrowserVaultReplicaRef(legacyRef)).toEqual(legacyRef);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      generation: 0,
+    })).toThrow(/generation must be a positive safe integer/u);
     expect(parseHostedExecutionSnapshotRef(undefined)).toBeNull();
     expect(() => parseHostedBrowserVaultReplicaRef({
       ...ref,
@@ -295,6 +305,7 @@ describe("hosted execution coverage gaps", () => {
       byteLength: 128,
       dataVersion: "browser-data-v1",
       generatedAt: "2026-05-04T00:03:00.000Z",
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
       keyId: "browser-vault-replica:key",
       objectKey: "users/browser-vault-replicas/user/replica.json",
       replicaSchema: "murph.browser-vault-replica",
@@ -311,6 +322,25 @@ describe("hosted execution coverage gaps", () => {
       freshness: "fresh",
       reason: "current",
       shouldRefresh: false,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: { ...freshReplica, generation: undefined },
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "generation_mismatch",
+      shouldRefresh: true,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: {
+        ...freshReplica,
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION + 1,
+      },
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "generation_mismatch",
+      shouldRefresh: true,
     });
     expect(assessBrowserVaultReplicaFreshness({
       currentSourceHash: base.hash,

@@ -196,6 +196,10 @@ export async function loadBrowserVaultReplica({
     throw new Error("Browser vault replica dataVersion did not match its session ref.");
   }
 
+  if (replica.generation !== session.replicaRef.generation) {
+    throw new Error("Browser vault replica generation did not match its session ref.");
+  }
+
   if (replica.source.sourceBundleHash !== session.replicaRef.sourceBundleHash) {
     throw new Error("Browser vault replica sourceBundleHash did not match its session ref.");
   }

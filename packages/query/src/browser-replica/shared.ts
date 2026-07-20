@@ -1,5 +1,9 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
-import type { ExperimentOutcome } from "@murphai/contracts";
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+  BROWSER_VAULT_REPLICA_SCHEMA,
+  type ExperimentOutcome,
+} from "@murphai/contracts";
 import type {
   OverviewExperiment,
   OverviewExperimentSummary,
@@ -19,7 +23,10 @@ import type {
   MetricStatistic,
 } from "@murphai/health-metrics";
 
-export const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
+export {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+  BROWSER_VAULT_REPLICA_SCHEMA,
+};
 export const BROWSER_VAULT_REPLICA_POLICY_ID = "health-vault-browser";
 
 export const BODY_PREVIEW_CHARS = 280;
@@ -235,6 +242,8 @@ export interface BrowserVaultReplica {
   /** Absent only on replicas produced before canonical outcome projection shipped. */
   experimentOutcomes?: ExperimentOutcome[];
   generatedAt: string;
+  /** Absent only on legacy replicas produced before generation-aware freshness. */
+  generation?: number;
   labResultRows: BrowserVaultLabResultRow[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];

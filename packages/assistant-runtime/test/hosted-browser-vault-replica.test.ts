@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import type {
   HostedBrowserVaultReplicaRef,
@@ -171,6 +172,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(points.some((point) => point.metricKey === "hba1c" && point.value === 9.9)).toBe(false);
       expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
       expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
+      expect(replica.generation).toBe(BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
       expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
       expect(replica.metricRows.some((row) => row.metricKey === "hba1c")).toBe(false);
       expect(replica.metricRows.some((row) => row.metricKey === "glucose" && row.value === 101)).toBe(false);
@@ -872,12 +874,14 @@ function createReplicaRefFromReplica(replica: unknown): HostedBrowserVaultReplic
   const sourceBundleHash = requireString(source.sourceBundleHash, "replica.source.sourceBundleHash");
   const dataVersion = requireString(source.dataVersion, "replica.source.dataVersion");
   const generatedAt = requireString(record.generatedAt, "replica.generatedAt");
+  const generation = requireNumber(record.generation, "replica.generation");
   const byteLength = new TextEncoder().encode(JSON.stringify(replica)).byteLength;
 
   return {
     byteLength,
     dataVersion,
     generatedAt,
+    generation,
     keyId: `browser-vault-replica:${dataVersion.slice(0, 12)}`,
     objectKey: `users/browser-vault-replicas/member_123/${dataVersion}.json`,
     replicaSchema: "murph.browser-vault-replica",
@@ -897,6 +901,13 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
   }
   return value;
 }

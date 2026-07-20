@@ -7,10 +7,11 @@ import type {
   HostedExecutionDeviceSyncJobHint as DeviceSyncHostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
-import type {
-  AssistantPersonalitySettingId,
-  AssistantTonePreference,
-  AssistantVoiceOptionId,
+import {
+  BROWSER_VAULT_REPLICA_SCHEMA,
+  type AssistantPersonalitySettingId,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import type {
   HostedExecutionBundlePayload,
@@ -691,9 +692,11 @@ export interface HostedBrowserVaultReplicaRef {
   dataKeyEnvelope?: HostedDataKeyEnvelopeV1;
   dataVersion: string;
   generatedAt: string;
+  /** Absent only on legacy refs produced before generation-aware freshness. */
+  generation?: number;
   keyId: string;
   objectKey: string;
-  replicaSchema: "murph.browser-vault-replica";
+  replicaSchema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   runtimeRootKeyId: string;
   schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
   sourceBundleHash: string;

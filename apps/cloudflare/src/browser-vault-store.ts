@@ -1,3 +1,4 @@
+import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts";
 import {
   buildHostedStorageAad as buildRuntimeHostedStorageAad,
   createHostedDataKeyEnvelopeWithDomainRoot,
@@ -20,7 +21,6 @@ import {
   encodeHostedBrowserVaultReplicaJson,
 } from "./browser-vault-limits.ts";
 
-const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
 const utf8Decoder = new TextDecoder();
 
 type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
@@ -142,6 +142,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
         byteLength: encodedReplica.byteLength,
         dataVersion: parsed.source.dataVersion,
         generatedAt: parsed.generatedAt,
+        ...(parsed.generation === undefined ? {} : { generation: parsed.generation }),
         keyId: createBrowserVaultReplicaKeyId(parsed.source.dataVersion),
         objectKey,
         replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
@@ -340,6 +341,7 @@ function createBrowserVaultReplicaKeyId(dataVersion: string): string {
 
 function parseBrowserVaultReplicaStorageInput(value: unknown): {
   generatedAt: string;
+  generation?: number;
   source: {
     dataVersion: string;
     sourceBundleHash: string;
@@ -356,11 +358,21 @@ function parseBrowserVaultReplicaStorageInput(value: unknown): {
 
   return {
     generatedAt: requireIsoTimestampString(record.generatedAt, "Browser vault replica generatedAt"),
+    ...(record.generation === undefined
+      ? {}
+      : { generation: requirePositiveSafeInteger(record.generation, "Browser vault replica generation") }),
     source: {
       dataVersion: requireString(source.dataVersion, "Browser vault replica dataVersion"),
       sourceBundleHash: requireString(source.sourceBundleHash, "Browser vault replica sourceBundleHash"),
     },
   };
+}
+
+function requirePositiveSafeInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive safe integer.`);
+  }
+  return value;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

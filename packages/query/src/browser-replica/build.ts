@@ -23,6 +23,7 @@ import {
 } from "../metrics/index.ts";
 import {
   BODY_PREVIEW_CHARS,
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   EXCLUDED_FAMILIES,
@@ -100,6 +101,7 @@ export async function createBrowserVaultReplica(
       experimentOutcomeSchema.parse(outcome)
     ),
     generatedAt,
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
