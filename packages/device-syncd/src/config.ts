@@ -182,6 +182,7 @@ export {
   readConfiguredDeviceSyncRuntimeConfig,
 } from "./config/runtime-config.ts";
 export {
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceSyncConnectTargetKey,
