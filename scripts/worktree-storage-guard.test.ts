@@ -120,7 +120,7 @@ describe('worktree storage guard', () => {
       readFileSync(path.join(sourceRoot, 'package.json'), 'utf8'),
     )
     expect(packageJson.scripts.prepare).toBe(
-      'if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi',
+      'if [ -z "${CI:-}" ] && [ -z "${VERCEL:-}" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi',
     )
   })
 
