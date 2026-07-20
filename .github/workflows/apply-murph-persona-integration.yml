@@ -1,10 +1,9 @@
 name: Apply focused Murph persona repair
 
 on:
-  push:
-    branches: [agent/murph-personas]
-    paths:
-      - .github/workflows/apply-murph-persona-integration.yml
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 permissions:
   contents: write
