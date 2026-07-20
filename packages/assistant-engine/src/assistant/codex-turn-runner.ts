@@ -472,6 +472,8 @@ async function executeAssistantCodexAttempt(input: {
           productFeedbackRecorder:
             executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),
+        providerThreadEphemeral:
+          executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery: executionPlan.progressDelivery ?? null,
         providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,

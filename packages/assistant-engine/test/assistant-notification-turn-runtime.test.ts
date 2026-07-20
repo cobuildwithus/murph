@@ -781,6 +781,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
 
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledOnce()
   expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(order).toEqual([
@@ -2862,6 +2863,7 @@ test('sendAssistantNotificationLocal keeps a reviewed completion model turn isol
   })
   const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
   const beforeToolExecution = vi.fn(async () => undefined)
+  const groupTool = { request: vi.fn() }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
   sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
@@ -2880,9 +2882,23 @@ test('sendAssistantNotificationLocal keeps a reviewed completion model turn isol
           codexConfigOverrides: [
             'memories.use_memories=false',
             'memories.generate_memories=false',
+            'features.shell_tool=false',
+            'web_search="disabled"',
+            'features.web_search_request=false',
+            'features.standalone_web_search=false',
+            'features.apps=false',
+            'features.enable_mcp_apps=false',
+            'features.browser_use=false',
+            'features.plugins=false',
+            'features.multi_agent=false',
+            'features.multi_agent_v2=false',
+            'features.tool_suggest=false',
           ],
+          providerThreadEphemeral: true,
+          sandbox: 'read-only',
           suppressProviderFailureTranscriptAudit: true,
         }))
+        expect(providerInput.hostedToolContext?.groupTool).toBe(groupTool)
         await providerInput.onProviderRequestPlanned?.({
           codexContinuation: { kind: 'explicit-structured-history' },
           providerAttemptId: null,
@@ -2917,6 +2933,7 @@ test('sendAssistantNotificationLocal keeps a reviewed completion model turn isol
       'reviewed-assistant-ask-completion:ephemeral-test',
     executionContext: {
       hosted: {
+        groupTool,
         memberId: 'member-reviewed-completion',
         userEnvKeys: [],
       },
@@ -2977,7 +2994,20 @@ test('sendAssistantNotificationLocal keeps a reviewed completion skip isolated a
           codexConfigOverrides: [
             'memories.use_memories=false',
             'memories.generate_memories=false',
+            'features.shell_tool=false',
+            'web_search="disabled"',
+            'features.web_search_request=false',
+            'features.standalone_web_search=false',
+            'features.apps=false',
+            'features.enable_mcp_apps=false',
+            'features.browser_use=false',
+            'features.plugins=false',
+            'features.multi_agent=false',
+            'features.multi_agent_v2=false',
+            'features.tool_suggest=false',
           ],
+          providerThreadEphemeral: true,
+          sandbox: 'read-only',
           suppressProviderFailureTranscriptAudit: true,
         }))
         return {
@@ -3032,6 +3062,81 @@ test('sendAssistantNotificationLocal keeps a reviewed completion skip isolated a
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
   expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal keeps a scheduled reviewed fallback isolated and ephemeral', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({ session: providerSession })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+  sharedPlan.conversationPolicy.audience.threadId = 'group-reviewed-fallback'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      sharedPlan,
+      turnId: 'turn-reviewed-fallback-ephemeral',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-reviewed-fallback-ephemeral',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey:
+      'reviewed-assistant-ask-completion:ephemeral-fallback-test',
+    executionContext: {
+      hosted: {
+        memberId: 'member-reviewed-fallback',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Private reviewed answer that must not be fingerprinted.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'I could not answer that from the information available to this group.',
+    },
+    reviewedAssistantAskCompletionExpiresAt: '2026-07-20T17:10:00.000Z',
+    scheduledInvocationAuthority: {
+      automationId: 'automation-reviewed-fallback',
+      occurrenceAt: '2026-07-20T17:00:00.000Z',
+    },
+    threadId: 'group-reviewed-fallback',
+    threadIsDirect: false,
+    vault: '/vaults/reviewed-fallback-ephemeral',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantSessionForMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantProviderResumeStateAction).not.toHaveBeenCalled()
+  const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
+  expect(mocks.createAssistantRuntimeStateService).toHaveBeenCalledOnce()
+  expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
+  expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [],
+    message:
+      'I could not answer that from the information available to this group.',
+  }))
+  expect(result).toEqual(expect.objectContaining({
+    deliveryOutcome: expect.objectContaining({
+      intentId: 'intent-reviewed-fallback-ephemeral',
+      kind: 'queued',
+    }),
+    response:
+      'I could not answer that from the information available to this group.',
+  }))
 })
 
 test('sendAssistantNotificationLocal rechecks notification authority before outbound delivery', async () => {

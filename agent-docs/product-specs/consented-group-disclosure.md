@@ -76,11 +76,14 @@ review the candidate disclosure inside that boundary.
    byte-for-byte. A scheduled answer re-reads the active canonical automation
    and current non-direct Linq route, then resumes that automation through the
    ordinary group notification and outbox path with a deterministic key derived
-   from the completion. That model decision uses an isolated one-shot thread:
-   it reads no conversation or assistant memory and persists no prompt, model
-   output, transcript, receipt, session, or provider-resume state. The existing
-   outbox remains the only durable delivery owner. The answer is untrusted data,
-   not consent for an external action; every available tool still applies its
+   from the completion. That model decision uses an ephemeral App Server thread
+   with a read-only sandbox and native shell, web, app, MCP, browser, plugin, and
+   multi-agent surfaces disabled. It reads no conversation or assistant memory
+   and persists no prompt, model output, transcript, receipt, session, or
+   provider-resume state. The deterministic fallback follows the same
+   no-receipt/session rule without starting a provider turn. The existing outbox
+   remains the only durable delivery owner. The answer is untrusted data, not
+   consent for an external action; every available Murph tool still applies its
    existing independent authority checks. Group-safe accountless service tools
    may be available, but the continuation receives no member's connected
    account or private runtime.

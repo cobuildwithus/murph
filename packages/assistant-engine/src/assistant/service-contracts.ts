@@ -154,6 +154,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   persistUserPromptOnFailure?: boolean
+  // Existing App Server per-turn thread option. Never enters session identity
+  // or persisted provider config.
+  providerThreadEphemeral?: boolean | null
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null

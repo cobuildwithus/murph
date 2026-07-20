@@ -375,7 +375,6 @@ export async function sendAssistantScheduledAutomationContinuation(
     participantId: resolved.job.target.participantId,
     responsePolicy: notification.responsePolicy,
     reviewedAssistantAskCompletionExpiresAt: input.expiresAt,
-    sandbox: 'workspace-write',
     scheduledInvocationAuthority: {
       automationId: source.automationId,
       occurrenceAt: input.occurrenceAt,

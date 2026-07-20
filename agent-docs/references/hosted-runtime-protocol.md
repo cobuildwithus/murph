@@ -460,9 +460,12 @@ canonical automation and current non-direct Linq route before resuming the
    ordinary controlled group notification and outbox path. A completion-derived
    delivery key makes retries idempotent. The same Web-owned completion predicate
    runs before model work, before each tool call, and before delivery or skip
-   commit. The model decision uses an isolated one-shot notification thread with
-   memory disabled and persists no prompt, output, transcript, receipt, session,
-   or provider-resume state; the existing outbox is the durable delivery owner.
+   commit. The model decision uses an ephemeral App Server thread with a
+   read-only sandbox and native shell, web, app, MCP, browser, plugin, and
+   multi-agent surfaces disabled. It reads no memory and persists no prompt,
+   output, transcript, receipt, session, or provider-resume state. The
+   deterministic fallback uses the same no-receipt/session rule without entering
+   the provider; the existing outbox is the durable delivery owner.
    The continuation still receives tools independently authorized for the current
    scheduled group turn. Cannot-answer uses the fixed non-disclosing result. The original private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
