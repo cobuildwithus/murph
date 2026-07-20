@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import { bundleWorkflowCode } from "@temporalio/worker";
 
+import {
+  assertHostedTemporalWorkflowBundle,
+} from "../workflow-bundle-policy.js";
+
 const workflowsPath = fileURLToPath(
   new URL("../workflows/index.js", import.meta.url),
 );
@@ -21,8 +25,11 @@ if (!existsSync(workflowsPath)) {
 const { code } = await bundleWorkflowCode({
   workflowsPath,
 });
+const summary = assertHostedTemporalWorkflowBundle(code);
 
 await mkdir(dirname(workflowBundlePath), { recursive: true });
 await writeFile(workflowBundlePath, code);
 
-console.log("Hosted Temporal workflow bundle written.");
+console.log(
+  `Hosted Temporal workflow bundle written (${summary.byteLength} bytes, ${summary.sourceCount} sources).`,
+);

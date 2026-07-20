@@ -262,7 +262,9 @@ export async function assertHostedUsageCreditStripePriceMatchesPurchase(input: {
   }
   if (
     price.currency_options &&
-    Object.keys(price.currency_options).length > 0
+    Object.keys(price.currency_options).some(
+      (currency) => currency.toLowerCase() !== price.currency.toLowerCase(),
+    )
   ) {
     throw buildHostedUsageCreditPriceConfigurationError(
       "price_currency_options_unsupported",

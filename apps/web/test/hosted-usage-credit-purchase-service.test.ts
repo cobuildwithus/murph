@@ -404,6 +404,36 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("accepts Stripe's expanded base-currency Price option", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripePriceRetrieve.mockResolvedValueOnce(buildStripePrice({
+      currency_options: {
+        usd: {
+          custom_unit_amount: null,
+          tax_behavior: "inclusive",
+          unit_amount: 1_000,
+          unit_amount_decimal: "1000",
+        },
+      },
+      tax_behavior: "inclusive",
+      unit_amount_decimal: "1000",
+    }));
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).resolves.toMatchObject({
+      status: "checkout_open",
+    });
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["recurring", { recurring: { interval: "month" }, type: "recurring" }],
     ["custom amount", { custom_unit_amount: { enabled: true } }],
