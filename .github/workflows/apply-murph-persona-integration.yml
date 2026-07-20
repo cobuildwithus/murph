@@ -38,13 +38,21 @@ jobs:
           base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs \
-            2>&1 | tee murph-persona-integration.log
+            2>&1 | tee /tmp/murph-persona-integration.log
 
-      - name: Stop after integration failure
+      - name: Commit integration diagnostic
         if: ${{ steps.integrate.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          echo "--- persona integration failure ---"
-          tail -n 80 murph-persona-integration.log
+          tail -n 60 /tmp/murph-persona-integration.log > /tmp/persona-failure.log
+          content="$(base64 -w0 /tmp/persona-failure.log)"
+          gh api --method PUT \
+            "repos/${GITHUB_REPOSITORY}/contents/agent-docs/exec-plans/active/murph-persona-integration-failure.log" \
+            -f message='chore: record persona integration failure [persona-failed]' \
+            -f branch='agent/murph-personas' \
+            -f content="$content"
           exit 1
 
       - uses: actions/setup-node@v4
@@ -102,19 +110,26 @@ jobs:
             pnpm typecheck:packages
             pnpm --dir apps/web typecheck
             git diff --check
-          } 2>&1 | tee murph-persona-verification.log
+          } 2>&1 | tee /tmp/murph-persona-verification.log
 
-      - name: Stop after verification failure
+      - name: Commit verification diagnostic
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          echo "--- persona verification failure ---"
-          tail -n 120 murph-persona-verification.log
+          tail -n 120 /tmp/murph-persona-verification.log > /tmp/persona-verification-failure.log
+          content="$(base64 -w0 /tmp/persona-verification-failure.log)"
+          gh api --method PUT \
+            "repos/${GITHUB_REPOSITORY}/contents/agent-docs/exec-plans/active/murph-persona-verification-failure.log" \
+            -f message='chore: record persona verification failure [persona-failed]' \
+            -f branch='agent/murph-personas' \
+            -f content="$content"
           exit 1
 
       - name: Commit integrated implementation
         if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
         run: |
-          rm -f murph-persona-integration.log murph-persona-verification.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
