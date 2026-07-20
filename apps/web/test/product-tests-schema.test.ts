@@ -14,6 +14,47 @@ const CONTAMINANT_THRESHOLDS_CSV_HEADER =
   "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active";
 
 describe("product test contaminant schema", () => {
+  it("defines the product-test measurement metadata exposed by label APIs", async () => {
+    const schemaSql = await readFile(
+      new URL("../sql/product-tests/schema.sql", import.meta.url),
+      "utf8",
+    );
+
+    for (const column of [
+      "evidence_type",
+      "sampling_context",
+      "tested_product_upc_raw",
+      "source_sample_id",
+      "source_sample_count",
+      "tested_lot_code",
+      "tested_best_by",
+      "tested_package_size",
+      "collected_on",
+      "tested_on",
+      "result_upper_value",
+      "normalized_upper_value",
+      "result_qualifier",
+      "detection_limit_value",
+      "quantification_limit_value",
+      "reporting_limit_value",
+      "uncertainty_value",
+    ]) {
+      expect(schemaSql).toContain(column);
+    }
+
+    expect(schemaSql).toContain("'regulatory_finding'");
+    expect(schemaSql).toContain("'manufacturer_coa'");
+    expect(schemaSql).toContain("result_operator = 'range'");
+    expect(schemaSql).toContain("result_value <= result_upper_value");
+    expect(schemaSql).toContain("normalized_value <= normalized_upper_value");
+    expect(schemaSql).toContain(
+      "CREATE OR REPLACE FUNCTION murph_product_test_valid_gtin",
+    );
+    expect(schemaSql).toContain(
+      "OR murph_product_test_valid_gtin(tested_product_upc)",
+    );
+  });
+
   it("backfills serving grams from stored label JSON", async () => {
     const foodsSchemaSql = await readFile(
       new URL("../sql/foods/schema.sql", import.meta.url),
@@ -338,23 +379,25 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("product_tests_source_only_link_check");
     expect(schemaSql).toContain("product_tests_source_only_idx");
     expect(schemaSql).toContain("match_method = 'source_only'");
-    expect(schemaSql).toContain("source_food.data_origin IN");
-    expect(schemaSql).toContain("source_supplement.data_origin IN");
+    expect(schemaSql).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_food\.data_origin/u,
+    );
+    expect(schemaSql).toMatch(
+      /murph_product_test_legacy_source_backed_origin\(\s+source_supplement\.data_origin/u,
+    );
     const sourceSupplementRepairSql = schemaSql.slice(
       schemaSql.indexOf("FROM supplements source_supplement"),
       schemaSql.indexOf("ALTER TABLE product_tests\n  DROP CONSTRAINT IF EXISTS product_tests_source_only_link_check"),
     );
-    expect(sourceSupplementRepairSql).toContain("'plasticlist_bay_area_2024'");
-    expect(sourceSupplementRepairSql).toContain("'nyc_dohmh_consumer_products'");
-    expect(sourceSupplementRepairSql).toContain("'king_county_consumer_products'");
-    expect(sourceSupplementRepairSql).toContain("'pure_earth_rms_2024'");
+    expect(sourceSupplementRepairSql).toContain(
+      "murph_product_test_legacy_source_backed_origin",
+    );
     const supplementPlaceholderCleanupSql = schemaSql.slice(
       schemaSql.lastIndexOf("DELETE FROM supplements"),
     );
-    expect(supplementPlaceholderCleanupSql).toContain("'plasticlist_bay_area_2024'");
-    expect(supplementPlaceholderCleanupSql).toContain("'nyc_dohmh_consumer_products'");
-    expect(supplementPlaceholderCleanupSql).toContain("'king_county_consumer_products'");
-    expect(supplementPlaceholderCleanupSql).toContain("'pure_earth_rms_2024'");
+    expect(supplementPlaceholderCleanupSql).toContain(
+      "murph_product_test_legacy_source_backed_origin(supplements.data_origin)",
+    );
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");

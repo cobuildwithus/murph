@@ -459,6 +459,15 @@ size. One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
 
+Each product-test observation may preserve evidence and sampling context,
+sample or lot identity, result bounds and qualifiers, analytical limits, and
+the raw reported product identifier. Only checksum-valid GTINs enter the
+canonical UPC field. Private label lookup and the bounded public product-detail
+contract expose the same additive metadata so a regulatory finding or sampled
+package is not presented as a timeless product claim. One-time acquisition,
+reconciliation, and remap tooling is operational research rather than deployed
+application code.
+
 ## Trust Boundaries
 
 - Canonical vault storage is file-native under the vault root.

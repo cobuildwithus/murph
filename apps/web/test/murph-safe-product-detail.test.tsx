@@ -149,6 +149,44 @@ describe("Murph Safe public pages", () => {
       createElement(MurphSafeProductDetail, { product }),
     );
     expect(preciseMarkup).toContain("0.00001 ppm");
+
+    observation.result = {
+      basis: "product_mass",
+      operator: "range",
+      unit: "ppm",
+      value: 0.1,
+      upperValue: 0.2,
+    };
+    observation.normalizedResult = {
+      basis: "product_mass",
+      unit: "ppb",
+      value: 100,
+      upperValue: 200,
+    };
+    const rangeMarkup = renderToStaticMarkup(
+      createElement(MurphSafeProductDetail, { product }),
+    );
+    expect(rangeMarkup).toContain("0.1–0.2 ppm");
+    expect(rangeMarkup).toContain("Normalized result: 100–200 ppb");
+
+    observation.normalizedResult.upperValue = null;
+    const partialNormalizedRangeMarkup = renderToStaticMarkup(
+      createElement(MurphSafeProductDetail, { product }),
+    );
+    expect(partialNormalizedRangeMarkup).toContain(
+      "Normalized result: From 100 ppb (upper bound not reported)",
+    );
+
+    observation.normalizedResult = {
+      basis: "product_mass",
+      unit: "ppm",
+      value: 0.1,
+      upperValue: 0.2,
+    };
+    const identicalRangeMarkup = renderToStaticMarkup(
+      createElement(MurphSafeProductDetail, { product }),
+    );
+    expect(identicalRangeMarkup).not.toContain("Normalized result:");
   });
 
   test("renders a canonical branded-food nutrient value", () => {

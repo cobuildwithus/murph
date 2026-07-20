@@ -109,9 +109,21 @@ describe("public product service", () => {
     expect(result?.productTests.observations[0]?.screening?.comparison).toBe(
       "does_not_exceed",
     );
+    expect(result?.productTests.observations[0]).toMatchObject({
+      result: {
+        operator: "range",
+        value: 0.1,
+        upperValue: 0.2,
+        qualifier: "estimated range",
+      },
+      sample: {
+        evidenceType: "regulatory_laboratory",
+        samplingContext: "retail_surveillance",
+        lotCode: "LOT-1",
+      },
+    });
     expect(result?.unknowns.map((unknown) => unknown.code)).toEqual([
       "FORMULA_REVISION_NOT_TRACKED",
-      "TESTED_LOT_NOT_REPORTED",
     ]);
     expect(source.getSupplementEvidence).toHaveBeenCalledWith({
       id: "dsld:1",
@@ -350,15 +362,36 @@ function productEvidence(): PublicProductTestEvidence {
         contaminantKey: "lead",
         contaminantName: "Lead",
         result: {
-          operator: "eq",
+          operator: "range",
           value: 0.1,
+          upperValue: 0.2,
+          qualifier: "estimated range",
+          detectionLimit: { value: 0.01, unit: "ppm" },
+          quantificationLimit: null,
+          reportingLimit: null,
+          uncertainty: { value: 0.02, unit: "ppm" },
           unit: "ppm",
           basis: "product_mass",
         },
         normalizedResult: {
           value: 0.1,
+          upperValue: 0.2,
           unit: "ppm",
           basis: "product_mass",
+        },
+        sample: {
+          evidenceType: "regulatory_laboratory",
+          samplingContext: "retail_surveillance",
+          sourceSampleId: "sample-1",
+          sampleCount: 3,
+          reportedUpc: "1234 5678",
+          lotCode: "LOT-1",
+          bestBy: "2027-01",
+          packageSize: "100 g",
+          collectedOn: "2026-06-01",
+          testedOn: "2026-06-03",
+          labName: "Example laboratory",
+          testMethod: "Example method",
         },
         screening: {
           comparison: "does_not_exceed",
