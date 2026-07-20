@@ -146,6 +146,14 @@ plain or forged GET must remain read-only. The first accepted automatic POST
 clears the claim. Existing Stripe idempotency makes overlapping valid
 continuations converge on the same subscription mutation.
 
+Browser continuation is an explicit, default-off service input owned by
+`POST /api/settings/billing/start-paid-pulse`. The conversational
+`start_pulse_now` and `continue_pulse` tools share the billing service but do
+not own the browser claim, so their Stripe handoffs remain unmarked, including
+paused/no-payment-method recovery. A surviving cookie from a canceled Settings
+flow therefore cannot change a later conversational continue-at-trial-end
+choice into an immediate start.
+
 While the automatic continuation is starting or waiting for billing, Settings
 shows one busy status and suppresses every other Start Pulse action. A terminal
 automatic failure exposes one manual retry; Stripe can reopen only from that

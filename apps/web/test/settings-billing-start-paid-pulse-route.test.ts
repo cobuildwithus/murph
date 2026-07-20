@@ -87,6 +87,7 @@ test("starts paid Pulse for an authenticated hosted trial member", async () => {
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
+    browserContinuationAfterPaymentMethodSetup: true,
     memberId: "member_123",
     prisma: {
       label: "test-prisma",

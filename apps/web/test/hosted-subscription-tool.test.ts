@@ -171,6 +171,11 @@ describe("hosted subscription tool", () => {
       plan: PULSE_PLAN,
       status: "payment_required",
     });
+
+    expect(mocks.startPulse).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: { label: "prisma" },
+    });
   });
 
   it.each([

@@ -37,6 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const result = await startHostedPulseTrialPaidPlan({
+    browserContinuationAfterPaymentMethodSetup: true,
     memberId: auth.member.id,
     prisma,
   });

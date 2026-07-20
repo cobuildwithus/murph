@@ -419,6 +419,32 @@ test("SettingsPage treats the return marker as inert without its bound claim", a
   assert.doesNotMatch(markup, /Starting paid Pulse automatically/);
 });
 
+test("SettingsPage treats a surviving claim as inert without the marked return", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_session_123",
+    },
+  });
+  mocks.hasHostedStartPaidPulseContinuationCookie.mockResolvedValueOnce(true);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.hasHostedStartPaidPulseContinuationCookie).not.toHaveBeenCalled();
+  expect(mocks.StartPaidPulseContinuation).not.toHaveBeenCalled();
+  assert.doesNotMatch(markup, /Starting paid Pulse automatically/);
+});
+
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
