@@ -29,14 +29,16 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
+import type {
+  HostedVaultShareDeliveryRecord,
+  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
+  HostedVaultShareSelectableProjectionKind,
+  HostedVaultShareSelectableProjectionScope,
+} from "./vault-share.ts";
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
-  type HostedVaultShareDeliveryRecord,
-  type HostedVaultShareProjectionKind,
-  type HostedVaultShareProjectionScope,
-  type HostedVaultShareSelectableProjectionKind,
-  type HostedVaultShareSelectableProjectionScope,
-} from "./vault-share.ts";
+} from "./vault-share-limits.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
