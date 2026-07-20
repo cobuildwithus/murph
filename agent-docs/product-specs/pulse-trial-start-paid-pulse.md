@@ -147,8 +147,9 @@ clears the claim. Existing Stripe idempotency makes overlapping valid
 continuations converge on the same subscription mutation.
 
 Payment-method continuation is an explicit, default-off service input. The
-Settings start route selects the existing session-bound `start_pulse_now`
-claim. Conversational `start_pulse_now` and `continue_pulse` calls select a
+Settings start route issues the existing session-bound `start_pulse_now`
+claim; the exact-action continuation route is its sole automatic consumer.
+Conversational `start_pulse_now` and `continue_pulse` calls select a
 signed conversational return whose action is derived from the service's
 existing transition timing. The URL contains the action, expiry, and HMAC but
 no member identifier. After Stripe reports successful flow completion, an

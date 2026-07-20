@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   buildHostedPulseTrialContinuationClearCookie: vi.fn(),
   buildHostedPulseTrialContinuationCookie: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedPulseTrialContinuationRequest: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   startHostedPulseTrialPaidPlan: vi.fn(),
 }));
@@ -29,8 +28,6 @@ vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
     mocks.buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie:
     mocks.buildHostedPulseTrialContinuationCookie,
-  readHostedPulseTrialContinuationRequest:
-    mocks.readHostedPulseTrialContinuationRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
@@ -52,7 +49,6 @@ beforeEach(async () => {
   mocks.buildHostedPulseTrialContinuationCookie.mockReturnValue(
     "murph-start-pulse=issued; Max-Age=900",
   );
-  mocks.readHostedPulseTrialContinuationRequest.mockReturnValue("start_pulse_now");
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       billingStatus: "active",
@@ -152,102 +148,6 @@ test("does not issue a continuation claim for hosted-invoice recovery", async ()
   expect(response.headers.get("set-cookie")).toBe(
     "murph-start-pulse=; Max-Age=0",
   );
-});
-
-test("accepts a valid automatic continuation and consumes its claim", async () => {
-  const request = new Request(
-    "https://join.example.test/api/settings/billing/start-paid-pulse",
-    {
-      headers: {
-        "x-murph-start-paid-pulse-continuation": "1",
-        cookie: "murph-start-pulse=issued",
-        origin: "https://join.example.test",
-      },
-      method: "POST",
-    },
-  );
-
-  const response = await billingStartPaidPulseRoute.POST(request);
-
-  expect(response.status).toBe(200);
-  expect(mocks.readHostedPulseTrialContinuationRequest).toHaveBeenCalledWith({
-    memberId: "member_123",
-    request,
-    sessionId: "hws_session_123",
-  });
-  expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledTimes(1);
-  expect(response.headers.get("set-cookie")).toBe(
-    "murph-start-pulse=; Max-Age=0",
-  );
-});
-
-test("does not reissue the claim when automatic continuation still needs payment setup", async () => {
-  mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
-    billingPlanCode: "launch_monthly",
-    paymentUrl: "https://billing.stripe.test/session_123",
-    resumeStartAfterPaymentMethodSetup: true,
-    status: "payment_required",
-  });
-
-  const response = await billingStartPaidPulseRoute.POST(
-    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
-      headers: {
-        "x-murph-start-paid-pulse-continuation": "1",
-        cookie: "murph-start-pulse=issued",
-        origin: "https://join.example.test",
-      },
-      method: "POST",
-    }),
-  );
-
-  expect(response.status).toBe(200);
-  expect(mocks.buildHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
-  expect(response.headers.get("set-cookie")).toBe(
-    "murph-start-pulse=; Max-Age=0",
-  );
-  await expect(response.json()).resolves.toEqual({
-    billingPlanCode: "launch_monthly",
-    paymentUrl: "https://billing.stripe.test/session_123",
-    status: "payment_required",
-  });
-});
-
-test("rejects an automatic continuation without its bound claim", async () => {
-  mocks.readHostedPulseTrialContinuationRequest.mockReturnValueOnce(null);
-
-  const response = await billingStartPaidPulseRoute.POST(
-    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
-      headers: {
-        "x-murph-start-paid-pulse-continuation": "1",
-        origin: "https://join.example.test",
-      },
-      method: "POST",
-    }),
-  );
-
-  expect(response.status).toBe(403);
-  expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
-  await expect(response.json()).resolves.toMatchObject({
-    error: {
-      code: "HOSTED_PULSE_TRIAL_START_PAID_CONTINUATION_INVALID",
-    },
-  });
-});
-
-test("rejects malformed automatic-continuation headers", async () => {
-  const response = await billingStartPaidPulseRoute.POST(
-    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
-      headers: {
-        "x-murph-start-paid-pulse-continuation": "true",
-        origin: "https://join.example.test",
-      },
-      method: "POST",
-    }),
-  );
-
-  expect(response.status).toBe(400);
-  expect(mocks.readHostedPulseTrialContinuationRequest).not.toHaveBeenCalled();
-  expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
 });
 
 test("rejects a generic request body", async () => {

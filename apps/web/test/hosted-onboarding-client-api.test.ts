@@ -243,40 +243,6 @@ describe("hosted onboarding client api", () => {
     expect(assign).toHaveBeenCalledWith("https://invoice.stripe.test/in_123");
   });
 
-  it("marks automatic Start Pulse continuation and never loops back to Stripe", async () => {
-    const assign = vi.fn();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
-      billingPlanCode: "launch_monthly",
-      paymentUrl: "https://billing.stripe.test/session_123",
-      status: "payment_required",
-    }), {
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("window", {
-      location: {
-        assign,
-      },
-    });
-
-    await expect(requestHostedPulseTrialStartPaid({
-      automaticContinuation: true,
-    })).resolves.toEqual({
-      status: "payment_required",
-    });
-    expect(fetchMock).toHaveBeenCalledWith("/api/settings/billing/start-paid-pulse", {
-      body: undefined,
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: {
-        "x-murph-start-paid-pulse-continuation": "1",
-      },
-      keepalive: false,
-      method: "POST",
-    });
-    expect(assign).not.toHaveBeenCalled();
-  });
-
   it("rejects payment-required Start Pulse responses without a payment URL", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
       billingPlanCode: "launch_monthly",

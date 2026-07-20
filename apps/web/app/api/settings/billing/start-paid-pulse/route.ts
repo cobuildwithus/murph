@@ -2,9 +2,7 @@ import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/
 import {
   buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie,
-  readHostedPulseTrialContinuationRequest,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
-import { HOSTED_START_PAID_PULSE_CONTINUATION_HEADER } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { startHostedPulseTrialPaidPlan } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
@@ -19,22 +17,6 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
   assertHostedMemberNotSuspended(auth.member);
-  const automaticContinuation = readAutomaticContinuation(request);
-
-  if (
-    automaticContinuation
-    && readHostedPulseTrialContinuationRequest({
-      memberId: auth.member.id,
-      request,
-      sessionId: auth.sessionId,
-    }) !== "start_pulse_now"
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_CONTINUATION_INVALID",
-      httpStatus: 403,
-      message: "Your Start Pulse confirmation expired. Try again.",
-    });
-  }
 
   const result = await startHostedPulseTrialPaidPlan({
     memberId: auth.member.id,
@@ -55,7 +37,6 @@ export const POST = withJsonError(async (request: Request) => {
     "Set-Cookie",
     result.status === "payment_required"
       && result.resumeStartAfterPaymentMethodSetup === true
-      && !automaticContinuation
       ? buildHostedPulseTrialContinuationCookie({
         action: "start_pulse_now",
         memberId: auth.member.id,
@@ -65,23 +46,6 @@ export const POST = withJsonError(async (request: Request) => {
   );
   return response;
 });
-
-function readAutomaticContinuation(request: Request): boolean {
-  const value = request.headers.get(HOSTED_START_PAID_PULSE_CONTINUATION_HEADER);
-  if (value === null) {
-    return false;
-  }
-
-  if (value === "1") {
-    return true;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_PULSE_TRIAL_START_PAID_CONTINUATION_INVALID",
-    httpStatus: 400,
-    message: "Start Pulse continuation is invalid.",
-  });
-}
 
 async function assertNoRequestBody(request: Request): Promise<void> {
   const body = await readRawBodyBuffer(request, {
