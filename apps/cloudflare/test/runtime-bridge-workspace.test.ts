@@ -431,6 +431,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       "utf8",
     );
     await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite-shm"), "projection-shm\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite-wal"), "projection-wal\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "inboxd.sqlite"), "other-projection\n", "utf8");
     await writeFile(path.join(vaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
     await writeFile(path.join(vaultRoot, ".runtime", "tmp", "temp.txt"), "tmp\n", "utf8");
     await writeFile(path.join(vaultRoot, ".git", "config"), "git config\n", "utf8");
@@ -494,7 +497,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(entries).toContain("vault/note.md");
     expect(entries).toContain("vault/.runtime/operations/assistant/sessions/session.json");
     expect(entries).toContain(`home/.codex-hosted/${rolloutRelativePath}`);
-    expect(entries).not.toContain("vault/.runtime/projections/query.sqlite");
+    expect(entries).toContain("vault/.runtime/projections/query.sqlite");
+    expect(entries).toContain("vault/.runtime/projections/query.sqlite-shm");
+    expect(entries).toContain("vault/.runtime/projections/query.sqlite-wal");
+    expect(entries).not.toContain("vault/.runtime/projections/inboxd.sqlite");
     expect(entries).not.toContain("vault/.runtime/cache/cache.txt");
     expect(entries).not.toContain("vault/.runtime/tmp/temp.txt");
     expect(entries).not.toContain("vault/.git/config");

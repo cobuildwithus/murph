@@ -837,7 +837,11 @@ children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
-warm local runtime markers across leases. The detailed contract lives in
+warm local runtime markers across leases. Encrypted hosted snapshots also carry
+the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
+last projection; canonical vault files remain authoritative, source-manifest
+validation rebuilds stale caches, and every other projection remains excluded.
+The detailed contract lives in
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 A valid `idle_shutdown` snapshot whose workspace-version compare-and-swap still

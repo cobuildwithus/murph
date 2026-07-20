@@ -78,6 +78,7 @@ export interface CommonListOptionNames {
   limit: string
   status: string
   tag: string
+  text: string
   to: string
 }
 
@@ -88,6 +89,7 @@ export interface CommonListOptionsConfig {
   limit?: z.ZodType<number>
   status?: z.ZodType<string | undefined>
   tag?: z.ZodType<unknown>
+  text?: z.ZodType<string | undefined>
   to?: ListDateOptionConfig
 }
 
@@ -98,6 +100,7 @@ export interface CommonListOptions {
   limit?: number
   status?: string
   tag?: unknown
+  text?: string
   to?: string
 }
 
@@ -194,6 +197,7 @@ const defaultCommonListOptionNames: CommonListOptionNames = {
   limit: 'limit',
   status: 'status',
   tag: 'tag',
+  text: 'text',
   to: 'to',
 }
 
@@ -241,6 +245,10 @@ function buildCommonListOptionShape(
     shape[names.tag] = config.tag
   }
 
+  if (config.text) {
+    shape[names.text] = config.text
+  }
+
   if (config.experiment) {
     shape[names.experiment] = config.experiment
   }
@@ -263,6 +271,7 @@ function readCommonListOptions(
     limit: optionNumberValue(options, names.limit),
     status: optionStringValue(options, names.status),
     tag: options[names.tag],
+    text: optionStringValue(options, names.text),
     to: optionStringValue(options, names.to),
   }
 }

@@ -3,7 +3,7 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
 } from "@murphai/contracts";
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { listEntities, readVault, type VaultReadModel } from "../model.ts";
+import { listCanonicalEntitiesRuntime } from "../query-projection.ts";
 import {
   applyLimit,
   asObject,
@@ -168,15 +168,10 @@ function matchesBloodTestOptions(
 }
 
 function selectProjectedBloodTests(
-  vault: VaultReadModel,
+  entities: readonly CanonicalEntity[],
   options: BloodTestListOptions = {},
 ): BloodTestQueryRecord[] {
-  const records = listEntities(vault, {
-    families: ["event"],
-    kinds: ["test"],
-    from: options.from,
-    to: options.to,
-  })
+  const records = entities
     .map(bloodTestRecordFromEventEntity)
     .filter(isBloodTestRecord)
     .filter((record) => matchesDateRange(record.occurredAt, options.from, options.to))
@@ -190,7 +185,16 @@ export async function listBloodTests(
   vaultRoot: string,
   options: BloodTestListOptions = {},
 ): Promise<BloodTestQueryRecord[]> {
-  return selectProjectedBloodTests(await readVault(vaultRoot), options);
+  const entities = await listCanonicalEntitiesRuntime(vaultRoot, {
+    family: "event",
+    from: options.from,
+    kinds: ["test"],
+    // Blood-test classification and text matching live above the canonical
+    // entity projection, so SQL must not truncate generic test events first.
+    limit: null,
+    to: options.to,
+  });
+  return selectProjectedBloodTests(entities, options);
 }
 
 export async function readBloodTest(

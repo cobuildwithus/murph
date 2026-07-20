@@ -54,6 +54,11 @@ const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_RELATIVE_PATH =
   `${RUNTIME_CACHE_ROOT_RELATIVE_PATH}/hosted-skipped-inline-files.json`;
 const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA =
   "murph.hosted-workspace-skipped-inline-files.v1";
+const HOSTED_QUERY_PROJECTION_SNAPSHOT_RELATIVE_PATHS = [
+  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite`,
+  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite-shm`,
+  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite-wal`,
+] as const;
 const HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u;
 const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
@@ -2520,6 +2525,9 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {
+  if (isHostedQueryProjectionSnapshotRelativePath(relativePath)) {
+    return true;
+  }
   if (isHostedRuntimeSnapshotExcludedRelativePath(relativePath)) {
     return false;
   }
@@ -2533,6 +2541,14 @@ function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string)
     isStrictAncestorPath(relativePath, ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH)
     || localStateDescriptor?.portability === "portable"
     || isPortableVaultOperationalContainerRelativePath(relativePath)
+  );
+}
+
+function isHostedQueryProjectionSnapshotRelativePath(relativePath: string): boolean {
+  return HOSTED_QUERY_PROJECTION_SNAPSHOT_RELATIVE_PATHS.some(
+    (queryProjectionPath) =>
+      relativePath === queryProjectionPath
+      || isStrictAncestorPath(relativePath, queryProjectionPath),
   );
 }
 
