@@ -214,7 +214,7 @@ text, count = re.subn(
     text,
     flags=re.MULTILINE,
 )
-if count != 15:
+if count != 16:
     raise RuntimeError(f"catalog category rows: {count}")
 start = text.index("const assistantPersonaOptionById = new Map")
 end = text.index("export function resolveAssistantEffectiveStyle", start)
