@@ -776,7 +776,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   options: HostedLocalE2eRunnerCleanupOptions,
 ): Promise<void> {
   const {
-    cleanupHostedLocalOrphanedWorkerdProcesses,
     cleanupHostedRunnerContainers,
     cleanupHostedRunnerImages,
   } =
@@ -787,7 +786,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   } =
     await import("./dev-hosted-local/minio.ts");
 
-  cleanupHostedLocalOrphanedWorkerdProcesses();
   await cleanupHostedRunnerContainers({
     cwd: hostedLocalHarnessRepoRoot,
     env,

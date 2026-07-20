@@ -1,5 +1,27 @@
 import { spawn, spawnSync } from "node:child_process";
 
+const defaultForegroundSignals = process.platform === "win32"
+  ? (["SIGINT", "SIGTERM"] as const)
+  : (["SIGINT", "SIGTERM", "SIGHUP"] as const);
+const processGroupPollIntervalMs = 25;
+
+export interface OwnedChildProcess {
+  exitCode: number | null;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
+  pid?: number;
+  signalCode?: NodeJS.Signals | null;
+}
+
+interface OwnedChildProcessTerminationOptions {
+  forceMs?: number;
+  graceMs?: number;
+  signal?: NodeJS.Signals;
+}
+
 export interface ForegroundCommandInput {
   args: readonly string[];
   command: string;
@@ -26,6 +48,7 @@ export async function runForegroundCommand(
     let settled = false;
     const child = spawn(input.command, [...input.args], {
       cwd: input.cwd,
+      detached: process.platform !== "win32",
       env: input.env,
       stdio: "inherit",
     });
@@ -37,12 +60,12 @@ export async function runForegroundCommand(
       }
       signalHandlers.clear();
     };
-    for (const signal of input.forwardProcessSignals ?? []) {
+    for (const signal of input.forwardProcessSignals ?? defaultForegroundSignals) {
       const handler = (): void => {
-        child.kill(signal);
+        signalOwnedChildProcess(child, signal);
       };
       signalHandlers.set(signal, handler);
-      process.once(signal, handler);
+      process.on(signal, handler);
     }
 
     child.once("error", (error) => {
@@ -59,15 +82,184 @@ export async function runForegroundCommand(
       }
       settled = true;
       cleanupSignalHandlers();
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(signal
-        ? new ForegroundCommandSignalError(input.label, signal)
-        : new Error(`${input.label} exited with code ${code ?? "unknown"}.`));
+      void terminateOwnedChildProcessAndWait(child).then(() => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(signal
+          ? new ForegroundCommandSignalError(input.label, signal)
+          : new Error(`${input.label} exited with code ${code ?? "unknown"}.`));
+      }, reject);
     });
   });
+}
+
+export function signalOwnedChildProcess(
+  child: OwnedChildProcess,
+  signal: NodeJS.Signals,
+): void {
+  const processGroupId = resolveOwnedProcessGroupId(child);
+  if (processGroupId !== null && signalProcessGroup(processGroupId, signal) === "sent") {
+    return;
+  }
+
+  if (!hasChildExited(child)) {
+    try {
+      child.kill(signal);
+    } catch {
+      // The retained child may have exited between the state check and signal.
+    }
+  }
+}
+
+export async function terminateOwnedChildProcessAndWait(
+  child: OwnedChildProcess,
+  input: OwnedChildProcessTerminationOptions = {},
+): Promise<void> {
+  const signal = input.signal ?? "SIGTERM";
+  const graceMs = input.graceMs ?? 5_000;
+  const forceMs = input.forceMs ?? 5_000;
+  const processGroupId = resolveOwnedProcessGroupId(child);
+
+  if (processGroupId !== null) {
+    if (!isProcessGroupRunning(processGroupId)) {
+      if (!hasChildExited(child)) {
+        await terminateDirectChildAndWait(child, { forceMs, graceMs, signal });
+      }
+      return;
+    }
+
+    const gracefulResult = signalProcessGroup(processGroupId, signal);
+    if (gracefulResult === "missing") {
+      return;
+    }
+    if (gracefulResult === "failed" && !hasChildExited(child)) {
+      await terminateDirectChildAndWait(child, { forceMs, graceMs, signal });
+      return;
+    }
+    if (await waitForProcessGroupExit(processGroupId, graceMs)) {
+      return;
+    }
+
+    const forceResult = signalProcessGroup(processGroupId, "SIGKILL");
+    if (forceResult === "missing") {
+      return;
+    }
+    await waitForProcessGroupExit(processGroupId, forceMs);
+    return;
+  }
+
+  await terminateDirectChildAndWait(child, { forceMs, graceMs, signal });
+}
+
+function resolveOwnedProcessGroupId(child: OwnedChildProcess): number | null {
+  return process.platform !== "win32"
+    && typeof child.pid === "number"
+    && child.pid > 0
+    ? child.pid
+    : null;
+}
+
+function signalProcessGroup(
+  processGroupId: number,
+  signal: NodeJS.Signals,
+): "failed" | "missing" | "sent" {
+  try {
+    process.kill(-processGroupId, signal);
+    return "sent";
+  } catch (error) {
+    return isMissingProcessError(error) ? "missing" : "failed";
+  }
+}
+
+function isProcessGroupRunning(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return !isMissingProcessError(error);
+  }
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessGroupRunning(processGroupId)) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    await sleep(Math.min(processGroupPollIntervalMs, remainingMs));
+  }
+  return true;
+}
+
+async function terminateDirectChildAndWait(
+  child: OwnedChildProcess,
+  input: Required<OwnedChildProcessTerminationOptions>,
+): Promise<void> {
+  if (hasChildExited(child)) {
+    return;
+  }
+
+  try {
+    child.kill(input.signal);
+  } catch {
+    return;
+  }
+  if (await waitForChildExit(child, input.graceMs)) {
+    return;
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    return;
+  }
+  await waitForChildExit(child, input.forceMs);
+}
+
+async function waitForChildExit(
+  child: OwnedChildProcess,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (hasChildExited(child)) {
+    return true;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (exited: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve(exited);
+    };
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", () => finish(true));
+  });
+}
+
+function hasChildExited(child: OwnedChildProcess): boolean {
+  return child.exitCode !== null || (child.signalCode ?? null) !== null;
+}
+
+function isMissingProcessError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ESRCH",
+  );
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 export interface DoctorCommandResult {

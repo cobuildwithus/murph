@@ -7,7 +7,6 @@ import {
 const runForegroundCommand = vi.hoisted(() =>
   vi.fn(async (_input: ForegroundCommandInput) => {})
 );
-const cleanupHostedLocalOrphanedWorkerdProcesses = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
 const cleanupHostedRunnerImages = vi.hoisted(() => vi.fn(async () => {}));
 const cleanupHostedLocalMinioBuildContainersBestEffort = vi.hoisted(() => vi.fn(async () => {}));
@@ -31,7 +30,6 @@ vi.mock("../src/process.ts", () => {
 });
 
 vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
-  cleanupHostedLocalOrphanedWorkerdProcesses,
   cleanupHostedRunnerContainers,
   cleanupHostedRunnerImages,
 }));
@@ -401,7 +399,6 @@ describe("hosted-local E2E suite preparation", () => {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       }),
     );
-    expect(cleanupHostedLocalOrphanedWorkerdProcesses).toHaveBeenCalled();
   });
 
   test("scrubs inherited web session authority before E2E preparation", async () => {

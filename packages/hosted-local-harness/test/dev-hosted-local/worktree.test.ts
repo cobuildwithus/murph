@@ -300,10 +300,9 @@ describe("hosted-local worktree config", () => {
     }
   });
 
-  it("pins inherited E2E isolation and broad Temporal reset off", () => {
+  it("pins inherited E2E isolation off", () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {
-        MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
       ports,
@@ -311,16 +310,14 @@ describe("hosted-local worktree config", () => {
     });
 
     expect(config.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("0");
-    expect(config.env.MURPH_DEV_FORCE_RESET_TEMPORAL).toBe("0");
 
     const devConfig = resolveHostedLocalWorktreeDevConfig({
       env: {
-        MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
       slug: "feature-a",
     });
-    expect(devConfig.forceResetLocalTemporal).toBe(false);
+    expect(devConfig.temporal.mode).toBe("managed");
   });
 
   it("keeps forbidden worktree flags off after profile application", () => {

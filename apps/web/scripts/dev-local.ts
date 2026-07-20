@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -41,10 +40,6 @@ interface NextDevLockDescriptor {
 
 interface NextDevLockCleanupOptions {
   isProcessRunning?: (pid: number) => boolean;
-  processCommand?: (pid: number) => string | null;
-  sleep?: (milliseconds: number) => Promise<void>;
-  stderr?: Pick<NodeJS.WritableStream, "write">;
-  terminateProcess?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 export function buildHostedWebDevArgv(
@@ -280,7 +275,6 @@ function installHostedWebDevOwnerWatchdog(
     }
 
     shuttingDown = true;
-    terminateCurrentProcessDescendants("SIGKILL");
     process.exit(0);
   }, ownerWatchdogPollIntervalMs);
   interval.unref?.();
@@ -305,7 +299,6 @@ function installHostedWebDevSignalShutdown(
     shuttingDown = true;
     releaseHandlers();
     releaseOwnerWatchdog();
-    terminateCurrentProcessDescendants("SIGKILL");
     void releaseLock().finally(() => {
       process.exit(resolveHostedWebDevSignalExitCode(signal));
     });
@@ -326,16 +319,6 @@ function installHostedWebDevSignalShutdown(
   }
 
   return releaseHandlers;
-}
-
-function terminateCurrentProcessDescendants(signal: NodeJS.Signals): void {
-  for (const pid of listDescendantProcessIds(process.pid).reverse()) {
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // Best-effort cleanup only.
-    }
-  }
 }
 
 function resolveHostedWebDevSignalExitCode(signal: NodeJS.Signals): number {
@@ -528,10 +511,6 @@ export async function clearConflictingNextDevLock(
   options: NextDevLockCleanupOptions = {},
 ): Promise<void> {
   const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
-  const getProcessCommand = options.processCommand ?? readProcessCommand;
-  const sleepFor = options.sleep ?? sleep;
-  const stderr = options.stderr ?? process.stderr;
-  const terminateProcess = options.terminateProcess ?? terminateProcessId;
   const descriptor = await readNextDevLockDescriptor(nextDevLockPath);
 
   if (descriptor === null) {
@@ -543,30 +522,12 @@ export async function clearConflictingNextDevLock(
     return;
   }
 
-  const command = getProcessCommand(descriptor.pid);
-  if (!isRecoverableNextDevLockOwner(command)) {
-    throw new Error(
-      [
-        `Next dev lock is held by an active non-Next process (pid ${descriptor.pid}, port ${descriptor.port}).`,
-        "Stop that process or remove apps/web/.next-dev after confirming it is stale.",
-      ].join(" "),
-    );
-  }
-
-  stderr.write(
-    `Recovering stale Next dev server on port ${descriptor.port} (pid ${descriptor.pid}).\n`,
+  throw new Error(
+    [
+      `Next dev lock is held by an active process (pid ${descriptor.pid}, port ${descriptor.port}).`,
+      "Stop that process or use a separate apps/web dist directory.",
+    ].join(" "),
   );
-  terminateProcess(descriptor.pid, "SIGINT");
-
-  if (!(await waitForProcessExit(descriptor.pid, 5_000, checkProcessRunning, sleepFor))) {
-    terminateProcess(descriptor.pid, "SIGKILL");
-    await waitForProcessExit(descriptor.pid, 5_000, checkProcessRunning, sleepFor);
-  }
-
-  const nextDescriptor = await readNextDevLockDescriptor(nextDevLockPath);
-  if (nextDescriptor === null || !checkProcessRunning(nextDescriptor.pid)) {
-    await rm(nextDevLockPath, { force: true });
-  }
 }
 
 async function readNextDevLockDescriptor(
@@ -611,63 +572,6 @@ async function readNextDevLockDescriptor(
     pid: parsed.pid,
     port: parsed.port,
   };
-}
-
-function isRecoverableNextDevLockOwner(command: string | null): boolean {
-  if (command === null) {
-    return false;
-  }
-
-  const normalizedCommand = command.replace(/\\/gu, "/");
-  return (
-    normalizedCommand.startsWith("next-server ")
-    || normalizedCommand === "next-server"
-    || normalizedCommand.includes("/node_modules/next/dist/bin/next")
-  );
-}
-
-async function waitForProcessExit(
-  pid: number,
-  timeoutMs: number,
-  checkProcessRunning: (pid: number) => boolean = isProcessRunning,
-  sleepFor: (milliseconds: number) => Promise<void> = sleep,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() <= deadline) {
-    if (!checkProcessRunning(pid)) {
-      return true;
-    }
-
-    await sleepFor(100);
-  }
-
-  return !checkProcessRunning(pid);
-}
-
-async function sleep(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-}
-
-function terminateProcessId(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Best-effort cleanup only.
-  }
-}
-
-function readProcessCommand(pid: number): string | null {
-  try {
-    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim() || null;
-  } catch {
-    return null;
-  }
 }
 
 function isHostedWebDevServerLockMetadata(value: unknown): value is HostedWebDevServerLockMetadata {
@@ -720,52 +624,6 @@ function isProcessRunning(pid: number): boolean {
     }
 
     return true;
-  }
-}
-
-function listDescendantProcessIds(rootPid: number): number[] {
-  try {
-    const output = execFileSync("ps", ["-axo", "pid=,ppid="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const childrenByParent = new Map<number, number[]>();
-
-    for (const line of output.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      const [pidText, parentPidText] = trimmed.split(/\s+/, 2);
-      const pid = Number.parseInt(pidText ?? "", 10);
-      const parentPid = Number.parseInt(parentPidText ?? "", 10);
-
-      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
-        continue;
-      }
-
-      const siblings = childrenByParent.get(parentPid) ?? [];
-      siblings.push(pid);
-      childrenByParent.set(parentPid, siblings);
-    }
-
-    const descendants: number[] = [];
-    const queue = [...(childrenByParent.get(rootPid) ?? [])];
-
-    while (queue.length > 0) {
-      const pid = queue.shift();
-      if (pid === undefined) {
-        continue;
-      }
-
-      descendants.push(pid);
-      queue.push(...(childrenByParent.get(pid) ?? []));
-    }
-
-    return descendants;
-  } catch {
-    return [];
   }
 }
 
