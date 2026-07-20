@@ -122,6 +122,12 @@ worker start path sets `NODE_ENV=production` and fails closed if that bundle is
 missing. Local development uses `workflowsPath` so source edits keep the normal
 runtime-bundling feedback loop.
 
+The same package build enforces the production bundle contract before writing
+the artifact. The bundle must remain at or below 2.25 MiB, retain a readable
+inline source map, and exclude the broad `@murphai/contracts` and hosted
+vault-share source closures. Workflow-reachable shared values belong in small
+leaf modules; do not turn type-only imports into broad runtime dependencies.
+
 Signal a local smoke workflow:
 
 ```bash
@@ -287,6 +293,9 @@ Worker concurrency:
   `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS`: maximum concurrent
   Workflow task polls, default `5`, and must be no higher than the Workflow task
   execution limit.
+- Production always enables Temporal's reusable V8 context and fixes the cache
+  ceiling at `100` Workflow executions instead of deriving cache capacity from
+  the process heap. The ceiling is intentionally not operator-configurable.
 - Local development omits these Worker performance options unless an override is
   configured. Production startup always sets explicit values instead of relying
   on Temporal SDK defaults.
@@ -294,8 +303,9 @@ Worker concurrency:
 ## Render Deployment
 
 The repo root `render.yaml` defines `murph-temporal-worker` as a Render
-Background Worker. It builds the Temporal package, including the production
-Workflow bundle, ensures the device-sync reconciler Schedule, and starts
+Background Worker on the 2 GB Standard plan. It builds the Temporal package,
+including the fail-closed production Workflow bundle, ensures the device-sync
+reconciler Schedule, and starts
 `pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
 
 Use Render Blueprint sync from the dashboard or validate it with:

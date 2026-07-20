@@ -12,6 +12,13 @@ import {
   requireObject,
   requireString,
 } from "./parsers/assertions.ts";
+import {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+} from "./vault-share-limits.ts";
+
+export {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+};
 
 /**
  * VaultShare v0: a member grants a standing share of a fixed vault projection to a
@@ -373,8 +380,6 @@ export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
 
 export const HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA =
   "murph.vault-share.revoke.v1";
-
-export const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS = 7;
 
 const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
 const HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN = /^[A-Za-z0-9._-]+$/u;

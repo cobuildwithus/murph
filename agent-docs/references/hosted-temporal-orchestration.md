@@ -184,6 +184,15 @@ exactly. Temporal TypeScript workflow type names are function names, so renaming
 the exported function requires changing the shared constant and tests together.
 The Temporal worker must use an ESM-compatible explicit `workflowsPath`, such as
 `createRequire(import.meta.url).resolve(...)`, or a prebuilt workflow bundle.
+The production prebuilt bundle is a guarded deploy artifact: its package build
+must reject bundles above 2.25 MiB, bundles without inspectable inline
+source-map evidence, and dependency graphs that contain the broad contracts or
+vault-share source closures. Workflow-reachable shared constants belong in
+dependency-light leaf modules so type-only domain imports remain erased.
+Production workers explicitly reuse the V8 context and cache at most 100
+Workflow executions; the cache ceiling must remain no lower than concurrent
+Workflow task executions. This avoids deriving a much larger cache from the
+container heap after an instance-size change.
 Production Temporal Cloud clients must use the configured frontend address,
 namespace, API-key auth when configured, and TLS settings. The web signal client
 and worker connection code must support the same API key, TLS enablement,
@@ -475,6 +484,11 @@ The hard-cut architecture is accepted when:
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
   into workflow code.
+- The production Workflow bundle stays within its byte budget, retains
+  inspectable dependency evidence, and excludes broad contracts/vault-share
+  source closures.
+- The production Worker pins its reusable V8 context and Workflow cache ceiling
+  instead of deriving cache capacity from the container heap.
 - Cloudflare exposes an ensure-processing adapter and no longer computes
   mailbox, assistant, browser-vault, or device-sync work due.
 - Cloudflare alarms are write-fence cleanup only.
