@@ -165,7 +165,7 @@ function trackedExperimentToCard(
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
     "Private run only",
   ].filter((part): part is string => part !== null).join(" · ");
-  const runStatus = runStatusForTrackedExperiment(entry);
+  const runStatus = privateRun?.status ?? runStatusForTrackedExperiment(entry);
 
   return {
     id: entry.id,
@@ -183,9 +183,7 @@ function trackedExperimentToCard(
       ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
     hasPrivateData: true,
     runStatus,
-    runSummary: privateRun?.status === runStatus
-      ? buildExperimentRunCardSummary(privateRun)
-      : undefined,
+    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
     startedOn,
     trackedExperimentId: entry.id,
     searchText: [

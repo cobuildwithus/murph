@@ -24,7 +24,10 @@ import {
   resolveBrowserVaultExperimentRunById,
 } from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
-import { buildExperimentLibraryCards } from "@/src/lib/experiments/library-cards";
+import {
+  buildExperimentLibraryCards,
+  splitHomeExperimentCards,
+} from "@/src/lib/experiments/library-cards";
 import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 
@@ -199,10 +202,21 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun).toEqual(expect.objectContaining({
       baselineDays: 3,
       completionPercent: undefined,
+      day: 5,
       durationDays: undefined,
       id: "exp_private_active",
       status: "active",
     }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      title: "Continue the protocol",
+      when: "Day 5",
+    }));
+    expect(privateRun?.timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "Day 5",
+        title: "Protocol",
+      }),
+    ]));
   });
 
   it("renders progress without a false total when private duration is unknown", () => {
@@ -525,6 +539,67 @@ describe("experiment detail private-run composition", () => {
       expect(privateRun?.nextStep).toBeUndefined();
     },
   );
+
+  it("uses the canonical review-due projection for a private-only home card", async () => {
+    const client = await createClient({
+      generatedAt: "2026-04-20T08:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 64],
+        ["2026-04-02", 63],
+        ["2026-04-03", 62],
+        ["2026-04-04", 59],
+        ["2026-04-05", 58],
+        ["2026-04-06", 57],
+      ]),
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          id: "exp_private_review_due",
+          runPlan: {
+            baselineEnd: "2026-04-03",
+            baselineStart: "2026-04-01",
+            interventionEnd: "2026-04-06",
+            interventionStart: "2026-04-04",
+          },
+          slug: "private-review-due",
+          startedOn: "2026-04-01",
+          status: "active",
+          title: "Private review due run",
+        }),
+        id: "exp_private_review_due",
+        slug: "private-review-due",
+        startedOn: "2026-04-01",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Private review due run",
+      }],
+    });
+    const cards = buildExperimentLibraryCards({
+      client,
+      protocols: [],
+      trackedExperiments: selectBrowserVaultTrackedExperiments(client),
+    });
+    const [card] = cards;
+
+    expect(card).toEqual(expect.objectContaining({
+      runStatus: "finished",
+      statusLabel: "Review due",
+    }));
+    expect(card?.runSummary?.metrics).toEqual([
+      expect.objectContaining({
+        delta: "-5 bpm",
+        label: "Resting Heart Rate",
+      }),
+    ]);
+    expect(splitHomeExperimentCards(cards)).toEqual(expect.objectContaining({
+      history: [card],
+      inProgress: [],
+    }));
+  });
 
   it("renders honest baseline progress before the protocol window starts", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");

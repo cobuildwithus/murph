@@ -509,9 +509,7 @@ function buildRunContext(
         : attributes.commonsProtocolRef,
     ),
     completedAt,
-    dayInRun: windows.interventionStart !== null && windows.interventionEnd !== null
-      ? computeDayInRun(runStart, evidenceThrough)
-      : null,
+    dayInRun: computeDayInRun(runStart, evidenceThrough),
     effectiveProtocolSnapshot: cloneRecordOrNull(
       persistedOutcome
         ? persistedOutcome.effectiveProtocolSnapshot
@@ -2261,13 +2259,6 @@ function resolveExperimentPhase(
   }
 
   if (status === "planned") {
-    return "planned";
-  }
-
-  if (
-    windows.interventionStart === null ||
-    windows.interventionEnd === null
-  ) {
     return "planned";
   }
 
