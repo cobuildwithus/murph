@@ -11,6 +11,7 @@ coverage/
 .swp
 .turbo/
 .tmp/
+.crabbox/
 .runtime/
 .next/
 .next-dev/
@@ -25,6 +26,8 @@ apps/web/next-env.d.ts
 /.agents/skills/*
 !/.agents/skills/github-project-issues/
 !/.agents/skills/github-project-issues/SKILL.md
+!/.agents/skills/crabbox/
+!/.agents/skills/crabbox/SKILL.md
 !/.agents/skills/health-commons-research/
 !/.agents/skills/health-commons-research/SKILL.md
 !/.agents/skills/work-with-pro/
@@ -70,6 +73,9 @@ vault/
 .env
 .env.*
 !.env.example
+.dev.vars*
+!.dev.vars.example
+.runner.env*
 agent-docs/generated/doc-inventory.md
 packages/health-commons/generated/
 

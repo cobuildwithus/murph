@@ -1,6 +1,59 @@
 # Verification And Runtime
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
+
+## Verification Execution Location
+
+The verification matrix chooses the command and coverage surface; it does not
+require that finite CPU-heavy work execute on the developer laptop. The canonical
+root commands `pnpm test:diff <path ...>` and `pnpm verify:acceptance` pass
+through `scripts/verification-dispatch.mjs`:
+
+- CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
+- A local Codex parent in `auto` mode uses Crabbox's direct
+  `blacksmith-testbox` provider only when both CLIs are available and either
+  `MURPH_CRABBOX_BLACKSMITH=1` or `MURPH_CRABBOX_LEASE_ID` is set.
+- Other callers and unconfigured or unavailable CLIs retain the existing local
+  shared-host admission and worker budgets. Blacksmith capacity or auth failure
+  after an explicitly configured remote attempt fails that attempt instead of
+  silently duplicating it locally.
+- `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
+  Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
+  unavailable. The `:local` package aliases exist for executor diagnosis, not as
+  a normal way to skip remote proof.
+
+Remote execution preserves the exact underlying `workspace-verify.sh` command,
+including diff scope, reverse dependents, coverage thresholds, app verification,
+and acceptance semantics. The remote bootstrap reconciles the synced lockfile
+with `pnpm install --frozen-lockfile --prefer-offline` before verification.
+
+### Environment and Vercel boundary
+
+The default Crabbox/Blacksmith lane is synthetic and secret-free:
+
+- Blacksmith Testbox rejects Crabbox environment forwarding, and the dispatcher
+  removes any inherited `CRABBOX_ENV_ALLOW` before invoking the direct provider.
+  Do not add `--allow-env`, `--env-from-profile`, or workflow secrets to this lane.
+- Blacksmith owns sync and transfers only Git-tracked and untracked non-ignored
+  paths. Before delegation, the dispatcher independently inspects that exact
+  `git ls-files` set and refuses known credential, vault, runtime-state,
+  local-artifact, and private-document paths. `.gitignore` carries the matching
+  normal exclusions, including local Crabbox run artifacts.
+- `scripts/crabbox/run-verification.mjs` discards the received process environment,
+  preserves only basic host paths, and supplies deterministic CI-style placeholder
+  values required by hosted-web build and smoke checks. Blacksmith authentication
+  remains in the local Blacksmith CLI and never enters the test process.
+- The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
+  `.vercel`, provider, model, billing, messaging, or production credentials.
+- Canonical completion tests are expected to pass under this synthetic contract.
+  A separate direct scenario that genuinely requires Vercel development state
+  must set `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1`, remain local on an authorized
+  host, and be reported separately. Do not weaken the default Crabbox boundary;
+  a future remote live-env lane requires its own reviewed Testbox workflow with
+  repository-managed, step-scoped secrets.
+
+When Crabbox runs, record the command, result, Testbox ID, timing summary, and
+linked GitHub Actions run in the completion evidence.
 
 ## Verification Matrix
 
