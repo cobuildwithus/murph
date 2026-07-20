@@ -4,10 +4,10 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  buildHostedStartPaidPulseContinuationClearCookie: vi.fn(),
-  buildHostedStartPaidPulseContinuationCookie: vi.fn(),
+  buildHostedPulseTrialContinuationClearCookie: vi.fn(),
+  buildHostedPulseTrialContinuationCookie: vi.fn(),
   getPrisma: vi.fn(),
-  hasHostedStartPaidPulseContinuationRequest: vi.fn(),
+  readHostedPulseTrialContinuationRequest: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   startHostedPulseTrialPaidPlan: vi.fn(),
 }));
@@ -24,13 +24,13 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation", () => ({
-  buildHostedStartPaidPulseContinuationClearCookie:
-    mocks.buildHostedStartPaidPulseContinuationClearCookie,
-  buildHostedStartPaidPulseContinuationCookie:
-    mocks.buildHostedStartPaidPulseContinuationCookie,
-  hasHostedStartPaidPulseContinuationRequest:
-    mocks.hasHostedStartPaidPulseContinuationRequest,
+vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
+  buildHostedPulseTrialContinuationClearCookie:
+    mocks.buildHostedPulseTrialContinuationClearCookie,
+  buildHostedPulseTrialContinuationCookie:
+    mocks.buildHostedPulseTrialContinuationCookie,
+  readHostedPulseTrialContinuationRequest:
+    mocks.readHostedPulseTrialContinuationRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
@@ -46,13 +46,13 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
-  mocks.buildHostedStartPaidPulseContinuationClearCookie.mockReturnValue(
+  mocks.buildHostedPulseTrialContinuationClearCookie.mockReturnValue(
     "murph-start-pulse=; Max-Age=0",
   );
-  mocks.buildHostedStartPaidPulseContinuationCookie.mockReturnValue(
+  mocks.buildHostedPulseTrialContinuationCookie.mockReturnValue(
     "murph-start-pulse=issued; Max-Age=900",
   );
-  mocks.hasHostedStartPaidPulseContinuationRequest.mockReturnValue(true);
+  mocks.readHostedPulseTrialContinuationRequest.mockReturnValue("start_pulse_now");
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       billingStatus: "active",
@@ -87,8 +87,8 @@ test("starts paid Pulse for an authenticated hosted trial member", async () => {
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
-    browserContinuationAfterPaymentMethodSetup: true,
     memberId: "member_123",
+    paymentMethodContinuation: "settings",
     prisma: {
       label: "test-prisma",
     },
@@ -116,7 +116,8 @@ test("issues a continuation claim before redirecting to payment-method setup", a
   );
 
   expect(response.status).toBe(200);
-  expect(mocks.buildHostedStartPaidPulseContinuationCookie).toHaveBeenCalledWith({
+  expect(mocks.buildHostedPulseTrialContinuationCookie).toHaveBeenCalledWith({
+    action: "start_pulse_now",
     memberId: "member_123",
     sessionId: "hws_session_123",
   });
@@ -147,7 +148,7 @@ test("does not issue a continuation claim for hosted-invoice recovery", async ()
   );
 
   expect(response.status).toBe(200);
-  expect(mocks.buildHostedStartPaidPulseContinuationCookie).not.toHaveBeenCalled();
+  expect(mocks.buildHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
   expect(response.headers.get("set-cookie")).toBe(
     "murph-start-pulse=; Max-Age=0",
   );
@@ -169,7 +170,7 @@ test("accepts a valid automatic continuation and consumes its claim", async () =
   const response = await billingStartPaidPulseRoute.POST(request);
 
   expect(response.status).toBe(200);
-  expect(mocks.hasHostedStartPaidPulseContinuationRequest).toHaveBeenCalledWith({
+  expect(mocks.readHostedPulseTrialContinuationRequest).toHaveBeenCalledWith({
     memberId: "member_123",
     request,
     sessionId: "hws_session_123",
@@ -200,7 +201,7 @@ test("does not reissue the claim when automatic continuation still needs payment
   );
 
   expect(response.status).toBe(200);
-  expect(mocks.buildHostedStartPaidPulseContinuationCookie).not.toHaveBeenCalled();
+  expect(mocks.buildHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
   expect(response.headers.get("set-cookie")).toBe(
     "murph-start-pulse=; Max-Age=0",
   );
@@ -212,7 +213,7 @@ test("does not reissue the claim when automatic continuation still needs payment
 });
 
 test("rejects an automatic continuation without its bound claim", async () => {
-  mocks.hasHostedStartPaidPulseContinuationRequest.mockReturnValueOnce(false);
+  mocks.readHostedPulseTrialContinuationRequest.mockReturnValueOnce(null);
 
   const response = await billingStartPaidPulseRoute.POST(
     new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
@@ -245,7 +246,7 @@ test("rejects malformed automatic-continuation headers", async () => {
   );
 
   expect(response.status).toBe(400);
-  expect(mocks.hasHostedStartPaidPulseContinuationRequest).not.toHaveBeenCalled();
+  expect(mocks.readHostedPulseTrialContinuationRequest).not.toHaveBeenCalled();
   expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
 });
 

@@ -4,6 +4,7 @@ import {
   HostedOnboardingApiError,
   requestHostedBillingCheckout,
   requestHostedOnboardingJson,
+  requestHostedPulseTrialContinuation,
   requestHostedPulseTrialStartPaid,
 } from "@/src/components/hosted-onboarding/client-api";
 
@@ -289,6 +290,64 @@ describe("hosted onboarding client api", () => {
       code: null,
       message: "Payment link missing.",
     });
+  });
+
+  it("posts an exact Pulse continuation without a body", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      status: "continuing",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedPulseTrialContinuation()).resolves.toEqual({
+      status: "continuing",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/billing/pulse-trial-continuation",
+      {
+        body: undefined,
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {},
+        keepalive: false,
+        method: "POST",
+      },
+    );
+  });
+
+  it("does not reopen Stripe until the member explicitly retries", async () => {
+    const assign = vi.fn();
+    const paymentResponse = () => new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.test/session_retry",
+      status: "payment_required",
+    }), {
+      status: 200,
+    });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(paymentResponse())
+      .mockResolvedValueOnce(paymentResponse()));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    await expect(requestHostedPulseTrialContinuation()).resolves.toEqual({
+      status: "payment_required",
+    });
+    expect(assign).not.toHaveBeenCalled();
+
+    await expect(requestHostedPulseTrialContinuation({
+      redirectIfPaymentRequired: true,
+    })).resolves.toEqual({
+      status: "redirecting",
+    });
+    expect(assign).toHaveBeenCalledWith(
+      "https://billing.stripe.test/session_retry",
+    );
   });
 
   it("fails cleanly when a successful response has an empty body", async () => {

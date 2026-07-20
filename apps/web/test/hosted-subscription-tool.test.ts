@@ -145,6 +145,7 @@ describe("hosted subscription tool", () => {
 
     expect(mocks.continuePulse).toHaveBeenCalledWith({
       memberId: "member_123",
+      paymentMethodContinuation: "conversation",
       prisma: { label: "prisma" },
     });
     expect(mocks.claimSubscriptionAction.mock.invocationCallOrder[0]).toBeLessThan(
@@ -174,6 +175,7 @@ describe("hosted subscription tool", () => {
 
     expect(mocks.startPulse).toHaveBeenCalledWith({
       memberId: "member_123",
+      paymentMethodContinuation: "conversation",
       prisma: { label: "prisma" },
     });
   });

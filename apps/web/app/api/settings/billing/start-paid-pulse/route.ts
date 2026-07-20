@@ -1,10 +1,10 @@
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  buildHostedStartPaidPulseContinuationClearCookie,
-  buildHostedStartPaidPulseContinuationCookie,
-  hasHostedStartPaidPulseContinuationRequest,
-} from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation";
-import { HOSTED_START_PAID_PULSE_CONTINUATION_HEADER } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-continuation-contract";
+  buildHostedPulseTrialContinuationClearCookie,
+  buildHostedPulseTrialContinuationCookie,
+  readHostedPulseTrialContinuationRequest,
+} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
+import { HOSTED_START_PAID_PULSE_CONTINUATION_HEADER } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { startHostedPulseTrialPaidPlan } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
@@ -23,11 +23,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (
     automaticContinuation
-    && !hasHostedStartPaidPulseContinuationRequest({
+    && readHostedPulseTrialContinuationRequest({
       memberId: auth.member.id,
       request,
       sessionId: auth.sessionId,
-    })
+    }) !== "start_pulse_now"
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_PULSE_TRIAL_START_PAID_CONTINUATION_INVALID",
@@ -37,8 +37,8 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const result = await startHostedPulseTrialPaidPlan({
-    browserContinuationAfterPaymentMethodSetup: true,
     memberId: auth.member.id,
+    paymentMethodContinuation: "settings",
     prisma,
   });
 
@@ -56,11 +56,12 @@ export const POST = withJsonError(async (request: Request) => {
     result.status === "payment_required"
       && result.resumeStartAfterPaymentMethodSetup === true
       && !automaticContinuation
-      ? buildHostedStartPaidPulseContinuationCookie({
+      ? buildHostedPulseTrialContinuationCookie({
+        action: "start_pulse_now",
         memberId: auth.member.id,
         sessionId: auth.sessionId,
       })
-      : buildHostedStartPaidPulseContinuationClearCookie(),
+      : buildHostedPulseTrialContinuationClearCookie(),
   );
   return response;
 });
