@@ -18,8 +18,31 @@ const componentMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
-    open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
+  Dialog: ({
+    children,
+    onOpenChange,
+    open,
+  }: {
+    children?: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+  }) =>
+    open
+      ? createElement(
+          "div",
+          { "data-dialog-open": "true" },
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "true",
+              onClick: () => onOpenChange?.(false),
+              type: "button",
+            },
+            "Dismiss",
+          ),
+          children,
+        )
+      : null,
   DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", { className, "data-dialog-content": "true" }, children),
   DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
@@ -98,8 +121,8 @@ test("MurphPersonaPicker saves persona, writing style, and voice atomically", as
   );
 
   try {
-    await clickContaining(rendered, "Navy SEAL");
-    await clickContaining(rendered, "Lowercase");
+    await clickControlContaining(rendered, "Navy SEAL");
+    await clickControlContaining(rendered, "Lowercase");
 
     const preview = rendered.container.querySelector(
       "[data-voice-preview='/audio/murph-personas/navy-seal/drill-sergeant.mp3']",
@@ -111,7 +134,7 @@ test("MurphPersonaPicker saves persona, writing style, and voice atomically", as
     );
     assert.equal(preview.getAttribute("data-preload"), "metadata");
 
-    await clickContaining(rendered, "Continue with Navy SEAL");
+    await clickControlContaining(rendered, "Continue");
 
     assert.equal(fetchMock.mock.calls.length, 1);
     assert.equal(fetchMock.mock.calls[0]?.[0], "/api/settings/assistant-style");
@@ -145,7 +168,7 @@ test("MurphPersonaPicker skips without writing preferences", async () => {
   );
 
   try {
-    await clickContaining(rendered, "Skip");
+    await clickControlContaining(rendered, "Skip");
     assert.equal(fetchMock.mock.calls.length, 0);
     assert.equal(onComplete.mock.calls.length, 1);
     assert.deepEqual(onOpenChange.mock.calls[0], [false]);
@@ -154,15 +177,166 @@ test("MurphPersonaPicker skips without writing preferences", async () => {
   }
 });
 
-async function clickContaining(
+test("MurphPersonaPicker exposes independent native radio groups", async () => {
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onOpenChange: vi.fn(),
+      open: true,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const fieldsets = Array.from(rendered.container.querySelectorAll("fieldset"));
+    assert.deepEqual(
+      fieldsets.map((fieldset) =>
+        fieldset.querySelector("legend")?.textContent?.trim()
+      ),
+      ["Murph persona", "Text style", "Voice"],
+    );
+
+    const names = fieldsets.map((fieldset) => {
+      const radios = Array.from(
+        fieldset.querySelectorAll<HTMLInputElement>("input[type='radio']"),
+      );
+      assert.equal(radios.filter((radio) => radio.checked).length, 1);
+      assert.ok(radios.length > 1);
+      assert.equal(new Set(radios.map((radio) => radio.name)).size, 1);
+      return radios[0]?.name;
+    });
+    assert.equal(new Set(names).size, 3);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker disables dismissal and controls while saving", async () => {
+  let resolveSave: ((value: {
+    persona: "classic";
+    tone: "formal";
+    voice: "upbeat";
+  }) => void) | undefined;
+  const savePreference = vi.fn(
+    () => new Promise<{
+      persona: "classic";
+      tone: "formal";
+      voice: "upbeat";
+    }>((resolve) => {
+      resolveSave = resolve;
+    }),
+  );
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onComplete,
+      onOpenChange,
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Continue");
+    assert.equal(savePreference.mock.calls.length, 1);
+    assert.ok(
+      Array.from(rendered.container.querySelectorAll("input[type='radio']"))
+        .every((radio) => (radio as HTMLInputElement).disabled),
+    );
+    const skipButton = Array.from(rendered.container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.includes("Skip"));
+    assert.ok(skipButton, "Missing Skip button");
+    assert.equal(skipButton.hasAttribute("disabled"), true);
+    const savingButton = rendered.container
+      .querySelector("[data-icon='inline-start']")
+      ?.closest("button");
+    assert.ok(savingButton, "Missing saving button");
+    assert.equal(savingButton.hasAttribute("disabled"), true);
+
+    const dismiss = rendered.container.querySelector("[data-dialog-dismiss]");
+    assert.ok(dismiss instanceof rendered.window.HTMLButtonElement);
+    await act(async () => dismiss.click());
+    assert.equal(onOpenChange.mock.calls.length, 0);
+
+    assert.ok(resolveSave);
+    await act(async () => {
+      resolveSave?.({ persona: "classic", tone: "formal", voice: "upbeat" });
+    });
+    assert.deepEqual(onComplete.mock.calls[0], [
+      { persona: "classic", tone: "formal", voice: "upbeat" },
+    ]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker retains choices after an error and retries them", async () => {
+  const saved = {
+    persona: "navy-seal" as const,
+    tone: "casual" as const,
+    voice: "drill-sergeant" as const,
+  };
+  const savePreference = vi.fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce(saved);
+  const onComplete = vi.fn();
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onComplete,
+      onOpenChange,
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Navy SEAL");
+    await clickControlContaining(rendered, "Lowercase");
+    await clickControlContaining(rendered, "Continue");
+
+    assert.match(
+      rendered.container.querySelector("[role='alert']")?.textContent ?? "",
+      /choices are still here/iu,
+    );
+    assert.equal(onComplete.mock.calls.length, 0);
+    assert.equal(onOpenChange.mock.calls.length, 0);
+    await clickControlContaining(rendered, "Continue");
+    assert.deepEqual(savePreference.mock.calls, [[saved], [saved]]);
+    assert.deepEqual(onComplete.mock.calls[0], [saved]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+async function clickControlContaining(
   rendered: Awaited<ReturnType<typeof renderClientComponent>>,
   text: string,
 ): Promise<void> {
-  const button = Array.from(rendered.container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.includes(text),
-  );
-  assert.ok(button, `Missing button containing ${text}`);
+  const control = Array.from(
+    rendered.container.querySelectorAll("button, label"),
+  ).find((candidate) => candidate.textContent?.includes(text));
+  assert.ok(control, `Missing control containing ${text}`);
   await act(async () => {
-    button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    const input = control.querySelector("input[type='radio']");
+    if (input instanceof rendered.window.HTMLInputElement) {
+      input.checked = true;
+      input.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      return;
+    }
+    (control as HTMLElement).click();
   });
 }

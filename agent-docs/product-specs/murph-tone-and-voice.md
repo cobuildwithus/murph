@@ -1,7 +1,7 @@
 # How Murph Talks
 
-Last verified: 2026-07-16
-Status: Implemented for onboarding, personal Settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls for all five settings
+Last verified: 2026-07-20
+Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls
 
 ## Product Contract
 
@@ -43,6 +43,7 @@ Its optional assistant block is:
 ```json
 {
   "assistant": {
+    "persona": "medical-detective",
     "tone": "casual",
     "voice": "deep-calm",
     "personality": {
@@ -56,13 +57,17 @@ Its optional assistant block is:
 
 The personality object is strict and sparse. It stores only explicit user choices. Every stored value is an integer from 0 through 10. Unknown keys, fractions, and out-of-range scores fail validation instead of being ignored or clamped.
 
-The effective defaults are:
+The Classic Murph baseline defaults are:
 
 | Dial | Default |
 | --- | ---: |
 | Humor | 3 |
 | Push | 3 |
 | Detail | 5 |
+
+An explicit persona supplies the effective default for each missing dial, tone, and
+voice. When persona is absent, the Classic Murph baseline above remains in
+effect without adding a persona or dial overlay to the prompt.
 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web projection for mailbox handoff. A person member's row also backs personal Settings display; a synthetic thread-container member's row backs only that room runtime. The session-authenticated route `POST /api/settings/assistant-style` and the runtime-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the same runtime.
 
@@ -72,7 +77,12 @@ Humor, Push, or Detail columns and their per-dial causal watermarks atomically
 with the sparse canonical mutation event carrying the accepted turn's original
 causal sequence. Canonical personality values still live only in the vault.
 
-The `murph.assistant_style` `show` action resolves missing dial values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
+The `murph.assistant_style` `show` action resolves missing dial values to the
+selected persona defaults, or to the Classic Murph defaults when persona is
+absent, and labels them `source: "default"`. A successful explicit set remains
+`source: "custom"` even when the chosen score equals the effective default.
+Reset removes the override and restores that effective default. Resetting the
+last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
 

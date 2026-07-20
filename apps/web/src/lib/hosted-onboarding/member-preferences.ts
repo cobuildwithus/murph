@@ -330,7 +330,7 @@ export async function readHostedMemberAssistantPreferences(input: {
 
 export function projectHostedMemberAssistantPreferences(
   member: (HostedMemberPersonalityColumns & {
-    assistantPersona: string | null;
+    assistantPersona?: string | null;
     assistantTone: string | null;
     assistantVoice: string | null;
   }) | null,

@@ -87,7 +87,6 @@ export interface HostedAccountSettingsRouting {
 const hostedAccountSettingsMemberSelect =
   Prisma.validator<Prisma.HostedMemberSelect>()({
     ...HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
-    assistantPersona: true,
     assistantDetail: true,
     assistantHumor: true,
     assistantPush: true,
