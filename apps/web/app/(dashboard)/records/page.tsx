@@ -12,7 +12,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Medical records | Murph",
-  description: "Review medical record connections and their latest import status.",
+  description: "Connect a supported patient portal and check the copy status of lab results and report summaries.",
 });
 
 type RecordsSearchParams = {

@@ -954,18 +954,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
   });
 
-  it("checkpoints active runtime delivery refs without claiming the legacy public prefix", async () => {
+  it("prunes only quiescent runtime deliveries before archive planning", async () => {
     const vaultRoot = await createVaultRoot();
-    const { platform } = createRuntimePlatform();
+    const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const orphanRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/orphan.pdf`;
+    const orphanContents = Buffer.from("unreferenced generated delivery\n");
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
     const activeContents = Buffer.from("active generated delivery\n");
     const legacyRef = "exports/assistant-deliveries/base-era.pdf";
-    const legacyContents = "ordinary pre-existing vault file\n";
-    await mkdir(path.dirname(path.join(vaultRoot, activeRef)), { recursive: true });
+    const legacyContents = Buffer.from("ordinary pre-existing vault file\n");
+    await mkdir(path.dirname(path.join(vaultRoot, orphanRef)), { recursive: true });
     await mkdir(path.dirname(path.join(vaultRoot, legacyRef)), { recursive: true });
+    await writeFile(path.join(vaultRoot, orphanRef), orphanContents);
     await writeFile(path.join(vaultRoot, activeRef), activeContents);
-    await writeFile(path.join(vaultRoot, legacyRef), legacyContents, "utf8");
+    await writeFile(path.join(vaultRoot, legacyRef), legacyContents);
     await createAssistantOutboxIntent({
       channel: "linq",
       identityId: "identity-generated-delivery",
@@ -998,10 +1001,19 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const archiveEntries =
       vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
         .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === orphanRef)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === activeRef)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === legacyRef)).toBe(true);
+    await expectMissing(path.join(vaultRoot, orphanRef));
     await expectPresent(path.join(vaultRoot, activeRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === orphanContents.byteLength
+    )).toBe(true);
   });
 
   it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {
@@ -1097,6 +1109,39 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "deferred",
     });
   });
+
+  it.each([
+    ["vault-share.delivery", "import-vault-share-delivery"],
+    ["vault-share.revoke", "import-vault-share-revoke"],
+  ] as const)(
+    "consumes retired %s rows without decoding or recreating local shared data",
+    async (kind, routeAction) => {
+      const vaultRoot = await createVaultRoot();
+      const { platform } = createRuntimePlatform();
+      const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+        decode: vi.fn(async () => {
+          throw new Error("Retired vault-share payloads must not be decoded.");
+        }),
+      };
+      const options = createBridgeOptions({
+        mailboxPayloadDecoder,
+        platform,
+        vaultRoot,
+      });
+
+      await expect(options.importItem(
+        createRetiredVaultShareMailboxImportItem({ kind, routeAction }),
+      )).resolves.toEqual({
+        reasonCode: "vault_share.retired_direct_snapshot",
+        status: "skipped",
+      });
+      expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+      await expect(access(path.join(vaultRoot, "derived", "vault-share")))
+        .rejects.toThrow();
+      await expect(access(path.join(vaultRoot, "vault-share")))
+        .rejects.toThrow();
+    },
+  );
 
   it("binds paired Assistant Ask payloads to the mailbox row id and expiry", async () => {
     const vaultRoot = await createVaultRoot();
@@ -1616,6 +1661,34 @@ function createSystemMailboxImportItem(input: {
         kind: "member.channels.updated",
         lane: "system",
         laneSeq: "1",
+      },
+      state: "route",
+    },
+  };
+}
+
+function createRetiredVaultShareMailboxImportItem(input: {
+  kind: "vault-share.delivery" | "vault-share.revoke";
+  routeAction: "import-vault-share-delivery" | "import-vault-share-revoke";
+}): Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0] {
+  const base = createSystemMailboxImportItem();
+  const id = `retired_${input.kind.replaceAll(".", "_")}`;
+  return {
+    ...base,
+    item: {
+      ...base.item,
+      dedupeKey: id,
+      id,
+      kind: input.kind,
+    },
+    route: {
+      action: input.routeAction,
+      advanceProgress: true,
+      itemRef: {
+        id,
+        kind: input.kind,
+        lane: "system",
+        laneSeq: base.item.laneSeq,
       },
       state: "route",
     },

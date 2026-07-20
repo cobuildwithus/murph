@@ -31,6 +31,69 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_import";
 
 describe("hosted mailbox import loop", () => {
+  test("skips legacy vault-share sidecars before payload fetch or import", async () => {
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_legacy_vault_share_delivery",
+        kind: "vault-share.delivery",
+        lane: "system",
+        laneSeq: "1",
+        payloadInlineCiphertext: null,
+        payloadRef:
+          "hosted-mailbox-payload:mailbox_item_legacy_vault_share_delivery",
+      }),
+      createMailboxItem({
+        id: "mailbox_item_legacy_vault_share_revoke",
+        kind: "vault-share.revoke",
+        lane: "system",
+        laneSeq: "2",
+        payloadInlineCiphertext: null,
+        payloadRef:
+          "hosted-mailbox-payload:mailbox_item_legacy_vault_share_revoke",
+      }),
+    ];
+    const { mailboxPort, payloadFetchRequests } = createMailboxPort({ items });
+    let importCalls = 0;
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        importCalls += 1;
+        return { status: "imported" };
+      },
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_skip_legacy_vault_share_sidecars",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(importCalls, 0);
+    assert.deepEqual(payloadFetchRequests, []);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.state.watermarks.system, "2");
+    assert.deepEqual(result.state.recentStatuses, [
+      {
+        itemKind: "vault-share.delivery",
+        lane: "system",
+        occurredAt: TEST_NOW,
+        reasonCode: "legacy_vault_share.web_owned",
+        seq: "1",
+        status: "skipped",
+      },
+      {
+        itemKind: "vault-share.revoke",
+        lane: "system",
+        occurredAt: TEST_NOW,
+        reasonCode: "legacy_vault_share.web_owned",
+        seq: "2",
+        status: "skipped",
+      },
+    ]);
+  });
+
   test("reuses one mixed prefetch for isolated conversation and system phases", async () => {
     const state = createEmptyHostedMailboxImportState();
     const conversation = createMailboxItem({

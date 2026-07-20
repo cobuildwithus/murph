@@ -5,54 +5,26 @@ import {
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
 
-const mocks = vi.hoisted(() => ({
-  appendHostedMailboxEnvelopeTx: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
-}));
-
 import {
   grantHostedVaultShareTx,
   revokeHostedVaultSharesTx,
-  revokeOutgoingHostedVaultSharesForMemberDeletionTx,
 } from "@/src/lib/hosted-vault-share/share-grant-store";
 
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
 
 function buildTx(): Prisma.TransactionClient & {
-  $queryRaw: ReturnType<typeof vi.fn>;
   hostedVaultShare: {
-    findMany: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
 } {
-  const transitionedRows = [{
-    destinationMemberId: "member_referee",
-    grantorMemberId: "member_grantor",
-    id: "share_1",
-    projectionKind: "sleep-times.v0",
-    projectionScopeJson: SLEEP_SCOPE,
-    projectionScopeKey: SLEEP_SCOPE_KEY,
-    revokedAt: new Date("2026-07-01T00:00:00.000Z"),
-  }];
   return {
-    $queryRaw: vi.fn(async () => transitionedRows),
     hostedVaultShare: {
-      findMany: vi.fn(async () => [{
-        destinationMemberId: "member_referee",
-        grantorMemberId: "member_grantor",
-        id: "share_1",
-        projectionKind: "sleep-times.v0",
-        projectionScopeJson: SLEEP_SCOPE,
-        projectionScopeKey: SLEEP_SCOPE_KEY,
-      }]),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
   } as unknown as Prisma.TransactionClient & {
-    $queryRaw: ReturnType<typeof vi.fn>;
     hostedVaultShare: {
-      findMany: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
   };
 }
@@ -60,13 +32,9 @@ function buildTx(): Prisma.TransactionClient & {
 describe("revokeHostedVaultSharesTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      inserted: true,
-      item: { id: "mailbox_item_1" },
-    });
   });
 
-  it("revokes active grants and appends destination cleanup wakes in the same transaction", async () => {
+  it("revokes active grants and clears ciphertext in the same transaction", async () => {
     const tx = buildTx();
     const now = new Date("2026-07-01T00:00:00.000Z");
 
@@ -78,41 +46,25 @@ describe("revokeHostedVaultSharesTx", () => {
       tx,
     })).resolves.toBe(1);
 
-    expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
+      data: {
+        projectionSnapshotCiphertext: null,
+        revokedAt: now,
+        status: "revoked",
+        updatedAt: now,
+      },
       where: {
         destinationMemberId: "member_referee",
         grantorMemberId: "member_grantor",
         projectionScopeKey: { in: [SLEEP_SCOPE_KEY] },
         status: "granted",
       },
-    }));
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    const updateSql = Array.from(tx.$queryRaw.mock.calls[0]?.[0] ?? []).join("?");
-    expect(updateSql).toContain("UPDATE hosted_vault_share");
-    expect(updateSql).toContain("AND status = 'granted'");
-    expect(updateSql).toContain("RETURNING");
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: {
-        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
-        kind: "vault-share.revoke",
-        occurredAt: "2026-07-01T00:00:00.000Z",
-        revoke: {
-          grantorMemberId: "member_grantor",
-          projectionKind: "sleep-times.v0",
-          projectionScope: SLEEP_SCOPE,
-          revokedAt: "2026-07-01T00:00:00.000Z",
-          schema: "murph.vault-share.revoke.v1",
-          shareId: "share_1",
-        },
-        userId: "member_referee",
-      },
-      tx,
     });
   });
 
-  it("does not append cleanup when a concurrent transaction already revoked the row", async () => {
+  it("returns zero when a concurrent transaction already revoked the row", async () => {
     const tx = buildTx();
-    tx.$queryRaw.mockResolvedValue([]);
+    tx.hostedVaultShare.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(revokeHostedVaultSharesTx({
       destinationMemberId: "member_referee",
@@ -122,119 +74,46 @@ describe("revokeHostedVaultSharesTx", () => {
       tx,
     })).resolves.toBe(0);
 
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledTimes(1);
   });
 
-  it("does not append cleanup when no active grant matched", async () => {
+  it("revokes every active grant for the destination when no grantor is specified", async () => {
     const tx = buildTx();
-    tx.hostedVaultShare.findMany.mockResolvedValue([]);
+    const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(revokeHostedVaultSharesTx({
       destinationMemberId: "member_referee",
-      now: new Date("2026-07-01T00:00:00.000Z"),
+      now,
       projectionScopes: [SLEEP_SCOPE],
-      tx,
-    })).resolves.toBe(0);
-
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["a malformed projection scope", {
-      projectionScopeJson: { projectionKind: "unsupported.v0" },
-    }],
-    ["a mismatched projection kind", {
-      projectionKind: "profile-name.v0",
-    }],
-  ])("revokes an active grant with %s from its canonical scope key", async (_label, overrides) => {
-    const tx = buildTx();
-    const share = {
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      id: "share_invalid",
-      projectionKind: "sleep-times.v0",
-      projectionScopeJson: SLEEP_SCOPE,
-      projectionScopeKey: SLEEP_SCOPE_KEY,
-      ...overrides,
-    };
-    tx.hostedVaultShare.findMany.mockResolvedValue([share]);
-    tx.$queryRaw.mockResolvedValue([{
-      ...share,
-      revokedAt: new Date("2026-07-01T00:00:00.000Z"),
-    }]);
-
-    await expect(revokeHostedVaultSharesTx({
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      now: new Date("2026-07-01T00:00:00.000Z"),
       tx,
     })).resolves.toBe(1);
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
-      envelope: expect.objectContaining({
-        revoke: expect.objectContaining({
-          projectionKind: "sleep-times.v0",
-          projectionScope: SLEEP_SCOPE,
-        }),
-      }),
-      tx,
-    }));
+    expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
+      data: {
+        projectionSnapshotCiphertext: null,
+        revokedAt: now,
+        status: "revoked",
+        updatedAt: now,
+      },
+      where: {
+        destinationMemberId: "member_referee",
+        projectionScopeKey: { in: [SLEEP_SCOPE_KEY] },
+        status: "granted",
+      },
+    });
   });
 
-  it("fails closed before revocation when an active grant has an invalid canonical scope key", async () => {
+  it("does not issue an update for an explicitly empty scope set", async () => {
     const tx = buildTx();
-    tx.hostedVaultShare.findMany.mockResolvedValue([{
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      id: "share_invalid",
-      projectionKind: "sleep-times.v0",
-      projectionScopeJson: SLEEP_SCOPE,
-      projectionScopeKey: "unsupported.v0",
-    }]);
 
     await expect(revokeHostedVaultSharesTx({
       destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [],
       tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_VAULT_SHARE_STATE_INVALID",
-      httpStatus: 500,
-      message: "Stored vault-share state is invalid.",
-      retryable: false,
-    });
+    })).resolves.toBe(0);
 
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when a transitioned grant returns an invalid canonical scope key", async () => {
-    const tx = buildTx();
-    tx.$queryRaw.mockResolvedValue([{
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      id: "share_invalid",
-      projectionKind: "sleep-times.v0",
-      projectionScopeJson: SLEEP_SCOPE,
-      projectionScopeKey: "unsupported.v0",
-      revokedAt: new Date("2026-07-01T00:00:00.000Z"),
-    }]);
-
-    await expect(revokeHostedVaultSharesTx({
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      now: new Date("2026-07-01T00:00:00.000Z"),
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_VAULT_SHARE_STATE_INVALID",
-      httpStatus: 500,
-      message: "Stored vault-share state is invalid.",
-      retryable: false,
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -267,6 +146,7 @@ describe("grantHostedVaultShareTx", () => {
       data: expect.objectContaining({
         grantedAt: now,
         id: expect.stringMatching(/^hbvs_/u),
+        projectionSnapshotCiphertext: null,
         revokedAt: null,
         status: "granted",
       }),
@@ -310,47 +190,5 @@ describe("grantHostedVaultShareTx", () => {
 
     expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
     expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
-  });
-});
-
-describe("revokeOutgoingHostedVaultSharesForMemberDeletionTx", () => {
-  it("revokes outgoing shares only for surviving destinations and returns cleanup signals", async () => {
-    const tx = buildTx();
-    tx.hostedVaultShare.findMany.mockResolvedValue([{
-      destinationMemberId: "member_referee",
-      grantorMemberId: "member_grantor",
-      id: "share_1",
-      projectionKind: "sleep-times.v0",
-      projectionScopeJson: SLEEP_SCOPE,
-      projectionScopeKey: SLEEP_SCOPE_KEY,
-    }]);
-    const now = new Date("2026-07-01T00:00:00.000Z");
-
-    await expect(revokeOutgoingHostedVaultSharesForMemberDeletionTx({
-      grantorMemberIds: ["member_grantor", "member_owned_runtime"],
-      now,
-      tx,
-    })).resolves.toEqual({
-      cleanupSignals: [{
-        mailboxItemId: "mailbox_item_1",
-        memberId: "member_referee",
-      }],
-      revokedCount: 1,
-    });
-
-    expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: {
-        destinationMemberId: { notIn: ["member_grantor", "member_owned_runtime"] },
-        grantorMemberId: { in: ["member_grantor", "member_owned_runtime"] },
-        status: "granted",
-      },
-    }));
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
-      envelope: expect.objectContaining({
-        kind: "vault-share.revoke",
-        userId: "member_referee",
-      }),
-      tx,
-    }));
   });
 });

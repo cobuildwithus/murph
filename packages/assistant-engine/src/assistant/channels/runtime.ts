@@ -451,6 +451,7 @@ export async function sendLinqMessage(
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
+    nativeReplyRequested?: true
     replyToMessageId?: string | null
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
@@ -479,6 +480,20 @@ export async function sendLinqMessage(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
       'iMessage delivery requires an explicit chat id or a stored thread binding.',
     )
+  }
+  if (input.nativeReplyRequested === true) {
+    if (!normalizeOptionalText(input.replyToMessageId)) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_NATIVE_REPLY_TARGET_REQUIRED',
+        'A native iMessage reply requires a target message id.',
+      )
+    }
+    if (input.targetKind === 'participant') {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_NATIVE_REPLY_CHAT_REQUIRED',
+        'A native iMessage reply requires an existing Linq chat.',
+      )
+    }
   }
   const participantFromPhoneNumber = input.targetKind === 'participant'
     ? normalizeOptionalText(input.fromPhoneNumber)
@@ -524,6 +539,7 @@ export async function sendLinqMessage(
       idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
       ...(media.length > 0 ? { media } : {}),
+      ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       replyToMessageId: input.replyToMessageId ?? null,
     },
     {

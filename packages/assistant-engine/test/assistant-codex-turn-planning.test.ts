@@ -120,6 +120,44 @@ describe('assistant Codex turn planning', () => {
     expect(plan.onFinishWithoutReplyRecorded).toBe(onFinishWithoutReplyRecorded)
   })
 
+  it('exposes message-target tools only when the execution plan carries an authorizer', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null)
+    const session = createSession()
+    const executionPlan = await buildCodexTurnExecutionPlan({
+      authorizeAcceptedMessageTarget,
+      input: {
+        ...createMessageInput(),
+        deliveryTarget: '123',
+      },
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-message-targeting',
+    })
+    const attemptPlan = await buildCodexTurnAttemptPlan({
+      attemptCount: 1,
+      executionPlan,
+      session,
+    })
+
+    expect(executionPlan.authorizeAcceptedMessageTarget).toBe(
+      authorizeAcceptedMessageTarget,
+    )
+    expect(attemptPlan.routePlan.dynamicTools.map((tool) => tool.name))
+      .toEqual(expect.arrayContaining([
+        'react_to_message',
+        'select_reply_target',
+      ]))
+  })
+
   it('resolves disabled native resume notification turns as isolated threads', async () => {
     const plan = await buildCodexTurnExecutionPlan({
       input: createMessageInput(),
@@ -1110,7 +1148,7 @@ describe('assistant Codex turn planning', () => {
     expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
-  it('adds the reaction dynamic tool to the route contract for reply-capable channels', async () => {
+  it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1128,9 +1166,10 @@ describe('assistant Codex turn planning', () => {
     }
     const telegramReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
-        deliveryReplyToMessageId: 'message-1',
+        deliveryTarget: '123',
       },
       profile,
       promptTimeContext,
@@ -1144,7 +1183,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: true,
+          messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
         }),
@@ -1152,8 +1191,26 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
+    const telegramWithoutAuthorizerPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        deliveryTarget: '123',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const toolsWithoutAuthorizer = telegramWithoutAuthorizerPlan.dynamicTools
+      .map((tool) => tool.name)
+    expect(toolsWithoutAuthorizer).not.toContain('react_to_message')
+    expect(toolsWithoutAuthorizer).not.toContain('select_reply_target')
+
     const linqReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -1173,7 +1230,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: true,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1181,8 +1238,9 @@ describe('assistant Codex turn planning', () => {
       }),
     )
 
-    const linqSmsReplyPlan = await resolveAssistantRouteTurnPlan({
+    const linqCurrentMessageNotReactionEligiblePlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         channel: 'linq',
@@ -1197,12 +1255,13 @@ describe('assistant Codex turn planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(linqSmsReplyPlan.assistantContractFingerprint).toBe(
+    expect(linqCurrentMessageNotReactionEligiblePlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: linqSmsReplyPlan.developerInstructions,
+        developerInstructions:
+          linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1212,6 +1271,7 @@ describe('assistant Codex turn planning', () => {
 
     const telegramBusinessReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: {
         ...createMessageInput(),
         deliveryReplyToMessageId: 'message-1',
@@ -1229,7 +1289,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1239,6 +1299,7 @@ describe('assistant Codex turn planning', () => {
 
     const telegramNoReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
+      messageTargetAuthorizerAvailable: true,
       input: createMessageInput(),
       profile,
       promptTimeContext,
@@ -1252,7 +1313,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramNoReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          allowMessageReactions: false,
+          messageTargetingAvailable: false,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
         }),
@@ -1315,6 +1376,78 @@ describe('assistant Codex turn planning', () => {
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
+  })
+
+  it('plans a scheduled turn with only lazy shared reads and permission offers', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const groupSharedRead = vi.fn(async () => ({
+      members: [] as const,
+      requestedProjectionScopeKeys: ['steps-days.v0'],
+      status: 'none' as const,
+    }))
+    const groupSharedReader = { request: groupSharedRead }
+    const groupPermissionOfferRequest = vi.fn(async () => ({
+      action: 'post_join_offer' as const,
+      result: {
+        group: null,
+        status: 'unavailable' as const,
+        unavailableReason: 'test_unavailable',
+      },
+    }))
+    const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      groupPermissionOfferTool,
+      groupSharedReader,
+      groupTool: null,
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          groupPermissionOfferTool,
+          groupSharedReader,
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        turnTrigger: 'automation-cron',
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-18',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    const groupTools = plan.dynamicTools.filter((tool) =>
+      tool.namespace === 'murph' && tool.name === 'group')
+    expect(groupTools).toHaveLength(1)
+    expect(groupTools[0]).toMatchObject({
+      inputSchema: {
+        properties: {
+          action: { enum: ['read_shared', 'post_join_offer'] },
+        },
+      },
+    })
+    expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
+    expect(groupSharedRead).not.toHaveBeenCalled()
   })
 
   it('derives a group-scoped prompt and tool surface from the audience', async () => {

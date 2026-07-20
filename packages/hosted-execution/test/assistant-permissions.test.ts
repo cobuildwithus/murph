@@ -16,6 +16,8 @@ describe("group-read Codex permissions", () => {
       '"." = "read"',
       '".runtime" = "deny"',
       '".codex" = "deny"',
+      '"vault-share" = "deny"',
+      '"derived/vault-share" = "deny"',
       '"**/.env" = "deny"',
       '"**/.env.*" = "deny"',
       "",

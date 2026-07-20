@@ -13,8 +13,6 @@ const serviceMocks = vi.hoisted(() => ({
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
-  revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
@@ -66,20 +64,11 @@ vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort,
 }));
 
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: serviceMocks.signalHostedMailboxAppendRuntime,
-}));
-
 vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx:
     serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx,
   deleteHostedPhoneCallsForAccountDeletion:
     serviceMocks.deleteHostedPhoneCallsForAccountDeletion,
-}));
-
-vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
-  revokeOutgoingHostedVaultSharesForMemberDeletionTx:
-    serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx,
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -195,13 +184,6 @@ beforeEach(() => {
     maxAccountsPerToolkit: 5,
     toolkits: ["gmail", "googlecalendar"],
   });
-  serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockReset();
-  serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockResolvedValue({
-    cleanupSignals: [],
-    revokedCount: 0,
-  });
-  serviceMocks.signalHostedMailboxAppendRuntime.mockReset();
-  serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockResolvedValue(
     undefined,
@@ -661,23 +643,8 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls.map((call) => call.model)).not.toContain("hostedMailboxItemConsume");
   });
 
-  it("revokes outgoing vault shares before member rows cascade and wakes surviving destinations", async () => {
+  it("reports vault-share rows before member-row FK cascades delete them", async () => {
     const operationOrder: string[] = [];
-    serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockImplementation(
-      async () => {
-        operationOrder.push("vault-share:revoke");
-        return {
-          cleanupSignals: [{
-            mailboxItemId: "mailbox_item_revoke_1",
-            memberId: "member_surviving_destination",
-          }],
-          revokedCount: 1,
-        };
-      },
-    );
-    serviceMocks.signalHostedMailboxAppendRuntime.mockImplementation(async () => {
-      operationOrder.push("vault-share:signal");
-    });
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
@@ -690,25 +657,9 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx)
-      .toHaveBeenCalledWith({
-        grantorMemberIds: ["member_123", "member_thread_container_123"],
-        now: expect.any(Date),
-        tx: expect.any(Object),
-      });
-    expect(serviceMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_surviving_destination",
-      mailboxItemId: "mailbox_item_revoke_1",
-    });
     expect(result.deletedCounts["prisma.hosted_vault_share"]).toBe(1);
-    expect(operationOrder.indexOf("vault-share:revoke")).toBeLessThan(
-      operationOrder.indexOf("count:hostedVaultShare"),
-    );
     expect(operationOrder.indexOf("count:hostedVaultShare")).toBeLessThan(
       operationOrder.indexOf("delete:hostedMember"),
-    );
-    expect(operationOrder.indexOf("vault-share:signal")).toBeGreaterThan(
-      operationOrder.lastIndexOf("transaction"),
     );
   });
 

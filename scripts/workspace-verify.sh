@@ -10,15 +10,35 @@ if [[ "$#" -gt 0 ]]; then
   workspace_artifact_lock_label+=" $1"
 fi
 
-readonly shared_host_mode="${MURPH_VERIFY_SHARED_HOST:-0}"
+if [[ -n "${MURPH_VERIFY_SHARED_HOST+x}" ]]; then
+  shared_host_mode="$MURPH_VERIFY_SHARED_HOST"
+elif [[ -z "${CI:-}" && -n "${CODEX_THREAD_ID:-}" ]]; then
+  shared_host_mode="1"
+else
+  shared_host_mode="0"
+fi
 if [[ "$shared_host_mode" != "0" && "$shared_host_mode" != "1" ]]; then
   printf '[workspace-verify] ERROR: MURPH_VERIFY_SHARED_HOST must be 0 or 1.\n' >&2
   exit 1
 fi
+readonly shared_host_mode
+export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
+readonly verification_command="${1:-}"
 
 command_requires_workspace_artifact_lock() {
   case "${1:-}" in
     "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:diff" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+command_requires_host_verification_slot() {
+  case "${1:-}" in
+    "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
       return 0
       ;;
     *)
@@ -32,7 +52,7 @@ if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_w
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
 
-if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
+if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]] && command_requires_host_verification_slot "$verification_command"; then
   exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$workspace_artifact_lock_label" -- \
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
@@ -189,6 +209,34 @@ resolve_package_coverage_concurrency_default() {
   local_concurrency_default 6 4
 }
 
+resolve_typecheck_workspace_concurrency_default() {
+  if [[ "$shared_host_mode" == "1" && "$verification_command" == "test:diff" ]]; then
+    printf '1\n'
+    return
+  fi
+
+  if [[ -n "${CI:-}" || "$shared_host_mode" == "1" ]]; then
+    printf '2\n'
+    return
+  fi
+
+  local_concurrency_default 8 4
+}
+
+resolve_test_diff_vitest_max_workers_default() {
+  if [[ -n "${CI:-}" ]]; then
+    printf '50%%\n'
+    return
+  fi
+
+  if [[ "$shared_host_mode" == "1" ]]; then
+    printf '1\n'
+    return
+  fi
+
+  local_worker_budget_default "$test_diff_workspace_concurrency" 1
+}
+
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
@@ -207,13 +255,13 @@ readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "
 readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
-readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 2 || local_concurrency_default 8 4)"
+readonly typecheck_workspace_concurrency_default="$(resolve_typecheck_workspace_concurrency_default)"
 readonly typecheck_preflight_parallel_default="$([[ "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly test_diff_workspace_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || local_concurrency_default 4 2)"
 readonly test_diff_workspace_concurrency="$(normalize_positive_integer "${MURPH_TEST_DIFF_WORKSPACE_CONCURRENCY:-$test_diff_workspace_concurrency_default}" "$test_diff_workspace_concurrency_default")"
-readonly test_diff_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$test_diff_workspace_concurrency" 1)"
+readonly test_diff_vitest_max_workers_default="$(resolve_test_diff_vitest_max_workers_default)"
 readonly test_diff_vitest_max_workers="${MURPH_TEST_DIFF_VITEST_MAX_WORKERS:-$test_diff_vitest_max_workers_default}"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
@@ -1066,6 +1114,10 @@ run_test_diff_package_tests() {
   done
 }
 
+run_test_diff_repo_tools_tests() {
+  MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" pnpm test:repo-tools
+}
+
 run_test_diff_app_verification() {
   local app_dirs=("$@")
   local app_dir
@@ -1347,7 +1399,7 @@ run_test_diff() {
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
     if [[ "$run_repo_tools_tests" == "1" ]]; then
-      run_timed_step "Repo tools tests" pnpm test:repo-tools
+      run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests
     fi
     run_timed_step "Dependency policy" run_dependency_policy_check
     return 0
@@ -1374,7 +1426,7 @@ run_test_diff() {
   fi
 
   if [[ "$run_repo_tools_tests" == "1" ]]; then
-    run_timed_step "Repo tools tests" pnpm test:repo-tools
+    run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests
   fi
 
   if [[ "${#typecheck_dirs[@]}" -gt 0 ]]; then

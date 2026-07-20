@@ -20,7 +20,6 @@ import {
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../src/lib/hosted-web/encryption";
-import { readHostedMemberPhoneNumberSnapshots } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberVerifiedEmailSnapshots } from "../src/lib/hosted-onboarding/hosted-member-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 import type {
@@ -329,16 +328,14 @@ test("hosted web private-field encryption uses already-provisioned control roots
   assert.equal(tx.persistedEnvelopes.length, 1);
 });
 
-test("member email and phone batches use one envelope query with bounded KMS unwraps", async () => {
+test("member email batches use one envelope query with bounded KMS unwraps", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
   const memberIds = Array.from({ length: 6 }, (_, index) => `member-batch-${index + 1}`);
   const records = await createBatchPrivateFieldRecords({ memberIds, tx });
   const envelopeFindMany = createBatchEnvelopeFindMany(tx);
   const emailFindMany = vi.fn().mockResolvedValue(records.emailRecords);
-  const identityFindMany = vi.fn().mockResolvedValue(records.identityRecords);
   const prisma = Object.assign(tx.prisma, {
     hostedMemberEmailAuthorization: { findMany: emailFindMany },
-    hostedMemberIdentity: { findMany: identityFindMany },
     hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
   });
 
@@ -356,29 +353,6 @@ test("member email and phone batches use one envelope query with bounded KMS unw
     },
   })));
   expect(emailFindMany).toHaveBeenCalledTimes(1);
-  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
-  expect(decryptMetrics.calls).toHaveLength(memberIds.length);
-  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
-  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
-  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
-    plaintext.every((byte) => byte === 0)
-  )).toBe(true);
-  expect(openedPlaintexts).toHaveLength(memberIds.length);
-  expect(openedPlaintexts.every((plaintext) =>
-    new Uint8Array(plaintext).every((byte) => byte === 0)
-  )).toBe(true);
-
-  envelopeFindMany.mockClear();
-  openedPlaintexts.length = 0;
-  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
-  await expect(readHostedMemberPhoneNumberSnapshots({
-    memberIds: [...memberIds, memberIds[0]!],
-    prisma,
-  })).resolves.toEqual(memberIds.map((memberId, index) => ({
-    memberId,
-    phoneNumber: `+12125550${String(index + 1).padStart(3, "0")}`,
-  })));
-  expect(identityFindMany).toHaveBeenCalledTimes(1);
   expect(envelopeFindMany).toHaveBeenCalledTimes(1);
   expect(decryptMetrics.calls).toHaveLength(memberIds.length);
   expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);

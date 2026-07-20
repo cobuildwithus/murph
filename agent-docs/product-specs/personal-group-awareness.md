@@ -71,8 +71,8 @@ affect another member. The existing join page instead binds the actor to the app
 session and the group to the link already being viewed.
 
 Web commits either path as one transaction: it revokes every active share from
-that member to the group runtime, appends the existing durable projection
-cleanup envelopes, and deletes the membership row. The canonical owner cannot
+that member to the group runtime, clears each row-owned encrypted snapshot, and
+deletes the membership row. No runtime cleanup envelope is required. The canonical owner cannot
 leave. Repeating a completed leave is safe, and a later explicit join creates a
 new membership. The leave mutation itself is not gated by launch consent,
 suspension status, or billing/runtime access. Asking private Murph still depends
@@ -116,7 +116,8 @@ At minimum, verify these cases:
 5. Unsupported selector scopes are filtered for older callers.
 6. An inactive caller receives structured unavailability.
 7. A non-owner's private-tool or authenticated join-page departure atomically
-   removes membership, revokes all active grants, and appends cleanup work; an
+   removes membership, revokes all active grants, and clears their encrypted
+   snapshots without runtime cleanup work; an
    owner attempt makes no change and a repeated departure remains idempotent.
 8. If leave commits before an older existing-member sharing save, the save
    conflicts without recreating membership or grants. If the save commits first,

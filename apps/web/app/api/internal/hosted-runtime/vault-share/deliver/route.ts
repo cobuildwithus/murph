@@ -13,23 +13,14 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "@/src/lib/hosted-execution/logging";
 import {
-  isHostedRuntimeInactiveAccessError,
-  requireHostedRuntimeActiveAccess,
-} from "@/src/lib/hosted-mailbox/runtime-access";
-import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  deliverHostedVaultShareRecords,
   findActiveHostedVaultShares,
-  type ActiveHostedVaultShare,
-} from "@/src/lib/hosted-mailbox/vault-share-store";
-import {
-  signalHostedMailboxAppendRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
+  replaceHostedVaultShareProjectionSnapshot,
+} from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES = 16 * 1024;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
@@ -48,85 +39,45 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
  * The single cross-member write seam. The grantor identity comes exclusively from the
  * signed Cloudflare callback. The grantor runtime first asks web for active projection
  * kinds, then this write seam revalidates the requested kind before fanout. Web remains
- * the sole authority: it delivers only to active HostedVaultShare rows for
- * (grantor, projection scope), skipping inactive destinations. The response is a function
- * of share configuration alone — no grants, or only inactive destinations, resolves to
- * `no-active-share`; everything else resolves to a bare `delivered`, so the grantor
- * runtime learns nothing beyond "an active share exists".
+ * the sole authority: each replacement transaction validates both members' access and
+ * conditionally updates the exact active HostedVaultShare generation. The response is a
+ * function of share configuration alone — no grants, only inactive destinations, or only
+ * stale generations resolves to `no-active-share`; everything else resolves to a bare
+ * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
-  const prisma = getPrisma();
-
-  if (!await hasDeliverableHostedRuntimeActiveAccess(grantorMemberId, prisma)) {
-    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
-  }
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionScope: body.projectionScope,
   });
-  const activeShares: ActiveHostedVaultShare[] = [];
+  if (shares.length === 0) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  }
+
+  // An all-stale offer replaces the prior snapshot with an encrypted empty snapshot. The
+  // response still reflects share configuration only, so staleness cannot probe finer-
+  // grained share state or leave old records visible after an empty refresh.
+  const records = filterDeliverableRecords(body.records, body.projectionKind);
+  let delivered = false;
   let deliveryFailed = false;
 
   for (const share of shares) {
     try {
-      if (await hasDeliverableHostedRuntimeActiveAccess(share.destinationMemberId, prisma)) {
-        activeShares.push(share);
-      }
-    } catch (error) {
-      deliveryFailed = true;
-      console.error("Hosted vault-share destination share eligibility check failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_VAULT_SHARE_DESTINATION_ELIGIBILITY_FAILED",
-        }),
-      });
-    }
-  }
-
-  if (activeShares.length === 0) {
-    if (deliveryFailed) {
-      throw createHostedVaultShareDeliveryFailedError();
-    }
-    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
-  }
-
-  // An all-stale offer appends nothing but still resolves `delivered`: the status reflects
-  // share configuration only, so record staleness can never probe finer-grained share
-  // state, and stale records never put the grantor runtime in a permanent error loop.
-  const records = filterDeliverableRecords(body.records, body.projectionKind);
-
-  if (records.length === 0) {
-    return jsonOk(DELIVERED_RESPONSE);
-  }
-
-  for (const share of activeShares) {
-    try {
-      const delivery = await deliverHostedVaultShareRecords({
+      const outcome = await replaceHostedVaultShareProjectionSnapshot({
         records,
         share,
       });
-
-      if (delivery.lastAppendedMailboxItemId !== null) {
-        try {
-          await signalHostedMailboxAppendRuntime({
-            expectedUserId: share.destinationMemberId,
-            mailboxItemId: delivery.lastAppendedMailboxItemId,
-          });
-        } catch {
-          // The append is already durable; the destination imports on its next wake.
-          // Matches the repo invariant that signal failures after a durable append are
-          // not retried — and must not be logged as a delivery failure.
-        }
-      }
+      delivered ||= outcome === "replaced";
     } catch (error) {
       deliveryFailed = true;
-      // Best-effort per destination: one failing share must not block delivery to the
-      // others, and the retry re-offers (already-appended records dedupe). Log only
-      // redacted error details — never payload fields, timestamps, or raw share ids.
+      // Best-effort per destination: one failing share must not block replacement for
+      // the others. Log only redacted error details — never payload fields, timestamps,
+      // or raw share ids.
       console.error("Hosted vault-share delivery to a destination share failed.", {
         ...formatHostedExecutionSafeLogErrorDetails(error, {
           code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
@@ -139,25 +90,8 @@ export const POST = withJsonError(async (request: Request) => {
     throw createHostedVaultShareDeliveryFailedError();
   }
 
-  return jsonOk(DELIVERED_RESPONSE);
+  return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
 });
-
-async function hasDeliverableHostedRuntimeActiveAccess(
-  memberId: string,
-  prisma: ReturnType<typeof getPrisma>,
-): Promise<boolean> {
-  try {
-    await requireHostedRuntimeActiveAccess(memberId, {
-      prisma,
-    });
-    return true;
-  } catch (error) {
-    if (isHostedRuntimeInactiveAccessError(error)) {
-      return false;
-    }
-    throw error;
-  }
-}
 
 function createHostedVaultShareDeliveryFailedError(): Error {
   return hostedOnboardingError({
@@ -169,10 +103,9 @@ function createHostedVaultShareDeliveryFailedError(): Error {
 }
 
 /**
- * Bounds the mailbox dedupe-key space a grantor runtime can mint: only records inside a
- * sane recency window are delivered. Out-of-window records are silently dropped rather than
- * rejected so one stale record never poisons delivery of the fresh ones. Honest runtimes
- * only ever offer the latest few records.
+ * Bounds each replacement snapshot to records inside a sane recency window. Out-of-window
+ * records are silently dropped rather than rejected so one stale record never poisons
+ * delivery of the fresh ones. Honest runtimes only ever offer the latest few records.
  *
  * The age bound applies only to time-series kinds whose recordKey space grows with time.
  * Current-state kinds have one parser-enforced fixed recordKey and a content-only delivery

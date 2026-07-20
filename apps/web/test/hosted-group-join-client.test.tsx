@@ -88,6 +88,37 @@ test("renders a not-now escape link with the group join legal consent gate", asy
   expect(markup).toContain("Not now");
 });
 
+test("renders optional sharing cards with visible keyboard focus treatment", async () => {
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [{
+        description:
+          "Shares your health-source names, basic connection status (such as connected or needs attention), when Murph observed the status, and when Murph last completed a connection-wide sync job. A completed sync does not prove health data arrived. This permission does not share account details, device IDs, errors, or health values.",
+        label: "Health source connection status",
+        projectionScope: { projectionKind: "device-sync-status.v0" },
+        projectionScopeKey: "device-sync-status.v0",
+      }],
+      postJoinDestination: "/home",
+    }),
+  );
+
+  expect(markup).toContain("Health source connection status");
+  expect(markup).toContain(
+    "Shares your health-source names, basic connection status (such as connected or needs attention), when Murph observed the status, and when Murph last completed a connection-wide sync job. A completed sync does not prove health data arrived. This permission does not share account details, device IDs, errors, or health values.",
+  );
+  expect(markup).toContain("has-[:focus-visible]:ring-2");
+  expect(markup).toContain('type="checkbox"');
+});
+
 test("automatically opens the intent-first auth prompt on a valid group join page", async () => {
   const { GroupJoinSignInButton } = await import(
     "@/src/components/hosted-groups/group-join-client"

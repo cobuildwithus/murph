@@ -545,29 +545,38 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'explain naturally that approval is required',
+      'Only after this turn establishes an obligation to send a newly generated file now',
     )
     expect(prompt).toContain(
-      'The file is not attached yet.',
+      '.runtime/operations/assistant/generated-deliveries/<flat-filename>',
     )
     expect(prompt).toContain(
-      'The runtime appends the exact approval link outside model context',
-    )
-    expect(prompt).toContain('do not invent, request, or print an approval URL')
-    expect(prompt).toContain(
-      'When `murph.send_vault_file` returns `status: "approved"`',
+      'Do not use runtime staging for "prepare now, maybe send later,"',
     )
     expect(prompt).toContain(
-      'write a concise, natural reply using the returned filename when useful',
+      'never move or copy existing, user-owned, canonical, or durable files there.',
     )
     expect(prompt).toContain(
-      'such as "Here it is: report.pdf."',
+      'say approval is required and the file is not attached',
     )
     expect(prompt).toContain(
-      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+      'the runtime adds the exact approval link outside model context',
+    )
+    expect(prompt).toContain('Never invent or print a link')
+    expect(prompt).toContain(
+      'On `status: "approved"`',
     )
     expect(prompt).toContain(
-      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
+      'reply naturally with the filename',
+    )
+    expect(prompt).toContain(
+      'for example, "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Never expose `deliveryStatus`, approval/queue mechanics, or stock "delivery is not confirmed" copy',
+    )
+    expect(prompt).toContain(
+      'claim success only after later evidence says `sent`.',
     )
   })
 
@@ -1220,7 +1229,20 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).toContain('Message reactions:')
     expect(prompt).toContain('Use reactions sparingly')
     expect(prompt).toContain(
-      'A reaction is a public stance toward the exact current inbound message',
+      'Message refs label accepted messages visible now',
+    )
+    expect(prompt).toContain(
+      '`murph.select_reply_target` annotates the eventual response, including every `---` bubble',
+    )
+    expect(prompt).toContain(
+      '`murph.react_to_message` reacts independently',
+    )
+    expect(prompt).toContain('never invent or force one')
+    expect(prompt).toContain(
+      'With a message ref you can react to that exact accepted message, not only the newest one',
+    )
+    expect(prompt).toContain(
+      'A reaction is a public stance toward the exact message it lands on',
     )
     expect(prompt).toContain(
       'mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣"',
@@ -1232,7 +1254,7 @@ describe('assistant user-facing wording guidance', () => {
       'A bare or mostly laughter reply usually points back to an earlier turn',
     )
     expect(prompt).toContain(
-      'prefer no reaction over laugh-reacting to it as a proxy for the earlier joke',
+      'Do not laugh-react to it as a proxy',
     )
     expect(prompt).toContain(
       'Laughter can also signal affiliation, politeness, tension relief, disbelief, embarrassment, or topic closure',
@@ -1241,13 +1263,13 @@ describe('assistant user-facing wording guidance', () => {
       'A reaction can stand alone only when it fully satisfies the turn',
     )
     expect(prompt).toContain(
-      'if no text reply should be sent after reacting, also use `finish_without_reply`',
+      'also use `finish_without_reply`',
     )
     expect(prompt).toContain(
       'Use `heart` for genuine warmth, affection, pride, or strong celebration',
     )
     expect(prompt).toContain(
-      'Use `laugh` only for a clearly shared joke or comic moment in the current message',
+      'Use `laugh` only for a clearly shared joke or comic moment in the targeted message',
     )
     expect(prompt).toContain(
       'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',

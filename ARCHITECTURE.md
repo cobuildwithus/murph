@@ -2,9 +2,92 @@
 
 Last verified: 2026-07-16
 
+## Accepted-Message Targeting
+
+Exact-message replies and reactions share one accepted-message targeting
+primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
+`Message ref` beside eligible accepted Linq iMessage input or Telegram input
+with a valid numeric provider message target. Linq SMS, RCS, and unknown
+service types expose no ref. One resolver binds that ref to the current
+delivery-context ordinal, reloads the stored event, rechecks route,
+conversation, audience, group-actor, provider-target, and action-specific
+capability authority, and returns only the accepted input id. Provider message
+ids stay inside the local delivery boundary. Both targeting tools are
+invocation-scoped root tools: the resident App Server may expose them to the
+active root turn, but descendant or foreign resident threads fail before the
+accepted-message resolver runs.
+
+`murph.select_reply_target` annotates a normal response segment;
+`murph.react_to_message` keeps the existing reaction effect and outbox
+operation. The delivery owner re-resolves the selected input immediately before
+each effect and clones its reply context instead of mutating shared input. Every
+`---` bubble from one response segment inherits the same selected target.
+
+Intentional replies persist a true-only `nativeReplyRequested` marker on each
+normal message intent. The marker participates in strict parsing, persistence,
+fingerprints, equality, and dedupe. It distinguishes an explicit native reply
+from the contextual `replyToMessageId` already carried by automatic Linq
+replies, so unmarked automatic model replies remain flat. Existing explicit or
+manual low-level provider reply calls keep their prior behavior. This adds no
+provider-id map, database projection, service, API, queue, or feature flag. The
+full contract lives in `agent-docs/product-specs/shared-message-targeting.md`.
+
 ## Hosted Group Self-Awareness
 
-`apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
+`apps/web` owns hosted groups, memberships, join policies, vault-share grants,
+and the one nullable encrypted projection snapshot column on each existing
+`HostedVaultShare` row. A personal hosted runtime may read its
+callback-authenticated member's current memberships through the signed group
+tool control route. That membership read derives only the member's own group
+labels, role, requested and active self-granted scopes, and an authorized
+first-party permission URL; it does not expose another member's identity or
+sharing state or persist a copy in the workspace. Private self-leave atomically
+removes the non-owner membership and its shares under Web ownership. It does
+not append a runtime cleanup wake. Other permission mutations remain on the
+authenticated group join page or route-bound group-chat offer flow.
+
+`murph.group action="read_shared"` is the only hosted assistant path for group
+standings, shared facts, and diagnostics. Its runtime adapter is synchronous and
+performs no I/O when constructed. This path adds no pre-model roster, grant,
+snapshot, device, projection, configuration, or attribution read; existing
+accepted-input and route-binding work is unchanged. Web is contacted only after
+the model invokes the tool.
+
+Challenge kickoff and later interactive identity repair stay inside that same
+model-triggered `read_shared` request. At request time, the runtime adds only
+the bounded, route-authorized current-turn Linq sender handles already visible
+in the prompt. Web matches those handles against verified phone and email blind
+indexes selected by the existing group query. A handle appears only in the
+matching member's bounded `currentTurnHandles` array and only when it resolves
+to exactly one current membership; the same row carries the group-scoped
+`participantId`. The model may bind a challenge participant only when an exact
+current `Sender:` handle appears in one row. Scheduled and detached reads carry
+no handles. Handles are never persisted, and this adds no pre-model work,
+standalone query, decrypted contact roster, or compatibility branch. The
+legacy `read_current` wire is unchanged, and assistant-engine still removes the
+global member id and legacy roster handle before any group summary reaches the
+model.
+
+Web then captures the current roster and exact active grants, decrypts the
+bounded encrypted snapshots owned by those share rows, and returns every member
+with every requested scope as `not_granted`, `granted` plus `missing`, or
+`available`. Health projection delivery conditionally replaces the complete
+encrypted snapshot on the exact active share generation. Revoke and regrant
+clear it transactionally, and regrant rotates the share id. The explicit
+`device-sync-status.v0` grant instead authorizes one live bounded Web derivation
+of public source labels, coarse state, and honest timestamps; device facts are
+never stored in the share snapshot.
+
+No shared projection lands in a personal or group workspace. Legacy
+`vault-share.delivery` and `vault-share.revoke` mailbox rows are skipped before
+payload fetch or decryption, and v2 restore plus legacy materialization exclude
+`derived/vault-share/**` and `vault-share/**`. Challenge logic starts from
+knowledge-page participants recorded as `in`, joins the `read_shared` matrix by
+the group-membership-scoped `participantId`, treats a real zero as data, and
+names missing participants instead of ranking absence as zero. The model never
+receives the global hosted member id. The full behavior, privacy shape, and
+consumer-first cutover live in
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
 
 ## Hosted Assistant Ask
 
@@ -26,8 +109,10 @@ Server process. The trusted group target adapter supplies the authorized root
 and bounded committed conversation evidence; the model cannot choose either.
 The native `murph-group-read` permission profile then exposes the live group
 read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
-environment files are denied, tool network is off, shell commands inherit no
-secrets, and the child receives no dynamic tools or delivery authority.
+retired vault-share projection roots, and environment files are denied; tool
+network is off, shell commands inherit no secrets, and the child receives only
+the consent-aware lazy `murph.group/read_shared` dynamic tool, with no mutation
+or delivery authority.
 Thread-start attestation must confirm the exact profile, roots, empty working
 directory, empty instruction sources, and approval policy before model work.
 The child never shares the resident process, provider thread, interruption
@@ -319,7 +404,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/health-metrics`: workspace-private neutral MetricPoint contract owner for health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports
 - `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
 - `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, exact protocol revisions, generated catalogs, and future aggregate outcome summaries consumed across local and hosted surfaces
-- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, and attachment prompt-bundle audit support. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
+- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
 - `packages/assistant-cli`: workspace-private CLI-only assistant surface that owns the daemon-aware assistant wrappers, assistant command registration, foreground terminal logging, and the Ink chat UI
 - `packages/setup-cli`: workspace-private CLI-only onboarding and host-setup surface that owns the setup wizard, host provisioning helpers, AgentMail setup helpers, and assistant/channel/wearable onboarding flows
@@ -393,7 +478,7 @@ and the production build verifies their exact active configuration.
 - Query runtime state is local-only under `.runtime/projections/query.sqlite`, is rebuildable from canonical query-visible vault evidence, and remains strictly read-only relative to canonical writes. Dense provider telemetry does not enter the default query/read/browser/assistant model: generic `ledger/samples/**` shards are explicit import/debug ledgers, `readVault()` and `readVaultTolerant()` materialize sparse canonical product records plus display-grade `ledger/metric-samples/**`, and browser-vault metrics come from compact `query_metric_points` rows rather than hydrated sample entities. Dense metric rows remain lookback-bounded, while sparse lab history uses a dedicated all-history browser projection derived only from collapsed live canonical test events; it preserves structured result facts needed for measured-biomarker history without adding raw reports, notes, raw references, or external identifiers to the browser replica. `readVaultRawTolerant()` is the explicit repair/debug source hydration path and bypasses default projection filtering. In `readVault()`, `family: "sample"` means display-grade `kind: "metric_sample"` product facts only; it must not be used as a signal that generic raw sample telemetry is back in the default read model.
 - Durable local runtime state is split explicitly: `.runtime/operations/**` holds non-canonical operational state, `.runtime/projections/**` holds rebuildable indexes/projections, and `.runtime/cache/**` plus `.runtime/tmp/**` stay ephemeral. Canonical vault evolution is a separate seam in `packages/core`: `vault.json`, `CORE.md`, and any future canonical record-shape changes stay there, and non-current `formatVersion` values fail closed while `.runtime/projections/**` stores remain rebuildable and never carry canonical migration authority. `vault.json` itself stays minimal and instance-owned: it stores only `formatVersion`, `vaultId`, `title`, `timezone`, and `createdAt`, while layout paths, shard patterns, and id-prefix policy remain code-owned runtime contract details. Portability is a second explicit axis on top of that taxonomy: runtime paths are either `portable` or `machine_local`, and operational state defaults to `machine_local` unless a more specific classification says otherwise. Device sync runtime state is machine-local under `.runtime/operations/device-sync/state.sqlite`, and Murph's daemon launcher state/logs plus separate private managed control-token and encryption-secret files live under `.runtime/operations/device-sync/`; the control bearer may rotate with daemon lifecycle, while the encryption secret is stable for stored OAuth credential decrypt. Encrypted provider tokens, OAuth sessions, and webhook/reconcile cursors never belong in the canonical vault. Portable operational examples include canonical write-operation receipts and inbox promotion ledgers that must move with the vault's recovery/idempotency context. In the hosted lane, `apps/web` Postgres is the canonical owner of hosted member identity, routing, billing, email authorization, legal consent events/grants, device-sync authority, the hosted AI usage ledger, usage-credit purchases and append-only entries plus their bounded member projection, the anonymized hosted assistant-runtime issue table, hosted product-feedback rows, encrypted hosted mailbox rows, hosted workspace checkpoint metadata, hosted computer-use profile/run/handoff state, and redacted hosted runtime logs/status. Cloudflare may use narrow signed web callbacks for execution-time device-sync snapshots, computer-use commands, and product-feedback recording, but it is not a second product control plane or a durable device-sync/browser mirror. Hosted onboarding billing refs, legal consent rows, queued Stripe receipts, webhook receipts, mailbox rows, workspace checkpoint metadata, hosted computer-use rows, hosted AI usage rows, usage-credit purchases and entries, hosted product-feedback rows, and anonymized assistant-runtime issue rows in Postgres are operational or idempotency state only, not canonical health truth. Mailbox import watermarks, assistant channel enablement state, outbox truth, turn revision, and runtime timers live inside the encrypted hosted workspace checkpoint owned by the restored local runtime, not in web-visible run rows.
 - Local assistant runtime state is non-canonical under `vault/.runtime/operations/assistant/**`, including sessions, transcripts, outbox/receipt artifacts, diagnostics, status, and other execution residue. Durable user-facing memory, typed preferences, compiled wiki pages, and scheduled prompt configuration do not live in assistant runtime state; they live under `bank/memory.md`, `bank/preferences.json`, `derived/knowledge/**`, and `bank/automations/*.md`. The canonical preferences singleton owns stable user intent such as workout unit defaults and desired wearable providers. The hosted mailbox owner serializes one immutable per-member causal sequence across conversation and system lanes at append; preference work carries that sequence through local pending or accepted-input state, while the bounded canonical companion `bank/assistant-preference-mutations.json` retains only each sparse field's last-applied sequence. The preference value document stays strict and contains no runtime mutation metadata. An older or equal event terminally no-ops only its stale fields while non-stale siblings apply, so post-commit replay needs no event receipt, reservation lifecycle, or capacity policy. Conversational commands from one accepted turn may apply at the same sequence in command order. Tokenless legacy pending work is sequence zero: it drains, but cannot overwrite a field already touched by any legacy conversational or sequenced mutation. The web projection and wall-clock timestamps never decide this order. The canonical assistant-input selector admits a bounded, cursor-ordered compound batch from one conversation and one provider-native reply anchor only when each positive mailbox causal sequence is the exact successor of the previous one. Foreground starts at the oldest fresh input in the current wake and never pulls older pending backlog ahead of it; background starts at the oldest replyable pending input. Any boundary change, sequence gap, legacy sequence-zero input, or 50-input bound ends the batch and leaves the remainder pending. For web-owned tone/voice updates and local `murph.assistant_style` commands, the runtime forwards the terminal provider-accepted input id from that validated batch; web resolves its live member-owned conversation row and derives the causal sequence. Exact-successor proof prevents the terminal input from crossing an intervening Settings mutation. Actual wearable OAuth/account/runtime state remains device-sync-owned operational state. Session persistence stores one canonical Codex App Server assistant target plus separate resume-state metadata rather than duplicating provider config across multiple runtime records, and turn execution resolves boundary defaults, persisted session target, and per-turn overrides through one explicit execution-plan seam before Codex request shaping. Provider-native resume state is the continuity authority when present: onboarding/bootstrap overlays must not clear a valid provider resume handle, and flat-prompt native-resume providers such as Codex receive Murph's system/bootstrap instructions only on bootstrap turns rather than as repeated resumed-turn user content. Active same-conversation input otherwise follows one lifecycle: the initial hosted mailbox compound batch is frozen against broad rediscovery before Codex starts, but an exact staged input notification may join the live Codex turn when it is the next positive causal-sequence successor and preserves the conversation, delivery route, native reply anchor, account/audience, and group actor. A projection-pending input is a causal barrier until the existing projection-completion notification retries it; terminal projection failure remains replyable through the normal fallback. Duplicate staging and projection-completion notifications at or behind the newest queued or committed frontier are ignored before successor proof. After the provider acknowledges `turn/steer`, Murph journals and checkpoints the accepted live input before any hosted tool effect or final delivery may proceed; any missing input, gap, boundary change, or missed live window remains pending for a normal later turn. Final-delivery and hosted-tool effect keys use the newest accepted causal input as their stable anchor while answered-mailbox evidence retains the full set. Input with a strict active-turn target fails closed when that target is no longer live, and Murph does not replay a completed provider response by synthesizing another provider request inside the same assistant turn. Murph may replay recent raw transcript turns plus bounded sanitized tool/provider audit entries during bootstrap or fallback continuity, and rely on provider-native resume or compaction for continuity, but that runtime context still must never be treated as canonical health memory or vault truth.
-- Assistant-generated one-time delivery staging has one flat runtime-owned ref shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. This non-canonical private residue is included in encrypted hosted checkpoints for active delivery continuity and omitted from portable support bundles with the rest of `.runtime/**`. The compatibility release parses persisted outbox and hosted side-effect refs and can verify bytes for retries, but initial `send_vault_file` preparation still rejects this hidden path until every production runner has converged. `exports/assistant-deliveries/**` remains ordinary vault data and receives no ownership, deletion, or packaging-exclusion semantics from this contract.
+- Assistant-generated one-time delivery staging has one flat runtime-owned ref shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. The assistant may create and adopt a direct single-link regular file there only when the same turn establishes the delivery obligation and calls `send_vault_file` with a semantic provider call id; generated-file calls run on the existing serialized dynamic-tool chain, and missing call identity fails before adoption. Runtime parents are tightened to `0700`, the file to `0600`, and the friendly source is transferred to its deterministic owned ref with atomic no-clobber link/unlink plus exact interrupted-link recovery. This non-canonical private residue is included in encrypted hosted checkpoints while an exact filename/type/size/SHA-256 descriptor is active and is omitted from portable support bundles with the rest of `.runtime/**`. Quiescent pre-checkpoint cleanup first validates the complete flat inventory and outbox state, then removes only terminal, changed, or orphaned owned files; an orphan hardlink removes only its runtime link, while an active hardlink, nesting, unsafe names, symlinks, special entries, or untrusted live inventory fail closed. `exports/assistant-deliveries/**` remains ordinary vault data and receives no ownership, deletion, or packaging-exclusion semantics. The reader-compatible phase-one release is the rollback floor while any persisted outbox or checkpoint can contain the runtime ref.
 - Hosted `murph.assistant_style` resolves the selected turn's Humor, Push, and
   Detail sequence at mutation time through the signed Web personalization port.
   Web binds the terminal provider-accepted input id from the validated compound

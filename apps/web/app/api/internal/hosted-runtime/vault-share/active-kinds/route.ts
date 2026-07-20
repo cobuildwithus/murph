@@ -12,7 +12,7 @@ import {
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   readDeliverableHostedVaultShareProjectionScopes,
-} from "@/src/lib/hosted-mailbox/vault-share-store";
+} from "@/src/lib/hosted-vault-share/projection-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   filterHostedVaultShareProjectionScopesBySupportedKeys,

@@ -9,11 +9,13 @@ import {
 } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  inputProps: vi.fn(),
   openAuthDialog: vi.fn(),
   refresh: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
@@ -73,6 +75,7 @@ vi.mock("@/src/components/ui/button", () => ({
 
 vi.mock("@/src/components/ui/input", () => ({
   Input(props: InputHTMLAttributes<HTMLInputElement> & { inputSize?: string }) {
+    mocks.inputProps(props);
     const inputProps = { ...props };
     delete inputProps.inputSize;
     return createElement("input", inputProps);
@@ -129,11 +132,11 @@ describe("Clinical Records connect page", () => {
     const loadingStatus = rendered.container.querySelector('[role="status"]');
     assert.ok(loadingStatus);
     expect(loadingStatus.getAttribute("aria-busy")).toBe("true");
-    expect(loadingStatus.getAttribute("aria-label")).toBe("Preparing Epic connection");
+    expect(loadingStatus.getAttribute("aria-label")).toBe("Preparing records connection");
     expect(queueMicrotask).toHaveBeenCalled();
   });
 
-  it("scrubs the claim before search and sends it only in the exact SMART start body", async () => {
+  it("scrubs the claim, sends it only in the SMART start body, and closes a committed BFCache flow", async () => {
     const claim = `cr_${"a".repeat(32)}`;
     mocks.requestHostedOnboardingJson
       .mockResolvedValueOnce({
@@ -172,10 +175,26 @@ describe("Clinical Records connect page", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(rendered.replaceState).toHaveBeenCalled();
     expect(String(rendered.replaceState.mock.lastCall?.[2])).not.toContain(claim);
+    const connectionProgress = rendered.container.querySelector(
+      '[aria-label="Medical records connection progress"]',
+    );
+    assert.ok(connectionProgress);
+    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
+      "Review",
+    );
 
     await clickButton(rendered, "Accept health-data consent");
     expect(rendered.container.textContent).toContain(
-      "This beta performs one import of supported Epic laboratory results and diagnostic summaries. It does not continuously sync your chart.",
+      "Murph copies records once. It does not keep checking your chart.",
+    );
+    expect(rendered.container.textContent).toContain("Where do you get care?");
+    expect(rendered.container.textContent).toContain(
+      "Murph supports selected portals right now.",
+    );
+    expect(rendered.container.textContent).not.toContain("Epic organization");
+    expect(connectionProgress.textContent).toContain("Patient portal");
+    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
+      "Where you get care",
     );
     const searchInput = rendered.container.querySelector("#clinical-provider-search");
     assert.ok(searchInput instanceof rendered.window.HTMLInputElement);
@@ -194,11 +213,12 @@ describe("Clinical Records connect page", () => {
     expect(JSON.stringify(mocks.requestHostedOnboardingJson.mock.calls[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Piedmont Healthcare");
 
-    await clickButton(rendered, "Continue");
+    await clickButton(rendered, "Continue to portal");
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
         method: "POST",
+        onSuccessfulResponseHeaders: expect.any(Function),
         payload: {
           claim,
           providerDirectoryEntryId: "epic-piedmont",
@@ -210,14 +230,19 @@ describe("Clinical Records connect page", () => {
       );
     });
     expect(String(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.url)).not.toContain(claim);
-    expect(rendered.container.textContent).toContain("Opening Epic");
+    expect(JSON.stringify(rendered.replaceState.mock.lastCall?.[0])).not.toContain(claim);
+    expect(rendered.container.textContent).toContain("Opening portal");
+    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
+      "Where you get care",
+    );
 
     await restoreFromBackForwardCache(rendered);
 
-    expect(findButton(rendered, "Continue").disabled).toBe(false);
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).not.toContain("Piedmont Healthcare");
   });
 
-  it("blocks duplicate provider searches while the first request is pending", async () => {
+  it("blocks duplicate searches and ignores a stale response after BFCache restore", async () => {
     const claim = `cr_${"b".repeat(32)}`;
     let resolveSearch!: (value: unknown) => void;
     mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
@@ -275,10 +300,77 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(rendered.container.textContent).toContain("No matching Epic organizations found");
+    expect(rendered.container.textContent).not.toContain("No matches");
+    expect(rendered.container.textContent).not.toContain("This portal may not be supported");
     await vi.waitFor(() => {
       expect(input.hasAttribute("readOnly")).toBe(false);
     });
+  });
+
+  it("closes a stale SMART start after its committed response reaches a BFCache-restored page", async () => {
+    const claim = `cr_${"d".repeat(32)}`;
+    let resolveStart!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1",
+        ok: true,
+        providers: [{
+          brandName: "Piedmont Healthcare",
+          facilities: [],
+          id: "epic-piedmont",
+          sourceSystem: "epic-fhir",
+        }],
+      })
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveStart = resolve;
+      }));
+
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Accept health-data consent");
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => {
+      setInputValue(rendered.window, input, "Piedmont");
+    });
+    await submitProviderSearch(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Piedmont Healthcare");
+    });
+
+    await clickButton(rendered, "Continue to portal");
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Opening portal");
+    });
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveStart({
+        authorizationUrl: "https://epic.example.test/oauth2/authorize?state=safe-state",
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.assign).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
   });
 
   it("marks earlier results stale while a new search is pending", async () => {
@@ -343,7 +435,7 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
     });
 
-    expect(rendered.container.textContent).toContain("No matching Epic organizations found");
+    expect(rendered.container.textContent).toContain("No matches");
     expect(results.getAttribute("aria-busy")).toBe("false");
     expect(results.className).not.toContain("opacity-60");
   });
@@ -432,6 +524,7 @@ describe("Clinical Records connect page", () => {
     const input = rendered.container.querySelector("#clinical-provider-search");
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     expect(input.hasAttribute("required")).toBe(true);
+    expect(mocks.inputProps).toHaveBeenCalledWith(expect.objectContaining({ maxLength: 120 }));
     expect(findButton(rendered, "Search").getAttribute("type")).toBe("submit");
 
     const reportValidity = vi.fn(() => false);
@@ -449,7 +542,11 @@ describe("Clinical Records connect page", () => {
 
   it("keeps keyboard focus in the search field when provider search fails", async () => {
     const claim = `cr_${"f".repeat(32)}`;
-    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new Error("offline"));
+    const technicalMessage = "Clinical Records provider returned a raw FHIR directory error.";
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CLINICAL_PROVIDER_DIRECTORY_ERROR",
+      message: technicalMessage,
+    }));
     const { RecordsConnectClient } = await import(
       "../app/(dashboard)/records/connect/records-connect-client"
     );
@@ -485,12 +582,16 @@ describe("Clinical Records connect page", () => {
 
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Search unavailable");
+      expect(rendered.container.textContent).toContain(
+        "Hospitals and clinics could not be searched right now. Try again.",
+      );
     });
+    expect(rendered.container.textContent).not.toContain(technicalMessage);
     expect(input.hasAttribute("disabled")).toBe(false);
     expect(input.hasAttribute("readOnly")).toBe(false);
   });
 
-  it("refuses a non-HTTPS provider authorization redirect", async () => {
+  it("closes a committed connection flow when a successful response has a non-HTTPS redirect", async () => {
     const claim = `cr_${"d".repeat(32)}`;
     mocks.requestHostedOnboardingJson
       .mockResolvedValueOnce({
@@ -537,20 +638,79 @@ describe("Clinical Records connect page", () => {
       expect(rendered.container.textContent).toContain("Piedmont Healthcare");
     });
 
-    await clickButton(rendered, "Continue");
+    await clickButton(rendered, "Continue to portal");
 
     await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain(
-        "Could not continue with Piedmont Healthcare",
-      );
+      expect(rendered.container.textContent).toContain("Connection link unavailable");
     });
     expect(rendered.assign).not.toHaveBeenCalled();
+  });
+
+  it("does not resurrect a server-rejected connection claim after remount", async () => {
+    const claim = `cr_${"e".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1",
+        ok: true,
+        providers: [{
+          brandName: "Piedmont Healthcare",
+          facilities: [],
+          id: "epic-piedmont",
+          sourceSystem: "epic-fhir",
+        }],
+      })
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "CLINICAL_RECORD_CONNECT_INTENT_USED",
+        message: "This connection link has already been used.",
+      }));
+
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: true }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Accept health-data consent");
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => {
+      setInputValue(rendered.window, input, "Piedmont");
+    });
+    await submitProviderSearch(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Piedmont Healthcare");
+    });
+    await clickButton(rendered, "Continue to portal");
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Connection link unavailable");
+    });
+
+    await rendered.rerender(createElement(RecordsConnectClient, {
+      authenticated: true,
+      key: "reloaded",
+    }));
+
+    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).not.toContain("Accept health-data consent");
+    expect(JSON.stringify(rendered.window.history.state)).not.toContain(claim);
   });
 });
 
 describe("Clinical Records status page", () => {
   it("creates a fresh private intent from the empty state without provider authority", async () => {
     const claim = `cr_${"c".repeat(32)}`;
+    const technicalMessage = "Clinical Records connect-intent issuance failed.";
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       claim,
       expiresAt: "2026-07-16T18:15:00.000Z",
@@ -576,7 +736,12 @@ describe("Clinical Records status page", () => {
     });
     cleanup = rendered.cleanup;
 
-    await clickButton(rendered, "Connect Epic");
+    expect(rendered.container.textContent).toContain("Connect a supported patient portal.");
+    expect(rendered.container.textContent).toContain(
+      "Murph copies available lab results and report summaries once",
+    );
+
+    await clickButton(rendered, "Connect records");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
@@ -588,20 +753,83 @@ describe("Clinical Records status page", () => {
         `/records/connect#clinicalRecordsIntent=${claim}`,
       );
     });
-    expect(rendered.container.textContent).toContain("Preparing private link");
+    expect(rendered.container.textContent).toContain("Getting things ready");
 
     await restoreFromBackForwardCache(rendered);
 
-    expect(findButton(rendered, "Connect Epic").disabled).toBe(false);
+    expect(findButton(rendered, "Connect records").disabled).toBe(false);
+
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "CLINICAL_RECORD_CONNECT_INTENT_FAILED",
+      message: technicalMessage,
+    }));
+    await clickButton(rendered, "Connect records");
+
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Murph could not get the records connection ready. Try again.",
+      );
+    });
+    expect(rendered.container.textContent).not.toContain(technicalMessage);
   });
 
-  it("renders truthful partial status, strips callback state, and disconnects once", async () => {
-    const connection = makeConnection();
-    mocks.requestHostedOnboardingJson.mockResolvedValue({
-      connectionId: connection.connectionId,
-      ok: true,
-      status: "disconnected",
+  it("ignores a stale private-intent response after BFCache restore", async () => {
+    const claim = `cr_${"e".repeat(32)}`;
+    let resolveIntent!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
+      resolveIntent = resolve;
+    }));
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
     });
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Connect records");
+    expect(rendered.container.textContent).toContain("Getting things ready");
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveIntent({
+        claim,
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.assign).not.toHaveBeenCalled();
+    expect(findButton(rendered, "Connect records").disabled).toBe(false);
+  });
+
+  it("renders truthful partial status, strips callback state, and deduplicates disconnect attempts", async () => {
+    const connection = makeConnection();
+    const technicalMessage = "Clinical Records credential revocation failed upstream.";
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "CLINICAL_RECORD_DISCONNECT_FAILED",
+        message: technicalMessage,
+      }))
+      .mockResolvedValueOnce({
+        connectionId: connection.connectionId,
+        ok: true,
+        status: "disconnected",
+      });
     const { RecordsPageClient } = await import(
       "../app/(dashboard)/records/records-page-client"
     );
@@ -622,11 +850,21 @@ describe("Clinical Records status page", () => {
     });
     cleanup = rendered.cleanup;
 
-    expect(rendered.container.textContent).toContain("Epic connected");
-    expect(rendered.container.textContent).toContain("Partially imported");
-    expect(rendered.container.textContent).toContain("3 imported");
+    expect(rendered.container.textContent).toContain("Records connected");
+    expect(rendered.container.textContent).toContain("Partly complete");
+    expect(rendered.container.textContent).toContain(
+      "Murph added some lab results or report summaries, but part of the copy could not finish.",
+    );
+    const addedLabel = Array.from(rendered.container.querySelectorAll("p"))
+      .find((paragraph) => paragraph.textContent === "Added");
+    assert.ok(addedLabel);
+    expect(addedLabel.nextElementSibling?.textContent).toBe("3");
+    const reviewLabel = Array.from(rendered.container.querySelectorAll("p"))
+      .find((paragraph) => paragraph.textContent === "Held for review");
+    assert.ok(reviewLabel);
+    expect(reviewLabel.nextElementSibling?.textContent).toBe("1");
     const partialBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Partially imported");
+      .find((span) => span.textContent === "Partly complete");
     assert.ok(partialBadge);
     expect(partialBadge.className).not.toContain("bg-primary");
     expect(String(rendered.replaceState.mock.lastCall?.[2])).toBe(
@@ -648,25 +886,97 @@ describe("Clinical Records status page", () => {
     });
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
       method: "POST",
       url: "/api/clinical-records/connections/crc_1/disconnect",
     });
     await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain("Results already imported into your vault stay there");
-      expect(rendered.container.textContent).toContain("No active Epic connections");
-      expect(rendered.container.textContent).not.toContain("Epic connected");
-      expect(rendered.container.textContent).not.toContain("Partially imported");
+      expect(rendered.container.textContent).toContain(
+        "Could not disconnect Piedmont Healthcare. Try again.",
+      );
+    });
+    expect(rendered.container.textContent).not.toContain(technicalMessage);
+
+    await act(async () => {
+      confirmButtons[1]?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      confirmButtons[1]?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+      method: "POST",
+      url: "/api/clinical-records/connections/crc_1/disconnect",
+    });
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
+      expect(rendered.container.textContent).toContain("No patient portals connected");
+      expect(rendered.container.textContent).not.toContain("Records connected");
+      expect(rendered.container.textContent).not.toContain("Partly complete");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
-      .find((alert) => alert.textContent?.includes("Epic connection disconnected"));
+      .find((alert) => alert.textContent?.includes("Patient portal disconnected"));
     assert.ok(disconnectNotice);
     expect(disconnectNotice.getAttribute("tabindex")).toBe("-1");
     expect(disconnectNotice.className).toContain("focus-visible:ring-2");
     expect(disconnectNotice.className).not.toContain("focus:ring-2");
   });
 
-  it("uses an affirmative badge only for completion and truthful attention copy", async () => {
+  it("ignores a stale disconnect response after BFCache restore", async () => {
+    const connection = makeConnection();
+    let resolveDisconnect!: (value: unknown) => void;
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
+      resolveDisconnect = resolve;
+    }));
+    const { RecordsPageClient } = await import(
+      "../app/(dashboard)/records/records-page-client"
+    );
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      authenticated: true,
+      initialCallback: null,
+      initialConnections: [connection],
+      initialLoadError: false,
+    }), {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records",
+        origin: "https://join.example.test",
+        pathname: "/records",
+        search: "",
+      },
+      requireButton: false,
+    });
+    cleanup = rendered.cleanup;
+
+    await clickButton(rendered, "Disconnect");
+    const confirmButtons = Array.from(rendered.container.querySelectorAll("button"))
+      .filter((button) => button.textContent?.trim() === "Disconnect");
+    expect(confirmButtons).toHaveLength(2);
+    await act(async () => {
+      confirmButtons[1]?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rendered.container.textContent).toContain("Disconnecting");
+    await restoreFromBackForwardCache(rendered);
+
+    await act(async () => {
+      resolveDisconnect({
+        connectionId: connection.connectionId,
+        ok: true,
+        status: "disconnected",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent).toContain(connection.displayName);
+    expect(rendered.container.textContent).toContain("Partly complete");
+    expect(rendered.container.textContent).not.toContain("No patient portals connected");
+    expect(rendered.container.textContent).not.toContain("Patient portal disconnected");
+  });
+
+  it("derives terminal copy from the status and added count", async () => {
     const connection = makeConnection();
     const { RecordsPageClient } = await import(
       "../app/(dashboard)/records/records-page-client"
@@ -700,20 +1010,59 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Import complete");
+      .find((span) => span.textContent === "Copy complete");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "The totals below show how many lab results and report summaries were added",
+    );
+
+    await rendered.rerender(renderWithConnection({
+      ...connection,
+      latestRun: {
+        completedAt: "2026-07-16T18:15:00.000Z",
+        importedCount: 0,
+        reviewCount: 1,
+        runId: "crr_complete_empty",
+        status: "complete",
+      },
+    }));
+    const nothingAddedBadge = Array.from(rendered.container.querySelectorAll("span"))
+      .find((span) => span.textContent === "Nothing added");
+    assert.ok(nothingAddedBadge);
+    expect(nothingAddedBadge.className).not.toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "Murph finished this copy, but nothing was added.",
+    );
+
+    await rendered.rerender(renderWithConnection({
+      ...connection,
+      latestRun: {
+        completedAt: "2026-07-16T18:15:00.000Z",
+        importedCount: 0,
+        reviewCount: 0,
+        runId: "crr_partial_empty",
+        status: "partial",
+      },
+    }));
+    const emptyPartialBadge = Array.from(rendered.container.querySelectorAll("span"))
+      .find((span) => span.textContent === "Could not finish");
+    assert.ok(emptyPartialBadge);
+    expect(emptyPartialBadge.className).not.toContain("bg-primary");
+    expect(rendered.container.textContent).toContain(
+      "Part of the copy could not finish, and nothing was added.",
+    );
 
     await rendered.rerender(renderWithConnection({
       ...connection,
       status: "needs_reauth",
     }));
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Authorization ended");
+      .find((span) => span.textContent === "Portal access ended");
     assert.ok(reauthorizationBadge);
     expect(reauthorizationBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "Epic authorization ended before the one-time import finished. Reauthorization is not available in this beta.",
+      "Access from your patient portal ended before Murph finished copying records. Connecting it again is not available in this beta.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -721,11 +1070,11 @@ describe("Clinical Records status page", () => {
       status: "error",
     }));
     const failedBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Import failed");
+      .find((span) => span.textContent === "Could not add records");
     assert.ok(failedBadge);
     expect(failedBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "The one-time import could not finish. Any results already saved remain in your private vault.",
+      "Murph could not finish copying records. Anything already saved remains in your private vault.",
     );
   });
 
@@ -751,9 +1100,9 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     const callbackNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
-      .find((alert) => alert.textContent?.includes("Epic access not granted"));
+      .find((alert) => alert.textContent?.includes("Connection canceled"));
     assert.ok(callbackNotice);
-    expect(callbackNotice.textContent).toContain("Epic was not connected and no import started.");
+    expect(callbackNotice.textContent).toContain("The patient portal was not connected and no records were copied.");
     expect(callbackNotice.className).toContain("before:bg-border");
     expect(callbackNotice.className).not.toContain("before:bg-primary");
   });
@@ -790,10 +1139,13 @@ describe("Clinical Records status page", () => {
     });
     cleanup = rendered.cleanup;
 
-    expect(rendered.container.textContent).toContain("Retrieving results");
+    expect(rendered.container.textContent).toContain("Getting records");
     expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain(
-      "Retrieving results",
+      "Getting records",
     );
+    const copyProgress = rendered.container.querySelector('[aria-label="Records copy progress"]');
+    assert.ok(copyProgress);
+    expect(copyProgress.querySelector('[aria-current="step"]')?.textContent).toBe("Copying");
     await clickButton(rendered, "Refresh status");
 
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
@@ -833,9 +1185,12 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain(
-      "This page updates on its own while an import runs.",
+      "This page updates on its own while Murph is copying records.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain("Loading");
+    const copyProgress = rendered.container.querySelector('[aria-label="Records copy progress"]');
+    assert.ok(copyProgress);
+    expect(copyProgress.querySelector('[aria-current="step"]')?.textContent).toBe("Saving");
 
     await act(async () => {
       vi.advanceTimersByTime(15_000);
@@ -871,7 +1226,7 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).not.toContain(
-      "This page updates on its own while an import runs.",
+      "This page updates on its own while Murph is copying records.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
 
@@ -990,7 +1345,7 @@ describe("Clinical Records status page", () => {
     }));
 
     expect(rendered.container.textContent).not.toContain(
-      "This page updates on its own while an import runs.",
+      "This page updates on its own while Murph is copying records.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
     await act(async () => {

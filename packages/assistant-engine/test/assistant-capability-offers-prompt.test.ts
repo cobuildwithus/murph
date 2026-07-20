@@ -135,20 +135,65 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
-    expect(section).toContain('start with "Like this message" and say what it does')
-    expect(section).not.toContain('lead with reacting to this message')
-    expect(section).toContain('when the current group is adding a sharing permission')
-    expect(section).toContain('permission opt-in, not joining or rejoining')
-    expect(section).toContain('secondary customize link')
+    expect(section).not.toContain('proactively call `action="post_join_offer"` once')
+    expect(section).toContain('`action="read_shared"` as the only hosted path')
+    expect(section).toContain('resolves live authority lazily after the tool call')
+    expect(section).toContain("exact handle appears in exactly one returned member's `currentTurnHandles`")
+    expect(section).toContain('Scheduled and detached reads have no current-turn handles')
+    expect(section).not.toContain('For running-challenge standings')
+    expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
+    expect(section).toContain('Use `read_current` for membership and permission configuration only')
+    expect(section).toContain('not Apple Health access')
+    expect(section).toContain('Apple does not expose HealthKit read authorization')
     expect(section).toContain(
       "After read_current, use the group-chat skill's core permissions only for `status=none`",
     )
     expect(section).toContain('existing groups use workflow scopes')
+    expect(section).toContain('liking or hearting it adds only its disclosed permission snapshot')
     expect(section).toContain('grants membership only when needed')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',
     )
     expect(section).not.toContain('to join by reacting')
+  })
+
+  it('puts proactive challenge permission handling in the scheduled group prompt', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptLayers(
+      createNotificationDecisionPromptInput({
+        channel: 'linq',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).prompt
+
+    expect(prompt).toContain('For running-challenge standings')
+    expect(prompt).toContain('report all available rankings plus each named blocker')
+    expect(prompt).toContain('required scoring scope that is `not_granted`')
+    expect(prompt).toContain('`device-sync-status.v0` when the scoring scope is granted but lacks current data')
+    expect(prompt).toContain('Include each exact missing scope only when at least one participant affected by that scope')
+    expect(prompt).toContain('neither explicitly declined it nor a prior offer recorded on the challenge page')
+    expect(prompt).toContain('proactively call `action="post_join_offer"` once')
+    expect(prompt).toContain('never imply that reacting to the standings grants anything')
+    expect(prompt).toContain('If the tool returns `sent`, record those scopes as offered')
+    expect(prompt).toContain('Never offer the scoring scope merely because it is granted but missing data')
+    expect(prompt).toContain('other sync/device cases get ordinary open-Murph, sync, or reconnect guidance and no permission card')
+  })
+
+  it('keeps bounded device diagnostics inside the closed group permission contract', () => {
+    const prompt = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).stableRouteCapabilityPrompt
+
+    expect(prompt).toContain(HOSTED_GROUPS_HEADER)
+    expect(prompt).toContain('`device-sync-status.v0`')
+    expect(prompt).toContain('public health-source labels')
+    expect(prompt).toContain('coarse connection status')
+    expect(prompt).toContain('connection-wide sync-job times')
+    expect(prompt).toContain('raw provider or account identity')
   })
 
   it('keeps the new-group contact handoff natural and reactive', () => {

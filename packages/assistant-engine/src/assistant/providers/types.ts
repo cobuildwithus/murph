@@ -34,6 +34,9 @@ import type {
   AssistantRuntimeIssueInput,
 } from '../issue-reporting.js'
 import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from '../message-target-selection.js'
+import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
 
@@ -88,6 +91,11 @@ export interface AssistantProviderRequestStartedEvent
   startedAt: string
 }
 
+export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
+  deliveryContextOrdinal: number
+  messageReactionPending: boolean
+}
+
 /**
  * Per-turn OpenAI processing tier. This is turn execution policy only: it must
  * never enter `CodexThreadIdentity`/route fingerprints or persisted session
@@ -107,7 +115,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
-  allowMessageReactions?: boolean | null
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
@@ -116,9 +124,9 @@ export interface AssistantProviderTurn {
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((
+    event: AssistantProviderFinishWithoutReplyAcceptedEvent
+  ) => Promise<void> | void) | null
   onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -203,9 +211,10 @@ export type AssistantNoReplyDisposition = {
   kind: 'none'
 }
 
-export interface AssistantCurrentMessageReactionAction {
+export interface AssistantTargetedMessageReactionAction {
   deliveryContextOrdinal: number
   reaction: AssistantMessageReaction
+  targetInputId: string
 }
 
 export interface AssistantProviderTurnExecutionResult {
@@ -216,7 +225,7 @@ export interface AssistantProviderTurnExecutionResult {
   rawEvents: unknown[]
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
   finalAction?: AssistantNoReplyDisposition
-  reactions?: readonly AssistantCurrentMessageReactionAction[] | null
+  reactions?: readonly AssistantTargetedMessageReactionAction[] | null
   response: string
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
@@ -227,6 +236,8 @@ export interface AssistantProviderTurnExecutionResult {
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns `response` and `responseMedia`. */
   responseDeliveryContextOrdinal: number
+  /** Accepted input selected as the native target for this response, if any. */
+  targetInputId?: string | null
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
@@ -237,6 +248,7 @@ export interface AssistantProviderResponseSegment {
   deliveryContextOrdinal: number
   media?: readonly AssistantResponseMedia[] | null
   response: string
+  targetInputId?: string | null
 }
 
 export interface AssistantProviderAttemptMetadata {
@@ -262,7 +274,7 @@ export type AssistantProviderTurnAttemptResult =
       codexRolloutRelativePath?: string | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
-      reactions?: readonly AssistantCurrentMessageReactionAction[] | null
+      reactions?: readonly AssistantTargetedMessageReactionAction[] | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null

@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import { resolveMurphVitestConcurrency } from "../config/vitest-parallelism.js";
+import {
+  resolveMurphVitestConcurrency,
+  resolveMurphVitestMaxWorkers,
+} from "../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../config/vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "../config/vitest-temp-lifecycle.js";
 import {
@@ -30,6 +33,7 @@ export default defineConfig({
     environment: "node",
     globalSetup: [murphVitestTempGlobalSetup],
     ...resolveMurphVitestConcurrency(),
+    maxWorkers: resolveMurphVitestMaxWorkers(),
     include: ["scripts/**/*.test.ts"],
     exclude: ["scripts/murph-age/**/*.test.ts"],
   },

@@ -11,19 +11,21 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedEmailLookupKey,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
-  readHostedMemberPhoneNumberSnapshots: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
-  revokeHostedVaultSharesWithCleanupTx: vi.fn(),
+  revokeHostedVaultSharesTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
@@ -43,22 +45,20 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   grantHostedVaultShareTx: mocks.grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionScopes: mocks.readActiveHostedVaultShareProjectionScopes,
-  revokeHostedVaultSharesWithCleanupTx: mocks.revokeHostedVaultSharesWithCleanupTx,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  readHostedMemberPhoneNumberSnapshots:
-    mocks.readHostedMemberPhoneNumberSnapshots,
+  revokeHostedVaultSharesTx: mocks.revokeHostedVaultSharesTx,
 }));
 
 import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   leaveHostedGroupMemberTx,
+  prepareHostedGroupJoinOfferPostTx,
   readHostedGroupJoinView,
+  readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -300,10 +300,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(true);
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [],
-      revokedCount: 0,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
   it("rejects membership when the group runtime is inactive even with no selected permissions", async () => {
@@ -588,7 +585,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
       expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
       expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
-      expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+      expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     },
   );
 
@@ -795,19 +792,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("returns cleanup signals when a member unselects a previously granted group share", async () => {
+  it("records revoked scopes when a member unselects a previously granted group share", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       existingMembershipId: "membership_existing",
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [{
-        mailboxItemId: "mailbox_item_revoke_1",
-        memberId: "member_group_runtime",
-      }],
-      revokedCount: 1,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(1);
 
     await expect(acceptHostedGroupJoinCodeTx({
       expectedMembershipId: "membership_existing",
@@ -821,13 +812,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantedVaultShareProjectionKinds: ["profile-name.v0"],
       membershipId: "membership_existing",
       revokedVaultShareProjectionKinds: ["sleep-times.v0"],
-      vaultShareCleanupSignals: [{
-        mailboxItemId: "mailbox_item_revoke_1",
-        memberId: "member_group_runtime",
-      }],
     });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
@@ -864,6 +851,169 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         projectionKindsJson: [SLEEP_SCOPE],
       },
     });
+  });
+
+  it("finds an active offer whose canonical scope snapshot covers the request", async () => {
+    const findMany = vi.fn(async () => [{
+      projectionKindsJson: [SLEEP_SCOPE, ACTIVITY_SCOPE],
+    }]);
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+        })),
+      },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "active_offer" });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { groupId: "group_1", revokedAt: null },
+      select: { projectionKindsJson: true },
+      take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
+    });
+  });
+
+  it("fails closed when a stored active offer scope is not canonicalizable", async () => {
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+        })),
+      },
+      hostedGroupJoinOffer: {
+        findMany: vi.fn(async () => [{
+          projectionKindsJson: [{ projectionKind: "raw-health-records.v0" }],
+        }]),
+      },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+  });
+
+  it("fails closed before inspecting a truncated active-offer set", async () => {
+    const findMany = vi.fn(async () => Array.from(
+      { length: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1 },
+      () => ({ projectionKindsJson: [SLEEP_SCOPE] }),
+    ));
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "join_generation_1" })),
+      },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { groupId: "group_1", revokedAt: null },
+      take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
+    }));
+  });
+
+  it("rejects duplicate requested scopes before reading active offers", async () => {
+    const findMany = vi.fn();
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: { findUnique: vi.fn() },
+      hostedGroupJoinOffer: { findMany },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      projectionScopes: [SLEEP_SCOPE, SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("idempotently reuses the same active provider-message binding", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const input = {
+      groupId: "group_1",
+      messageId: "msg_offer_same",
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    };
+
+    const first = await recordHostedGroupJoinOfferTx(input);
+    const retry = await recordHostedGroupJoinOfferTx(input);
+
+    expect(retry).toEqual(first);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: "different group",
+      existingGroupId: "group_1",
+      inputGroupId: "group_2",
+      existingProjectionKinds: ["sleep-times.v0"],
+      revokedAt: null,
+    },
+    {
+      label: "different scopes",
+      existingGroupId: "group_1",
+      inputGroupId: "group_1",
+      existingProjectionKinds: ["activity-days.v0"],
+      revokedAt: null,
+    },
+    {
+      label: "revoked binding",
+      existingGroupId: "group_1",
+      inputGroupId: "group_1",
+      existingProjectionKinds: ["sleep-times.v0"],
+      revokedAt: new Date("2026-07-02T00:00:00.000Z"),
+    },
+  ])("fails closed when a retry resolves to a $label", async ({
+    existingGroupId,
+    existingProjectionKinds,
+    inputGroupId,
+    revokedAt,
+  }) => {
+    const messageId = "msg_offer_conflict";
+    const messageLookupKey = createHostedLinqMessageLookupKey(messageId);
+    if (!messageLookupKey) {
+      throw new Error("Expected a message lookup key.");
+    }
+    const tx = buildTx({
+      offerMessageLookupKey: messageLookupKey,
+      offerProjectionKinds: existingProjectionKinds,
+      revokedOfferAt: revokedAt,
+    });
+    tx.hostedGroupJoinOffer.findUnique.mockResolvedValueOnce({
+      groupId: existingGroupId,
+      projectionKindsJson: existingProjectionKinds,
+      revokedAt,
+    });
+
+    await expect(recordHostedGroupJoinOfferTx({
+      groupId: inputGroupId,
+      messageId,
+      postedAt: new Date("2026-07-03T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_CONFLICT",
+      httpStatus: 409,
+    });
+    expect(tx.hostedGroupJoinOffer.create).not.toHaveBeenCalled();
   });
 
   it("accepts a live join offer additively without revoking unselected group shares", async () => {
@@ -905,7 +1055,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
       projectionScope: SLEEP_SCOPE,
     }));
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
   });
 
   it("appends a reaction-specific private confirmation for a first offer join", async () => {
@@ -1127,18 +1277,231 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 });
 
+describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+  });
+
+  it("keeps each exact verified handle on its one current membership", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const dualPhoneHandle = "+15551110001";
+    const dualEmailHandle = "dual@example.test";
+    const emailHandle = "email-only@example.test";
+    const unverifiedEmailHandle = "unverified@example.test";
+    const ambiguousMemberEmailHandle = "ambiguous-a@example.test";
+    const priorKeyPhoneHandle = "+15551110003";
+    const rotatedAmbiguousPhoneHandle = "+15551110004";
+    const dualPhoneLookupKey = createHostedPhoneLookupKey(dualPhoneHandle);
+    const dualEmailLookupKey = createHostedEmailLookupKey(dualEmailHandle);
+    const emailLookupKey = createHostedEmailLookupKey(emailHandle);
+    const unverifiedEmailLookupKey = createHostedEmailLookupKey(
+      unverifiedEmailHandle,
+    );
+    const ambiguousMemberEmailLookupKey = createHostedEmailLookupKey(
+      ambiguousMemberEmailHandle,
+    );
+    const priorKeyPhoneLookupKey = createHostedPhoneLookupKeyReadCandidates(
+      priorKeyPhoneHandle,
+    ).find((lookupKey) => lookupKey.startsWith("hbidx:phone:v1:"));
+    const rotatedAmbiguousPhoneLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates(rotatedAmbiguousPhoneHandle);
+    const rotatedAmbiguousPhoneLookupKeyV1 =
+      rotatedAmbiguousPhoneLookupKeys.find((lookupKey) =>
+        lookupKey.startsWith("hbidx:phone:v1:")
+      );
+    const rotatedAmbiguousPhoneLookupKeyV2 =
+      rotatedAmbiguousPhoneLookupKeys.find((lookupKey) =>
+        lookupKey.startsWith("hbidx:phone:v2:")
+      );
+    if (
+      !dualPhoneLookupKey
+      || !dualEmailLookupKey
+      || !emailLookupKey
+      || !unverifiedEmailLookupKey
+      || !ambiguousMemberEmailLookupKey
+      || !priorKeyPhoneLookupKey
+      || !rotatedAmbiguousPhoneLookupKeyV1
+      || !rotatedAmbiguousPhoneLookupKeyV2
+    ) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const verifiedAt = new Date("2026-07-01T00:00:00.000Z");
+    const members = [
+      {
+        id: "group_member_dual",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: dualEmailLookupKey,
+            verifiedEmailVerifiedAt: verifiedAt,
+          },
+          identity: {
+            phoneLookupKey: dualPhoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: "member_dual",
+      },
+      {
+        id: "group_member_email",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: emailLookupKey,
+            verifiedEmailVerifiedAt: verifiedAt,
+          },
+          identity: null,
+        },
+        memberId: "member_email",
+      },
+      {
+        id: "group_member_unverified",
+        member: {
+          emailAuthorization: {
+            verifiedEmailLookupKey: unverifiedEmailLookupKey,
+            verifiedEmailVerifiedAt: null,
+          },
+          identity: null,
+        },
+        memberId: "member_unverified",
+      },
+      {
+        id: "group_member_prior_key",
+        member: {
+          emailAuthorization: null,
+          identity: {
+            phoneLookupKey: priorKeyPhoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: "member_prior_key",
+      },
+      ...[
+        ["v1", rotatedAmbiguousPhoneLookupKeyV1],
+        ["v2", rotatedAmbiguousPhoneLookupKeyV2],
+      ].map(([version, phoneLookupKey]) => ({
+        id: `group_member_rotated_ambiguous_${version}`,
+        member: {
+          emailAuthorization: version === "v1"
+            ? {
+                verifiedEmailLookupKey: ambiguousMemberEmailLookupKey,
+                verifiedEmailVerifiedAt: verifiedAt,
+              }
+            : null,
+          identity: {
+            phoneLookupKey,
+            phoneNumberVerifiedAt: verifiedAt,
+          },
+        },
+        memberId: `member_rotated_ambiguous_${version}`,
+      })),
+    ];
+    const hostedGroupFindUnique = vi.fn(async () => ({ members }));
+    const hostedVaultShareFindMany = vi.fn(async () => []);
+    const deviceConnectionFindMany = vi.fn(async () => []);
+    const tx = {
+      deviceConnection: { findMany: deviceConnectionFindMany },
+      hostedGroup: { findUnique: hostedGroupFindUnique },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    };
+    const transaction = vi.fn(async (
+      callback: (client: typeof tx) => Promise<unknown>,
+    ) => callback(tx));
+    const prisma = createPrismaStub({ $transaction: transaction });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      linqSenderHandles: [
+        dualPhoneHandle,
+        dualPhoneHandle,
+        dualEmailHandle,
+        emailHandle,
+        unverifiedEmailHandle,
+        ambiguousMemberEmailHandle,
+        priorKeyPhoneHandle,
+        rotatedAmbiguousPhoneHandle,
+        "unknown@example.test",
+      ],
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [dualPhoneHandle, dualEmailHandle],
+        memberId: "member_dual",
+        participantId: "group_member_dual",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [emailHandle],
+        memberId: "member_email",
+        participantId: "group_member_email",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_unverified",
+        participantId: "group_member_unverified",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [priorKeyPhoneHandle],
+        memberId: "member_prior_key",
+        participantId: "group_member_prior_key",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [ambiguousMemberEmailHandle],
+        memberId: "member_rotated_ambiguous_v1",
+        participantId: "group_member_rotated_ambiguous_v1",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_rotated_ambiguous_v2",
+        participantId: "group_member_rotated_ambiguous_v2",
+      }),
+    ]);
+    expect(hostedGroupFindUnique).toHaveBeenCalledWith({
+      select: {
+        members: expect.objectContaining({
+          select: {
+            id: true,
+            member: {
+              select: {
+                emailAuthorization: {
+                  select: {
+                    verifiedEmailLookupKey: true,
+                    verifiedEmailVerifiedAt: true,
+                  },
+                },
+                identity: {
+                  select: {
+                    phoneLookupKey: true,
+                    phoneNumberVerifiedAt: true,
+                  },
+                },
+              },
+            },
+            memberId: true,
+          },
+        }),
+      },
+      where: { runtimeMemberId: "member_group_runtime" },
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.readHostedMemberPhoneNumberSnapshots.mockImplementation(
-      async (input: { memberIds: readonly string[] }) =>
-        input.memberIds.map((memberId) => ({
-          memberId,
-          phoneNumber: "+15551110000",
-        })),
-    );
   });
 
   it("requires the signed-in actor to own the thread container", async () => {
@@ -1276,7 +1639,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
           {
             grantedVaultShareProjectionKinds: ["profile-name.v0"],
             grantedVaultShareProjectionScopes: [PROFILE_SCOPE],
-            handle: "+15551110000",
+            handle: null,
             memberId: "member_owner",
             role: "owner",
           },
@@ -1302,11 +1665,6 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         groupId: "group_1",
         revokedAt: null,
       },
-    });
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).toHaveBeenCalledWith({
-      memberIds: ["member_owner"],
-      prisma: tx,
     });
   });
 
@@ -1796,22 +2154,12 @@ function buildLeaveTx(input?: {
 describe("leaveHostedGroupMemberTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
-      cleanupSignals: [],
-      revokedCount: 0,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
   it("hard-deletes the selected self-membership and revokes every share atomically", async () => {
     const leave = buildLeaveTx({ currentMembershipId: "membership_1" });
-    const cleanupSignals = [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }];
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
-      cleanupSignals,
-      revokedCount: 3,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(3);
     const now = new Date("2026-07-15T12:00:00.000Z");
 
     await expect(leaveHostedGroupMemberTx({
@@ -1819,12 +2167,9 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_1",
       now,
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "left",
-      vaultShareCleanupSignals: cleanupSignals,
-    });
+    })).resolves.toEqual({ kind: "left" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_self",
       now,
@@ -1843,12 +2188,9 @@ describe("leaveHostedGroupMemberTx", () => {
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "owner_cannot_leave",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "owner_cannot_leave" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
@@ -1860,12 +2202,9 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_old",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
@@ -1877,36 +2216,23 @@ describe("leaveHostedGroupMemberTx", () => {
       membershipId: "membership_other",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
     expect(leave.hostedGroupFindUnique).not.toHaveBeenCalled();
-    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
 
   it("repairs orphaned shares for an authenticated join-page member", async () => {
     const leave = buildLeaveTx({ currentMembershipId: null });
-    const cleanupSignals = [{
-      mailboxItemId: "mailbox_item_revoke_1",
-      memberId: "member_group_runtime",
-    }];
-    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
-      cleanupSignals,
-      revokedCount: 1,
-    });
+    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(leaveHostedGroupMemberTx({
       joinCode: "join_1",
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "left",
-      vaultShareCleanupSignals: cleanupSignals,
-    });
+    })).resolves.toEqual({ kind: "left" });
 
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
@@ -1919,10 +2245,7 @@ describe("leaveHostedGroupMemberTx", () => {
       memberId: "member_self",
       now: new Date("2026-07-15T12:00:00.000Z"),
       tx: leave.tx,
-    })).resolves.toEqual({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+    })).resolves.toEqual({ kind: "already_left" });
 
     expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
   });
@@ -2080,7 +2403,6 @@ describe("readHostedGroupMembershipsForMember", () => {
         status: "granted",
       },
     }));
-    expect(mocks.readHostedMemberPhoneNumberSnapshots).not.toHaveBeenCalled();
   });
 
   it("returns at most 25 memberships and reports when more exist", async () => {

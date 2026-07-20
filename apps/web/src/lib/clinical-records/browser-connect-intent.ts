@@ -5,9 +5,9 @@ const CLINICAL_RECORDS_INTENT_PATTERN = /^cr_[A-Za-z0-9_-]{32}$/u;
 
 /**
  * Removes the bearer from the visible URL before the page can make a request.
- * Anonymous flows keep it only in this history entry long enough for the
- * shared auth dialog's full-document reload. Authenticated flows take it into
- * component memory and clear the staged copy in the same call.
+ * Connect flows can keep it only in this history entry long enough for an auth
+ * or session reload. The flow clears the staged copy once SMART start commits
+ * or the server declares the intent terminal.
  */
 export function takeClinicalRecordsConnectIntentFromBrowser(input: {
   preserveForAuthReload: boolean;
@@ -61,6 +61,10 @@ export function hasStagedClinicalRecordsConnectIntentForCurrentPath(): boolean {
     && window.location.pathname === CLINICAL_RECORDS_CONNECT_PATH
     && readStagedClinicalRecordsConnectIntent(),
   );
+}
+
+export function clearClinicalRecordsConnectIntentFromBrowser(): void {
+  takeClinicalRecordsConnectIntentFromBrowser({ preserveForAuthReload: false });
 }
 
 function readCurrentUrl(): URL | null {

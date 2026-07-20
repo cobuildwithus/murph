@@ -20,6 +20,20 @@ export type {
   AssistantConnectedAppsPort,
 } from './assistant/connected-apps-port.js'
 export {
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+} from './assistant/group-shared-read-limits.js'
+export type {
+  AssistantHostedGroupPermissionOfferRequest,
+  AssistantHostedGroupPermissionOfferTool,
+  AssistantHostedGroupSharedMember,
+  AssistantHostedGroupSharedProjection,
+  AssistantHostedGroupSharedReader,
+  AssistantHostedGroupSharedReadRequest,
+  AssistantHostedGroupSharedReadResponse,
+  AssistantHostedGroupSharedRecord,
+} from './assistant/execution-context.js'
+export {
   flushPendingAssistantRuntimeIssueWrites,
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'

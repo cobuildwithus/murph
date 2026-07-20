@@ -22,6 +22,8 @@ import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedClinicalRecordsConnectLinkTool,
+  AssistantHostedGroupPermissionOfferTool,
+  AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
@@ -80,6 +82,8 @@ export interface AssistantHostedToolContext {
   readonly clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly deviceTool?: AssistantHostedDeviceTool | null
+  readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
+  readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
@@ -105,7 +109,10 @@ export interface AssistantHostedToolContext {
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
-  sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
+  sendVaultFile(
+    ref: string,
+    toolCallId?: string | null,
+  ): Promise<AssistantHostedVaultFileSendResult>
 }
 
 type AssistantHostedToolDeliveryContext = {
@@ -121,6 +128,8 @@ export function createAssistantHostedToolContext(input: {
   clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   deviceTool?: AssistantHostedDeviceTool | null
+  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
+  groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
@@ -143,7 +152,10 @@ export function createAssistantHostedToolContext(input: {
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
-  sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
+  sendVaultFile?: (
+    ref: string,
+    toolCallId?: string | null,
+  ) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
@@ -203,6 +215,8 @@ export function createAssistantHostedToolContext(input: {
       : null,
     familyPlanTool: input.familyPlanTool ?? null,
     deviceTool: input.deviceTool ?? null,
+    groupPermissionOfferTool: input.groupPermissionOfferTool ?? null,
+    groupSharedReader: input.groupSharedReader ?? null,
     groupTool: input.groupTool ?? null,
     labsTool: input.labsTool ?? null,
     newsletterTool,

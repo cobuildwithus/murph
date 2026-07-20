@@ -58,6 +58,7 @@ export interface DeliverAssistantMessageInput {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: true
   participantId?: string | null
   replyToMessageId?: string | null
   sessionId?: string | null
@@ -100,6 +101,7 @@ export async function deliverAssistantMessage(
       sessionId: resolved.session.sessionId,
       media: input.media ?? [],
       message: normalizedMessage,
+      ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       channel: resolved.session.binding.channel,
       identityId: resolved.session.binding.identityId,
       actorId: resolved.session.binding.actorId,
@@ -304,6 +306,7 @@ export async function deliverAssistantMessageOverBinding(
     identityId?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
+    nativeReplyRequested?: true
     replyToMessageId?: string | null
     subject?: string | null
     sessionId?: string | null
@@ -364,6 +367,7 @@ export async function deliverAssistantMessageOverBinding(
       identityId: binding.identityId,
       media: input.media ?? [],
       message: input.message,
+      ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       replyToMessageId: input.replyToMessageId ?? null,
       subject,
       threadIsDirect: binding.threadIsDirect,

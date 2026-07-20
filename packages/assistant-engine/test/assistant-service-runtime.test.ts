@@ -1435,6 +1435,74 @@ describe("assistant delivery orchestration seam", () => {
     );
   });
 
+  it("keeps one selected Telegram target and marker on every reply bubble", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-telegram-selected",
+        messageLength: 5,
+        providerMessageId: "provider-telegram-selected",
+        providerThreadId: null,
+        sentAt: "2026-07-16T12:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-telegram-selected",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryNativeReplyRequested: true,
+        deliveryReplyToMessageId: "4242",
+        prompt: "hello",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      response: "First.\n---\nSecond.",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-telegram-selected-bubbles",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(([call]) => ({
+        message: call?.message,
+        nativeReplyRequested: call?.nativeReplyRequested,
+        replyToMessageId: call?.replyToMessageId,
+      })),
+    ).toEqual([
+      {
+        message: "First.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+      {
+        message: "Second.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+    ]);
+  });
+
   it("keeps explicit Telegram native reply anchors for manual final text delivery", async () => {
     const session = createAssistantSession({
       binding: {
@@ -3324,6 +3392,9 @@ describe("assistant execution context normalization", () => {
 
   it("normalizes hosted context and preserves callable helpers only", () => {
     const deviceTool = { request: vi.fn() };
+    const groupPermissionOfferTool = { request: vi.fn() };
+    const groupSharedReader = { request: vi.fn() };
+    const createScheduledGroupTools = vi.fn();
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.6-terra",
@@ -3334,6 +3405,7 @@ describe("assistant execution context normalization", () => {
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
+          createScheduledGroupTools,
           defaultTarget,
           deviceConnectProviders: [
             { label: " Oura ", provider: " OURA " },
@@ -3341,6 +3413,8 @@ describe("assistant execution context normalization", () => {
             { label: "bad", provider: "not allowed!" },
           ],
           deviceTool,
+          groupPermissionOfferTool,
+          groupSharedReader,
           memberId: " member-1 ",
           resolveScheduledLinqRoute,
           userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
@@ -3348,6 +3422,7 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
+        createScheduledGroupTools,
         defaultTarget,
         deviceConnectProviders: [
           { label: "Oura", provider: "oura" },
@@ -3355,11 +3430,18 @@ describe("assistant execution context normalization", () => {
         deviceTool: {
           request: expect.any(Function),
         },
+        groupPermissionOfferTool: {
+          request: expect.any(Function),
+        },
+        groupSharedReader: {
+          request: expect.any(Function),
+        },
         memberId: "member-1",
         resolveScheduledLinqRoute,
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });
+    expect(createScheduledGroupTools).not.toHaveBeenCalled();
   });
 
   it("keeps a valid hosted member id even when no hosted helper functions are injected", () => {
