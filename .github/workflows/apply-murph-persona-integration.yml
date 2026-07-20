@@ -1,20 +1,18 @@
-name: Materialize Murph persona integration
+name: Diagnose Murph persona integration
 
 on:
   push:
     branches: [agent/murph-personas]
     paths:
       - .github/workflows/apply-murph-persona-integration.yml
-      - scripts/persona-integration-parts/**
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    if: ${{ github.actor != 'github-actions[bot]' }}
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout branch quietly
         env:
@@ -24,18 +22,47 @@ jobs:
           git clone --quiet --depth=1 --branch agent/murph-personas \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
 
-      - name: Apply and commit integration
-        shell: bash
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pnpm
         run: |
-          set -o pipefail
-          cat scripts/persona-integration-parts/*.b64 \
-            | base64 --decode \
-            | gunzip > /tmp/apply-murph-persona-integration.mjs
-          sed -i '533s/  4,/  1,/' /tmp/apply-murph-persona-integration.mjs
-          sed -i '535s/, 3);/, 4);/' /tmp/apply-murph-persona-integration.mjs
-          node /tmp/apply-murph-persona-integration.mjs
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: materialize Murph persona integration [persona-applied]"
-          git push origin HEAD:agent/murph-personas
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Build contracts
+        run: pnpm --dir packages/contracts build
+
+      - name: Contracts persona catalog
+        run: pnpm exec vitest run --no-coverage packages/contracts/test/assistant-personas.test.ts --reporter=verbose
+
+      - name: Contracts preferences
+        run: pnpm exec vitest run --no-coverage packages/contracts/test/preferences.test.ts --reporter=verbose
+
+      - name: Core preferences
+        run: pnpm exec vitest run --no-coverage packages/core/test/preferences.test.ts --reporter=verbose
+
+      - name: Hosted execution contract guards
+        run: pnpm exec vitest run --no-coverage packages/hosted-execution/test/hosted-execution-contract-guards.test.ts --reporter=verbose
+
+      - name: Persona prompts
+        run: pnpm exec vitest run --no-coverage packages/assistant-engine/test/persona-prompts.test.ts --reporter=verbose
+
+      - name: Assistant style tool
+        run: pnpm exec vitest run --no-coverage packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts --reporter=verbose
+
+      - name: Assistant turn planning
+        run: pnpm exec vitest run --no-coverage packages/assistant-engine/test/assistant-codex-turn-planning.test.ts --reporter=verbose
+
+      - name: Initial visit
+        run: pnpm exec vitest run --no-coverage apps/web/test/home-initial-visit-dialog.test.tsx --reporter=verbose
+
+      - name: Hosted preferences
+        run: pnpm exec vitest run --no-coverage apps/web/test/hosted-onboarding-member-preferences.test.ts --reporter=verbose
+
+      - name: Account settings snapshot
+        run: pnpm exec vitest run --no-coverage apps/web/test/account-settings-snapshot.test.ts --reporter=verbose
