@@ -1,4 +1,4 @@
-name: Diagnose hosted Murph persona persistence
+name: Diagnose remaining Web Murph persona owners
 
 on:
   pull_request:
@@ -12,9 +12,9 @@ jobs:
   verify:
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Diagnose hosted preference persistence
+      - name: Checkout and apply reviewed repair
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -46,13 +46,21 @@ jobs:
               raise SystemExit(f"expected two hosted preference select assertions, found {count}")
           path.write_text(text)
           PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Install and prepare
+        run: |
           corepack enable >/dev/null
           corepack prepare pnpm@10.33.0 --activate >/dev/null
-          pnpm install --frozen-lockfile --reporter=silent >/dev/null
+          pnpm install --frozen-lockfile --reporter=silent
           pnpm --dir packages/contracts build >/dev/null
           pnpm --dir apps/web prisma:generate >/dev/null
-          pnpm exec vitest run \
-            --config apps/web/vitest.workspace.ts \
-            --no-coverage \
-            apps/web/test/hosted-onboarding-member-preferences.test.ts \
-            --reporter=verbose
+
+      - name: Hosted personalization tool
+        run: pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-personalization-tool.test.ts --reporter=verbose
+
+      - name: Account settings snapshot
+        run: pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/account-settings-snapshot.test.ts --reporter=verbose
