@@ -34,7 +34,60 @@ full contract lives in `agent-docs/product-specs/shared-message-targeting.md`.
 
 ## Hosted Group Self-Awareness
 
-`apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
+`apps/web` owns hosted groups, memberships, join policies, vault-share grants,
+and the one nullable encrypted projection snapshot column on each existing
+`HostedVaultShare` row. A personal hosted runtime may read its
+callback-authenticated member's current memberships through the signed group
+tool control route. That membership read derives only the member's own group
+labels, role, requested and active self-granted scopes, and an authorized
+first-party permission URL; it does not expose another member's identity or
+sharing state or persist a copy in the workspace. Private self-leave atomically
+removes the non-owner membership and its shares under Web ownership. It does
+not append a runtime cleanup wake. Other permission mutations remain on the
+authenticated group join page or route-bound group-chat offer flow.
+
+`murph.group action="read_shared"` is the only hosted assistant path for group
+standings, shared facts, and diagnostics. Its runtime adapter is synchronous and
+performs no I/O when constructed. This path adds no pre-model roster, grant,
+snapshot, device, projection, configuration, or attribution read; existing
+accepted-input and route-binding work is unchanged. Web is contacted only after
+the model invokes the tool.
+
+Challenge kickoff and later interactive identity repair stay inside that same
+model-triggered `read_shared` request. At request time, the runtime adds only
+the bounded, route-authorized current-turn Linq sender handles already visible
+in the prompt. Web matches those handles against verified phone and email blind
+indexes selected by the existing group query. A handle appears only in the
+matching member's bounded `currentTurnHandles` array and only when it resolves
+to exactly one current membership; the same row carries the group-scoped
+`participantId`. The model may bind a challenge participant only when an exact
+current `Sender:` handle appears in one row. Scheduled and detached reads carry
+no handles. Handles are never persisted, and this adds no pre-model work,
+standalone query, decrypted contact roster, or compatibility branch. The
+legacy `read_current` wire is unchanged, and assistant-engine still removes the
+global member id and legacy roster handle before any group summary reaches the
+model.
+
+Web then captures the current roster and exact active grants, decrypts the
+bounded encrypted snapshots owned by those share rows, and returns every member
+with every requested scope as `not_granted`, `granted` plus `missing`, or
+`available`. Health projection delivery conditionally replaces the complete
+encrypted snapshot on the exact active share generation. Revoke and regrant
+clear it transactionally, and regrant rotates the share id. The explicit
+`device-sync-status.v0` grant instead authorizes one live bounded Web derivation
+of public source labels, coarse state, and honest timestamps; device facts are
+never stored in the share snapshot.
+
+No shared projection lands in a personal or group workspace. Legacy
+`vault-share.delivery` and `vault-share.revoke` mailbox rows are skipped before
+payload fetch or decryption, and v2 restore plus legacy materialization exclude
+`derived/vault-share/**` and `vault-share/**`. Challenge logic starts from
+knowledge-page participants recorded as `in`, joins the `read_shared` matrix by
+the group-membership-scoped `participantId`, treats a real zero as data, and
+names missing participants instead of ranking absence as zero. The model never
+receives the global hosted member id. The full behavior, privacy shape, and
+consumer-first cutover live in
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
 
 ## Hosted Assistant Ask
 
@@ -96,8 +149,10 @@ Server process. The trusted group target adapter supplies the authorized root
 and bounded committed conversation evidence; the model cannot choose either.
 The native `murph-group-read` permission profile then exposes the live group
 read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
-environment files are denied, tool network is off, shell commands inherit no
-secrets, and the child receives no dynamic tools or delivery authority.
+retired vault-share projection roots, and environment files are denied; tool
+network is off, shell commands inherit no secrets, and the child receives only
+the consent-aware lazy `murph.group/read_shared` dynamic tool, with no mutation
+or delivery authority.
 Thread-start attestation must confirm the exact profile, roots, empty working
 directory, empty instruction sources, and approval policy before model work.
 The child never shares the resident process, provider thread, interruption

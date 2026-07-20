@@ -28,6 +28,19 @@ function parseMurphPositiveIntegerEnv(value: string | undefined): number | undef
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function usesSharedHostBudget(env: NodeJS.ProcessEnv): boolean {
+  const configured = env.MURPH_VERIFY_SHARED_HOST;
+  if (configured !== undefined) {
+    if (configured !== "0" && configured !== "1") {
+      throw new Error("MURPH_VERIFY_SHARED_HOST must be 0 or 1 when set.");
+    }
+    return configured === "1";
+  }
+
+  return !env.CI && typeof env.CODEX_THREAD_ID === "string"
+    && env.CODEX_THREAD_ID.trim().length > 0;
+}
+
 export function resolveMurphVitestFileParallelism(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -62,7 +75,8 @@ export function resolveMurphVitestSuiteConcurrency(
 export function resolveMurphVitestMaxWorkers(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return env.MURPH_VITEST_MAX_WORKERS ?? (env.CI ? "50%" : "75%");
+  return env.MURPH_VITEST_MAX_WORKERS
+    ?? (env.CI ? "50%" : usesSharedHostBudget(env) ? "1" : "75%");
 }
 
 export function resolveMurphVitestMaxConcurrency(
@@ -100,6 +114,6 @@ export function resolveMurphAppVitestMaxWorkers(
   return (
     env.MURPH_APP_VITEST_MAX_WORKERS ??
     env.MURPH_VITEST_MAX_WORKERS ??
-    (env.CI ? "25%" : "50%")
+    (env.CI ? "25%" : usesSharedHostBudget(env) ? "1" : "50%")
   );
 }

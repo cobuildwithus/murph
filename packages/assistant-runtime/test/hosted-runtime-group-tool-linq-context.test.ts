@@ -148,6 +148,16 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
 
     await groupTool.request({
+      action: "read_shared",
+      linqSenderHandles: ["forged@example.test"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    await groupTool.request({
       action: "ask",
       groupLabel: "Morning Movers",
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
@@ -204,8 +214,12 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     const groupTool = createHostedGroupToolWithLinqThreadContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
-        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
         buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "member@example.test",
           routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_group_2" },
           target: "chat_group_2",
         }),
@@ -227,6 +241,18 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    await groupTool.request({ action: "read_current" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "read_shared",
+      linqSenderHandles: ["forged@example.test"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
   });
 
   it("dedupes repeated contexts for the same thread and skips non-iMessage or direct contexts", async () => {
@@ -342,6 +368,16 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "read_shared",
+      linqSenderHandles: ["forged@example.test"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
   });
 
   it("rejects personal membership reads and durable group mutations whenever email ingress is present", async () => {
@@ -448,6 +484,23 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
     await groupTool.request({ action: "revoke_own_email_share" });
     expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+
+    request.mockResolvedValueOnce({
+      action: "read_shared",
+      result: {
+        members: [],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "none",
+      },
+    });
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
   });
 
   it("retains group-email mutation denial across a no-context continuation", async () => {
@@ -492,6 +545,92 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         senderHandle: "+15550000001",
         source: "linq",
       },
+    });
+  });
+
+  it("keeps newsletter opt-out independent of read_shared route attribution", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 1, status: "revoked" },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: null,
+          service: null,
+        }),
+      ],
+    });
+
+    await groupTool.request({ action: "revoke_own_email_share" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "revoke_own_email_share",
+      selfOptOut: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    });
+  });
+
+  it("injects deduplicated current-turn phone and email handles only on lazy shared reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_shared",
+      result: {
+        members: [],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "none",
+      },
+    });
+    const groupTool = createHostedGroupToolWithLinqThreadContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "member@example.test",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "direct@example.test",
+          routeAuthority: ROUTE_AUTHORITY,
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "sms@example.test",
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "sms",
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "unauthorized@example.test",
+          routeAuthority: null,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "x".repeat(513),
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      linqSenderHandles: [
+        "+15550000001",
+        "member@example.test",
+      ],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
   });
 

@@ -364,10 +364,26 @@ export async function sendAssistantNotificationLocal(
       )
         ? executionContext?.hosted?.groupTool ?? null
         : null
+      const hostedGroupSharedReader =
+        !isAssistantNotificationMaintenanceExactSkip(input)
+        && conversationScope === 'group'
+          ? executionContext?.hosted?.groupSharedReader ?? null
+          : null
+      const hostedGroupPermissionOfferTool =
+        !isAssistantNotificationMaintenanceExactSkip(input)
+        && conversationScope === 'group'
+          ? executionContext?.hosted?.groupPermissionOfferTool ?? null
+          : null
       const hostedToolContext =
-        hostedNewsletterTool || hostedDeviceTool || hostedGroupTool
+        hostedNewsletterTool
+        || hostedDeviceTool
+        || hostedGroupTool
+        || hostedGroupPermissionOfferTool
+        || hostedGroupSharedReader
           ? createAssistantHostedToolContext({
               deviceTool: hostedDeviceTool,
+              groupPermissionOfferTool: hostedGroupPermissionOfferTool,
+              groupSharedReader: hostedGroupSharedReader,
               groupTool: hostedGroupTool,
               newsletterTool: hostedNewsletterTool,
               messageInput,

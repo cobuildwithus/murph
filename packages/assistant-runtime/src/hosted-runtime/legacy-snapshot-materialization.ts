@@ -38,6 +38,13 @@ import {
   type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
 
+// A v2 restore must not rehydrate the local group-share copies retired by the
+// direct Web read boundary.
+const HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS = [
+  "derived/vault-share",
+  "vault-share",
+] as const;
+
 export interface LegacyWorkspaceRefsForV2SnapshotMaterializationPlan {
   currentSnapshotRefPresent: boolean;
   legacyBundleRefPresent: boolean;
@@ -209,7 +216,12 @@ async function stageLegacyWorkspaceRefsForV2Snapshot(input: {
       });
       const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
       if (
-        materializedArtifactPaths.has(`${file.root}:${file.path}`)
+        isHostedLegacySharedProjectionSnapshotPath({
+          root: file.root,
+          targetPath,
+          vaultRoot: input.vaultRoot,
+        })
+        || materializedArtifactPaths.has(`${file.root}:${file.path}`)
         || await hostedWorkspaceSnapshotPathExists(targetPath)
       ) {
         continue;
@@ -353,6 +365,25 @@ function resolveSafeHostedWorkspaceSnapshotPath(root: string, relativePath: stri
     throw new Error("Hosted workspace skipped-inline file path escapes its root.");
   }
   return targetPath;
+}
+
+function isHostedLegacySharedProjectionSnapshotPath(input: {
+  root: string;
+  targetPath: string;
+  vaultRoot: string;
+}): boolean {
+  if (input.root !== "vault") {
+    return false;
+  }
+  const relativePath = path.relative(
+    path.resolve(input.vaultRoot),
+    input.targetPath,
+  ).split(path.sep).join(path.posix.sep);
+  return HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS.some(
+    (excludedPath) =>
+      relativePath === excludedPath
+      || relativePath.startsWith(`${excludedPath}${path.posix.sep}`),
+  );
 }
 
 async function readHostedWorkspaceEffectivePreservedState(input: {

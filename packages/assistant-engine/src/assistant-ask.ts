@@ -30,6 +30,9 @@ import {
   type CodexAppServerTurnInput,
 } from './assistant-codex.js'
 import {
+  MURPH_GROUP_SHARED_READ_TOOL,
+} from './assistant-codex/dynamic-tools.js'
+import {
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from './assistant-skill-env.js'
@@ -47,6 +50,12 @@ import {
 export type {
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
+import type {
+  AssistantHostedGroupSharedReader,
+} from './assistant/execution-context.js'
+import type {
+  AssistantHostedToolContext,
+} from './assistant/hosted-tool-context.js'
 
 const READ_ONLY_ASSISTANT_ASK_MAX_QUESTION_CODE_POINTS = 1_200
 const READ_ONLY_ASSISTANT_ASK_MAX_ANSWER_CODE_POINTS = 4_000
@@ -154,6 +163,7 @@ export interface ReadOnlyAssistantAskInput {
   codexHome?: string | null
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  groupSharedReader?: AssistantHostedGroupSharedReader | null
   model?: string | null
   modelProvider?: string | null
   now?: Date
@@ -167,7 +177,7 @@ export interface ReadOnlyAssistantAskInput {
 export interface ConsentedReadOnlyAssistantAskInput
   extends Omit<
     ReadOnlyAssistantAskInput,
-    'baseInstructions' | 'developerInstructions'
+    'baseInstructions' | 'developerInstructions' | 'groupSharedReader'
   > {
   permissionText: string
 }
@@ -190,6 +200,7 @@ export interface ReadOnlyAssistantAskProviderUsageEvent {
 interface ConfinedReadOnlyAssistantAskTurn {
   baseInstructions: string
   developerInstructions: string | null
+  groupSharedRead: boolean
   outputSchema: NonNullable<CodexAppServerTurnInput['outputSchema']>
   prompt: string
   usageStage: ReadOnlyAssistantAskProviderUsageEvent['stage']
@@ -267,6 +278,7 @@ async function executeReadOnlyAssistantAskChild(
       developerInstructions: normalizeNullableString(
         input.developerInstructions,
       ),
+      groupSharedRead: permissionText === undefined,
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
       prompt: buildReadOnlyAssistantAskPrompt({
         conversationEvidence,
@@ -282,7 +294,10 @@ async function executeReadOnlyAssistantAskChild(
 }
 
 async function reviewConsentedReadOnlyAssistantAskAnswer(
-  input: Omit<ReadOnlyAssistantAskInput, 'baseInstructions' | 'developerInstructions'> & {
+  input: Omit<
+    ReadOnlyAssistantAskInput,
+    'baseInstructions' | 'developerInstructions' | 'groupSharedReader'
+  > & {
     permissionText: string
     proposedAnswer: string
   },
@@ -292,6 +307,7 @@ async function reviewConsentedReadOnlyAssistantAskAnswer(
     {
       baseInstructions: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_INSTRUCTIONS,
       developerInstructions: null,
+      groupSharedRead: false,
       outputSchema: CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_OUTPUT_SCHEMA,
       prompt: buildConsentedReadOnlyAssistantAskReviewPrompt(input),
       usageStage: 'review',
@@ -311,10 +327,24 @@ async function executeConfinedReadOnlyAssistantAskTurn(
   await chmod(workingDirectory, 0o700)
 
   try {
+    const groupSharedReader = turn.groupSharedRead
+      ? input.groupSharedReader ?? null
+      : null
+    const dynamicTools = groupSharedReader
+      ? [MURPH_GROUP_SHARED_READ_TOOL]
+      : []
+    const hostedToolContext = groupSharedReader
+      ? createReadOnlyAssistantAskHostedToolContext(groupSharedReader)
+      : null
     const providerConfig = normalizeAssistantProviderConfig({
       approvalPolicy: 'never',
       codexCommand: input.codexCommand,
       codexHome: input.codexHome,
+      developerInstructions: turn.developerInstructions,
+      dynamicTools,
+      env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
+      ephemeral: true,
+      hostedToolContext,
       model: input.model,
       modelProvider: input.modelProvider,
       provider: 'codex-cli',
@@ -329,9 +359,10 @@ async function executeConfinedReadOnlyAssistantAskTurn(
         codexCommand: input.codexCommand,
         codexHome: input.codexHome,
         developerInstructions: turn.developerInstructions,
-        dynamicTools: [],
+        dynamicTools,
         env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
         ephemeral: true,
+        hostedToolContext,
         model: input.model,
         modelProvider: input.modelProvider,
         outputSchema: turn.outputSchema,
@@ -473,6 +504,22 @@ function warnReadOnlyAssistantAskUsageCaptureFailure(error: unknown): void {
       errorName: error instanceof Error ? error.name : typeof error,
     },
   )
+}
+
+function createReadOnlyAssistantAskHostedToolContext(
+  groupSharedReader: AssistantHostedGroupSharedReader | null,
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    groupSharedReader,
+    groupTool: null,
+    sendVaultFile: async () => {
+      throw new Error('Vault-file sending is unavailable for read-only group ask.')
+    },
+    vaultFileSendAvailable: false,
+  }
 }
 
 function assertReadOnlyAssistantAskQuestion(value: string): string {

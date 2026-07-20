@@ -691,12 +691,21 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
     expect(raw).toContain('## Creating a hosted group')
-    expect(raw).toContain('Before any permission-bearing `create_join_link` or `post_join_offer`, call')
-    expect(raw).toContain('Only when it returns `status="none"`')
+    expect(raw).toContain('In interactive group setup and additive-permission flows, call `read_current`')
+    expect(raw).toContain('scheduled surface uses `read_shared` and may post one evidence-gated offer')
+    expect(raw).toContain('Only when an interactive `read_current` returns')
     expect(raw).toMatch(/one reusable core\s+set/u)
-    expect(raw).toMatch(
+    const coreSet = raw.match(
+      /one reusable core[\s\S]*?Pass the set/u,
+    )?.[0] ?? ''
+    expect(coreSet).toMatch(
       /`group-email\.v0`[\s\S]*`steps-days\.v0`[\s\S]*`activity-days\.v0`[\s\S]*`workout-days\.v0`[\s\S]*`sleep-duration-days\.v0`[\s\S]*`sleep-times\.v0`[\s\S]*`resting-heart-rate-days\.v0`[\s\S]*`hrv-days\.v0`/u,
     )
+    expect(coreSet).not.toContain('`device-sync-status.v0`')
+    expect(raw).toContain('`device-sync-status.v0` is not in the universal core set')
+    expect(raw).toMatch(/pass the unique union of the core\s+set/u)
+    expect(raw).toContain('Never list a scope twice')
+    expect(raw).toMatch(/That\s+device scope does not grant Apple Health access/u)
     expect(raw).toContain('`requestedVaultShareProjectionScopes` on `create_join_link`')
     expect(raw).toContain('`projectionScopes` when creation uses `post_join_offer`')
     expect(raw).toContain('This is a permission\nrequest, not automatic sharing')
@@ -762,14 +771,20 @@ describe('assistant skill assets', () => {
       /post a permission offer scoped to[\s\S]{0,400}`sleep-times\.v0`/u,
     )
     expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
-    expect(raw).toContain('Every permission offer must lead with "Like this message,"')
-    expect(raw).not.toContain('lead with "react to this message')
-    expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
-    expect(raw).toContain('pass the group\'s')
-    expect(raw).toContain('chosen name as `displayName` on the `post_join_offer` call')
+    expect(raw).toContain('Pass only the exact newsletter `projectionScopes`')
+    expect(raw).toContain('also pass the group\'s chosen name as')
+    expect(raw).toContain('`displayName` on the `post_join_offer` call')
+    expect(raw).toContain('Web owns the complete canonical')
+    expect(raw).toContain('Like-or-heart consent sentence')
+    expect(raw).toContain('exact scope disclosure')
+    expect(raw).toContain('first-party')
+    expect(raw).toContain('customize link')
+    expect(raw).toContain('Never author or pass offer text')
+    expect(raw).not.toContain('{{join_url}}')
+    expect(raw).not.toContain('{{share_scope}}')
     expect(raw).toContain('newsletter like-to-consent path')
     expect(raw).not.toContain('newsletter react-to-join path')
-    expect(raw).toContain('Liking the message')
+    expect(raw).toContain('Liking or hearting the message')
     expect(raw).toContain('adds the disclosed snapshot')
     expect(raw).toContain('disclosed snapshot')
     expect(raw).toMatch(/For\s+existing participants, call this permission opt-in/)
@@ -780,6 +795,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('## Additive permissions')
     expect(raw).toMatch(/default\s+to `murph\.group action="post_join_offer"`/)
     expect(raw).toContain('Do not tell existing members to join')
+    expect(raw).toContain('Pass only the exact')
+    expect(raw).toContain('Web owns the full canonical offer copy')
   })
 
   it('keeps the new-group contact handoff natural and reactive', async () => {
@@ -860,22 +877,51 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('"activityKind": "<alias>"')
     expect(raw).toContain('narrowest matching scope')
     expect(raw).toContain('unsupported instead of')
-    expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
+    expect(raw).toContain('murph.group action="read_shared"')
+    expect(raw).toContain('After the model turn has begun')
+    expect(raw).toContain('the exact scoring scope and `device-sync-status.v0`')
+    expect(raw).toContain('an explicit `grantStatus`, `dataStatus`')
+    expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
+    expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
+    expect(raw).toMatch(
+      /When the hosted group exists, after the model turn has begun and before\s+writing the challenge roster, call\s+`murph\.group action="read_shared"` exactly once/u,
     )
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>',
+    expect(raw).toMatch(
+      /exact current prompt `Sender:` handle appears\s+in that row's `currentTurnHandles`/u,
     )
-    expect(raw).toContain(
-      'vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>',
+    expect(raw).toMatch(
+      /that turn's same\s+`read_shared` result for a one-time identity backfill; do not add another\s+identity read/u,
     )
-    expect(raw).toContain('Never pass selector scopes through `--kind`')
-    expect(raw).toContain('`murph.group action="post_join_offer"` with only the challenge\'s share')
-    expect(raw).toContain('the group-chat skill\'s Creating a\n   hosted group core set takes precedence')
-    expect(raw).toContain('For an existing group, use')
-    expect(raw).toMatch(/Existing\s+members like the server-owned message to opt into/)
-    expect(raw).toContain('Do not tell the room to join again')
+    expect(raw).toMatch(/A unique or equal\s+display name is not\s+identity proof/u)
+    expect(raw).toContain('`participantId: unresolved`')
+    expect(raw).toContain('`grantStatus="not_granted"`')
+    expect(raw).toContain('`dataStatus="missing"`')
+    expect(raw).toContain('`dataStatus="available"`')
+    expect(raw).not.toContain('Gap disclosure log')
+    expect(raw).not.toContain('`gapState`')
+    expect(raw).not.toContain('`episodePublicGapDate`')
+    expect(raw).toContain('state the exact missing group share\n   in ordinary language')
+    expect(raw).toMatch(/Never infer a missing\s+permission from granted-but-missing or stale data\./u)
+    expect(raw).toMatch(/call `murph\.group action="post_join_offer"` exactly once after the read with\s+only those `projectionScopes`/u)
+    expect(raw).toMatch(/adds no scheduler-side message and no pre-model work/u)
+    expect(raw).toContain('Never author generic permission copy or tell someone to Like the standings.')
+    expect(raw).toMatch(/explicitly says they do not want to share a scope, record that choice and do\s+not offer, repeat, or nag/u)
+    expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
+    expect(raw).toContain('A `sent` result may mean a matching card was already active.')
+    expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
+    expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)
+    expect(raw).not.toContain('belong in the affected participant\'s private thread')
+    expect(raw).toContain(
+      'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',
+    )
+    expect(raw).not.toContain('vault-cli group shared --kind')
+    expect(raw).not.toContain('vault-cli group shared --scope')
+    expect(raw).not.toContain('vault-cli group weekly --')
+    expect(raw).toMatch(/Whether `read_current` returns\s+`status="none"` or an existing group/u)
+    expect(raw).toMatch(/do not\s+create a hosted group or post a permission offer as part of challenge setup/u)
+    expect(raw).toMatch(/Explain any missing group setup or share naturally in the normal\s+group reply/u)
+    expect(raw).toMatch(/bounded proactive\s+standings behavior below begins only once the challenge is running/u)
+    expect(raw).toMatch(/Do not\s+tell the room to join again/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
     expect(raw).toContain(
       "under the developer prompt's shared\nautomation action rules",

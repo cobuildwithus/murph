@@ -83,6 +83,9 @@ describe("workspace snapshot local restore", () => {
       await mkdir(path.join(sourceVaultRoot, ".runtime", "projections"), { recursive: true });
       await mkdir(path.join(sourceVaultRoot, ".runtime", "cache"), { recursive: true });
       await mkdir(path.join(sourceVaultRoot, ".git"), { recursive: true });
+      await mkdir(path.join(sourceVaultRoot, "derived", "vault-share"), { recursive: true });
+      await mkdir(path.join(sourceVaultRoot, "derived", "vault-share-notes"), { recursive: true });
+      await mkdir(path.join(sourceVaultRoot, "vault-share"), { recursive: true });
       await mkdir(path.join(sourceOperatorHomeRoot, ".codex-hosted", path.dirname(rolloutRelativePath)), {
         recursive: true,
       });
@@ -102,6 +105,21 @@ describe("workspace snapshot local restore", () => {
       await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".git", "config"), "git config\n", "utf8");
+      await writeFile(
+        path.join(sourceVaultRoot, "derived", "vault-share", "projections.json"),
+        "legacy derived share\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceVaultRoot, "vault-share", "projections.json"),
+        "abandoned direct-child share\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceVaultRoot, "derived", "vault-share-notes", "keep.md"),
+        "unrelated sibling\n",
+        "utf8",
+      );
       await writeFile(
         path.join(sourceOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
         "{\"type\":\"rollout\"}\n",
@@ -123,6 +141,16 @@ describe("workspace snapshot local restore", () => {
         operatorHomeRoot: sourceOperatorHomeRoot,
         vaultRoot: sourceVaultRoot,
       });
+      expect(archivePlan.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          archivePath: "vault/derived/vault-share/projections.json",
+          kind: "file",
+        }),
+        expect.objectContaining({
+          archivePath: "vault/vault-share/projections.json",
+          kind: "file",
+        }),
+      ]));
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
         archiveEntries: archivePlan.entries,
@@ -164,8 +192,16 @@ describe("workspace snapshot local restore", () => {
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
       await expect(readFile(path.join(restoredVaultRoot, "note.md"), "utf8"))
         .resolves.toBe("selected workspace\n");
+      await expect(readFile(
+        path.join(restoredVaultRoot, "derived", "vault-share-notes", "keep.md"),
+        "utf8",
+      )).resolves.toBe("unrelated sibling\n");
       await expect(readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"))
         .resolves.toBe("{\"type\":\"rollout\"}\n");
+      await expect(access(path.join(restoredVaultRoot, "derived", "vault-share")))
+        .rejects.toThrow();
+      await expect(access(path.join(restoredVaultRoot, "vault-share")))
+        .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "cache", "cache.txt")))

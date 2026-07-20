@@ -1110,6 +1110,39 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   });
 
+  it.each([
+    ["vault-share.delivery", "import-vault-share-delivery"],
+    ["vault-share.revoke", "import-vault-share-revoke"],
+  ] as const)(
+    "consumes retired %s rows without decoding or recreating local shared data",
+    async (kind, routeAction) => {
+      const vaultRoot = await createVaultRoot();
+      const { platform } = createRuntimePlatform();
+      const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+        decode: vi.fn(async () => {
+          throw new Error("Retired vault-share payloads must not be decoded.");
+        }),
+      };
+      const options = createBridgeOptions({
+        mailboxPayloadDecoder,
+        platform,
+        vaultRoot,
+      });
+
+      await expect(options.importItem(
+        createRetiredVaultShareMailboxImportItem({ kind, routeAction }),
+      )).resolves.toEqual({
+        reasonCode: "vault_share.retired_direct_snapshot",
+        status: "skipped",
+      });
+      expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+      await expect(access(path.join(vaultRoot, "derived", "vault-share")))
+        .rejects.toThrow();
+      await expect(access(path.join(vaultRoot, "vault-share")))
+        .rejects.toThrow();
+    },
+  );
+
   it("binds paired Assistant Ask payloads to the mailbox row id and expiry", async () => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
@@ -1628,6 +1661,34 @@ function createSystemMailboxImportItem(input: {
         kind: "member.channels.updated",
         lane: "system",
         laneSeq: "1",
+      },
+      state: "route",
+    },
+  };
+}
+
+function createRetiredVaultShareMailboxImportItem(input: {
+  kind: "vault-share.delivery" | "vault-share.revoke";
+  routeAction: "import-vault-share-delivery" | "import-vault-share-revoke";
+}): Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0] {
+  const base = createSystemMailboxImportItem();
+  const id = `retired_${input.kind.replaceAll(".", "_")}`;
+  return {
+    ...base,
+    item: {
+      ...base.item,
+      dedupeKey: id,
+      id,
+      kind: input.kind,
+    },
+    route: {
+      action: input.routeAction,
+      advanceProgress: true,
+      itemRef: {
+        id,
+        kind: input.kind,
+        lane: "system",
+        laneSeq: base.item.laneSeq,
       },
       state: "route",
     },

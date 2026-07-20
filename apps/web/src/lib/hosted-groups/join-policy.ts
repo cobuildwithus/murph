@@ -36,6 +36,7 @@ export interface HostedGroupJoinPolicy {
 export interface HostedVaultShareProjectionDisplay {
   description: string;
   label: string;
+  offerDisclosure?: string;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   projectionScopeKey: string;
@@ -44,11 +45,19 @@ export interface HostedVaultShareProjectionDisplay {
 const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectableProjectionKind, {
   description: string;
   label: string;
+  offerDisclosure?: string;
 }> = {
   "group-email.v0": {
     label: "Email address",
     description:
       "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
+  },
+  "device-sync-status.v0": {
+    label: "Health source connection status",
+    description:
+      "Shares your health-source names, basic connection status (such as connected or needs attention), when Murph observed the status, and when Murph last completed a connection-wide sync job. A completed sync does not prove health data arrived. This permission does not share account details, device IDs, errors, or health values.",
+    offerDisclosure:
+      "health-source connection details (source names, basic connection status, when Murph observed it, and when Murph last completed a connection-wide sync job)",
   },
   "activity-days.v0": {
     label: "Activity minutes",
@@ -245,7 +254,7 @@ function hostedGroupJoinPolicyFromScopes(
 
 function hostedVaultShareProjectionScopeDisplay(
   projectionScope: HostedVaultShareProjectionScope,
-): { description: string; label: string } {
+): { description: string; label: string; offerDisclosure?: string } {
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
     const label = formatHostedVaultShareActivityKindLabel(
       projectionScope.selector.activityKind,

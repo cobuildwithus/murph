@@ -10,6 +10,9 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -20,6 +23,9 @@ import {
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
@@ -35,6 +41,8 @@ import {
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
+  type AssistantHostedGroupPermissionOfferTool,
+  type AssistantHostedGroupSharedReader,
   type AssistantInputEventRecord,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
@@ -108,6 +116,10 @@ import {
   buildHostedDeviceSyncStatusPrompt,
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
+import {
+  createHostedGroupSharedReader,
+  normalizeHostedGroupSharedProjectionScopes,
+} from "./group-shared-reader.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
@@ -280,6 +292,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         emailIngressPresent
         && request.action !== "read_current"
+        && request.action !== "read_shared"
         && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
@@ -293,6 +306,20 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+        );
+      }
+      if (request.action === "read_shared") {
+        const sharedReadRequest = {
+          action: request.action,
+          projectionScopes: request.projectionScopes,
+        };
+        const linqSenderHandles = emailIngressPresent
+          ? []
+          : resolveHostedGroupToolLinqSenderHandles(input.linqDeliveryContexts);
+        return await input.groupToolPort.request(
+          linqSenderHandles.length > 0
+            ? { ...sharedReadRequest, linqSenderHandles }
+            : sharedReadRequest,
         );
       }
       if (
@@ -319,7 +346,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
-    { action: "read_current" | "revoke_own_email_share" }
+    { action: "read_current" | "read_shared" | "revoke_own_email_share" }
   >,
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
@@ -381,6 +408,41 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
   }
 
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
+}
+
+function resolveHostedGroupToolLinqSenderHandles(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): string[] {
+  // Use only route-authorized Linq group inputs. Hosted email reply aliases
+  // authenticate a route, not the human From header, and never enter here.
+  const linqThread = resolveHostedGroupToolLinqThreadContext(contexts);
+  if (!linqThread) {
+    return [];
+  }
+  const eligible = new Set<string>();
+  for (const context of contexts) {
+    const authority = context.routeAuthority;
+    if (
+      !authority
+      || authority.channel !== linqThread.authority.channel
+      || authority.containerMemberId !== linqThread.authority.containerMemberId
+      || authority.threadId !== linqThread.authority.threadId
+      || context.service?.trim().toLowerCase() !== "imessage"
+      || context.threadIsDirect !== false
+    ) {
+      continue;
+    }
+    const senderHandle = context.directRecipientPhoneNumber?.trim();
+    if (
+      !senderHandle
+      || [...senderHandle].length
+        > HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+    ) {
+      continue;
+    }
+    eligible.add(senderHandle);
+  }
+  return [...eligible].slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
 }
 
 function resolveHostedGroupToolLinqThreadContext(
@@ -471,6 +533,7 @@ function createHostedAssistantAutomationOperationScope(
       const groupScopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
         emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
+        groupSharedReadAvailable: route?.threadIsDirect === false,
         groupEmailIngress:
           normalizeAssistantRouteString(route?.channel)?.toLowerCase() === "email"
           && route?.threadIsDirect === false,
@@ -600,22 +663,174 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
 function scopeHostedGroupToolToAssistantOperation(input: {
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   executionContext: AssistantExecutionContext;
+  groupSharedReadAvailable: boolean;
   groupEmailIngress: boolean;
-  groupToolPort: HostedRuntimePlatform["groupToolPort"] | null;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): AssistantExecutionContext {
-  if (!input.executionContext.hosted || !input.groupToolPort) {
-    return input.executionContext;
-  }
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      groupTool: createHostedGroupToolWithLinqThreadContext({
+  const scopedGroupToolPort = input.groupToolPort
+    ? createHostedGroupToolWithLinqThreadContext({
         emailDeliveryContexts: input.emailDeliveryContexts,
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,
         linqDeliveryContexts: input.linqDeliveryContexts,
-      }),
+      })
+    : null;
+  const sharedScopedExecutionContext = scopeHostedGroupSharedReaderToAssistantOperation({
+    executionContext: input.executionContext,
+    groupSharedReadAvailable: input.groupSharedReadAvailable,
+    groupToolPort: scopedGroupToolPort,
+  });
+  if (!sharedScopedExecutionContext.hosted || !scopedGroupToolPort) {
+    return sharedScopedExecutionContext;
+  }
+  return {
+    hosted: {
+      ...sharedScopedExecutionContext.hosted,
+      groupTool: scopedGroupToolPort,
+    },
+  };
+}
+
+function scopeHostedGroupSharedReaderToAssistantOperation(input: {
+  executionContext: AssistantExecutionContext;
+  groupSharedReadAvailable: boolean;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+}): AssistantExecutionContext {
+  if (!input.executionContext.hosted) {
+    return input.executionContext;
+  }
+  const {
+    groupSharedReader: _unscopedGroupSharedReader,
+    ...hostedWithoutGroupSharedReader
+  } = input.executionContext.hosted;
+  void _unscopedGroupSharedReader;
+  return {
+    hosted: {
+      ...hostedWithoutGroupSharedReader,
+      ...(input.groupSharedReadAvailable
+        ? {
+            groupSharedReader: createHostedGroupSharedReader({
+              groupToolPort: input.groupToolPort,
+            }),
+          }
+        : {}),
+    },
+  };
+}
+
+const HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE =
+  "scheduled_group_permission_offer_unavailable";
+
+function createHostedScheduledGroupTools(input: {
+  channel: string;
+  containerMemberId: string;
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
+  target: string;
+  threadIsDirect: boolean;
+}): {
+  groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool;
+  groupSharedReader: AssistantHostedGroupSharedReader;
+} | null {
+  const channel = input.channel.trim().toLowerCase();
+  const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
+  const target = normalizeAssistantRouteString(input.target);
+  if (
+    channel !== "linq"
+    || input.threadIsDirect !== false
+    || !containerMemberId
+    || !target
+  ) {
+    return null;
+  }
+
+  // This state belongs to one scheduled model operation. It proves a missing
+  // grant from the model-triggered read and prevents repeated offer attempts.
+  const observedNotGrantedScopeKeys = new Set<string>();
+  let permissionOfferAttempted = false;
+  const unobservedGroupSharedReader = createHostedGroupSharedReader({
+    groupToolPort: input.groupToolPort,
+  });
+  const groupSharedReader: AssistantHostedGroupSharedReader = {
+    async request(request) {
+      const result = await unobservedGroupSharedReader.request(request);
+      if (result.status !== "ok") {
+        observedNotGrantedScopeKeys.clear();
+        return result;
+      }
+      observedNotGrantedScopeKeys.clear();
+      for (const member of result.members) {
+        for (const projection of member.projections) {
+          if (projection.grantStatus === "not_granted") {
+            observedNotGrantedScopeKeys.add(projection.projectionScopeKey);
+          }
+        }
+      }
+      return result;
+    },
+  };
+
+  const groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool = {
+    async request(request) {
+      if (permissionOfferAttempted) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+      permissionOfferAttempted = true;
+
+      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(
+        request.projectionScopes,
+      );
+      if (
+        !input.groupToolPort
+        || !projectionScopes
+        || projectionScopes.some((projectionScope) =>
+          !observedNotGrantedScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(projectionScope),
+          )
+        )
+      ) {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+
+      try {
+        const response = await input.groupToolPort.request({
+          action: "post_join_offer",
+          joinOffer: {
+            messageTemplate:
+              HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+            projectionScopes,
+          },
+          linqThread: {
+            authority: {
+              channel: "linq",
+              containerMemberId,
+              threadId: target,
+            },
+            chatId: target,
+          },
+        });
+        return response.action === "post_join_offer"
+          ? response
+          : buildHostedScheduledGroupPermissionOfferUnavailable();
+      } catch {
+        return buildHostedScheduledGroupPermissionOfferUnavailable();
+      }
+    },
+  };
+
+  return { groupPermissionOfferTool, groupSharedReader };
+}
+
+function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "post_join_offer" }
+> {
+  return {
+    action: "post_join_offer",
+    result: {
+      group: null,
+      status: "unavailable",
+      unavailableReason: HOSTED_SCHEDULED_GROUP_PERMISSION_OFFER_UNAVAILABLE,
     },
   };
 }
@@ -972,6 +1187,14 @@ export async function runHostedWorkspaceAssistantPhase(
           ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
           : {}),
         memberId: input.request.userId,
+        createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
+          createHostedScheduledGroupTools({
+            channel,
+            containerMemberId: input.request.userId,
+            groupToolPort: input.runtime.platform.groupToolPort ?? null,
+            target,
+            threadIsDirect,
+          }),
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
         resolveScheduledLinqRoute: async ({

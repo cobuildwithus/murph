@@ -3,6 +3,19 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
+if [[ -n "${MURPH_VERIFY_SHARED_HOST+x}" ]]; then
+  shared_host_mode="$MURPH_VERIFY_SHARED_HOST"
+elif [[ -z "${CI:-}" && -n "${CODEX_THREAD_ID:-}" ]]; then
+  shared_host_mode="1"
+else
+  shared_host_mode="0"
+fi
+if [[ "$shared_host_mode" != "0" && "$shared_host_mode" != "1" ]]; then
+  printf '[apps/web verify] ERROR: MURPH_VERIFY_SHARED_HOST must be 0 or 1.\n' >&2
+  exit 1
+fi
+readonly shared_host_mode
+export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
 sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 hosted_web_default_database_url="postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"
 hosted_web_default_hosted_key="BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"
@@ -23,7 +36,7 @@ if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
     bash "$script_dir/verify-fast.sh" "$@"
 fi
 
-if [[ "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
+if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "apps/web verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
 fi
@@ -68,7 +81,7 @@ compose_hosted_mailbox_fingerprint_key_for_build() {
   printf '%s\n' "${HOSTED_MAILBOX_FINGERPRINT_KEY:-$hosted_web_default_hosted_key}"
 }
 
-verify_step_parallel_default="$([[ -n "${CI:-}" || "${MURPH_VERIFY_SHARED_HOST:-0}" == "1" ]] && echo 0 || echo 1)"
+verify_step_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 tracked_background_pids=()
 

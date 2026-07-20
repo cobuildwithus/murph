@@ -164,6 +164,14 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 ## Accepted Work And External Effects
 
+- A change must not introduce a new automatic or unsolicited member-facing
+  message, notification, nudge, reminder, permission offer, or parallel
+  delivery unless that extra message is strictly necessary to the requested
+  outcome and the task's user explicitly approves that automatic effect before
+  implementation.
+  Prefer one already-authorized conversational reply over a second automatic
+  effect. Existing authorized automations remain governed by their owning
+  consent and lifecycle contracts.
 - Every durably accepted conversational input reaches a restart-safe terminal
   disposition: delivered response, explicit policy non-reply, or an explicit
   durable supersession record naming the later accepted input. Accidental

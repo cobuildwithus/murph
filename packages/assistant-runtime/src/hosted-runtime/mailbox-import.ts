@@ -32,6 +32,8 @@ import type {
 } from "./email-delivery-context.ts";
 
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
+const HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON =
+  "legacy_vault_share.web_owned";
 export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
 
 export type HostedMailboxItemImportOutcome =
@@ -343,6 +345,18 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
     }
 
+    if (isLegacyVaultShareImportAction(route.action)) {
+      nextState = recordHostedMailboxTerminalSkip({
+        item,
+        lane,
+        now: now(),
+        reasonCode: HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON,
+        state: nextState,
+      });
+      expectedSeqByLane[lane] += 1n;
+      continue;
+    }
+
     const payload = await resolveHostedMailboxItemPayload({
       item,
       mailboxPort: input.mailboxPort,
@@ -351,7 +365,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     if (payload.status === "blocked") {
       const reasonCode = `payload.${payload.code}`;
       if (payload.retryable && itemIsDurablyConsumedReplay) {
-        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+        nextState = recordHostedMailboxTerminalSkip({
           item,
           lane,
           now: now(),
@@ -400,7 +414,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         itemIsDurablyConsumedReplay
         && reasonCode !== HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE
       ) {
-        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+        nextState = recordHostedMailboxTerminalSkip({
           item,
           lane,
           now: now(),
@@ -425,7 +439,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     if (outcome.status === "blocked") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
       if (outcome.retryable && itemIsDurablyConsumedReplay) {
-        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+        nextState = recordHostedMailboxTerminalSkip({
           item,
           lane,
           now: now(),
@@ -593,7 +607,7 @@ function hasHostedMailboxItemConsumedAt(item: HostedMailboxItem): boolean {
   return typeof item.consumedAt === "string" && item.consumedAt.trim().length > 0;
 }
 
-function recordHostedMailboxDurablyConsumedReplaySkip(input: {
+function recordHostedMailboxTerminalSkip(input: {
   item: HostedMailboxItem;
   lane: HostedMailboxLane;
   now: string;
@@ -614,6 +628,13 @@ function recordHostedMailboxDurablyConsumedReplaySkip(input: {
   }).state;
 
   return nextState;
+}
+
+function isLegacyVaultShareImportAction(
+  action: HostedMailboxRoutePlan["action"],
+): boolean {
+  return action === "import-vault-share-delivery"
+    || action === "import-vault-share-revoke";
 }
 
 async function fetchHostedMailboxPrefix(input: {

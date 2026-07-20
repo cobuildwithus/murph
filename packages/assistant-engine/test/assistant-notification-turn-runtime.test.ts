@@ -31,6 +31,12 @@ import {
   resolveAssistantConversationPolicy,
   resolveAssistantConversationScope,
 } from '../src/assistant/conversation-policy.ts'
+import {
+  executeMurphDynamicToolRequest,
+  MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+  readMurphDynamicToolRequest,
+  resolveMurphDynamicTools,
+} from '../src/assistant-codex/dynamic-tools.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -2582,6 +2588,235 @@ test('sendAssistantNotificationLocal isolates hosted capabilities and retains tr
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',
+  })
+  const events: string[] = []
+  const providerStartHook = vi.fn(() => {
+    events.push('provider-started')
+  })
+  const groupSharedRead = vi.fn(async (request) => {
+    events.push('authority-read')
+    expect(request).toEqual({
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    })
+    return {
+      members: [] as const,
+      requestedProjectionScopeKeys: ['steps-days.v0'],
+      status: 'none' as const,
+    }
+  })
+  const groupPermissionOfferRequest = vi.fn(async (request) => {
+    events.push('permission-offer')
+    expect(request).toEqual({
+      projectionScopes: [
+        { projectionKind: 'steps-days.v0' },
+        { projectionKind: 'device-sync-status.v0' },
+      ],
+    })
+    return {
+      action: 'post_join_offer' as const,
+      result: {
+        group: null,
+        status: 'unavailable' as const,
+        unavailableReason: 'test_unavailable',
+      },
+    }
+  })
+  const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
+  const groupSharedReader = { request: groupSharedRead }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    actorId: null,
+    bindingDelivery: null,
+    channel: 'linq',
+    deliveryPolicy: 'not-requested',
+    effectiveThreadIsDirect: false,
+    explicitTarget: null,
+    identityId: null,
+    replyToMessageId: null,
+    threadId: 'family-step-challenge',
+    threadIsDirect: false,
+  }
+
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      const hostedToolContext = providerInput.hostedToolContext
+      expect(hostedToolContext?.groupPermissionOfferTool)
+        .toBe(groupPermissionOfferTool)
+      expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
+      expect(hostedToolContext?.groupTool).toBeNull()
+      expect(providerInput.profile?.toolProfile).toBe('notification-turn')
+      expect(groupSharedRead).not.toHaveBeenCalled()
+
+      await providerInput.onProviderRequestStarted?.({
+        providerRequestOrdinal: 0,
+        startedAt: '2026-07-18T13:00:00.000Z',
+      })
+      expect(events).toEqual(['provider-started'])
+      expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
+      expect(groupSharedRead).not.toHaveBeenCalled()
+
+      const groupTools = resolveMurphDynamicTools({
+        groupAvailable: hostedToolContext?.groupTool != null,
+        groupPermissionOfferAvailable:
+          hostedToolContext?.groupPermissionOfferTool != null,
+        groupSharedReadAvailable: hostedToolContext?.groupSharedReader != null,
+      }).filter((tool) => tool.namespace === 'murph' && tool.name === 'group')
+      expect(groupTools).toEqual([
+        MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
+      ])
+      expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
+      expect(groupSharedRead).not.toHaveBeenCalled()
+
+      const request = readMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'read_shared',
+            projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+          },
+          namespace: 'murph',
+          tool: 'group',
+        },
+      })
+      if (!request || request.kind !== 'group') {
+        throw new Error('Expected a scheduled read_shared request.')
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      })
+      expect(result.rpcResult.success).toBe(true)
+      expect(groupSharedRead).toHaveBeenCalledTimes(1)
+
+      const permissionOfferRequest = readMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'post_join_offer',
+            projectionScopes: [
+              { projectionKind: 'steps-days.v0' },
+              { projectionKind: 'device-sync-status.v0' },
+            ],
+          },
+          namespace: 'murph',
+          tool: 'group',
+        },
+      })
+      if (!permissionOfferRequest || permissionOfferRequest.kind !== 'group') {
+        throw new Error('Expected a parsed post_join_offer request.')
+      }
+      const permissionOfferResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: permissionOfferRequest,
+        vaultRoot: null,
+      })
+      expect(permissionOfferResult.rpcResult.success).toBe(true)
+      expect(groupPermissionOfferRequest).toHaveBeenCalledTimes(1)
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    sharedPlan,
+    turnId: 'turn-scheduled-group-shared-read',
+  })
+
+  await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: {
+        groupPermissionOfferTool,
+        groupSharedReader,
+        memberId: 'member-scheduled-group-runtime',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'At 9:00 AM, post the current family step-challenge standings.',
+    onProviderRequestStarted: providerStartHook,
+    scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+    serviceTier: 'flex',
+    vault: '/vaults/scheduled-group-runtime',
+  })
+
+  expect(events).toEqual([
+    'provider-started',
+    'authority-read',
+    'permission-offer',
+  ])
+  expect(providerStartHook).toHaveBeenCalledTimes(1)
+})
+
+test('sendAssistantNotificationLocal omits shared-group authority from direct scheduled turns', async () => {
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"No group update required."}\n```',
+  })
+  const groupSharedRead = vi.fn(async () => ({
+    members: [] as const,
+    requestedProjectionScopeKeys: ['steps-days.v0'],
+    status: 'none' as const,
+  }))
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    actorId: 'member-direct-scheduled',
+    bindingDelivery: null,
+    channel: 'linq',
+    deliveryPolicy: 'not-requested',
+    effectiveThreadIsDirect: true,
+    explicitTarget: null,
+    identityId: null,
+    replyToMessageId: null,
+    threadId: 'direct-scheduled-thread',
+    threadIsDirect: true,
+  }
+
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      expect(providerInput.hostedToolContext?.groupSharedReader ?? null).toBeNull()
+      const groupTools = resolveMurphDynamicTools({
+        groupAvailable: providerInput.hostedToolContext?.groupTool != null,
+        groupSharedReadAvailable:
+          providerInput.hostedToolContext?.groupSharedReader != null,
+      }).filter((tool) => tool.namespace === 'murph' && tool.name === 'group')
+      expect(groupTools).toEqual([])
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    sharedPlan,
+    turnId: 'turn-direct-scheduled-without-shared-group-read',
+  })
+
+  await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: {
+        groupSharedReader: { request: groupSharedRead },
+        memberId: 'member-direct-scheduled',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Send the private morning reminder.',
+    scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+    vault: '/vaults/direct-scheduled-without-shared-group-read',
+  })
+
+  expect(groupSharedRead).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {

@@ -14,14 +14,27 @@ In group runtimes each inbound message includes a `Sender:` handle. Track who
 is talking, who was asked, and who already answered. Refer to people the way
 the group does (names, never raw phone numbers).
 
-Read the roster before you need it: `murph.group` with `action="read_current"`
-returns the group's members with their member id, chat handle, and the share
-kinds each member granted. Members' display names and shared data land in this
-runtime keyed by the same member id and are read with `vault-cli group shared`,
-so the roster is your join between who is texting (`Sender:` handle), who they
-are (display name), and whose shared data is whose (grantor member id). If a
-member's name has not arrived yet, use context gracefully and never guess;
-their name usually lands after their runtime's next wake.
+Use `murph.group action="read_current"` when the room needs membership,
+join-policy, or permission-offer facts. Use
+`murph.group action="read_shared"` when the current turn needs shared group
+data or exact current-turn membership attribution. Pass one to three exact
+projection scopes. That read happens after the model turn has begun and returns
+every current group member with an explicit `grantStatus` and `dataStatus` for
+each requested scope. It is the only hosted model-facing path to the current
+Web-owned shared snapshot; do not use `vault-cli group shared`, `vault-cli group
+weekly`, a preloaded roster, or a remembered prompt snapshot as an alternate
+source.
+
+On an interactive Linq turn, a shared member's `currentTurnHandles` may contain
+only exact, route-authorized `Sender:` handles from the current prompt that Web
+matched to that one current membership. Scheduled and detached reads have no
+handles. Use an exact current `Sender:` match only; never persist or render a
+handle, and never substitute display name, array order, shared values, grant
+state, global member id, or memory. Join tool results by exact group-scoped
+`participantId`. A `participantId` identifies only one membership in this
+group; it carries no account, device, provider, or route identity. If a name is
+missing, use context gracefully and never guess. `read_current` is not an
+identity bridge and keeps its legacy membership-summary contract.
 
 `read_current` can return `status="none"` before this connected chat has a
 hosted group record. That means the group is ready to be created here, not that
@@ -31,10 +44,13 @@ actions create the hosted group record as part of the existing flow.
 
 ## Creating a hosted group
 
-Before any permission-bearing `create_join_link` or `post_join_offer`, call
-`read_current`. Only when it returns `status="none"`, request one reusable core
-set so members do not have to revisit consent for the most common future
-newsletter and challenge uses:
+In interactive group setup and additive-permission flows, call `read_current`
+before a permission-bearing `create_join_link` or `post_join_offer`. The bounded
+running-challenge standings flow in `group-challenge` is the exception: its
+scheduled surface uses `read_shared` and may post one evidence-gated offer
+without `read_current`. Only when an interactive `read_current` returns
+`status="none"`, request one reusable core set so members do not have to revisit
+consent for common future newsletter and group-health uses:
 
 - `group-email.v0`
 - `steps-days.v0`
@@ -49,7 +65,8 @@ Pass the set as `requestedVaultShareProjectionScopes` on `create_join_link`, or
 as `projectionScopes` when creation uses `post_join_offer`. This is a permission
 request, not automatic sharing. On the join page, every item stays individually
 selectable. On a like-to-consent offer, liking grants exactly the disclosed
-snapshot and `{{join_url}}` remains the secondary path to share more or less.
+snapshot, and Web's first-party customize link remains the secondary path to
+share more or less.
 
 Follow an explicit request from the group creator for narrower or different
 health scopes. `group-email.v0` remains the server's standard new-group request,
@@ -57,6 +74,14 @@ and each member may deselect it. Otherwise use the core set even if the first
 idea in the room is one particular challenge; the hosted group is reusable
 beyond that first activity. Do not request every available projection by
 default.
+
+Workflow-specific scopes are additive and explicit. In particular,
+`device-sync-status.v0` is not in the universal core set. When creating a group
+for a challenge, follow `group-challenge` and pass the unique union of the core
+set, that challenge's exact scoring scope, and `device-sync-status.v0` in the
+same permission request. Never list a scope twice when the scoring scope is
+already in the core. That device scope does not grant Apple Health access,
+connect a source, or share health values.
 
 When `read_current` returns an existing group, do not add the core set to that
 group's requested policy. Use only the exact workflow or additive scopes needed
@@ -66,13 +91,15 @@ for the current request.
 
 When the room adds a sharing permission to a group that already exists, default
 to `murph.group action="post_join_offer"`. Do not tell existing members to join
-again or make them open the link as the primary action. Lead the offer with the
-exact words "Like this message," then say that liking opts them into the exact
-`{{share_scope}}`. Keep `{{join_url}}` as the secondary customize path for
-someone who wants to share more or less. Liking adds only the disclosed
-permission snapshot; it does not make an existing member redo membership or
-their other grants. Use `create_join_link` when the room explicitly asks for a
-standalone link, not as the default for an additive permission.
+again or make them open the link as the primary action. Pass only the exact
+`projectionScopes` (and the group's chosen `displayName`, when applicable);
+never author or pass offer text. Web owns the full canonical offer copy,
+including the causal consent sentence, exact scope disclosure, accepted Like
+or heart gestures, and first-party customize link. Liking or hearting adds only
+the disclosed permission snapshot; it does not make an existing member redo
+membership or their other grants. Use `create_join_link` when the room
+explicitly asks for a standalone link, not as the default for an additive
+permission.
 
 ## Consented member disclosures
 
@@ -264,18 +291,40 @@ into a consent ceremony, but do not wake a silent member up to find that they
 were automatically entered either. `group-challenge` owns the quick roll call
 and pending-name update. Once people are in, use the shared data playfully.
 
-Read it with `vault-cli group shared`. It returns each member (by name once
-their name has landed, otherwise by member id) with the recent records for
-every kind they granted. Add `--kind <kind>` for a single-metric leaderboard,
-for example `--kind steps-days.v0`. It is empty until members have connected
-the relevant data and their runtime has next woken; when it comes back empty,
-say so plainly and never invent figures.
+For challenge standings, call `murph.group action="read_shared"` with the
+exact scoring scope and `device-sync-status.v0` after the turn starts. Start
+with challenge-page participants recorded as `in`, then left join the tool's
+current member results by exact group-scoped `participantId`, never by display
+name. For every requested scope, treat
+`grantStatus="not_granted"` as missing group-sharing permission,
+`grantStatus="granted"` plus `dataStatus="missing"` as granted but without a
+usable record in the current snapshot,
+and `dataStatus="available"` as usable only from the returned records. A
+recorded zero is available data. Never infer a grant from a record, rank
+missing data as zero, or let an empty result hide an opted-in participant.
 
-For a current-versus-previous calendar-week summary, use `vault-cli group
-weekly`. Scheduled work must pass its exact occurrence with `--as-of` so a
-retry cannot drift into a different reporting week. This is the same generic
-group-data primitive used by the email newsletter; recipient eligibility and
-email delivery remain separate newsletter operations.
+`status="unavailable"` means Web could not resolve current authority and the
+direct bounded snapshot. It returns no roster or projection payload. Do not use stale
+prompt context, raw files, remembered numbers, or another command as a
+fallback; continue the conversation without publishing possibly unauthorized
+standings. `status="none"` means there is no current hosted group. Read and
+follow `group-challenge` for the complete partial-standings and diagnostic
+flow.
+
+`device-sync-status.v0` is a separate explicit group share for bounded
+connection diagnostics. It does not grant Apple Health access, prove that a
+member opened the app, or prove that a connection sync job delivered any
+health data. Apple does not expose HealthKit read authorization. Use a recent
+device projection only as literal evidence, and treat one more than two local
+calendar days old as unverified. In particular,
+`connectionSyncJobCompletedAt` is connection-wide job completion, not
+source-specific data receipt.
+
+For a hosted scheduled group update, request only the exact scopes needed for
+that occurrence through `read_shared`. The runtime does not preload a roster,
+grant snapshot, or shared-data block before model start. Email newsletter
+composition is separate: `murph.newsletter action="prepare"` performs its own
+post-start current-authority filtering and recipient eligibility check.
 
 - Scoreboards, health scores across members, streaks, daily standings, and
   callouts of who is winning are all in-bounds and encouraged when a challenge
@@ -305,8 +354,10 @@ messages are expected; send them on schedule with confidence. Etiquette:
 
 - Batch each update into one message at a predictable time. Never split a
   digest across messages.
-- Celebrate by name; nudge laggards privately in their own thread, not in
-  front of the room.
+- Celebrate by name. A first factual named data-availability note may stay in
+  the group when it explains partial standings; keep blame and jokes out of it.
+  Move performance nudges and repeated data reminders to the affected member's
+  private thread.
 - If an update or nudge gets no engagement, do not follow up on it. On
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
@@ -357,8 +408,9 @@ default. Tone and any custom notes belong in the automation instructions.
 If the group wants the recurring update in the chat instead of email, do not
 create the `group-health-newsletter` email automation and do not use the
 newsletter email tool. Set up a normal scheduled group-chat update automation
-under the Scheduled updates and automations rules above; it reads the same
-shared vault projections and needs no email grant.
+under the Scheduled updates and automations rules above; on each run it calls
+`murph.group action="read_shared"` for its exact needed scopes after model
+start and needs no email grant.
 
 Create a new newsletter under the developer prompt's shared automation action
 rules using:
@@ -397,15 +449,16 @@ If a member never granted email sharing and expresses interest, or the group
 asks how someone can opt into the newsletter, post a permission offer scoped to
 `group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. Every permission offer must lead with "Like this message,"
-immediately say what liking it will do, include `{{share_scope}}` exactly once, and
-include `{{join_url}}` exactly once as the customize link so a member can share
-more or less. When this offer names the newsletter group, pass the group's
-chosen name as `displayName` on the `post_join_offer` call. Liking the message
+different set. Pass only the exact newsletter `projectionScopes`; when this
+offer names the newsletter group, also pass the group's chosen name as
+`displayName` on the `post_join_offer` call. Web owns the complete canonical
+Like-or-heart consent sentence, exact scope disclosure, and first-party
+customize link. Never author or pass offer text. Liking or hearting the message
 adds the disclosed snapshot; the link lets a member pick a different set. For
 existing participants, call this permission opt-in, never joining or rejoining.
-Never silently share health data that the message did not disclose, never include any other
-URL, and never repeatedly re-offer to someone who declined.
+Never silently share health data that the message did not disclose, never add
+offer text or another URL, and never repeatedly re-offer to someone who
+declined.
 
 If a member asks to be removed from the newsletter in the group chat, call
 `murph.group` with `action="revoke_own_email_share"`. That revokes only the

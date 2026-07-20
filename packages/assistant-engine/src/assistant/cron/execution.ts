@@ -715,11 +715,19 @@ export async function executeClaimedAssistantCronJob(
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
+          const notificationExecutionContext =
+            scopeAssistantCronScheduledGroupTools({
+              channel: claimedJob.target.channel,
+              executionContext: automationTurn.executionContext,
+              route: deliveryRoute,
+              routeAuthorityVerified: !maintenanceJob,
+            })
           const notificationInput: Parameters<
             typeof sendAssistantNotificationLocal
           >[0] = {
             vault: input.vault,
             ...automationTurn,
+            executionContext: notificationExecutionContext,
             // Replay barrier: once the provider was admitted, a yielded
             // maintenance turn may already have committed memory writes even
             // if the completed-command event never reached the buffered raw
@@ -816,9 +824,9 @@ export async function executeClaimedAssistantCronJob(
           }
           const result = automationTurn.scheduledInvocationAuthority
             && input.operationScope
-            && input.executionContext
+            && notificationExecutionContext
             ? await input.operationScope.runScheduledAutomationOccurrence({
-                executionContext: input.executionContext,
+                executionContext: notificationExecutionContext,
                 operation: async (executionContext, turnEnvironment) =>
                   await sendAssistantNotificationLocal({
                     ...notificationInput,
@@ -2059,6 +2067,61 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+function scopeAssistantCronScheduledGroupTools(input: {
+  channel: string | null
+  executionContext: AssistantExecutionContext | null | undefined
+  route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
+  routeAuthorityVerified: boolean
+}): AssistantExecutionContext | null | undefined {
+  const hosted = input.executionContext?.hosted
+  if (
+    !hosted ||
+    input.routeAuthorityVerified !== true ||
+    input.channel !== 'linq' ||
+    input.route.threadIsDirect !== false
+  ) {
+    return input.executionContext
+  }
+
+  const {
+    createScheduledGroupTools,
+    groupPermissionOfferTool: _unscopedGroupPermissionOfferTool,
+    groupSharedReader: _unscopedGroupSharedReader,
+    ...hostedWithoutScheduledGroupTools
+  } = hosted
+  void _unscopedGroupPermissionOfferTool
+  void _unscopedGroupSharedReader
+  const unscopedExecutionContext: AssistantExecutionContext = {
+    hosted: hostedWithoutScheduledGroupTools,
+  }
+  const target = normalizeNullableString(
+    input.route.bindingDelivery?.target ?? input.route.deliveryTarget,
+  )
+  if (!target || typeof createScheduledGroupTools !== 'function') {
+    return unscopedExecutionContext
+  }
+
+  let scheduledGroupTools: ReturnType<typeof createScheduledGroupTools>
+  try {
+    scheduledGroupTools = createScheduledGroupTools({
+      channel: 'linq',
+      target,
+      threadIsDirect: false,
+    })
+  } catch {
+    return unscopedExecutionContext
+  }
+  if (!scheduledGroupTools) {
+    return unscopedExecutionContext
+  }
+  return {
+    hosted: {
+      ...hostedWithoutScheduledGroupTools,
+      ...scheduledGroupTools,
+    },
+  }
 }
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {

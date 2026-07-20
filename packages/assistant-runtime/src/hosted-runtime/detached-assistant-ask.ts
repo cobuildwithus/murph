@@ -13,6 +13,9 @@ import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
+  AssistantHostedGroupSharedReader,
+} from "@murphai/assistant-engine";
+import type {
   HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -49,6 +52,7 @@ export interface HostedDetachedAssistantAskController {
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
   codexHome: string | null;
+  createGroupSharedReader?(): AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk?: (
     input: ReadOnlyAssistantAskInput,
@@ -100,6 +104,9 @@ export function createHostedDetachedAssistantAskController(
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
       codexHome: input.codexHome,
+      ...(input.createGroupSharedReader
+        ? { createGroupSharedReader: input.createGroupSharedReader }
+        : {}),
       env: input.env,
       executeAsk,
       executeConsentedAsk,
@@ -193,6 +200,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
   codexHome: string | null;
+  createGroupSharedReader?: () => AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk: (
     input: ReadOnlyAssistantAskInput,
@@ -256,6 +264,14 @@ async function runOneHostedDetachedAssistantAsk(input: {
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
+    if (input.abortSignal.aborted) {
+      await requeueHostedDetachedAssistantAsk({
+        claimed,
+        input,
+        nextAttemptAt: null,
+      });
+      return "settled";
+    }
     const executionInput = {
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
@@ -290,7 +306,12 @@ async function runOneHostedDetachedAssistantAsk(input: {
           "Joined group ask prepare returned unexpected disclosure context.",
         );
       }
-      answer = await input.executeAsk(executionInput);
+      answer = await input.executeAsk({
+        ...executionInput,
+        ...(input.createGroupSharedReader
+          ? { groupSharedReader: input.createGroupSharedReader() }
+          : {}),
+      });
     }
     const result = normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(
@@ -468,7 +489,7 @@ function normalizeHostedDetachedAssistantAskResult(
     return result;
   }
   return {
-    answer: result.answer ?? null,
+    answer: null,
     outcome: "cannot_answer",
   };
 }

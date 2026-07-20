@@ -143,7 +143,10 @@ function renderGroupJoin(input: {
       <div className="flex flex-col gap-3">
         <ClarityRow label="Shared" text="Your name, plus what you choose below." />
         <div className="h-px bg-border" />
-        <ClarityRow label="Private" text="Your chats, health data, and vault. Always." />
+        <ClarityRow
+          label="Private"
+          text="Your chats and vault. Anything you don't choose to share stays private."
+        />
       </div>
 
       <div

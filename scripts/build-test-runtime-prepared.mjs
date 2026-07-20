@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+const sharedHostMode = resolveSharedHostMode(process.env);
+process.env.MURPH_VERIFY_SHARED_HOST = sharedHostMode;
 
 if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
   const result = spawnSync(
@@ -34,7 +36,7 @@ if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
 }
 
 if (
-  process.env.MURPH_VERIFY_SHARED_HOST === "1" &&
+  sharedHostMode === "1" &&
   process.env.MURPH_VERIFY_HOST_SLOT_HELD !== "1"
 ) {
   const result = spawnSync(
@@ -59,6 +61,21 @@ if (
   }
 
   process.exit(result.status ?? 1);
+}
+
+function resolveSharedHostMode(env) {
+  const configured = env.MURPH_VERIFY_SHARED_HOST;
+  if (configured !== undefined) {
+    if (configured !== "0" && configured !== "1") {
+      throw new Error("MURPH_VERIFY_SHARED_HOST must be 0 or 1.");
+    }
+    return configured;
+  }
+
+  return !env.CI && typeof env.CODEX_THREAD_ID === "string"
+    && env.CODEX_THREAD_ID.trim().length > 0
+    ? "1"
+    : "0";
 }
 
 const cliSourceRoot = path.join(repoRoot, "packages/cli/src");

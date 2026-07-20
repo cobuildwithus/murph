@@ -123,7 +123,16 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MEMBER_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   isHostedRuntimeNewsletterAuthorizationProof,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
@@ -140,6 +149,10 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupMemberSummary,
+  type HostedRuntimeGroupSharedMember,
+  type HostedRuntimeGroupSharedProjection,
+  type HostedRuntimeGroupSharedReadResult,
+  type HostedRuntimeGroupSharedRecord,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -174,6 +187,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
   hostedVaultShareProjectionKindToScope,
+  parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
@@ -1052,6 +1066,28 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "read_shared") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqSenderHandles", "projectionScopes"]),
+      "Hosted runtime group tool read_shared request",
+    );
+    return {
+      action,
+      ...(record.linqSenderHandles === undefined
+          || record.linqSenderHandles === null
+        ? {}
+        : {
+            linqSenderHandles: parseHostedRuntimeGroupLinqSenderHandles(
+              record.linqSenderHandles,
+            ),
+          }),
+      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+        record.projectionScopes,
+        "Hosted runtime group tool read_shared request projectionScopes",
+      ),
+    };
+  }
   if (
     action === "read_current"
     || action === "list_memberships"
@@ -1346,6 +1382,50 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   };
 }
 
+function parseHostedRuntimeGroupLinqSenderHandles(value: unknown): string[] {
+  return parseHostedRuntimeGroupBoundedHandles(value, {
+    allowEmpty: false,
+    label: "Hosted runtime group tool read_shared request linqSenderHandles",
+  });
+}
+
+function parseHostedRuntimeGroupCurrentTurnHandles(
+  value: unknown,
+  label: string,
+): string[] {
+  return parseHostedRuntimeGroupBoundedHandles(value, {
+    allowEmpty: true,
+    label,
+  });
+}
+
+function parseHostedRuntimeGroupBoundedHandles(
+  value: unknown,
+  options: { allowEmpty: boolean; label: string },
+): string[] {
+  const { allowEmpty, label } = options;
+  const entries = requireArray(value, label);
+  if (
+    (!allowEmpty && entries.length === 0)
+    || entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new TypeError(
+      `${label} must contain between ${allowEmpty ? 0 : 1} and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const handles = entries.map((entry, index) =>
+    parseHostedRuntimeGroupAskBoundedText({
+      label: `${label}[${index}]`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+      value: entry,
+    })
+  );
+  if (new Set(handles).size !== handles.length) {
+    throw new TypeError(`${label} must contain unique entries.`);
+  }
+  return handles;
+}
+
 function parseHostedRuntimeGroupCreateJoinLinkRequest(
   value: unknown,
 ): HostedRuntimeGroupCreateJoinLinkRequest {
@@ -1404,6 +1484,349 @@ function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | nu
     if (value === kind) return kind;
   }
   throw new TypeError("Hosted runtime group tool create_join_link kind is not supported.");
+}
+
+interface ParsedHostedRuntimeGroupSharedRequestedScope {
+  projectionScope: HostedVaultShareSelectableProjectionScope;
+  projectionScopeKey: string;
+}
+
+function parseHostedRuntimeGroupSharedReadResult(
+  value: unknown,
+): HostedRuntimeGroupSharedReadResult {
+  const result = requireObject(
+    value,
+    "Hosted runtime group tool read_shared response result",
+  );
+  const status = requireString(
+    result.status,
+    "Hosted runtime group tool read_shared response status",
+  );
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      "Hosted runtime group tool read_shared unavailable response result",
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool read_shared unavailableReason",
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+        value: result.unavailableReason,
+      }),
+    };
+  }
+  if (status !== "ok" && status !== "none") {
+    throw new TypeError(
+      "Hosted runtime group tool read_shared response status is invalid.",
+    );
+  }
+
+  assertAllowedObjectKeys(
+    result,
+    new Set(["members", "requestedProjectionScopeKeys", "status"]),
+    `Hosted runtime group tool read_shared ${status} response result`,
+  );
+  const requestedScopes =
+    parseHostedRuntimeGroupSharedRequestedProjectionScopeKeys(
+      result.requestedProjectionScopeKeys,
+    );
+  const rawMembers = requireArray(
+    result.members,
+    "Hosted runtime group tool read_shared response members",
+  );
+  if (status === "none") {
+    if (rawMembers.length !== 0) {
+      throw new TypeError(
+        "Hosted runtime group tool read_shared none response members must be empty.",
+      );
+    }
+    return {
+      members: [],
+      requestedProjectionScopeKeys: requestedScopes.map(
+        ({ projectionScopeKey }) => projectionScopeKey,
+      ),
+      status,
+    };
+  }
+  if (rawMembers.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
+    throw new TypeError(
+      `Hosted runtime group tool read_shared response members must contain at most ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS} entries.`,
+    );
+  }
+
+  const seenMemberIds = new Set<string>();
+  const seenParticipantIds = new Set<string>();
+  const seenCurrentTurnHandles = new Set<string>();
+  const members = rawMembers.map((rawMember, index) => {
+    const member = parseHostedRuntimeGroupSharedMember(
+      rawMember,
+      requestedScopes,
+      index,
+    );
+    if (seenMemberIds.has(member.memberId)) {
+      throw new TypeError(
+        "Hosted runtime group tool read_shared response memberIds must be unique.",
+      );
+    }
+    seenMemberIds.add(member.memberId);
+    if (seenParticipantIds.has(member.participantId)) {
+      throw new TypeError(
+        "Hosted runtime group tool read_shared response participantIds must be unique.",
+      );
+    }
+    seenParticipantIds.add(member.participantId);
+    for (const handle of member.currentTurnHandles) {
+      if (seenCurrentTurnHandles.has(handle)) {
+        throw new TypeError(
+          "Hosted runtime group tool read_shared response currentTurnHandles must be unique across members.",
+        );
+      }
+      seenCurrentTurnHandles.add(handle);
+      if (
+        seenCurrentTurnHandles.size
+        > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+      ) {
+        throw new TypeError(
+          `Hosted runtime group tool read_shared response currentTurnHandles must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries across all members.`,
+        );
+      }
+    }
+    return member;
+  });
+
+  return {
+    members,
+    requestedProjectionScopeKeys: requestedScopes.map(
+      ({ projectionScopeKey }) => projectionScopeKey,
+    ),
+    status,
+  };
+}
+
+function parseHostedRuntimeGroupSharedRequestedProjectionScopeKeys(
+  value: unknown,
+): ParsedHostedRuntimeGroupSharedRequestedScope[] {
+  const label =
+    "Hosted runtime group tool read_shared response requestedProjectionScopeKeys";
+  const rawScopeKeys = requireArray(value, label);
+  if (
+    rawScopeKeys.length === 0
+    || rawScopeKeys.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
+  ) {
+    throw new TypeError(
+      `${label} must contain between 1 and ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} entries.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  return rawScopeKeys.map((rawScopeKey) => {
+    const projectionScopeKey = parseHostedRuntimeGroupAskBoundedText({
+      label: `${label} entry`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
+      value: rawScopeKey,
+    });
+    const projectionScope =
+      HOSTED_RUNTIME_GROUP_SHARED_SELECTABLE_PROJECTION_SCOPE_BY_KEY.get(
+        projectionScopeKey,
+      );
+    if (!projectionScope) {
+      throw new TypeError(`${label} contains an unsupported projection scope key.`);
+    }
+    if (seen.has(projectionScopeKey)) {
+      throw new TypeError(`${label} must not contain duplicates.`);
+    }
+    seen.add(projectionScopeKey);
+    return { projectionScope, projectionScopeKey };
+  });
+}
+
+function parseHostedRuntimeGroupSharedMember(
+  value: unknown,
+  requestedScopes: readonly ParsedHostedRuntimeGroupSharedRequestedScope[],
+  index: number,
+): HostedRuntimeGroupSharedMember {
+  const label = `Hosted runtime group tool read_shared response members[${index}]`;
+  const member = requireObject(value, label);
+  assertAllowedObjectKeys(
+    member,
+    new Set([
+      "currentTurnHandles",
+      "displayName",
+      "memberId",
+      "participantId",
+      "projections",
+    ]),
+    label,
+  );
+
+  const memberId = parseHostedRuntimeGroupAskBoundedText({
+    label: `${label}.memberId`,
+    maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_MEMBER_ID_MAX_CODE_POINTS,
+    value: member.memberId,
+  });
+  const participantId = parseHostedRuntimeGroupAskBoundedText({
+    label: `${label}.participantId`,
+    maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
+    value: member.participantId,
+  });
+  const displayName = member.displayName === null
+    ? null
+    : parseHostedRuntimeGroupAskBoundedText({
+        label: `${label}.displayName`,
+        maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
+        value: member.displayName,
+      });
+  const currentTurnHandles = parseHostedRuntimeGroupCurrentTurnHandles(
+    member.currentTurnHandles,
+    `${label}.currentTurnHandles`,
+  );
+  const rawProjections = requireArray(member.projections, `${label}.projections`);
+  if (rawProjections.length !== requestedScopes.length) {
+    throw new TypeError(
+      `${label}.projections must contain exactly the requested projection scopes.`,
+    );
+  }
+
+  const requestedScopeKeys = new Set(
+    requestedScopes.map(({ projectionScopeKey }) => projectionScopeKey),
+  );
+  const projectionByKey = new Map<string, HostedRuntimeGroupSharedProjection>();
+  for (const [projectionIndex, rawProjection] of rawProjections.entries()) {
+    const projection = parseHostedRuntimeGroupSharedProjection(
+      rawProjection,
+      `${label}.projections[${projectionIndex}]`,
+    );
+    if (!requestedScopeKeys.has(projection.projectionScopeKey)) {
+      throw new TypeError(
+        `${label}.projections contains a projection that was not requested.`,
+      );
+    }
+    if (projectionByKey.has(projection.projectionScopeKey)) {
+      throw new TypeError(
+        `${label}.projections must not contain duplicate projection scopes.`,
+      );
+    }
+    projectionByKey.set(projection.projectionScopeKey, projection);
+  }
+
+  const projections = requestedScopes.map(({ projectionScopeKey }) => {
+    const projection = projectionByKey.get(projectionScopeKey);
+    if (!projection) {
+      throw new TypeError(
+        `${label}.projections must contain exactly the requested projection scopes.`,
+      );
+    }
+    return projection;
+  });
+
+  return {
+    currentTurnHandles,
+    displayName,
+    memberId,
+    participantId,
+    projections,
+  };
+}
+
+function parseHostedRuntimeGroupSharedProjection(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupSharedProjection {
+  const projection = requireObject(value, label);
+  assertAllowedObjectKeys(
+    projection,
+    new Set([
+      "dataStatus",
+      "grantStatus",
+      "projectionScope",
+      "projectionScopeKey",
+      "records",
+    ]),
+    label,
+  );
+
+  const projectionScope = parseHostedRuntimeGroupSharedSelectableProjectionScope(
+    projection.projectionScope,
+    `${label}.projectionScope`,
+  );
+  const expectedProjectionScopeKey =
+    buildHostedVaultShareProjectionScopeKey(projectionScope);
+  const projectionScopeKey = parseHostedRuntimeGroupAskBoundedText({
+    label: `${label}.projectionScopeKey`,
+    maxCodePoints: HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
+    value: projection.projectionScopeKey,
+  });
+  if (projectionScopeKey !== expectedProjectionScopeKey) {
+    throw new TypeError(
+      `${label}.projectionScopeKey must match projectionScope.`,
+    );
+  }
+
+  const grantStatus = requireString(projection.grantStatus, `${label}.grantStatus`);
+  if (grantStatus !== "granted" && grantStatus !== "not_granted") {
+    throw new TypeError(`${label}.grantStatus is invalid.`);
+  }
+  const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
+  if (dataStatus !== "available" && dataStatus !== "missing") {
+    throw new TypeError(`${label}.dataStatus is invalid.`);
+  }
+
+  const rawRecords = requireArray(projection.records, `${label}.records`);
+  if (
+    rawRecords.length >
+      HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION
+  ) {
+    throw new TypeError(
+      `${label}.records must contain at most ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION} entries.`,
+    );
+  }
+  if (grantStatus === "not_granted" && dataStatus !== "missing") {
+    throw new TypeError(
+      `${label} not_granted projections must have missing data.`,
+    );
+  }
+  if (dataStatus === "available" && rawRecords.length === 0) {
+    throw new TypeError(
+      `${label} available projections must contain at least one record.`,
+    );
+  }
+  if (dataStatus === "missing" && rawRecords.length !== 0) {
+    throw new TypeError(`${label} missing projections must not contain records.`);
+  }
+
+  const seenRecordKeys = new Set<string>();
+  const records: HostedRuntimeGroupSharedRecord[] = rawRecords.map(
+    (rawRecord, recordIndex) => {
+      const recordLabel = `${label}.records[${recordIndex}]`;
+      const record = requireObject(rawRecord, recordLabel);
+      assertAllowedObjectKeys(
+        record,
+        new Set(["data", "occurredAt", "recordKey"]),
+        recordLabel,
+      );
+      const parsed = parseHostedVaultShareDeliveryRecord(record, projectionScope);
+      if (seenRecordKeys.has(parsed.recordKey)) {
+        throw new TypeError(`${label}.records must have unique recordKeys.`);
+      }
+      seenRecordKeys.add(parsed.recordKey);
+      return {
+        data: parsed.data,
+        occurredAt: parsed.occurredAt,
+        recordKey: parsed.recordKey,
+      };
+    },
+  );
+
+  return {
+    dataStatus,
+    grantStatus,
+    projectionScope,
+    projectionScopeKey,
+    records,
+  };
 }
 
 export function parseHostedRuntimeGroupToolResponse(
@@ -1605,6 +2028,13 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_shared") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupSharedReadResult(record.result),
+    };
   }
 
   if (action === "list_memberships") {
@@ -2323,6 +2753,66 @@ const HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES = Object.freeze([
   ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
 ] satisfies readonly HostedVaultShareProjectionScope[]);
 
+const HOSTED_RUNTIME_GROUP_SHARED_SELECTABLE_PROJECTION_SCOPE_BY_KEY =
+  new Map<string, HostedVaultShareSelectableProjectionScope>(
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((projectionScope) => [
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+      projectionScope,
+    ]),
+  );
+
+function parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+  value: unknown,
+  label: string,
+): HostedVaultShareSelectableProjectionScope[] {
+  const requested = requireArray(value, label);
+  if (
+    requested.length === 0
+    || requested.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
+  ) {
+    throw new TypeError(
+      `${label} must contain between 1 and ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} entries.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  return requested.map((entry, index) => {
+    const projectionScope = parseHostedRuntimeGroupSharedSelectableProjectionScope(
+      entry,
+      `${label}[${index}]`,
+    );
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    if (seen.has(projectionScopeKey)) {
+      throw new TypeError(`${label} must not contain duplicate projection scopes.`);
+    }
+    seen.add(projectionScopeKey);
+    return projectionScope;
+  });
+}
+
+function parseHostedRuntimeGroupSharedSelectableProjectionScope(
+  value: unknown,
+  label: string,
+): HostedVaultShareSelectableProjectionScope {
+  let parsed: HostedVaultShareProjectionScope;
+  try {
+    parsed = parseHostedVaultShareProjectionScope(value, label);
+  } catch (error) {
+    throw new TypeError(`${label} must be a supported selectable projection scope.`, {
+      cause: error,
+    });
+  }
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(parsed);
+  const canonical =
+    HOSTED_RUNTIME_GROUP_SHARED_SELECTABLE_PROJECTION_SCOPE_BY_KEY.get(
+      projectionScopeKey,
+    );
+  if (!canonical) {
+    throw new TypeError(`${label} must be a supported selectable projection scope.`);
+  }
+  return canonical;
+}
+
 function parseHostedRuntimeGroupSelectableProjectionScopes(
   value: unknown,
   legacyKindsValue: unknown,
@@ -2575,8 +3065,7 @@ function parseHostedRuntimeGroupSummary(value: unknown) {
 const HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES = 200;
 
 // Optional for deploy skew: a runner updated before web tolerates summaries
-// without a roster; the reverse order is rejected by the allowed-keys check
-// above, so Cloudflare deploys before web when this shape widens.
+// without a roster.
 function parseHostedRuntimeGroupMemberSummaries(
   value: unknown,
 ): HostedRuntimeGroupMemberSummary[] {

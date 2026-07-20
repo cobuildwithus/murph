@@ -1425,6 +1425,78 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
+  it('plans a scheduled turn with only lazy shared reads and permission offers', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const groupSharedRead = vi.fn(async () => ({
+      members: [] as const,
+      requestedProjectionScopeKeys: ['steps-days.v0'],
+      status: 'none' as const,
+    }))
+    const groupSharedReader = { request: groupSharedRead }
+    const groupPermissionOfferRequest = vi.fn(async () => ({
+      action: 'post_join_offer' as const,
+      result: {
+        group: null,
+        status: 'unavailable' as const,
+        unavailableReason: 'test_unavailable',
+      },
+    }))
+    const groupPermissionOfferTool = { request: groupPermissionOfferRequest }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      groupPermissionOfferTool,
+      groupSharedReader,
+      groupTool: null,
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          groupPermissionOfferTool,
+          groupSharedReader,
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        turnTrigger: 'automation-cron',
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-18',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    const groupTools = plan.dynamicTools.filter((tool) =>
+      tool.namespace === 'murph' && tool.name === 'group')
+    expect(groupTools).toHaveLength(1)
+    expect(groupTools[0]).toMatchObject({
+      inputSchema: {
+        properties: {
+          action: { enum: ['read_shared', 'post_join_offer'] },
+        },
+      },
+    })
+    expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
+    expect(groupSharedRead).not.toHaveBeenCalled()
+  })
+
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

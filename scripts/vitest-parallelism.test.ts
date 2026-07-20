@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createMurphPackageVitestConfig } from "../config/vitest-package.js";
-import { resolveMurphVitestMaxWorkers } from "../config/vitest-parallelism.js";
+import {
+  resolveMurphAppVitestMaxWorkers,
+  resolveMurphVitestMaxWorkers,
+} from "../config/vitest-parallelism.js";
 
 describe("Vitest worker budgeting", () => {
   const packageConfigUrl = new URL(
@@ -11,6 +14,22 @@ describe("Vitest worker budgeting", () => {
 
   it("uses the explicit worker override", () => {
     expect(resolveMurphVitestMaxWorkers({ MURPH_VITEST_MAX_WORKERS: "2" })).toBe("2");
+  });
+
+  it("uses one worker for Codex while preserving human and CI defaults", () => {
+    expect(resolveMurphVitestMaxWorkers({})).toBe("75%");
+    expect(resolveMurphAppVitestMaxWorkers({})).toBe("50%");
+    expect(resolveMurphVitestMaxWorkers({ CODEX_THREAD_ID: "thread" })).toBe("1");
+    expect(resolveMurphAppVitestMaxWorkers({ CODEX_THREAD_ID: "thread" })).toBe("1");
+    expect(resolveMurphVitestMaxWorkers({
+      CODEX_THREAD_ID: "thread",
+      MURPH_VERIFY_SHARED_HOST: "0",
+    })).toBe("75%");
+    expect(resolveMurphVitestMaxWorkers({ CI: "1", CODEX_THREAD_ID: "thread" })).toBe("50%");
+    expect(resolveMurphAppVitestMaxWorkers({ CI: "1", CODEX_THREAD_ID: "thread" })).toBe("25%");
+    expect(() => resolveMurphVitestMaxWorkers({
+      MURPH_VERIFY_SHARED_HOST: "true",
+    })).toThrow("must be 0 or 1");
   });
 
   it("wires the shared worker budget into package configs while preserving package overrides", () => {

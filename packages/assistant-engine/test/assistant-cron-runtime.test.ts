@@ -189,6 +189,7 @@ import {
   completeAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
+import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
@@ -6481,11 +6482,13 @@ describe('assistant cron runtime orchestration', () => {
       target: 'current-home-chat',
       threadIsDirect: true,
     })
+    const createScheduledGroupTools = vi.fn()
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
 
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
+          createScheduledGroupTools,
           memberId: 'member-linq-participant-authority',
           resolveScheduledLinqRoute,
           userEnvKeys: [],
@@ -6505,6 +6508,7 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'explicit',
       }),
     )
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'current-home-chat',
@@ -6546,9 +6550,13 @@ describe('assistant cron runtime orchestration', () => {
       title: 'Linq group authority reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
-      target: 'saved-group-chat',
-      threadIsDirect: false,
+    const sequence: string[] = []
+    const resolveScheduledLinqRoute = vi.fn(async () => {
+      sequence.push('route_authority')
+      return {
+        target: 'saved-group-chat',
+        threadIsDirect: false,
+      }
     })
     const groupTool = {
       request: vi.fn(async () => {
@@ -6581,14 +6589,54 @@ describe('assistant cron runtime orchestration', () => {
       operationScope,
       'runScheduledAutomationOccurrence',
     )
-    const result = await processDueAssistantCronJobsLocal({
-      executionContext: {
-        hosted: {
-          memberId: 'member-linq-group-authority',
-          resolveScheduledLinqRoute,
-          userEnvKeys: [],
+    type ScheduledGroupToolsFactory = NonNullable<
+      NonNullable<AssistantExecutionContext['hosted']>['createScheduledGroupTools']
+    >
+    const scheduledGroupTools: NonNullable<
+      ReturnType<ScheduledGroupToolsFactory>
+    > = {
+      groupPermissionOfferTool: {
+        async request() {
+          return {
+            action: 'post_join_offer',
+            result: {
+              group: null,
+              status: 'unavailable',
+              unavailableReason: 'synthetic_unavailable',
+            },
+          }
         },
       },
+      groupSharedReader: {
+        async request() {
+          return {
+            status: 'unavailable',
+            unavailableReason: 'synthetic_unavailable',
+          }
+        },
+      },
+    }
+    const createScheduledGroupTools: ScheduledGroupToolsFactory = vi.fn(() => {
+      sequence.push('scheduled_group_factory')
+      return scheduledGroupTools
+    })
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
+      sequence.push('notification_turn')
+      return {
+        response: 'Completed scheduled check-in.',
+        session: { sessionId: 'session-default' },
+      }
+    })
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        createScheduledGroupTools,
+        memberId: 'member-linq-group-authority',
+        resolveScheduledLinqRoute,
+        userEnvKeys: [],
+      },
+    }
+    const result = await processDueAssistantCronJobsLocal({
+      executionContext,
       limit: 1,
       operationScope,
       vault: vaultRoot,
@@ -6603,17 +6651,36 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'thread',
       }),
     )
+    expect(createScheduledGroupTools).toHaveBeenCalledWith({
+      channel: 'linq',
+      target: 'saved-group-chat',
+      threadIsDirect: false,
+    })
+    expect(sequence).toEqual([
+      'route_authority',
+      'scheduled_group_factory',
+      'notification_turn',
+    ])
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'saved-group-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
         executionContext: expect.objectContaining({
-          hosted: expect.objectContaining({ groupTool }),
+          hosted: expect.objectContaining({
+            ...scheduledGroupTools,
+            groupTool,
+          }),
         }),
         threadIsDirect: false,
       }),
     )
+    const notificationInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0]
+    expect(notificationInput?.executionContext).not.toBe(executionContext)
+    expect(notificationInput?.executionContext?.hosted?.createScheduledGroupTools)
+      .toBeUndefined()
+    expect(executionContext.hosted?.groupSharedReader).toBeUndefined()
+    expect(executionContext.hosted?.groupPermissionOfferTool).toBeUndefined()
   })
 
   it('records a retryable cron failure when Linq route authority fails before notification', async () => {
@@ -6629,6 +6696,7 @@ describe('assistant cron runtime orchestration', () => {
         { retryable: true },
       ),
     )
+    const createScheduledGroupTools = vi.fn()
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-authority-failure',
       continuityPolicy: 'fresh',
@@ -6677,6 +6745,7 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
+          createScheduledGroupTools,
           memberId: 'member-linq-authority-failure',
           resolveScheduledLinqRoute,
           userEnvKeys: [],
@@ -6705,6 +6774,7 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'explicit',
       }),
     )
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
       reclaimStaleRunningClaims: false,

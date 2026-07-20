@@ -868,6 +868,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260716160000_hosted_usage_credits",
       "20260716190000_linq_signup_welcome_reservation",
       "20260716220000_hosted_growth_snapshot_message_counts",
+      "20260718090000_hosted_vault_share_projection_snapshot",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(

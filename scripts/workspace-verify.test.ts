@@ -92,7 +92,104 @@ resolve_package_coverage_concurrency_default
     expect(workspaceVerify).toContain("generate_health_commons_artifacts_with_retry");
   });
 
+  it("keeps scoped diff verification out of the heavyweight host lane", () => {
+    const artifactRouting = extractWorkspaceVerifyFunction(
+      "command_requires_workspace_artifact_lock",
+    );
+    const hostRouting = extractWorkspaceVerifyFunction(
+      "command_requires_host_verification_slot",
+    );
+
+    expect(artifactRouting).toContain('"test:diff"');
+    expect(hostRouting).not.toContain('"test:diff"');
+    expect(hostRouting).toContain('"verify:acceptance"');
+    expect(hostRouting).toContain('"test:apps"');
+  });
+
+  it("caps scoped Codex diff verification without changing human defaults", () => {
+    const resolveTypecheckDefault = extractWorkspaceVerifyFunction(
+      "resolve_typecheck_workspace_concurrency_default",
+    );
+    const resolveVitestDefault = extractWorkspaceVerifyFunction(
+      "resolve_test_diff_vitest_max_workers_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+local_concurrency_default() { printf '8\\n'; }
+local_worker_budget_default() { printf '4\\n'; }
+
+${resolveTypecheckDefault}
+${resolveVitestDefault}
+
+CI=
+shared_host_mode=1
+verification_command=test:diff
+test_diff_workspace_concurrency=1
+resolve_typecheck_workspace_concurrency_default
+resolve_test_diff_vitest_max_workers_default
+
+shared_host_mode=0
+resolve_typecheck_workspace_concurrency_default
+resolve_test_diff_vitest_max_workers_default
+
+CI=1
+resolve_typecheck_workspace_concurrency_default
+resolve_test_diff_vitest_max_workers_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("1\n1\n8\n4\n2\n50%\n");
+  });
+
+  it("passes the scoped worker budget to every repo-tools diff route", () => {
+    const resolveVitestDefault = extractWorkspaceVerifyFunction(
+      "resolve_test_diff_vitest_max_workers_default",
+    );
+    const runRepoTools = extractWorkspaceVerifyFunction(
+      "run_test_diff_repo_tools_tests",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+local_worker_budget_default() { printf '4\\n'; }
+pnpm() {
+  printf 'workers=%s command=%s\\n' "\${MURPH_VITEST_MAX_WORKERS:-}" "$*"
+}
+
+${resolveVitestDefault}
+${runRepoTools}
+
+CI=
+CODEX_THREAD_ID=test-thread
+shared_host_mode=1
+test_diff_workspace_concurrency=1
+test_diff_vitest_max_workers="$(resolve_test_diff_vitest_max_workers_default)"
+run_test_diff_repo_tools_tests
+
+MURPH_VERIFY_SHARED_HOST=0
+shared_host_mode="$MURPH_VERIFY_SHARED_HOST"
+test_diff_workspace_concurrency=4
+test_diff_vitest_max_workers="$(resolve_test_diff_vitest_max_workers_default)"
+run_test_diff_repo_tools_tests
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "workers=1 command=test:repo-tools\nworkers=4 command=test:repo-tools\n",
+    );
+    expect(
+      workspaceVerify.match(
+        /run_timed_step "Repo tools tests" run_test_diff_repo_tools_tests/gu,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("acquires checkout artifact locks before shared-host admission", () => {
+    const webVerify = readFileSync(
+      path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
+      "utf8",
+    );
     const cloudflareVerify = readFileSync(
       path.join(repoRoot, "apps", "cloudflare", "scripts", "verify-fast.sh"),
       "utf8",
@@ -106,6 +203,12 @@ resolve_package_coverage_concurrency_default
       [
         "workspace verification",
         workspaceVerify,
+        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
+        'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
+      ],
+      [
+        "Web verification",
+        webVerify,
         'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
@@ -128,12 +231,50 @@ resolve_package_coverage_concurrency_default
       expect(hostIndex, `${label} host slot`).toBeGreaterThan(artifactIndex);
     }
 
+    for (const source of [webVerify, cloudflareVerify]) {
+      expect(source).toContain('-n "${CODEX_THREAD_ID:-}"');
+      expect(source).toContain('export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"');
+      expect(source).toContain('[[ "$shared_host_mode" == "1"');
+    }
+    expect(preparedRuntimeBuild).toContain(
+      "const sharedHostMode = resolveSharedHostMode(process.env)",
+    );
+    expect(preparedRuntimeBuild).toContain(
+      "process.env.MURPH_VERIFY_SHARED_HOST = sharedHostMode",
+    );
+
     const rootPackage = JSON.parse(
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
     const benchmarkScript = rootPackage.scripts["benchmark:typescript"];
     expect(benchmarkScript.indexOf("run-with-workspace-artifact-lock.mjs"))
       .toBeLessThan(benchmarkScript.indexOf("run-with-host-verification-slot.mjs"));
+
+    for (const scriptName of [
+      "build:workspace:clean",
+      "build:workspace:incremental",
+      "build:test-runtime",
+    ]) {
+      const script = rootPackage.scripts[scriptName];
+      expect(script).toContain("run-with-host-verification-slot.mjs");
+      expect(script.indexOf("run-with-host-verification-slot.mjs"))
+        .toBeLessThan(script.indexOf("packages/importers build"));
+    }
+
+    const cloudflareWorkersConfig = readFileSync(
+      path.join(repoRoot, "apps", "cloudflare", "vitest.workers.config.ts"),
+      "utf8",
+    );
+    expect(cloudflareWorkersConfig).toContain(
+      "maxWorkers: resolveMurphAppVitestMaxWorkers()",
+    );
+    const repoToolsConfig = readFileSync(
+      path.join(repoRoot, "scripts", "vitest.config.ts"),
+      "utf8",
+    );
+    expect(repoToolsConfig).toContain(
+      "maxWorkers: resolveMurphVitestMaxWorkers()",
+    );
   });
 
   it("sets only the matching app typecheck reuse flag", () => {
@@ -239,6 +380,7 @@ fi
             MURPH_APP_VERIFY_PARALLEL: "1",
             MURPH_VERIFY_RETRY_COUNT: "0",
             MURPH_VERIFY_TEST_EVENT_LOG: eventLogPath,
+            MURPH_VERIFY_HOST_SLOT_HELD: "1",
             MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
             PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },

@@ -279,9 +279,11 @@ runtime and the exact `:workspace_roots`, no writes, explicit denial of
 `.runtime/**`, environment files and operational paths, no other workspace or
 operator-home access, no tool network, and approval policy `never`.
 
-The child receives no hosted dynamic tools or invocation-scoped automation or
-device authority, signing material, memories, plugins, MCP servers, apps, web
-search, or multi-agent capability. Project config and instruction discovery are
+The child's only hosted dynamic tool is the consent-aware lazy
+`murph.group/read_shared` read. It receives no mutation, delivery,
+invocation-scoped automation, device-control authority, signing material,
+memories, plugins, MCP servers, apps, web search, or multi-agent capability.
+Project config and instruction discovery are
 disabled, so a target workspace `.codex/config.toml`, hook, or skill cannot
 expand behavior. Set
 `shell_environment_policy.inherit = "none"` with only a tiny benign allowlist;

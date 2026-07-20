@@ -202,21 +202,6 @@ landing; record the chosen posture here so the decision is reviewable.
   months. Snapshot/restore cost remains negligible at the projected steady
   state, so no rotation or compaction seam is planned.
 
-- `derived/vault-share/projections.json`
-  (`murph.shared-vault-projections.v1`) is the destination-side materialization
-  for consented HostedVaultShare records. It is one compact JSON document per
-  workspace, not one file per shared record. Each grantor/projection entry keeps
-  only the latest `HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS` records, and a
-  `vault-share.revoke` mailbox wake removes the grantor/projection entry when
-  permission is revoked. If the final entry is removed, the compact document is
-  deleted. Group join grants also cap active grantors per destination/projection
-  through `HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION`, so the
-  single-file read/write cost is bounded on the growing destination side. This
-  derived path is included in hosted workspace snapshots while keeping `raw/`
-  reserved for immutable imported originals. The file count stays hard-bounded
-  at one file for the shared projection family and keeps normal import work
-  bounded despite delivery retries or night count.
-
 - `derived/captures/generated-image-lookups.json`
   (`murph.capture-lookup.v1`) is a compact derived index for generated-image
   retry identity. It is included in hosted workspace snapshots because replay
