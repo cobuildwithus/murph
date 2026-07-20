@@ -92,6 +92,9 @@ export type HostedVaultShareActivitySelectorProjectionKind =
   | HostedVaultShareActivityMinutesProjectionKind
   | HostedVaultShareActivitySessionCountProjectionKind;
 
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND =
+  "device-sync-status.v0" as const;
+
 const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ALIAS_GROUPS = [
   ["walk", "walking"],
   ["run", "running"],
@@ -176,6 +179,7 @@ export interface HostedVaultShareActivitySessionCountProjectionSpec {
 }
 
 export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   "group-email.v0",
   "profile-name.v0",
   "sleep-times.v0",
@@ -218,6 +222,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "vo2-max-days.v0",
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export type HostedVaultShareSelectableProjectionKind =
@@ -278,9 +283,11 @@ export type HostedVaultShareSelectableProjectionScope =
 
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
   Object.freeze([
-    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map((projectionKind) => ({
-      projectionKind,
-    })),
+    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS
+      .filter((projectionKind) =>
+        projectionKind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+      )
+      .map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS.map((activityKind) => ({
       projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
       selector: { activityKind },
@@ -293,6 +300,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
       projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
       selector: { activityKind },
     })),
+    { projectionKind: HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND },
   ] satisfies HostedVaultShareSelectableProjectionScope[]);
 
 export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
@@ -427,11 +435,31 @@ export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
+export type HostedVaultShareDeviceSyncSourceStatus =
+  | "connected"
+  | "disconnected"
+  | "needs-attention"
+  | "needs-reconnect"
+  | "setting-up";
+
+export interface HostedVaultShareDeviceSyncSource {
+  connectionSyncJobCompletedAt: string | null;
+  label: string;
+  status: HostedVaultShareDeviceSyncSourceStatus;
+  statusObservedAt: string;
+}
+
+export interface HostedVaultShareDeviceSyncStatusData {
+  observedAt: string;
+  sources: HostedVaultShareDeviceSyncSource[];
+}
+
 export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareActivityMinutesDayData
   | HostedVaultShareActivityDistanceDayData
   | HostedVaultShareActivitySessionCountDayData
   | HostedVaultShareDailyMetricData
+  | HostedVaultShareDeviceSyncStatusData
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
   | HostedVaultShareSleepTimesData
@@ -805,26 +833,6 @@ export function getHostedVaultShareActivitySessionCountProjectionSpec(
   };
 }
 
-/**
- * Delivery dedupe separates logical record identity from revision identity: recordKey is
- * the stable destination replacement key, while recordRevision is the stable hash of the
- * validated payload that lets corrected facts append without duplicating exact retries.
- */
-export function buildHostedVaultShareDeliveryDedupeKey(input: {
-  recordKey: string;
-  recordRevision: string;
-  shareId: string;
-}): string {
-  return `vault-share:${input.shareId}:${input.recordKey}:${input.recordRevision}`;
-}
-
-export function buildHostedVaultShareRevokeDedupeKey(input: {
-  revokedAt: string;
-  shareId: string;
-}): string {
-  return `vault-share-revoke:${input.shareId}:${input.revokedAt}`;
-}
-
 export function parseHostedVaultShareDeliveryRecord(
   value: unknown,
   projectionScope: HostedVaultShareProjectionScope,
@@ -913,6 +921,8 @@ function parseHostedVaultShareDeliveryRecordData(
   }
 
   switch (context.projectionKind) {
+    case HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND:
+      return parseHostedVaultShareDeviceSyncStatusData(value, context);
     case "heart-rate-zones-days.v0":
       return parseHostedVaultShareHeartRateZoneDayData(value, context);
     case "profile-name.v0":
@@ -930,6 +940,140 @@ function parseHostedVaultShareDeliveryRecordData(
 
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH = 120;
+
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY =
+  "device-sync-status";
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES = 8;
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH = 80;
+const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+function parseHostedVaultShareDeviceSyncStatusData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareDeviceSyncStatusData {
+  const data = requireObject(value, "Vault share device-sync-status data");
+  assertObjectKeys(
+    data,
+    "Vault share device-sync-status data",
+    ["observedAt", "sources"],
+  );
+
+  if (context.recordKey !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY) {
+    throw new TypeError(
+      'Vault share device-sync-status recordKey must be "device-sync-status".',
+    );
+  }
+
+  const observedAt = requireHostedVaultShareNonFutureTimestamp(
+    data.observedAt,
+    "Vault share device-sync-status data observedAt",
+  );
+  if (
+    observedAt !== context.occurredAt
+    || !/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u.test(observedAt)
+  ) {
+    throw new TypeError(
+      "Vault share device-sync-status observedAt and occurredAt must equal the UTC day bucket.",
+    );
+  }
+
+  const rawSources = requireArray(
+    data.sources,
+    "Vault share device-sync-status data sources",
+  );
+  if (rawSources.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES) {
+    throw new TypeError(
+      `Vault share device-sync-status sources must contain at most ${HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES} entries.`,
+    );
+  }
+
+  const seenLabels = new Set<string>();
+  const sources = rawSources.map((source, index) => {
+    const parsed = parseHostedVaultShareDeviceSyncSource(source, index);
+    const normalizedLabel = parsed.label.toLocaleLowerCase("en-US");
+    if (seenLabels.has(normalizedLabel)) {
+      throw new TypeError(
+        "Vault share device-sync-status source labels must be unique.",
+      );
+    }
+    seenLabels.add(normalizedLabel);
+    return parsed;
+  });
+
+  return { observedAt, sources };
+}
+
+function parseHostedVaultShareDeviceSyncSource(
+  value: unknown,
+  index: number,
+): HostedVaultShareDeviceSyncSource {
+  const label = `Vault share device-sync-status sources[${index}]`;
+  const source = requireObject(value, label);
+  assertObjectKeys(
+    source,
+    label,
+    ["connectionSyncJobCompletedAt", "label", "status", "statusObservedAt"],
+  );
+  if (!Object.prototype.hasOwnProperty.call(source, "connectionSyncJobCompletedAt")) {
+    throw new TypeError(`${label} connectionSyncJobCompletedAt must be a timestamp or null.`);
+  }
+
+  const publicLabel = parseHostedVaultShareBoundedText(
+    source.label,
+    `${label} label`,
+    HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH,
+  );
+  if (publicLabel.toLocaleLowerCase("en-US") === "junction") {
+    throw new TypeError(`${label} label must identify the public health source.`);
+  }
+
+  const status = requireString(source.status, `${label} status`);
+  if (!isHostedVaultShareDeviceSyncSourceStatus(status)) {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+
+  const statusObservedAt = requireHostedVaultShareNonFutureTimestamp(
+    source.statusObservedAt,
+    `${label} statusObservedAt`,
+  );
+  const connectionSyncJobCompletedAt = source.connectionSyncJobCompletedAt === null
+    ? null
+    : requireHostedVaultShareNonFutureTimestamp(
+        source.connectionSyncJobCompletedAt,
+        `${label} connectionSyncJobCompletedAt`,
+      );
+
+  return {
+    connectionSyncJobCompletedAt,
+    label: publicLabel,
+    status,
+    statusObservedAt,
+  };
+}
+
+function isHostedVaultShareDeviceSyncSourceStatus(
+  value: string,
+): value is HostedVaultShareDeviceSyncSourceStatus {
+  return value === "connected"
+    || value === "disconnected"
+    || value === "needs-attention"
+    || value === "needs-reconnect"
+    || value === "setting-up";
+}
+
+function requireHostedVaultShareNonFutureTimestamp(
+  value: unknown,
+  label: string,
+): string {
+  const timestamp = requireIsoTimestamp(value, label);
+  if (
+    Date.parse(timestamp)
+    > Date.now() + HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_FUTURE_SKEW_MS
+  ) {
+    throw new TypeError(`${label} must not be in the future.`);
+  }
+  return timestamp;
+}
 
 function parseHostedVaultShareProfileNameData(
   value: unknown,
@@ -1390,11 +1534,12 @@ export function parseHostedVaultShareDeliverRequest(
     "Vault share deliver request",
   );
   const projectionKind = projectionScope.projectionKind;
-  const records = requireArray(request.records, "Vault share deliver request records");
-
-  if (records.length === 0) {
-    throw new TypeError("Vault share deliver request records must not be empty.");
+  if (projectionKind === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND) {
+    throw new TypeError(
+      "Vault share deliver request does not accept device-sync-status.v0 because Web reads it live.",
+    );
   }
+  const records = requireArray(request.records, "Vault share deliver request records");
 
   if (records.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
     throw new TypeError(
@@ -1568,387 +1713,4 @@ function requireIsoTimestamp(value: unknown, label: string): string {
   }
 
   return text;
-}
-
-/**
- * Destination-side landing store for consented vault-share deliveries. The runtime
- * importer (`vault-share-import.ts`) is the sole writer; this section owns the pure,
- * fs-free contract shared by that writer and any reader: the schema seam, the store
- * shape, the read-only parser, and the member-major pivot the group-chat reader
- * consumes. Keeping it here (next to the delivery-record parser it reuses) means the
- * writer and the `vault-cli group shared` reader can never drift on the shape.
- */
-export const SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA =
-  "murph.shared-vault-projections.v1";
-
-/** Relative path of the landing store inside a destination member's vault. */
-export const SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH =
-  "derived/vault-share/projections.json";
-
-/** Projection kind whose landed record carries a member's display name. */
-export const HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND =
-  "profile-name.v0" satisfies HostedVaultShareProjectionKind;
-
-export interface SharedVaultShareRecordEntry {
-  receivedEventId: string;
-  record: HostedVaultShareDeliveryRecord;
-  schema: typeof HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA;
-  shareId: string;
-}
-
-export interface SharedVaultShareGrantorEntry {
-  grantorMemberId: string;
-  projectionKind: HostedVaultShareProjectionKind;
-  projectionScope: HostedVaultShareProjectionScope;
-  projectionScopeKey: string;
-  records: SharedVaultShareRecordEntry[];
-  shareId: string;
-  updatedAt: string;
-}
-
-export interface SharedVaultShareProjectionEntry {
-  grantors: Record<string, SharedVaultShareGrantorEntry>;
-  projectionScope: HostedVaultShareProjectionScope;
-  projectionScopeKey: string;
-}
-
-export interface SharedVaultShareProjectionsFile {
-  projections: Record<string, SharedVaultShareProjectionEntry>;
-  schema: typeof SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA;
-  updatedAt: string;
-}
-
-export function createEmptySharedVaultShareProjectionStore(): SharedVaultShareProjectionsFile {
-  return {
-    projections: {},
-    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
-    updatedAt: "1970-01-01T00:00:00.000Z",
-  };
-}
-
-/**
- * Newest-first ordering for a grantor's landed records: occurredAt desc, then recordKey,
- * then receivedEventId. The importer's upsert and the reader's pivot both use it so a
- * grantor's records order identically no matter which side touched them last.
- */
-export function compareSharedVaultShareRecords(
-  left: SharedVaultShareRecordEntry,
-  right: SharedVaultShareRecordEntry,
-): number {
-  return (
-    right.record.occurredAt.localeCompare(left.record.occurredAt)
-    || right.record.recordKey.localeCompare(left.record.recordKey)
-    || right.receivedEventId.localeCompare(left.receivedEventId)
-  );
-}
-
-/**
- * Read-only, tolerant parse of the landed store JSON. Returns null on any structural
- * mismatch so callers can decide their own recovery (the importer repairs; the reader
- * reports unavailable). Never throws, never mutates.
- */
-export function parseSharedVaultShareProjectionStore(
-  value: unknown,
-): SharedVaultShareProjectionsFile | null {
-  if (!isSharedVaultSharePlainRecord(value)) {
-    return null;
-  }
-  if (value.schema !== SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA) {
-    return null;
-  }
-  if (typeof value.updatedAt !== "string") {
-    return null;
-  }
-  if (!isSharedVaultSharePlainRecord(value.projections)) {
-    return null;
-  }
-
-  const projections: Record<string, SharedVaultShareProjectionEntry> = {};
-  for (const [projectionScopeKey, projectionValue] of Object.entries(value.projections)) {
-    const projection = parseSharedVaultShareProjection(
-      projectionValue,
-      projectionScopeKey,
-    );
-    if (!projection) {
-      return null;
-    }
-    projections[projection.projectionScopeKey] = projection;
-  }
-
-  return {
-    projections,
-    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
-    updatedAt: value.updatedAt,
-  };
-}
-
-function parseSharedVaultShareProjection(
-  value: unknown,
-  projectionScopeKey: string,
-): SharedVaultShareProjectionEntry | null {
-  if (!isSharedVaultSharePlainRecord(value) || !isSharedVaultSharePlainRecord(value.grantors)) {
-    return null;
-  }
-
-  const projectionScope = readSharedVaultShareProjectionScope(
-    value.projectionScope,
-    projectionScopeKey,
-  );
-  if (!projectionScope) {
-    return null;
-  }
-  const canonicalScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
-  if (canonicalScopeKey !== projectionScopeKey) {
-    return null;
-  }
-
-  const grantors: Record<string, SharedVaultShareGrantorEntry> = {};
-  for (const [grantorMemberId, grantorValue] of Object.entries(value.grantors)) {
-    const grantor = parseSharedVaultShareGrantor(grantorValue, projectionScope);
-    if (!grantor || grantor.grantorMemberId !== grantorMemberId) {
-      return null;
-    }
-    grantors[grantorMemberId] = grantor;
-  }
-
-  return { grantors, projectionScope, projectionScopeKey };
-}
-
-function readSharedVaultShareProjectionScope(
-  value: unknown,
-  projectionScopeKey: string,
-): HostedVaultShareProjectionScope | null {
-  if (value !== undefined) {
-    try {
-      return parseHostedVaultShareProjectionScope(
-        value,
-        "Shared vault-share projection scope",
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  if (isHostedVaultShareProjectionKind(projectionScopeKey)) {
-    try {
-      return hostedVaultShareProjectionKindToScope(
-        parseHostedVaultShareFixedProjectionKind(
-          projectionScopeKey,
-          "Shared vault-share projection scope key",
-        ),
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
-function parseSharedVaultShareGrantor(
-  value: unknown,
-  projectionScope: HostedVaultShareProjectionScope,
-): SharedVaultShareGrantorEntry | null {
-  if (!isSharedVaultSharePlainRecord(value)) {
-    return null;
-  }
-  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
-  if (
-    typeof value.grantorMemberId !== "string"
-    || value.projectionKind !== projectionScope.projectionKind
-    || (
-      value.projectionScopeKey !== undefined
-      && value.projectionScopeKey !== projectionScopeKey
-    )
-    || typeof value.shareId !== "string"
-    || typeof value.updatedAt !== "string"
-    || !Array.isArray(value.records)
-  ) {
-    return null;
-  }
-
-  const records: SharedVaultShareRecordEntry[] = [];
-  for (const record of value.records) {
-    const parsed = parseSharedVaultShareRecordEntry(record, projectionScope);
-    if (!parsed) {
-      return null;
-    }
-    records.push(parsed);
-  }
-
-  return {
-    grantorMemberId: value.grantorMemberId,
-    projectionKind: projectionScope.projectionKind,
-    projectionScope,
-    projectionScopeKey,
-    records: records
-      .sort(compareSharedVaultShareRecords)
-      .slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS),
-    shareId: value.shareId,
-    updatedAt: value.updatedAt,
-  };
-}
-
-function parseSharedVaultShareRecordEntry(
-  value: unknown,
-  projectionScope: HostedVaultShareProjectionScope,
-): SharedVaultShareRecordEntry | null {
-  if (!isSharedVaultSharePlainRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.receivedEventId !== "string"
-    || value.schema !== HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA
-    || typeof value.shareId !== "string"
-  ) {
-    return null;
-  }
-
-  try {
-    return {
-      receivedEventId: value.receivedEventId,
-      record: parseHostedVaultShareDeliveryRecord(value.record, projectionScope),
-      schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-      shareId: value.shareId,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export interface SharedGroupMemberShareView {
-  projectionKind: HostedVaultShareProjectionKind;
-  projectionScope: HostedVaultShareProjectionScope;
-  projectionScopeKey: string;
-  records: HostedVaultShareDeliveryRecord[];
-}
-
-/**
- * One group member's consented data as landed in this destination vault: the member's
- * shared display name (null until their `profile-name.v0` record has arrived) plus the
- * records they granted, grouped by projection kind. The `profile-name.v0` projection is
- * consumed as the name join here, never surfaced as a data share.
- */
-export interface SharedGroupMemberView {
-  displayName: string | null;
-  memberId: string;
-  shares: SharedGroupMemberShareView[];
-}
-
-/**
- * Pure kind-major -> member-major pivot over the landed store: the reader-facing shape.
- * Members are ordered named-first (by display name), then unnamed by member id, and each
- * member's shares follow the projection-kind registry order, so the same store always
- * renders the same view.
- */
-export function flattenSharedVaultShareProjectionStore(
-  store: SharedVaultShareProjectionsFile,
-): SharedGroupMemberView[] {
-  const memberIds = new Set<string>();
-  const projectionScopeKeys = orderedSharedVaultShareProjectionScopeKeys(store);
-  for (const projectionScopeKey of projectionScopeKeys) {
-    const projection = store.projections[projectionScopeKey];
-    if (!projection) {
-      continue;
-    }
-    for (const grantorMemberId of Object.keys(projection.grantors)) {
-      memberIds.add(grantorMemberId);
-    }
-  }
-
-  const views: SharedGroupMemberView[] = [];
-  for (const memberId of memberIds) {
-    const shares: SharedGroupMemberShareView[] = [];
-    for (const projectionScopeKey of projectionScopeKeys) {
-      const projection = store.projections[projectionScopeKey];
-      if (!projection) {
-        continue;
-      }
-      const projectionKind = projection.projectionScope.projectionKind;
-      if (projectionKind === HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND) {
-        continue;
-      }
-      const grantor = projection.grantors[memberId];
-      if (!grantor || grantor.records.length === 0) {
-        continue;
-      }
-      shares.push({
-        projectionKind,
-        projectionScope: projection.projectionScope,
-        projectionScopeKey,
-        records: [...grantor.records]
-          .sort(compareSharedVaultShareRecords)
-          .map((entry) => entry.record),
-      });
-    }
-    views.push({
-      displayName: readSharedVaultShareProfileDisplayName(store, memberId),
-      memberId,
-      shares,
-    });
-  }
-
-  return views.sort(compareSharedGroupMemberViews);
-}
-
-function orderedSharedVaultShareProjectionScopeKeys(
-  store: SharedVaultShareProjectionsFile,
-): string[] {
-  const preferredCandidates = [
-    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) =>
-      buildHostedVaultShareProjectionScopeKey({ projectionKind })
-    ),
-    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
-      buildHostedVaultShareProjectionScopeKey(scope)
-    ),
-  ];
-  const preferred: string[] = [];
-  for (const scopeKey of preferredCandidates) {
-    if (!preferred.includes(scopeKey)) {
-      preferred.push(scopeKey);
-    }
-  }
-  const preferredSet = new Set(preferred);
-  return [
-    ...preferred.filter((scopeKey) => store.projections[scopeKey] !== undefined),
-    ...Object.keys(store.projections)
-      .filter((scopeKey) => !preferredSet.has(scopeKey))
-      .sort((left, right) => left.localeCompare(right)),
-  ];
-}
-
-function readSharedVaultShareProfileDisplayName(
-  store: SharedVaultShareProjectionsFile,
-  memberId: string,
-): string | null {
-  const grantor =
-    store.projections[HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND]?.grantors[memberId];
-  const data = grantor?.records[0]?.record.data;
-  if (data && "displayName" in data && typeof data.displayName === "string") {
-    return data.displayName;
-  }
-  return null;
-}
-
-function compareSharedGroupMemberViews(
-  left: SharedGroupMemberView,
-  right: SharedGroupMemberView,
-): number {
-  if (left.displayName && right.displayName) {
-    return (
-      left.displayName.localeCompare(right.displayName)
-      || left.memberId.localeCompare(right.memberId)
-    );
-  }
-  if (left.displayName) {
-    return -1;
-  }
-  if (right.displayName) {
-    return 1;
-  }
-  return left.memberId.localeCompare(right.memberId);
-}
-
-function isSharedVaultSharePlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

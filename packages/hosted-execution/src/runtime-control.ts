@@ -29,11 +29,13 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
-import type {
-  HostedVaultShareProjectionKind,
-  HostedVaultShareProjectionScope,
-  HostedVaultShareSelectableProjectionKind,
-  HostedVaultShareSelectableProjectionScope,
+import {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
+  type HostedVaultShareSelectableProjectionKind,
+  type HostedVaultShareSelectableProjectionScope,
 } from "./vault-share.ts";
 
 export const HOSTED_MAILBOX_LANES = [
@@ -877,6 +879,7 @@ export type HostedRuntimeAssistantAskControlResponse =
 
 export type HostedRuntimeGroupToolAction =
   | "ask"
+  | "read_shared"
   | "read_current"
   | "list_memberships"
   | "leave_membership"
@@ -903,6 +906,8 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
+  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
@@ -949,8 +954,10 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Model-authored natural group-chat message with server-filled
-  // {{share_scope}} and {{join_url}} placeholders.
+  // Legacy wire compatibility only. Current Web ignores this field and owns
+  // the canonical copy. The runtime supplies one fixed value so older Web can
+  // substitute already-known scopes; model input can never set it. Remove the
+  // field after the consumer-first Web rollout sets the Cloudflare rollback floor.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
@@ -984,11 +991,68 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+export const HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS = 512;
+// JSON can escape one code point to six bytes. One KiB covers the fixed
+// request envelope, projection scopes, quotes, and commas.
+export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
+  + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+    * HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+    * 6;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES = 3;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION =
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_MEMBER_ID_MAX_CODE_POINTS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
+export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   hasOwnMurph: boolean;
 }
+
+export interface HostedRuntimeGroupSharedReadRequest {
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+}
+
+export type HostedRuntimeGroupSharedRecord = Pick<
+  HostedVaultShareDeliveryRecord,
+  "data" | "occurredAt" | "recordKey"
+>;
+
+export interface HostedRuntimeGroupSharedProjection {
+  dataStatus: "available" | "missing";
+  grantStatus: "granted" | "not_granted";
+  projectionScope: HostedVaultShareSelectableProjectionScope;
+  projectionScopeKey: string;
+  records: readonly HostedRuntimeGroupSharedRecord[];
+}
+
+export interface HostedRuntimeGroupSharedMember {
+  currentTurnHandles: readonly string[];
+  displayName: string | null;
+  memberId: string;
+  participantId: string;
+  projections: readonly HostedRuntimeGroupSharedProjection[];
+}
+
+export type HostedRuntimeGroupSharedReadResult =
+  | {
+      members: readonly HostedRuntimeGroupSharedMember[];
+      requestedProjectionScopeKeys: readonly string[];
+      status: "ok";
+    }
+  | {
+      members: readonly [];
+      requestedProjectionScopeKeys: readonly string[];
+      status: "none";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
 
 export type HostedRuntimeGroupToolRequest =
   | {
@@ -999,6 +1063,11 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | { action: "read_current" }
+  | ({
+      action: "read_shared";
+      /** Current-turn Linq sender evidence injected by the hosted runtime. */
+      linqSenderHandles?: readonly string[];
+    } & HostedRuntimeGroupSharedReadRequest)
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }
   | {
@@ -1045,6 +1114,10 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_shared";
+      result: HostedRuntimeGroupSharedReadResult;
     }
   | {
       action: "list_memberships";

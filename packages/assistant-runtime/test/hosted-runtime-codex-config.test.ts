@@ -225,7 +225,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(
     config,
     new RegExp(
-      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime" = "deny"\n"\.codex" = "deny"\n"\*\*/\.env" = "deny"\n"\*\*/\.env\.\*" = "deny"`,
+      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime" = "deny"\n"\.codex" = "deny"\n"vault-share" = "deny"\n"derived/vault-share" = "deny"\n"\*\*/\.env" = "deny"\n"\*\*/\.env\.\*" = "deny"`,
       "u",
     ),
   );
@@ -1400,6 +1400,8 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"." = "read"',
       '".runtime" = "deny"',
       '".codex" = "deny"',
+      '"vault-share" = "deny"',
+      '"derived/vault-share" = "deny"',
       '"**/.env" = "deny"',
       '"**/.env.*" = "deny"',
       "",

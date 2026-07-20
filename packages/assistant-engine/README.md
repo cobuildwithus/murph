@@ -76,8 +76,9 @@ roots, working directory, empty instruction sources, and approval policy before
 the turn starts. The profile permits read-only access to the exact target roots
 while denying `.runtime/**`, `.codex/**`, environment files, writes, other
 workspaces, and tool network. Model-run shell commands inherit no provider
-credential or hosted secret. The child receives no dynamic tools, delivery
-route, MCP, web search, memory, plugin, app, or multi-agent authority.
+credential or hosted secret. The child's only dynamic tool is the consent-aware
+lazy `murph.group/read_shared` read. It receives no mutation or delivery route,
+MCP, web search, memory, plugin, app, or multi-agent authority.
 
 The runtime may keep one such child beside foreground work. It owns the exact
 process handle and must interrupt, await with bounded grace, terminate only

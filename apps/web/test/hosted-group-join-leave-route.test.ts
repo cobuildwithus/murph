@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   leaveHostedGroupMemberTx: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -20,10 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
-}));
-
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -48,14 +43,7 @@ describe("hosted group join-page leave route", () => {
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true }),
     );
-    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
-      kind: "left",
-      vaultShareCleanupSignals: [{
-        mailboxItemId: "mailbox_cleanup_1",
-        memberId: "member_group_runtime",
-      }],
-    });
-    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({ kind: "left" });
   });
 
   it("leaves the session member and exposes only the terminal status", async () => {
@@ -72,31 +60,19 @@ describe("hosted group join-page leave route", () => {
       now: expect.any(Date),
       tx: { tx: true },
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_group_runtime",
-      mailboxItemId: "mailbox_cleanup_1",
-    });
   });
 
-  it("returns an idempotent already-left result without signaling", async () => {
-    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
-      kind: "already_left",
-      vaultShareCleanupSignals: [],
-    });
+  it("returns an idempotent already-left result", async () => {
+    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({ kind: "already_left" });
 
     const response = await route.POST(createLeaveRequest(), createRouteContext());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: "already_left" });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("maps a missing group to the same safe invalid-link error", async () => {
-    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
-      kind: "group_not_found",
-      vaultShareCleanupSignals: [],
-    });
+    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({ kind: "group_not_found" });
 
     const response = await route.POST(createLeaveRequest(), createRouteContext());
 
@@ -108,14 +84,10 @@ describe("hosted group join-page leave route", () => {
         retryable: false,
       },
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects the group owner without exposing group state", async () => {
-    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
-      kind: "owner_cannot_leave",
-      vaultShareCleanupSignals: [],
-    });
+    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({ kind: "owner_cannot_leave" });
 
     const response = await route.POST(createLeaveRequest(), createRouteContext());
 
@@ -127,7 +99,6 @@ describe("hosted group join-page leave route", () => {
         retryable: false,
       },
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("fails before session or database access when the mutation origin is invalid", async () => {
@@ -159,22 +130,6 @@ describe("hosted group join-page leave route", () => {
     expect(response.status).toBe(401);
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
-  });
-
-  it("keeps a committed leave successful when cleanup signaling stalls", async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
-
-      const responsePromise = route.POST(createLeaveRequest(), createRouteContext());
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      const response = await responsePromise;
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true, status: "left" });
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

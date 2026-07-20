@@ -21,6 +21,9 @@ import {
   executeCodexAppServerTurn,
 } from './assistant-codex.js'
 import {
+  MURPH_GROUP_SHARED_READ_TOOL,
+} from './assistant-codex/dynamic-tools.js'
+import {
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from './assistant-skill-env.js'
@@ -30,6 +33,12 @@ import {
 import type {
   AssistantProviderServiceTier,
 } from './assistant/providers/types.js'
+import type {
+  AssistantHostedGroupSharedReader,
+} from './assistant/execution-context.js'
+import type {
+  AssistantHostedToolContext,
+} from './assistant/hosted-tool-context.js'
 
 const READ_ONLY_ASSISTANT_ASK_MAX_QUESTION_CODE_POINTS = 1_200
 const READ_ONLY_ASSISTANT_ASK_MAX_ANSWER_CODE_POINTS = 4_000
@@ -103,6 +112,7 @@ export interface ReadOnlyAssistantAskInput {
   codexHome?: string | null
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  groupSharedReader?: AssistantHostedGroupSharedReader | null
   model?: string | null
   modelProvider?: string | null
   now?: Date
@@ -153,9 +163,12 @@ export async function executeReadOnlyAssistantAsk(
       developerInstructions: normalizeNullableString(
         input.developerInstructions,
       ),
-      dynamicTools: [],
+      dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
       env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
       ephemeral: true,
+      hostedToolContext: createReadOnlyAssistantAskHostedToolContext(
+        input.groupSharedReader ?? null,
+      ),
       model: input.model,
       modelProvider: input.modelProvider,
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
@@ -178,6 +191,22 @@ export async function executeReadOnlyAssistantAsk(
       force: true,
       recursive: true,
     })
+  }
+}
+
+function createReadOnlyAssistantAskHostedToolContext(
+  groupSharedReader: AssistantHostedGroupSharedReader | null,
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    groupSharedReader,
+    groupTool: null,
+    sendVaultFile: async () => {
+      throw new Error('Vault-file sending is unavailable for read-only group ask.')
+    },
+    vaultFileSendAvailable: false,
   }
 }
 

@@ -17,6 +17,7 @@ import {
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   type HostedVaultShareActivityDistanceProjectionSpec,
@@ -123,9 +124,9 @@ export interface HostedVaultShareProjectionOfferResult {
  * member's own vault. The web control plane is the sole authority on whether shares exist;
  * this step holds no share state.
  *
- * Never throws — a projection failure must never affect the runtime's primary work — and
- * sends nothing for a kind the vault cannot project, so members without that data make
- * no delivery call for it at all.
+ * Never throws — a projection failure must never affect the runtime's primary work. For
+ * a projectable scope, an empty read still replaces the Web-owned snapshot so records
+ * that disappeared from the member vault cannot remain visible as current data.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
   vaultRoot: string;
@@ -154,11 +155,15 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
   const context: HostedVaultShareProjectionReadContext = {};
 
   for (const projectionScope of projectionScopes) {
+    const readRecords = resolveProjectableRecordReader(projectionScope);
+    if (!readRecords) {
+      continue;
+    }
     outcomes.push(await offerHostedVaultShareScopeBestEffort({
       context,
       port,
       projectionScope,
-      readRecords: resolveProjectableRecordReader(projectionScope),
+      readRecords,
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -190,10 +195,6 @@ async function offerHostedVaultShareScopeBestEffort(input: {
       vaultRoot: input.vaultRoot,
     });
 
-    if (records.length === 0) {
-      return "no-projectable-records";
-    }
-
     const response = await input.port.deliver({
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
@@ -208,11 +209,13 @@ async function offerHostedVaultShareScopeBestEffort(input: {
 
 function resolveProjectableRecordReader(
   projectionScope: HostedVaultShareProjectionScope,
-): ProjectableRecordReader {
+): ProjectableRecordReader | null {
   const projectionKind = projectionScope.projectionKind;
   switch (projectionKind) {
+    case HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND:
+      return null;
     case "group-email.v0":
-      return async () => [];
+      return null;
     case "heart-rate-zones-days.v0":
       return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot);
     case "profile-name.v0":
@@ -244,7 +247,7 @@ function resolveProjectableRecordReader(
       if (spec) {
         return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec);
       }
-      return async () => [];
+      return null;
     }
   }
 }

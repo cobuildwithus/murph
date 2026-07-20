@@ -1609,7 +1609,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
-  test("uses Linq route account lookup and group directness for assistant conversation identity", async () => {
+  test("uses Linq route account, sender actor, and group directness for assistant conversation identity", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-group-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1683,6 +1683,10 @@ describe("hosted mailbox conversation import adapter", () => {
       identifierBlind,
       contactLookupKey,
     );
+    const expectedActorId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "+15551110000",
+    );
     const expectedThreadId = hashHostedAssistantConversationIdentifier(
       identifierBlind,
       "chat_group_identity",
@@ -1690,6 +1694,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.equal(event.conversation?.accountId, expectedAccountId);
     assert.notEqual(event.conversation?.accountId, unexpectedSenderAccountId);
+    assert.equal(event.conversation?.actorId, expectedActorId);
     assert.equal(event.conversation?.source, "linq");
     assert.equal(event.conversation?.threadId, expectedThreadId);
     assert.equal(event.conversation?.threadIsDirect, false);

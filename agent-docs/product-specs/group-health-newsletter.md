@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-16
+Last verified: 2026-07-18
 Status: Implemented
 
 ## Current State
@@ -9,7 +9,7 @@ A member of a Murph group chat (family, friend group, couple, household, team) w
 
 The newsletter is delivered as **one shared email thread** that the whole group is on, so members can reply-all and banter, and Murph takes part in the thread the way it does in the group chat.
 
-This is a thin feature over primitives that already exist. Group chats are already hosted runtimes with their own vault; members can share selected health metrics into that vault through disclosed grants; recurring scheduled sends already exist as automations; and outbound email already ships through the Cloudflare `HOSTED_EMAIL` send binding. The newsletter is a **new consumer** of these primitives plus one new reusable consent grant.
+This is a thin feature over primitives that already exist. Group chats are already hosted runtimes with their own vault; members can grant the group access to exact selected health scopes; recurring scheduled sends already exist as automations; and outbound email already ships through the Cloudflare `HOSTED_EMAIL` send binding. Web keeps each bounded health snapshot encrypted on its existing grant row and resolves shared data only when the scheduled model invokes newsletter preparation. The newsletter is a **new consumer** of these primitives plus one new reusable consent grant.
 
 ## Product Boundary
 
@@ -18,7 +18,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 - It is one **cron automation living in the group runtime's own vault**, authored the same way reminders are.
 - It **reuses** the Cloudflare outbound email path. It does not introduce a parallel Resend broadcast sender (Resend stays for web transactional mail only).
 - It sends **one shared email to the whole group** (a thread everyone is on), not a personalized email per member. Members reply-all; Murph participates in the thread.
-- It **reads health data that members explicitly share** into the group vault through the disclosed reaction offer or the join page. It does not infer newsletter health access from private 1:1 Murph data.
+- It **reads only health data that members explicitly share** through the disclosed reaction offer or the join page. Newsletter `prepare` performs the consent-aware Web read after the model invokes the tool; no shared snapshot or destination-local share store is written into the group vault. It does not infer newsletter health access from private 1:1 Murph data.
 - Email addresses are **shared with the group by explicit grant** and are visible to co-members in the thread's `To` line — that visibility is the point of a shared reply-all thread and is exactly what the grant authorizes. Addresses are **not persisted in the group vault**; they are resolved web-side at send time and placed only in the outbound email headers.
 
 ## Locked Decisions (2026-07-07)
@@ -42,7 +42,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Permission offers | Lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. Liking opts into the disclosed snapshot and grants membership only when needed; the link is the fine-tune path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
-| Projection retention | Each vault-share delivery can carry **the 7 most recent records per projection kind**, matching count-based receiver retention. |
+| Projection retention | Each Web-owned encrypted health snapshot can carry **the 7 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. |
 
 ## Canonical Objects
 
@@ -88,22 +88,25 @@ featured   = recipients ∩ members with a consented current weekly health stat
 
 The single shared email is sent to all **recipients** (`To`: all recipient
 addresses). Its body uses health data only from the **featured** members plus
-eligible group comparisons. The trusted web-side newsletter `prepare` call
+eligible group comparisons. The trusted Web-side newsletter `prepare` call
 returns member ids, email eligibility, and an address-free snapshot of each
 member's current data grants as exact projection-scope/share-id pairs, plus a
 SHA-256 proof of the complete private participant snapshot, including a hashed
-verified-email lookup identity that is never shown to the model. Trusted
-assistant code loads the same generic group weekly projection and vault timezone
-used by `vault-cli group weekly` **before** the final web authorization request.
-That final web resolution derives group binding, membership, active access,
-verified-email identity, and every grant from one late repeatable-read database
-snapshot. After it returns, assistant code synchronously filters the
-already-loaded projection by the exact live pairs and serializes current-week
-facts only for email-eligible members. This ordering remains safe while
-asynchronous revoke cleanup is still in flight: a stale local record's old
-share id no longer matches the final canonical grant result. The model never
-performs the authorization join and receives neither the grant snapshot nor its
-proof.
+verified-email lookup identity that is never shown to the model.
+
+This preparation starts only after the model invokes
+`murph.newsletter action="prepare"`. Trusted assistant code then requests the
+email-eligible health scopes through the direct Web shared-data reader. Each
+read captures the current roster and exact active grants, decrypts the bounded
+Web-owned snapshots on those grant rows, and derives device connection status
+live only when `device-sync-status.v0` is currently granted. The runtime uses
+the group vault timezone to turn the returned records into current-week facts
+and exposes only email-eligible results to the model. No roster, grant,
+snapshot, device, filesystem, projection, or Web/network read occurs before the
+model turn starts, and no shared-data copy lands in the destination workspace.
+Revocation clears its encrypted snapshot in the same Web authority transaction;
+the read path does not depend on asynchronous cleanup. The model never performs
+the authorization join and receives neither the grant snapshot nor its proof.
 
 Authorized newsletter cron turns keep the normal group conversation thread,
 native resume behavior, and shell/tool access. The automation instructions tell
@@ -150,19 +153,19 @@ returns addresses only when its proof matches.
 
 ### Data source
 
-Whatever the member consented to share with the group, no more. The generic
-`vault-cli group shared` command reads the landed
-`murph.shared-vault-projections.v1` records. `vault-cli group weekly` turns the
-same records into per-member current-week summaries with
-`buildSharedGroupWeeklyMembers` (`packages/query/src/group-weekly.ts`), which
-reuses the canonical overview weekly-stat calculation. Scheduled runs pass their
-exact occurrence to that reader, which uses the group vault timezone, so retries
-keep the same calendar week. Projection delivery carries up to seven
-records per projection kind so one delivery can refill a full weekly window
-after a quiet member runtime. Seven retained records cannot also prove a
-complete prior calendar week, so the generic result deliberately omits prior-
-week averages and deltas. One shared body; everyone on the thread sees the same
-digest.
+Whatever the member consented to share with the group, no more. After the model
+invokes newsletter `prepare`, trusted runtime code requests the eligible exact
+scopes through the direct Web shared-data reader. Web resolves current active
+grants, decrypts their bounded encrypted snapshots, and returns the complete
+member/scope result; an explicitly consented device status is derived live
+rather than stored in a snapshot. `buildSharedGroupWeeklyMembers`
+(`packages/query/src/group-weekly.ts`) turns available records into per-member
+current-week summaries with the canonical overview weekly-stat calculation.
+The scheduled occurrence and group vault timezone keep retries on the same
+calendar week. Each encrypted health snapshot carries up to seven records per
+projection kind. Seven records cannot also prove a complete prior calendar
+week, so the result deliberately omits prior-week averages and deltas. One
+shared body; everyone on the thread sees the same digest.
 
 Default content is a selective weekly story, not one repeated metric block per
 featured member. Lead with the strongest close race, leader, surprising
@@ -175,7 +178,7 @@ context-dependent measures mainly for group-level patterns unless the group
 explicitly chose that challenge metric.
 
 Express durations in human units. Use "about 30 minutes of movement a day"
-instead of raw minute totals. The `group weekly` `activity-minutes` stream is
+instead of raw minute totals. The weekly summary's `activity-minutes` stream is
 broad movement per observed day. The separate `workout-minutes` stream is
 exercise averaged over recorded workout days. Neither payload has a coverage
 count or weekly total, so never multiply an average into a weekly sum. The
@@ -230,7 +233,7 @@ already auto-routes headless-vs-Privy-modal).
 
 ## Opt-out
 
-Individual and self-service. A member says "take me off the newsletter" **in the group chat**; Murph maps the authenticated sender (Linq `senderHandle`) to their member id and revokes **only that member's own** `group-email.v0` grant via `revokeHostedVaultSharesWithCleanupTx`. An **email-thread reply cannot revoke**: the email `From` header is unauthenticated and spoofable, so email-sourced opt-out fails closed and Murph instead directs the member to the group chat or settings. For the same reason, an email-thread reply may converse and read current group context but cannot create, edit, import, pause, or reactivate automations or mutate group join links/offers, display name, avatar, or contact-card state; those controls require the authenticated group chat. Revoking removes them from the thread and from being featured, while their challenge/health-sharing (a separate grant) stays intact. Opt-out is **forward-only** — editions already delivered are already in inboxes.
+Individual and self-service. A member says "take me off the newsletter" **in the group chat**; Murph maps the authenticated sender (Linq `senderHandle`) to their member id and calls `murph.group action="revoke_own_email_share"`, which revokes **only that member's own** `group-email.v0` grant. An **email-thread reply cannot revoke**: the email `From` header is unauthenticated and spoofable, so email-sourced opt-out fails closed and Murph instead directs the member to the group chat or settings. For the same reason, an email-thread reply may converse and read current group context but cannot create, edit, import, pause, or reactivate automations or mutate group join links/offers, display name, avatar, or contact-card state; those controls require the authenticated group chat. Revoking removes them from the thread and from being featured, while their challenge/health-sharing (a separate grant) stays intact. Opt-out is **forward-only** — editions already delivered are already in inboxes.
 
 ## Security & Abuse
 
@@ -243,8 +246,8 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 - **Newsletter composition boundary.** Scheduled newsletter composition keeps
   the normal group conversation and tools, while its instructions restrict the
   edition's health facts to `prepare.result.members`. The runtime filters that
-  result by current email eligibility and exact live data-grant ids resolved
-  after local projection/timezone loading. Send requires a matching
+  result by current email eligibility and exact active grants resolved by the
+  model-triggered direct Web read. Send requires a matching
   same-occurrence preparation and carries its address-free proof to the final
   web callback, which rechecks the complete authorization snapshot before
   provider entry, so
@@ -275,13 +278,13 @@ the automation and grants.
 
 1. `group-email.v0` grant kind + join-policy display + disclosed newsletter reaction-share scope + "shared with the group" consent copy.
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
-3. Generic `vault-cli group shared` and `vault-cli group weekly` readers over
-   `murph.shared-vault-projections.v1`, backed by one Node store loader shared
-   with destination-side ingestion and the newsletter send guard. The reusable
-   current-week summary builder lives in `packages/query`; both the CLI and the
-   trusted newsletter preparation path call it.
+3. A direct, model-triggered Web shared-data reader over exact active grants,
+   bounded encrypted grant-row snapshots, and live explicitly consented device
+   status. The reusable current-week summary builder lives in `packages/query`;
+   trusted newsletter preparation calls it without destination-local share
+   state.
 4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
-5. Latest-7-record vault-share projection delivery for weekly newsletter stats, still bounded by existing per-kind receiver retention.
+5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest seven records per projection kind.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
 Everything else is reuse: scheduling, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.

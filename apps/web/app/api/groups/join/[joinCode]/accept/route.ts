@@ -19,10 +19,7 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import {
-  signalHostedMailboxAppendRuntime,
-  signalHostedRuntimeMaintenanceRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -70,11 +67,7 @@ export const POST = withJsonError(async (
     selectedVaultShareProjectionScopes,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  const {
-    joinConfirmationSignal,
-    vaultShareCleanupSignals,
-    ...responseResult
-  } = result;
+  const { joinConfirmationSignal, ...responseResult } = result;
 
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
   if (joinConfirmationSignal) {
@@ -112,31 +105,8 @@ export const POST = withJsonError(async (
       signal: request.signal,
     });
   }
-  await signalMailboxAppendRuntimesBestEffort({
-    deadlineMs: postCommitDeadlineMs,
-    signal: request.signal,
-    signals: vaultShareCleanupSignals,
-  });
-
   return jsonOk({ ok: true, ...responseResult });
 });
-
-async function signalMailboxAppendRuntimesBestEffort(input: {
-  deadlineMs: number;
-  signal?: AbortSignal;
-  signals: readonly { mailboxItemId: string; memberId: string }[];
-}): Promise<void> {
-  await Promise.all(input.signals.map((mailboxSignal) =>
-    runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: input.deadlineMs,
-      operation: () => signalHostedMailboxAppendRuntime({
-        expectedUserId: mailboxSignal.memberId,
-        mailboxItemId: mailboxSignal.mailboxItemId,
-      }),
-      signal: input.signal,
-    })
-  ));
-}
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;

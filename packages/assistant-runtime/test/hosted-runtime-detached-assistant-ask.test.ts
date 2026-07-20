@@ -208,6 +208,64 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
+  test("starts the detached model with a fresh lazy reader and no eager shared-data read", async () => {
+    const vaultRoot = await createVaultRoot();
+    const sharedRead = vi.fn(async () => ({
+      members: [] as const,
+      requestedProjectionScopeKeys: ["steps-days.v0"],
+      status: "none" as const,
+    }));
+    const groupSharedReader = { request: sharedRead };
+    const createGroupSharedReader = vi.fn(() => groupSharedReader);
+    const executeAsk = vi.fn(async (input) => {
+      assert.equal(input.groupSharedReader, groupSharedReader);
+      assert.equal(sharedRead.mock.calls.length, 0);
+      return { answer: "answer", outcome: "answered" as const };
+    });
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_authority", itemId: "item_authority" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            return {
+              action: "prepare",
+              question: "question with optional shared context",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        createGroupSharedReader,
+        env: {},
+        executeAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      assert.equal(createGroupSharedReader.mock.calls.length, 0);
+      assert.equal(sharedRead.mock.calls.length, 0);
+      controller.kick();
+      await waitUntil(async () => {
+        const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+        assert.equal(pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+      assert.equal(createGroupSharedReader.mock.calls.length, 1);
+      assert.equal(executeAsk.mock.calls.length, 1);
+      assert.equal(sharedRead.mock.calls.length, 0);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
   test("suppresses a sending wake and aborts, awaits, then requeues the exact ask", async () => {
     const vaultRoot = await createVaultRoot();
     const askStarted = createDeferred<void>();

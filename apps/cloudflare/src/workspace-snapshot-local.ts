@@ -38,6 +38,12 @@ const HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES = 20_000;
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_FAILURE_MARKER =
   Symbol("hosted.workspace-snapshot.process-failure");
 const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_SCAN_LIMIT_BYTES = 8192;
+// Direct Web reads supersede these cross-member copies. Drop legacy bytes while
+// extracting instead of scanning or deleting the foreground workspace later.
+const HOSTED_WORKSPACE_SNAPSHOT_LEGACY_SHARED_PROJECTION_ARCHIVE_PATHS = [
+  "./vault/derived/vault-share",
+  "./vault/vault-share",
+] as const;
 
 export const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABELS = [
   "tar",
@@ -472,6 +478,9 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
       restoreRoot,
       "--no-same-owner",
       "--no-same-permissions",
+      ...HOSTED_WORKSPACE_SNAPSHOT_LEGACY_SHARED_PROJECTION_ARCHIVE_PATHS.map(
+        (archivePath) => `--exclude=${archivePath}`,
+      ),
       "-xf",
       "-",
     ], {

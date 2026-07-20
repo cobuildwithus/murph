@@ -4,6 +4,9 @@ import {
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import type {
+  AssistantHostedGroupSharedReader,
+} from "@murphai/assistant-engine";
+import type {
   HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -36,6 +39,7 @@ export interface HostedDetachedAssistantAskController {
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
   codexHome: string | null;
+  createGroupSharedReader?(): AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk?: (
     input: ReadOnlyAssistantAskInput,
@@ -74,6 +78,9 @@ export function createHostedDetachedAssistantAskController(
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
       codexHome: input.codexHome,
+      ...(input.createGroupSharedReader
+        ? { createGroupSharedReader: input.createGroupSharedReader }
+        : {}),
       env: input.env,
       executeAsk,
       now,
@@ -159,6 +166,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
   codexHome: string | null;
+  createGroupSharedReader?: () => AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
   executeAsk: (
     input: ReadOnlyAssistantAskInput,
@@ -210,10 +218,21 @@ async function runOneHostedDetachedAssistantAsk(input: {
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
+    if (input.abortSignal.aborted) {
+      await requeueHostedDetachedAssistantAsk({
+        claimed,
+        input,
+        nextAttemptAt: null,
+      });
+      return "settled";
+    }
     const answer = await input.executeAsk({
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
       env: { ...input.env },
+      ...(input.createGroupSharedReader
+        ? { groupSharedReader: input.createGroupSharedReader() }
+        : {}),
       now: new Date(input.now()),
       question: prepared.question,
       workspaceRoot: input.vaultRoot,

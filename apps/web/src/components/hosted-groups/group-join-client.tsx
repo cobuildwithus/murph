@@ -190,7 +190,7 @@ export function GroupJoinAcceptForm(props: {
                 <label
                   key={permission.projectionScopeKey}
                   className={cn(
-                    "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors",
+                    "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                     checked
                       ? "border-primary bg-primary/[0.06]"
                       : "border-border bg-card hover:border-primary/40",
