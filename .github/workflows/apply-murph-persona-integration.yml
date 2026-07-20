@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: agent/murph-personas
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Detect a settled integration head
         id: settled
@@ -59,8 +59,12 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          echo "event head: ${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "checked out: $(git rev-parse HEAD)"
+          git hash-object scripts/apply-murph-persona-integration.mjs.gz.b64
           base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
+          sed -n '138,150p' /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs \
             2>&1 | tee /tmp/murph-persona-integration.log
 
@@ -73,7 +77,11 @@ jobs:
           {
             echo "### Persona integration codemod failed"
             echo
+            echo "Checked-out head: \`$(git rev-parse HEAD)\`"
+            echo "Codemod blob: \`$(git hash-object scripts/apply-murph-persona-integration.mjs.gz.b64)\`"
+            echo
             echo '```text'
+            sed -n '138,150p' /tmp/apply-murph-persona-integration.mjs
             tail -n 180 /tmp/murph-persona-integration.log
             echo '```'
             echo
