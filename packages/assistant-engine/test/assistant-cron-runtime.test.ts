@@ -7157,7 +7157,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('does not derive group-read authority from a local Linq routing hint', async () => {
+  it('keeps a support-tagged group task fail-closed in local execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -7184,10 +7184,29 @@ describe('assistant cron runtime orchestration', () => {
       scheduledTask: { kind: 'group_health_update' },
       slug: 'local-linq-group-authority-reminder',
       status: 'active',
+      supportKind: 'check_in',
       summary: null,
-      tags: ['assistant', 'scheduled'],
+      tags: [
+        'assistant',
+        'scheduled',
+        'system:support-series:habit:reg_group_walk',
+      ],
       title: 'Local Linq group authority reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext: {
+        kind: 'habit',
+        regimen: {
+          regimenId: 'reg_group_walk',
+          status: 'active',
+          title: 'Group walk',
+        },
+        regimenId: 'reg_group_walk',
+        supportKind: 'check_in',
+        supportSeriesId: 'habit:reg_group_walk',
+      },
     })
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
     const result = await executeClaimedAssistantCronJob({
@@ -7202,6 +7221,7 @@ describe('assistant cron runtime orchestration', () => {
       reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       status: 'failed',
     })
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
@@ -7417,7 +7437,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
-  it('fails when the hosted group route changes between shared read and delivery', async () => {
+  it('keeps support-plan ownership independent from hosted group route authority', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -7444,10 +7464,29 @@ describe('assistant cron runtime orchestration', () => {
       scheduledTask: { kind: 'group_health_update' },
       slug: 'linq-group-route-race-reminder',
       status: 'active',
+      supportKind: 'check_in',
       summary: null,
-      tags: ['assistant', 'scheduled'],
+      tags: [
+        'assistant',
+        'scheduled',
+        'system:support-series:habit:reg_group_walk',
+      ],
       title: 'Linq group route race reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext: {
+        kind: 'habit',
+        regimen: {
+          regimenId: 'reg_group_walk',
+          status: 'active',
+          title: 'Group walk',
+        },
+        regimenId: 'reg_group_walk',
+        supportKind: 'check_in',
+        supportSeriesId: 'habit:reg_group_walk',
+      },
     })
     const resolveScheduledLinqRoute = vi.fn()
       .mockResolvedValueOnce({
@@ -7476,6 +7515,17 @@ describe('assistant cron runtime orchestration', () => {
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
       input: AssistantNotificationInput,
     ) => {
+      expect(input.instructions).toContain(
+        '"supportSeriesId":"habit:reg_group_walk"',
+      )
+      expect(input.scheduledTaskAuthority).toEqual({
+        automationId: 'automation-linq-group-route-race',
+        expectedUpdatedAt: '2026-04-08T08:00:00.000Z',
+        kind: 'group_health_update',
+      })
+      expect(input.assertScheduledGroupRouteCurrent).toEqual(
+        expect.any(Function),
+      )
       await input.assertScheduledGroupRouteCurrent?.()
       await input.beforeDelivery?.(commitContext)
       deliveryCompleted = true
@@ -7508,6 +7558,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.runErrorCode).toBe(
       'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
     )
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledOnce()
     expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(3)
     expect(deliveryCompleted).toBe(false)
   })

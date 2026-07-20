@@ -795,15 +795,18 @@ export async function executeClaimedAssistantCronJob(
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
-          // The trusted parent has already supplied the exact plan snapshot.
-          // Withhold every model-selectable scheduled read for this turn; the
-          // delivery and commit callbacks below still recheck the live owner.
-          const turnScheduledTaskAuthority = preparedPlanSupportContext
-            ? { kind: 'none' } as const
-            : scheduledTaskAuthority
+          // The trusted parent has already supplied the exact plan snapshot,
+          // so a generic notification must not offer a second model-selectable
+          // plan read. Independent typed task and audience authority remains
+          // available to the model and to the parent-side freshness barriers.
+          const modelScheduledTaskAuthority =
+            preparedPlanSupportContext &&
+              scheduledTaskAuthority.kind === 'generic_notification'
+              ? { kind: 'none' } as const
+              : scheduledTaskAuthority
           if (
             assistantScheduledTaskAuthorityUsesGroupRoute(
-              turnScheduledTaskAuthority,
+              scheduledTaskAuthority,
             ) &&
             (
               assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
@@ -818,7 +821,7 @@ export async function executeClaimedAssistantCronJob(
           }
           const assertScheduledGroupRouteCurrent =
             assistantScheduledTaskAuthorityUsesGroupRoute(
-                turnScheduledTaskAuthority,
+                scheduledTaskAuthority,
               )
               ? async () => {
                   const currentRoute =
@@ -846,7 +849,7 @@ export async function executeClaimedAssistantCronJob(
             deliveryDispatchMode,
             executionContext: input.executionContext,
             scheduledOccurrenceAt: occurrenceAt,
-            scheduledTaskAuthority: turnScheduledTaskAuthority,
+            scheduledTaskAuthority: modelScheduledTaskAuthority,
             serviceTier,
             signal: yieldCancellation.signal,
             turnEnvironment: input.turnEnvironment ?? null,
@@ -888,10 +891,10 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
               if (assistantScheduledTaskAuthorityUsesGroupRoute(
-                turnScheduledTaskAuthority,
+                scheduledTaskAuthority,
               )) {
                 await assertAssistantScheduledTaskSourceCurrent({
-                  authority: turnScheduledTaskAuthority,
+                  authority: scheduledTaskAuthority,
                   vault: input.vault,
                 })
               }
@@ -917,10 +920,10 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
               if (assistantScheduledTaskAuthorityUsesGroupRoute(
-                turnScheduledTaskAuthority,
+                scheduledTaskAuthority,
               )) {
                 await assertAssistantScheduledTaskSourceCurrent({
-                  authority: turnScheduledTaskAuthority,
+                  authority: scheduledTaskAuthority,
                   vault: input.vault,
                 })
               }
