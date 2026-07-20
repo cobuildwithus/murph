@@ -8,14 +8,3 @@ blacksmith:
   ref: main
   idleTimeout: 90m
   debug: false
-
-profiles:
-  murph-verification:
-    doctor:
-      enabled: true
-      tools:
-        - node
-        - corepack
-        - pnpm
-      nodeMajor: 24
-      minDiskGB: 40
