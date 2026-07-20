@@ -25,6 +25,25 @@ jobs:
       - name: Apply reviewed source repairs
         shell: bash
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/finalize-persona-review.py")
+          text = path.read_text()
+          old = '''    """    const member = {
+                assistantDetail: null as number | null,
+          """,
+              """    const member = {
+                assistantPersona: null as string | null,
+                assistantPersonaCausalSeq: null as bigint | null,
+                assistantDetail: null as number | null,
+          """,
+              1,
+          )'''
+          new = old.replace("    1,\n)", "    6,\n)")
+          if text.count(old) != 1:
+              raise SystemExit("repeated hosted preference fixture patch did not match")
+          path.write_text(text.replace(old, new))
+          PY
           python scripts/repair-persona-remaining.py
           python scripts/finalize-persona-review.py
           python - <<'PY'
