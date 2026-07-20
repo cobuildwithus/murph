@@ -6,9 +6,10 @@ import {
   assistantPersonaOptions,
   assistantVoiceOptions,
   resolveAssistantEffectiveStyle,
+  resolveAssistantPersonaRecommendedVoiceOptions,
 } from "../src/index.ts";
 
-test("assistant persona catalog is complete and uses valid recommended voices", () => {
+test("assistant persona catalog is complete and uses ordered valid voices", () => {
   assert.equal(assistantPersonaOptions.length, assistantPersonaIdValues.length);
   assert.deepEqual(
     new Set(assistantPersonaOptions.map((option) => option.id)),
@@ -19,7 +20,11 @@ test("assistant persona catalog is complete and uses valid recommended voices", 
     assert.equal(persona.recommendedVoiceIds.length, 5);
     assert.equal(new Set(persona.recommendedVoiceIds).size, 5);
     assert.equal(persona.recommendedVoiceIds[0], persona.defaultVoiceId);
-    for (const voiceId of persona.recommendedVoiceIds) assert.ok(voiceIds.has(voiceId));
+    assert.ok(persona.recommendedVoiceIds.every((voiceId) => voiceIds.has(voiceId)));
+    assert.deepEqual(
+      resolveAssistantPersonaRecommendedVoiceOptions(persona.id).map((voice) => voice.id),
+      persona.recommendedVoiceIds,
+    );
   }
 });
 
