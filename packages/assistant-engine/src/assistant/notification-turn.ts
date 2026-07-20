@@ -119,6 +119,14 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
+const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'system-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -326,9 +334,11 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedExecutionContext = isAssistantNotificationMaintenanceExactSkip(input)
-        ? null
-        : executionContext?.hosted ?? null
+      const hostedExecutionContext =
+        isAssistantNotificationScheduledOccurrence(input) &&
+        !isAssistantNotificationMaintenanceExactSkip(input)
+          ? executionContext?.hosted ?? null
+          : null
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             computerToolsAvailable:
@@ -368,10 +378,7 @@ export async function sendAssistantNotificationLocal(
       try {
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
-        const notificationTurnProfile =
-          isAssistantNotificationMaintenanceExactSkip(input)
-            ? ASSISTANT_MAINTENANCE_TURN_PROFILE
-            : undefined
+        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
         const notificationThreadScope =
           notificationTurnProfile?.threadScope ?? 'session-thread'
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -1186,22 +1193,26 @@ function buildAssistantNotificationMessageInput(
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
   const instructions = normalizeRequiredText(input.instructions, 'instructions')
-  // One overlay for every maintenance-turn divergence, so the fields cannot
-  // drift apart across separate conditional spreads.
-  const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
+  const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
+  const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
+  // One overlay for each non-user turn boundary, so provider-audit policy
+  // cannot drift across caller-specific configuration.
+  const executionOverlay = maintenanceTurn
     ? {
         codexConfigOverrides:
           ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
-    : {}
+    : scheduledOccurrence
+      ? {}
+      : { suppressProviderFailureTranscriptAudit: true }
   return {
-    ...maintenanceOverlay,
+    ...executionOverlay,
     abortSignal: input.abortSignal,
     actorId: input.actorId,
     alias: input.alias,
     allowBindingRebind: input.allowBindingRebind,
-    approvalPolicy: input.approvalPolicy,
+    approvalPolicy: scheduledOccurrence ? input.approvalPolicy : 'never',
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
     codexCommand: input.codexCommand,
@@ -1237,7 +1248,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    sandbox: input.sandbox,
+    sandbox: scheduledOccurrence ? input.sandbox : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
@@ -1247,7 +1258,9 @@ function buildAssistantNotificationMessageInput(
     threadIsDirect: input.threadIsDirect,
     turnEnvironment: input.turnEnvironment ?? null,
     assistantTargetOverride: input.assistantTargetOverride ?? null,
-    turnTrigger: input.turnTrigger ?? 'automation-cron',
+    turnTrigger: scheduledOccurrence
+      ? input.turnTrigger ?? 'automation-cron'
+      : 'manual-deliver',
     userMessageContent: null,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
@@ -1351,7 +1364,10 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
-  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
+  if (
+    isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    !isAssistantNotificationScheduledOccurrence(input.input)
+  ) {
     return 'preserve-existing'
   }
 
@@ -1408,6 +1424,25 @@ function isAssistantNotificationMaintenanceExactSkip(
   input: AssistantNotificationInput,
 ): boolean {
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
+}
+
+function isAssistantNotificationScheduledOccurrence(
+  input: Pick<AssistantNotificationInput, 'scheduledOccurrenceAt'>,
+): boolean {
+  const occurrenceAt = normalizeNullableString(input.scheduledOccurrenceAt)
+  return occurrenceAt !== null && Number.isFinite(new Date(occurrenceAt).getTime())
+}
+
+function resolveAssistantNotificationTurnProfile(
+  input: AssistantNotificationInput,
+): Required<AssistantCodexTurnThreadScopeProfile> | null {
+  if (isAssistantNotificationMaintenanceExactSkip(input)) {
+    return ASSISTANT_MAINTENANCE_TURN_PROFILE
+  }
+
+  return isAssistantNotificationScheduledOccurrence(input)
+    ? null
+    : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run

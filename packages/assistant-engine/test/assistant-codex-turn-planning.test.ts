@@ -254,6 +254,94 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('plans detached system notifications with no history, private context, or tools', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'PRIVATE_CLI_CONTRACT',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PRIVATE_CONTEXT_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-system-notification-plan-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'f'.repeat(64),
+        routeFingerprint: 'route-test',
+        threadId: 'private-conversation-thread',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: 'PRIVATE_COMMITTED_HISTORY' },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['PRIVATE_HOSTED_CONTEXT'],
+            memberId: 'member-system-notification',
+            providerFetch: fetch,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          automationTool: { request: vi.fn() },
+          connectedApps: { request: vi.fn() },
+          familyPlanTool: { request: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: 'Summarize untrusted provider data only.',
+          turnTrigger: 'manual-deliver',
+          vault,
+        },
+        profile: {
+          promptProfile: 'system-notification',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-20',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.environments).toEqual([])
+      expect(plan.assistantCliContract).toBeNull()
+      expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.systemPrompt).toContain('detached Murph system notification')
+      expect(plan.systemPrompt).toContain(
+        'not an attended user turn or a scheduled automation occurrence',
+      )
+      expect(plan.systemPrompt).toContain('output-only turn')
+      expect(plan.systemPrompt).toContain('Delivery adapter contract:')
+      expect(plan.systemPrompt).not.toContain(
+        'Treat the user prompt as the execution instructions for this scheduled run',
+      )
+      expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
@@ -340,7 +428,7 @@ describe('assistant Codex turn planning', () => {
     expect(ordinaryToolNames).toContain('assistant_style')
     expect(ordinaryPlan.systemPrompt).toContain('hypertension')
     expect(ordinaryPlan.systemPrompt).toContain('device sync pending')
-    expect(ordinaryPlan.systemPrompt).not.toContain('Scheduled delivery contract:')
+    expect(ordinaryPlan.systemPrompt).not.toContain('Delivery adapter contract:')
     expect(ordinaryPlan.systemPrompt).not.toContain('Maintenance execution rules:')
     expect(ordinaryPlan.systemPrompt).toContain(
       'Assistant personality preferences',
@@ -358,6 +446,7 @@ describe('assistant Codex turn planning', () => {
           automationId: 'automation_newsletter',
           occurrenceAt: '2026-07-12T13:00:00.000Z',
         },
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
         turnTrigger: 'automation-cron',
       },
       preferenceContext,
@@ -378,7 +467,7 @@ describe('assistant Codex turn planning', () => {
       '## Compose each edition',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Scheduled delivery contract:',
+      'Delivery adapter contract:',
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames,
@@ -1413,7 +1502,7 @@ describe('assistant Codex turn planning', () => {
       groupTool: null,
     }
 
-    const resolveGroupPlan = (turnTrigger?: 'automation-cron') =>
+    const resolveGroupPlan = (scheduledOccurrence = false) =>
       resolveAssistantRouteTurnPlan({
         executionContext: {
           hosted: {
@@ -1428,7 +1517,12 @@ describe('assistant Codex turn planning', () => {
         hostedToolContext,
         input: {
           ...createMessageInput(),
-          ...(turnTrigger ? { turnTrigger } : {}),
+          ...(scheduledOccurrence
+            ? {
+                scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
+                turnTrigger: 'automation-cron' as const,
+              }
+            : {}),
         },
         profile: {
           promptProfile: 'conversation',
@@ -1447,7 +1541,7 @@ describe('assistant Codex turn planning', () => {
         }),
       })
     const attendedPlan = await resolveGroupPlan()
-    const scheduledPlan = await resolveGroupPlan('automation-cron')
+    const scheduledPlan = await resolveGroupPlan(true)
 
     expect(scheduledPlan.dynamicTools.map(({ inputSchema, name, namespace }) => ({
       inputSchema,
@@ -1488,6 +1582,7 @@ describe('assistant Codex turn planning', () => {
       hostedToolContext,
       input: {
         ...createMessageInput(),
+        scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
         turnTrigger: 'automation-cron',
       },
       profile: {

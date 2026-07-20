@@ -42,6 +42,11 @@ profile, tool profile, planner, thread policy, skill surface, or assistant stack
 The ordinary invocation context and effect-owner checks determine which tools
 are usable.
 
+Detached `assistant.notification.requested` system events are a different kind
+of input, not a scheduled-turn profile. Without a valid occurrence they use one
+isolated output-only formatter with no history, private context, resume
+mutation, tools, or network callbacks; the platform still owns delivery.
+
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
 ports. The App Server and its descendant shell environments never receive that

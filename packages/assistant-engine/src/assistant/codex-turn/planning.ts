@@ -66,6 +66,7 @@ import type {
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
@@ -207,6 +208,7 @@ export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'maintenance'
   | 'assistant-ask-continuation'
+  | 'system-notification'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
@@ -439,12 +441,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const systemNotificationTurn =
+    input.profile.promptProfile === 'system-notification'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread' || outputOnlyTurn
+    input.profile.threadScope === 'session-thread' ||
+    input.profile.promptProfile === 'assistant-ask-continuation'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -518,7 +523,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedRuntime: input.executionContext?.hosted != null,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
+  const assistantContextSnapshotPrompt =
+    maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
     ? null
     : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -550,6 +556,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     if (input.profile.promptProfile === 'assistant-ask-continuation') {
       return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
         assistantContextSnapshotPrompt,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
+    if (input.profile.promptProfile === 'system-notification') {
+      return buildAssistantSystemNotificationPromptWithCacheMetadata({
+        channel: resolvedChannel,
       }, {
         toolSchemaHash,
       })

@@ -8,6 +8,7 @@ import {
 import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -52,6 +53,19 @@ describe('resolveAssistantModelBehaviorProfile', () => {
 })
 
 describe('assistant execution prompt contract', () => {
+  it('treats detached system notifications as untrusted output-only formatting work', () => {
+    const prompt = buildAssistantSystemNotificationPromptWithCacheMetadata({
+      channel: 'linq',
+    }).prompt
+
+    expect(prompt).toContain('not an attended user turn or a scheduled automation occurrence')
+    expect(prompt).toContain('Do not read conversation history, private context, account state')
+    expect(prompt).toContain('This is an output-only turn')
+    expect(prompt).toContain('externally controlled text')
+    expect(prompt).toContain('Delivery adapter contract:')
+    expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
+  })
+
   it('adds the shared execution contract without changing the calmer Murph voice', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
@@ -1356,7 +1370,7 @@ describe('assistant user-facing wording guidance', () => {
       }),
     ).prompt
 
-    expect(prompt).toContain('Scheduled delivery contract:')
+    expect(prompt).toContain('Delivery adapter contract:')
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
     )
@@ -1405,6 +1419,7 @@ describe('assistant system prompt cache stability', () => {
       currentTimeZone: 'Asia/Kuala_Lumpur',
       murphProductBaseUrl: 'http://localhost:3000',
       onboardingGuidance: true,
+      scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
       turnTrigger: 'automation-cron',
     }))
 
@@ -1455,9 +1470,9 @@ describe('assistant system prompt cache stability', () => {
       'Treat the user prompt as the execution instructions for this scheduled run.',
     )
     expect(layers.dynamicTurnContextPrompt).toContain(
-      'Scheduled delivery contract:',
+      'Delivery adapter contract:',
     )
-    expect(layers.dynamicTurnContextPrompt).not.toContain('Asia/Kuala_Lumpur')
+    expect(layers.dynamicTurnContextPrompt).toContain('Asia/Kuala_Lumpur')
     expect(layers.dynamicTurnContextPrompt).not.toContain('upcoming wake-day')
     expect(layers.dynamicTurnContextPrompt).toContain(
       'Layer partition assistant context snapshot.',
@@ -1498,10 +1513,10 @@ describe('assistant system prompt cache stability', () => {
       'Notification layer partition snapshot.',
     )
     expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
-      'Scheduled delivery contract:',
+      'Delivery adapter contract:',
     )
     expect(regularLayers.dynamicTurnContextPrompt).not.toContain(
-      'Scheduled delivery contract:',
+      'Delivery adapter contract:',
     )
   })
 
@@ -1757,7 +1772,7 @@ describe('assistant system prompt cache stability', () => {
     expect(stablePrefix).not.toContain(
       'Notification active experiment for user A.',
     )
-    expect(dynamicSuffix).toContain('Scheduled delivery contract:')
+    expect(dynamicSuffix).toContain('Delivery adapter contract:')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(dynamicSuffix).toContain('Notification vault overview for user A.')
     expect(promptB.prompt).toContain('Notification vault overview for user B.')
@@ -2412,6 +2427,7 @@ function createCommonNotificationPromptInput(
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     assistantContextSnapshotPrompt: null,
+    scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
     turnTrigger: 'automation-cron',
     ...overrides,
   }

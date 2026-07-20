@@ -166,6 +166,7 @@ describe('assistant capability-offers prompt contract', () => {
     const attended = buildAssistantSystemPromptLayers(commonInput)
     const scheduled = buildAssistantSystemPromptLayers({
       ...commonInput,
+      scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
       turnTrigger: 'automation-cron',
     })
 
@@ -177,7 +178,7 @@ describe('assistant capability-offers prompt contract', () => {
     )
     expect(scheduled.threadContextPrompt).toBe(attended.threadContextPrompt)
     expect(scheduled.dynamicTurnContextPrompt).toContain(
-      'Scheduled delivery contract:',
+      'Delivery adapter contract:',
     )
     expect(scheduled.prompt).not.toContain('For running-challenge standings')
     expect(scheduled.prompt).not.toContain(

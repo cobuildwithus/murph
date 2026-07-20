@@ -351,6 +351,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   reduced tool planner. Effects still require the same invocation ports,
   audience and accepted-input evidence, and owning-boundary validation as any
   other turn.
+- A detached system notification without a valid scheduled occurrence is not a
+  user or automation turn. It runs as isolated output-only formatting with no
+  conversation history, private context, resume mutation, tools, network, or
+  delegated work. Provider, webhook, and other external values remain
+  untrusted data, and the platform alone owns final delivery.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the

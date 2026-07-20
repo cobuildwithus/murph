@@ -52,6 +52,7 @@ describe('assistant dynamic context prompt blocks', () => {
       currentTimeZone: 'America/New_York',
       modelBehaviorProfile: 'gpt5-agentic',
       onboardingGuidance: false,
+      scheduledOccurrenceAt: '2026-06-29T13:00:00.000Z',
       turnTrigger: 'automation-cron',
     })
 

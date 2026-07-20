@@ -78,6 +78,7 @@ export function resolveAssistantUsageFeatureKey(input: {
     | 'assistant-ask-continuation'
     | 'conversation'
     | 'maintenance'
+    | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {
   if (input.deliverResponse === false) {
