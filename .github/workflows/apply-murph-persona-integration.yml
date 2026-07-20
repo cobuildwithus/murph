@@ -30,19 +30,21 @@ jobs:
             packages/assistant-engine/src/assistant/codex-turn/planning.ts
           python - <<'PY'
           from pathlib import Path
+          import re
           path = Path("apps/web/test/hosted-onboarding-member-preferences.test.ts")
           text = path.read_text()
-          old = """      select: {
-                assistantDetail: true,
-          """
-          new = """      select: {
-                assistantPersona: true,
-                assistantDetail: true,
-          """
-          count = text.count(old)
+          pattern = re.compile(r"(?m)^(\s*)select: \{\n\1  assistantDetail: true,")
+          text, count = pattern.subn(
+              lambda match: (
+                  f"{match.group(1)}select: {{\n"
+                  f"{match.group(1)}  assistantPersona: true,\n"
+                  f"{match.group(1)}  assistantDetail: true,"
+              ),
+              text,
+          )
           if count != 4:
               raise SystemExit(f"expected four hosted preference select assertions, found {count}")
-          path.write_text(text.replace(old, new))
+          path.write_text(text)
           PY
           corepack enable >/dev/null
           corepack prepare pnpm@10.33.0 --activate >/dev/null
