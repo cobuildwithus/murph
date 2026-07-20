@@ -406,8 +406,14 @@ export async function runHostedLocalE2eSuite(
   const onSigterm = (): void => {
     terminationSignal ??= "SIGTERM";
   };
+  const onSighup = (): void => {
+    terminationSignal ??= "SIGHUP";
+  };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
+  if (process.platform !== "win32") {
+    process.once("SIGHUP", onSighup);
+  }
 
   try {
     try {
@@ -435,11 +441,14 @@ export async function runHostedLocalE2eSuite(
         runnerCleanupTimeoutMs: FINAL_RUNNER_CLEANUP_TIMEOUT_MS,
       });
       if (terminationSignal) {
-        process.exitCode = terminationSignal === "SIGINT" ? 130 : 143;
+        process.exitCode = foregroundSignalExitCode(terminationSignal);
       }
     } finally {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      if (process.platform !== "win32") {
+        process.off("SIGHUP", onSighup);
+      }
     }
   }
 
@@ -464,7 +473,6 @@ async function prepareHostedLocalRunnerBundle(input: {
     command: "pnpm",
     cwd: hostedLocalHarnessRepoRoot,
     env,
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner bundle preparation",
   });
 }
@@ -477,7 +485,6 @@ async function prepareHostedLocalRunnerBaseImage(input: {
     command: "pnpm",
     cwd: hostedLocalHarnessRepoRoot,
     env: input.env,
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner base image preparation",
   });
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
@@ -503,7 +510,6 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
       command: "pnpm",
       cwd: hostedLocalHarnessRepoRoot,
       env: input.env,
-      forwardProcessSignals: ["SIGINT", "SIGTERM"],
       label: "Hosted local web Prisma client preparation",
     });
     input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] = "1";
@@ -515,7 +521,6 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
       command: "pnpm",
       cwd: hostedLocalHarnessRepoRoot,
       env: input.env,
-      forwardProcessSignals: ["SIGINT", "SIGTERM"],
       label: "Hosted local Health Commons generation",
     });
     input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] = "1";
@@ -678,9 +683,21 @@ async function runHostedLocalVitestForScenarios(input: {
       env: input.env,
       scenarios: input.scenarios,
     }),
-    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: input.label,
   });
+}
+
+function foregroundSignalExitCode(signal: NodeJS.Signals): number {
+  switch (signal) {
+    case "SIGHUP":
+      return 129;
+    case "SIGINT":
+      return 130;
+    case "SIGTERM":
+      return 143;
+    default:
+      return 1;
+  }
 }
 
 function buildHostedLocalE2eSuiteEnv(input: {

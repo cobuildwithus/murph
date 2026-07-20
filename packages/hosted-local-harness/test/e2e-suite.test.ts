@@ -41,6 +41,16 @@ vi.mock("../src/dev-hosted-local/minio.ts", () => ({
 
 import { runHostedLocalE2eSuite } from "../src/e2e.ts";
 
+const interruptionCases: Array<{
+  expectedExitCode: number;
+  signal: "SIGHUP" | "SIGINT";
+}> = [
+  { expectedExitCode: 130, signal: "SIGINT" },
+  ...(process.platform === "win32"
+    ? []
+    : [{ expectedExitCode: 129, signal: "SIGHUP" as const }]),
+];
+
 describe("hosted-local E2E suite preparation", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -467,13 +477,15 @@ describe("hosted-local E2E suite preparation", () => {
     expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
   });
 
-  test("preserves SIGINT exit semantics while cleaning up runner artifacts", async () => {
+  test.each(interruptionCases)(
+    "preserves $signal exit semantics while cleaning up runner artifacts",
+    async ({ expectedExitCode, signal }) => {
     const signalHandlers = new Map<NodeJS.Signals, Array<() => void>>();
     const originalOnceMethod = process.once.bind(process);
     const originalOffMethod = process.off.bind(process);
     const originalExitCode = process.exitCode;
     const onceSpy = vi.spyOn(process, "once").mockImplementation((event, listener) => {
-      if (event === "SIGINT" || event === "SIGTERM") {
+      if (event === "SIGINT" || event === "SIGTERM" || event === "SIGHUP") {
         signalHandlers.set(event, [
           ...(signalHandlers.get(event) ?? []),
           listener as () => void,
@@ -483,7 +495,7 @@ describe("hosted-local E2E suite preparation", () => {
       return originalOnceMethod(event, listener);
     });
     const offSpy = vi.spyOn(process, "off").mockImplementation((event, listener) => {
-      if (event === "SIGINT" || event === "SIGTERM") {
+      if (event === "SIGINT" || event === "SIGTERM" || event === "SIGHUP") {
         signalHandlers.set(
           event,
           (signalHandlers.get(event) ?? []).filter((handler) => handler !== listener),
@@ -499,19 +511,20 @@ describe("hosted-local E2E suite preparation", () => {
         if (!input.args.includes("vitest")) {
           return;
         }
-        for (const handler of signalHandlers.get("SIGINT") ?? []) {
+        expect(input.forwardProcessSignals).toBeUndefined();
+        for (const handler of signalHandlers.get(signal) ?? []) {
           handler();
         }
-        throw new ForegroundCommandSignalError(input.label, "SIGINT");
+        throw new ForegroundCommandSignalError(input.label, signal);
       });
 
       await expect(runHostedLocalE2eSuite({
         env: {},
         prepareRunnerBundle: false,
         scenario: "checkpoint-baseline",
-      })).resolves.toEqual({ terminationSignal: "SIGINT" });
+      })).resolves.toEqual({ terminationSignal: signal });
 
-      expect(process.exitCode).toBe(130);
+      expect(process.exitCode).toBe(expectedExitCode);
       expect(cleanupHostedRunnerContainers).toHaveBeenLastCalledWith(
         expect.objectContaining({
           ignoreErrors: true,
@@ -520,12 +533,14 @@ describe("hosted-local E2E suite preparation", () => {
         }),
       );
       expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+      expect(signalHandlers.get(signal)).toEqual([]);
     } finally {
       process.exitCode = originalExitCode;
       onceSpy.mockRestore();
       offSpy.mockRestore();
     }
-  });
+    },
+  );
 
   test("does not add aggregate-only web preparation for one focused scenario", async () => {
     await runHostedLocalE2eSuite({

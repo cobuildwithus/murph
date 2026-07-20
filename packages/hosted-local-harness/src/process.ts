@@ -46,6 +46,7 @@ export async function runForegroundCommand(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let interruptedCleanup: Promise<void> | null = null;
     const child = spawn(input.command, [...input.args], {
       cwd: input.cwd,
       detached: process.platform !== "win32",
@@ -62,7 +63,29 @@ export async function runForegroundCommand(
     };
     for (const signal of input.forwardProcessSignals ?? defaultForegroundSignals) {
       const handler = (): void => {
-        signalOwnedChildProcess(child, signal);
+        if (settled || interruptedCleanup) {
+          return;
+        }
+        const promise = terminateOwnedChildProcessAndWait(child, { signal });
+        interruptedCleanup = promise;
+        void promise.then(
+          () => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            cleanupSignalHandlers();
+            reject(new ForegroundCommandSignalError(input.label, signal));
+          },
+          (error: unknown) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            cleanupSignalHandlers();
+            reject(error);
+          },
+        );
       };
       signalHandlers.set(signal, handler);
       process.on(signal, handler);
@@ -78,6 +101,9 @@ export async function runForegroundCommand(
     });
     child.once("exit", (code, signal) => {
       if (settled) {
+        return;
+      }
+      if (interruptedCleanup) {
         return;
       }
       settled = true;

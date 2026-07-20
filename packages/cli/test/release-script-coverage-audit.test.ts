@@ -2428,6 +2428,15 @@ cobuild_repo_tool_bin() {
 
       writeHarnessFile(
         harnessRoot,
+        'scripts/install-git-hooks',
+        `#!/usr/bin/env bash
+set -euo pipefail
+`,
+        true,
+      )
+
+      writeHarnessFile(
+        harnessRoot,
         '.fake-tools/cobuild-close-exec-plan',
         `#!/usr/bin/env bash
 set -euo pipefail
@@ -3052,8 +3061,14 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
     expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
     expect(workspaceVerify).toContain('can_launch_next_package_coverage()')
-    expect(webVerify.indexOf('run_timed_step "next build" run_next_build &')).toBeLessThan(
-      webVerify.indexOf('run_timed_step "dev smoke" run_dev_smoke &'),
+    expect(
+      webVerify.indexOf(
+        'start_owned_background_job build_pid run_timed_step "next build" run_next_build',
+      ),
+    ).toBeLessThan(
+      webVerify.indexOf(
+        'start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke',
+      ),
     )
     expect(workspaceVerify).toContain(
       'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
