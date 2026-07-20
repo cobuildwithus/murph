@@ -1248,7 +1248,14 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    sandbox: scheduledOccurrence ? input.sandbox : 'read-only',
+    // Exact-text notifications do not start a provider. Keep their durable
+    // conversation session on the ordinary target so a restrictive detached
+    // notification policy cannot split the next attended turn from the text
+    // that was already delivered.
+    sandbox:
+      scheduledOccurrence || input.responsePolicy?.kind === 'require_send_exact_text'
+        ? input.sandbox
+        : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,

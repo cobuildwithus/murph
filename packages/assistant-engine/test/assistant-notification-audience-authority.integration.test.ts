@@ -7,6 +7,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import type { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
 import type { persistAssistantTurnAndSession } from '../src/assistant/turn-finalizer.ts'
 import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
+import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -214,6 +215,7 @@ describe('notification audience authority integration', () => {
     expect(result.deliveryOutcome?.kind).toBe('sent')
     expect(boundaries.executeProvider).toHaveBeenCalledTimes(1)
     const providerInput = boundaries.executeProvider.mock.calls[0]?.[0]
+    expect(providerInput?.route.providerOptions.sandbox).toBe('read-only')
     expect(providerInput?.plan.conversationPolicy.audience).toMatchObject({
       effectiveThreadIsDirect: threadIsDirect,
       explicitTarget: target,
@@ -284,6 +286,74 @@ describe('notification audience authority integration', () => {
 
     expect(boundaries.executeProvider).not.toHaveBeenCalled()
     expect(boundaries.deliverMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps an exact Telegram welcome on the attended conversation session', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'telegram-exact-welcome-continuity-',
+    )
+    cleanupPaths.push(parentRoot)
+    const welcomeText = 'Welcome to Murph.'
+    const locator = {
+      actorId: 'h1_444444444444444444444444',
+      channel: 'telegram',
+      identityId: 'h1_555555555555555555555555',
+      threadId: 'h1_666666666666666666666666',
+      threadIsDirect: true,
+    } as const
+    const executionContext = {
+      hosted: {
+        defaultTarget: modelTarget,
+        memberId: 'member-exact-welcome',
+        userEnvKeys: [],
+      },
+    } as const
+
+    const welcome = await sendAssistantNotificationLocal({
+      ...locator,
+      bindingDeliveryTarget: locator.threadId,
+      deliveryIdempotencyKey: 'signup-welcome:member-exact-welcome',
+      deliveryKind: 'thread',
+      deliveryTarget: locator.threadId,
+      executionContext,
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: 'Send the exact signup welcome.',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: welcomeText,
+      },
+      vault: vaultRoot,
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(welcome.session.providerOptions.sandbox).toBe('danger-full-access')
+    expect(boundaries.appendTranscript).toHaveBeenCalledWith(
+      welcome.session.sessionId,
+      [
+        {
+          createdAt: expect.any(String),
+          kind: 'assistant',
+          text: welcomeText,
+        },
+      ],
+    )
+
+    const attended = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: modelTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext,
+        prompt: 'Hey Murph, do your thing.',
+        vault: vaultRoot,
+      },
+    })
+
+    expect(attended.created).toBe(false)
+    expect(attended.session.sessionId).toBe(welcome.session.sessionId)
+    expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
   })
 })
 
