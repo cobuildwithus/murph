@@ -252,6 +252,9 @@ export async function executeCodexAssistantTurnAttempt(
     profile: providerConfig.target.profile ?? undefined,
     productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,
+    ...(input.processLifetime === 'one-shot'
+      ? { processLifetime: 'one-shot' as const }
+      : {}),
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
       input.requireGeneratedImageUploader ?? false,

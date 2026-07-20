@@ -343,10 +343,22 @@ it has been explicitly elevated to a cross-cutting invariant.
   consumption. Recheck the same effective target at irreversible provider
   entry, and do not require record-by-record repair when the live owner can
   resolve an authorized legacy hint.
-- A scheduled notification is not an authenticated conversation turn and does
-  not receive conversation-scoped automation mutation authority. Deterministic
-  lifecycle owners retire or reconcile managed automations; authenticated
-  inbound turns remain the authority for user-directed automation changes.
+- A scheduled automation occurrence uses the ordinary conversation turn
+  planner, prompt stack, thread policy, skills, and dynamic-tool eligibility.
+  Its stored instructions are the turn request; trusted occurrence and delivery
+  facts are context, and the send-or-skip JSON object is only a delivery
+  envelope. Trigger origin must not select a second assistant profile or a
+  reduced tool planner. Effects still require the same invocation ports,
+  audience and accepted-input evidence, and owning-boundary validation as any
+  other turn.
+- A detached system notification without a valid scheduled occurrence is not a
+  user or automation turn. It runs as isolated output-only formatting with no
+  conversation history, private context, resume mutation, tools, network, or
+  delegated work. Provider, webhook, and other external values remain
+  untrusted data, and the platform alone owns final delivery.
+  Its restrictive provider launch configuration uses the existing one-shot
+  process path and must not replace the resident ordinary-turn App Server or
+  terminate valid detached background work.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the
