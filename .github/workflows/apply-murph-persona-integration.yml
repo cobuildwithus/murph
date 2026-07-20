@@ -2,15 +2,10 @@ name: Apply Murph persona integration
 
 on:
   pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
+    branches: [main]
+    types: [opened, reopened, synchronize]
   push:
-    branches:
-      - agent/murph-personas
+    branches: [agent/murph-personas]
     paths:
       - .github/workflows/apply-murph-persona-integration.yml
       - scripts/apply-murph-persona-integration.mjs.gz.b64
@@ -21,7 +16,6 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   apply:
@@ -34,82 +28,55 @@ jobs:
           fetch-depth: 0
           ref: agent/murph-personas
 
-      - name: Pin the latest branch head
-        shell: bash
+      - name: Pin latest branch head
         run: |
           git fetch origin agent/murph-personas
           git checkout -B agent/murph-personas origin/agent/murph-personas
-          echo "checked out: $(git rev-parse HEAD)"
-
-      - name: Detect a settled integration head
-        id: settled
-        shell: bash
-        run: |
-          message="$(git log -1 --pretty=%B)"
-          if [[ "$message" == *"[persona-applied]"* || "$message" == *"[persona-failed]"* ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - uses: actions/setup-node@v4
-        if: ${{ steps.settled.outputs.skip != 'true' }}
         with:
           node-version: 24.14.1
 
       - name: Enable pnpm
-        if: ${{ steps.settled.outputs.skip != 'true' }}
         run: |
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
 
-      - name: Apply narrow source integrations
+      - name: Apply narrow integrations
         id: integrate
-        if: ${{ steps.settled.outputs.skip != 'true' }}
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          git hash-object scripts/apply-murph-persona-integration.mjs.gz.b64
           base64 --decode scripts/apply-murph-persona-integration.mjs.gz.b64 \
             | gunzip > /tmp/apply-murph-persona-integration.mjs
           node /tmp/apply-murph-persona-integration.mjs \
             2>&1 | tee /tmp/murph-persona-integration.log
 
-      - name: Report integration failure
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'failure' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Persist integration diagnostic
+        if: ${{ steps.integrate.outcome == 'failure' }}
         shell: bash
         run: |
-          {
-            echo "### Persona integration codemod failed"
-            echo
-            echo "Checked-out head: \`$(git rev-parse HEAD)\`"
-            echo "Codemod blob: \`$(git hash-object scripts/apply-murph-persona-integration.mjs.gz.b64)\`"
-            echo
-            echo '```text'
-            tail -n 180 /tmp/murph-persona-integration.log
-            echo '```'
-            echo
-            echo "Partial diff before the ephemeral runner was discarded:"
-            echo '```text'
-            git diff --stat
-            echo '```'
-          } > /tmp/persona-pr-comment.md
-          gh pr comment 801 --body-file /tmp/persona-pr-comment.md
+          git reset --hard HEAD
+          tail -n 60 /tmp/murph-persona-integration.log \
+            > agent-docs/exec-plans/active/murph-persona-integration-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent-docs/exec-plans/active/murph-persona-integration-failure.log
+          git commit -m "chore: record persona integration failure [persona-failed]"
+          git push origin HEAD:agent/murph-personas
           exit 1
 
       - name: Install workspace
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
+        if: ${{ steps.integrate.outcome == 'success' }}
         run: pnpm install --frozen-lockfile
 
       - name: Build contracts
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
+        if: ${{ steps.integrate.outcome == 'success' }}
         run: pnpm --dir packages/contracts build
 
-      - name: Generate persona voice previews when credentials are configured
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
+      - name: Generate preview MP3s when credentials are configured
+        if: ${{ steps.integrate.outcome == 'success' }}
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           MURPH_ELEVENLABS_MODEL_ID: ${{ secrets.MURPH_ELEVENLABS_MODEL_ID }}
@@ -119,12 +86,12 @@ jobs:
           if [[ -n "$ELEVENLABS_API_KEY" && -n "$MURPH_ELEVENLABS_VOICE_ID" ]]; then
             node scripts/generate-murph-persona-previews.mjs
           else
-            echo "Persona preview credentials are not configured; keeping the deterministic generator and preview paths only."
+            echo "Preview credentials unavailable; retaining deterministic generator and paths."
           fi
 
-      - name: Verify persona integration
+      - name: Verify integration
         id: verify
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' }}
+        if: ${{ steps.integrate.outcome == 'success' }}
         continue-on-error: true
         shell: bash
         run: |
@@ -146,30 +113,22 @@ jobs:
             git diff --check
           } 2>&1 | tee /tmp/murph-persona-verification.log
 
-      - name: Report verification failure
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Persist verification diagnostic
+        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'failure' }}
         shell: bash
         run: |
-          {
-            echo "### Persona integration verification failed"
-            echo
-            echo '```text'
-            tail -n 220 /tmp/murph-persona-verification.log
-            echo '```'
-            echo
-            echo "Integrated diff summary:"
-            echo '```text'
-            git diff --stat
-            echo '```'
-          } > /tmp/persona-pr-comment.md
-          gh pr comment 801 --body-file /tmp/persona-pr-comment.md
+          git reset --hard HEAD
+          tail -n 120 /tmp/murph-persona-verification.log \
+            > agent-docs/exec-plans/active/murph-persona-verification-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent-docs/exec-plans/active/murph-persona-verification-failure.log
+          git commit -m "chore: record persona verification failure [persona-failed]"
+          git push origin HEAD:agent/murph-personas
           exit 1
 
       - name: Commit integrated implementation
-        if: ${{ steps.settled.outputs.skip != 'true' && steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
-        shell: bash
+        if: ${{ steps.integrate.outcome == 'success' && steps.verify.outcome == 'success' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
