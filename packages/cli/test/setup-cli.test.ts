@@ -136,16 +136,12 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   })
 })
 
-test('setup wizard scheduled updates default to the starter bundle', () => {
-  assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), [
-    'environment-health-watch',
-    'weekly-health-snapshot',
-  ])
+test('setup wizard scheduled updates default to the starter update', () => {
+  assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), ['weekly-health-snapshot'])
 })
 
 test('setup wizard initial scheduled updates preserve explicit opt-out selections', () => {
   assert.deepEqual(resolveSetupWizardInitialScheduledUpdates(undefined), [
-    'environment-health-watch',
     'weekly-health-snapshot',
   ])
   assert.deepEqual(resolveSetupWizardInitialScheduledUpdates([]), [])
@@ -164,7 +160,7 @@ test('setup scheduled updates defer preset-backed jobs instead of installing run
       dryRun: false,
       presetIds: [
         'weekly-health-snapshot',
-        'environment-health-watch',
+        'morning-mindfulness',
         'weekly-health-snapshot',
       ],
       steps,
@@ -173,7 +169,7 @@ test('setup scheduled updates defer preset-backed jobs instead of installing run
     assert.deepEqual(
       scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
       [
-        ['environment-health-watch', 'skipped'],
+        ['morning-mindfulness', 'skipped'],
         ['weekly-health-snapshot', 'skipped'],
       ],
     )
@@ -199,20 +195,20 @@ test('setup scheduled updates defer preset-backed jobs instead of installing run
 test('setup scheduled updates keep returning deferred recommendations on repeated onboarding runs', async () => {
   await configureSetupScheduledUpdates({
     dryRun: false,
-    presetIds: ['environment-health-watch'],
+    presetIds: ['morning-mindfulness'],
     steps: [],
   })
 
   const steps: SetupResult['steps'] = []
   const scheduledUpdates = await configureSetupScheduledUpdates({
     dryRun: false,
-    presetIds: ['environment-health-watch'],
+    presetIds: ['morning-mindfulness'],
     steps,
   })
 
   assert.deepEqual(
     scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
-    [['environment-health-watch', 'skipped']],
+    [['morning-mindfulness', 'skipped']],
   )
   assert.equal(steps[0]?.status, 'skipped')
 })
@@ -1329,7 +1325,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         wizardInitialScheduledUpdates.push([...input.initialScheduledUpdates])
         return {
           channels: ['telegram'],
-          scheduledUpdates: ['environment-health-watch'],
+          scheduledUpdates: ['morning-mindfulness'],
           wearables: [],
         }
       },
@@ -1356,12 +1352,9 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
     assert.equal(wizardCalls, 1)
     assert.deepEqual(wizardInitialChannels, [[]])
-    assert.deepEqual(wizardInitialScheduledUpdates, [[
-      'environment-health-watch',
-      'weekly-health-snapshot',
-    ]])
+    assert.deepEqual(wizardInitialScheduledUpdates, [['weekly-health-snapshot']])
     assert.deepEqual(receivedChannels[1], ['telegram'])
-    assert.deepEqual(receivedScheduledUpdates[1], ['environment-health-watch'])
+    assert.deepEqual(receivedScheduledUpdates[1], ['morning-mindfulness'])
     assert.deepEqual(receivedWearables[1], [])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -1417,10 +1410,7 @@ test('interactive onboarding on Linux starts with no default chat channels', asy
     })
 
     assert.deepEqual(wizardInitialChannels, [[]])
-    assert.deepEqual(wizardInitialScheduledUpdates, [[
-      'environment-health-watch',
-      'weekly-health-snapshot',
-    ]])
+    assert.deepEqual(wizardInitialScheduledUpdates, [['weekly-health-snapshot']])
     assert.deepEqual(wizardPlatforms, ['linux'])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

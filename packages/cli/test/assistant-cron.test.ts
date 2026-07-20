@@ -91,33 +91,17 @@ test('assistant cron presets stay separate from scheduler state until installed'
 
   const presets = listAssistantCronPresets()
   const mindfulnessPreset = getAssistantCronPreset('morning-mindfulness')
-  const environmentPreset = getAssistantCronPreset('environment-health-watch')
-  const conditionPreset = getAssistantCronPreset('condition-research-roundup')
-  const ingestiblePreset = getAssistantCronPreset('ingestible-watchlist')
-  const frontierPreset = getAssistantCronPreset('longevity-frontier-roundup')
   const weeklyPreset = getAssistantCronPreset('weekly-health-snapshot')
   const listedJobs = await listAssistantCronJobs(vaultRoot)
 
-  assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
-  assert.ok(presets.some((preset) => preset.id === 'morning-mindfulness'))
+  assert.deepEqual(
+    presets.map((preset) => preset.id),
+    ['morning-mindfulness', 'weekly-health-snapshot'],
+  )
   assert.ok(presets.every((preset) => !('promptTemplate' in preset)))
   assert.equal(mindfulnessPreset.id, 'morning-mindfulness')
   assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
   assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
-  assert.match(environmentPreset.promptTemplate, /do not call a separate research automation command/u)
-  assert.match(environmentPreset.promptTemplate, /Anchor the audit to my own context first/u)
-  assert.match(environmentPreset.promptTemplate, /Do not end with a long source dump/u)
-  assert.match(conditionPreset.promptTemplate, /Anchor the roundup to my own context first/u)
-  assert.match(conditionPreset.promptTemplate, /do not call a separate research automation command/u)
-  assert.match(conditionPreset.promptTemplate, /plain language for a smart non-specialist/u)
-  assert.match(conditionPreset.promptTemplate, /Do not end with a long source dump/u)
-  assert.match(conditionPreset.promptTemplate, /worth watching next for me/u)
-  assert.match(ingestiblePreset.promptTemplate, /do not call a separate research automation command/u)
-  assert.match(ingestiblePreset.promptTemplate, /Anchor the review to my own context first/u)
-  assert.match(ingestiblePreset.promptTemplate, /Do not end with a long source dump/u)
-  assert.match(frontierPreset.promptTemplate, /do not call a separate research automation command/u)
-  assert.match(frontierPreset.promptTemplate, /Anchor the roundup to my own context first/u)
-  assert.match(frontierPreset.promptTemplate, /Do not end with a long source dump/u)
   assert.equal(weeklyPreset.title, 'Weekly health compass')
   assert.match(weeklyPreset.promptTemplate, /weekly health compass/u)
   assert.match(weeklyPreset.promptTemplate, /what changed, what stayed steady/u)
@@ -138,7 +122,7 @@ test('assistant cron preset install rejects unknown preset variables', async () 
     () =>
       installAssistantCronPreset({
         vault: vaultRoot,
-        presetId: 'condition-research-roundup',
+        presetId: 'morning-mindfulness',
         ...testCronDeliveryTarget,
         variables: {
           unsupported_key: 'value',

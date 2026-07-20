@@ -10,6 +10,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 const vaultServicesMocks = vi.hoisted(() => ({
   listExperimentLifecycleFrontmatter: vi.fn(),
+  showExperimentFollowupDue: vi.fn(),
+  showExperimentProgress: vi.fn(),
   writeExperimentOutcome: vi.fn(),
   showExperiment: vi.fn(),
   useShowExperimentMock: false,
@@ -52,6 +54,18 @@ vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
             vaultServicesMocks.useShowExperimentMock
               ? vaultServicesMocks.showExperiment(input)
               : services.query.showExperiment(input),
+          showExperimentFollowupDue: (
+            input: Parameters<typeof services.query.showExperimentFollowupDue>[0]
+          ) => {
+            vaultServicesMocks.showExperimentFollowupDue(input)
+            return services.query.showExperimentFollowupDue(input)
+          },
+          showExperimentProgress: (
+            input: Parameters<typeof services.query.showExperimentProgress>[0]
+          ) => {
+            vaultServicesMocks.showExperimentProgress(input)
+            return services.query.showExperimentProgress(input)
+          },
         },
       }
     },
@@ -75,7 +89,9 @@ import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automati
 import {
   buildExperimentFinalResultsSeeds,
   buildExperimentLifecycleSeeds,
+  EXPERIMENT_CHECK_IN_PRIOR_DAY_TAG,
   persistDueExperimentOutcomes,
+  prepareExperimentLifecycleScheduledTurn,
   prepareExperimentLifecycleAutomations,
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
@@ -87,6 +103,8 @@ const cleanupRoots: string[] = []
 afterEach(async () => {
   vaultServicesMocks.useShowExperimentMock = false
   vaultServicesMocks.listExperimentLifecycleFrontmatter.mockReset()
+  vaultServicesMocks.showExperimentFollowupDue.mockReset()
+  vaultServicesMocks.showExperimentProgress.mockReset()
   await Promise.all(
     cleanupRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
   )
@@ -769,6 +787,8 @@ function resetPreconditionMocks() {
   vaultServicesMocks.useShowExperimentMock = true
   vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
   vaultServicesMocks.showExperiment.mockReset()
+  vaultServicesMocks.showExperimentFollowupDue.mockReset()
+  vaultServicesMocks.showExperimentProgress.mockReset()
   coreMocks.patchAutomation.mockReset().mockResolvedValue({})
 }
 
@@ -776,6 +796,7 @@ async function createPlanSupportAutomation(input: {
   ownerSeriesId: string
   slug: string
   supportKind?: AutomationSupportKind
+  tags?: readonly string[]
   vaultRoot: string
 }) {
   const payload = scaffoldAutomationPayload()
@@ -784,13 +805,17 @@ async function createPlanSupportAutomation(input: {
     instructions: 'Read the live plan and provide only the accepted support.',
     slug: input.slug,
     supportKind: input.supportKind,
-    tags: [buildAutomationSupportSeriesTag(input.ownerSeriesId)],
+    tags: [
+      buildAutomationSupportSeriesTag(input.ownerSeriesId),
+      ...(input.tags ?? []),
+    ],
     title: `Support ${input.slug}`,
     vaultRoot: input.vaultRoot,
   })
   return {
     automationId: created.record.automationId,
     tags: created.record.tags,
+    updatedAt: created.record.updatedAt,
   }
 }
 
@@ -819,6 +844,28 @@ it('revalidates generic experiment reminder consent against the live owner', asy
     vaultRoot,
   })
 
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      asOf: '2026-07-04',
+      dueDecision: null,
+      experimentId: created.experiment.id,
+      kind: 'experiment',
+      progress: { asOf: '2026-07-04' },
+      supportKind: 'reminder',
+      supportSeriesId: `experiment:${created.experiment.id}`,
+    },
+  })
+  expect(vaultServicesMocks.showExperimentProgress).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue).not.toHaveBeenCalled()
+
   await expect(runExperimentLifecycleOutcomePrecondition({
     ...automation,
     vault: vaultRoot,
@@ -836,6 +883,269 @@ it('revalidates generic experiment reminder consent against the live owner', asy
     kind: 'skip',
     reason: 'reminder support consent is not currently enabled',
   })
+})
+
+it('prepares exact current experiment progress for plan-owned support without widening authority checks', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-plan-support-context-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const created = await createExperiment({
+    slug: 'current-reminder-owner',
+    startedOn: '2026-07-01',
+    title: 'Current Reminder Owner',
+    vaultRoot,
+  })
+  await updateExperiment({
+    assistantSupport: {
+      checkInCadence: 'daily',
+      missedLogFollowup: 'default_on',
+      remindersEnabled: true,
+    },
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionEnd: '2026-07-14',
+      interventionStart: '2026-07-01',
+      sessionsPerWeek: 7,
+      targetSessions: 14,
+    },
+    vaultRoot,
+  })
+  const automation = await createPlanSupportAutomation({
+    ownerSeriesId: `experiment:${created.experiment.id}`,
+    slug: 'current-checkin-support',
+    supportKind: 'check_in',
+    vaultRoot,
+  })
+
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: '2026-07-04T00:00:00.000Z',
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toEqual({
+    kind: 'skip',
+    reason: 'plan-owned support automation revision changed',
+  })
+  expect(vaultServicesMocks.showExperimentProgress).not.toHaveBeenCalled()
+
+  const prepared = await prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })
+  expect(prepared).toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      asOf: '2026-07-04',
+      dueDecision: {
+        date: '2026-07-04',
+        decision: {
+          action: 'notify',
+          date: '2026-07-04',
+          kind: 'missed-log',
+        },
+        relation: 'occurrence_day',
+      },
+      experiment: {
+        experimentId: created.experiment.id,
+        status: 'active',
+      },
+      experimentId: created.experiment.id,
+      kind: 'experiment',
+      progress: {
+        asOf: '2026-07-04',
+      },
+      supportKind: 'check_in',
+      supportSeriesId: `experiment:${created.experiment.id}`,
+    },
+  })
+  expect(vaultServicesMocks.showExperimentProgress).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue.mock.calls).toEqual([
+    [expect.objectContaining({ date: '2026-07-04', kind: 'missed-log' })],
+  ])
+
+  vaultServicesMocks.showExperimentProgress.mockClear()
+  vaultServicesMocks.showExperimentFollowupDue.mockClear()
+  await expect(runExperimentLifecycleDeliveryAuthorityPrecondition({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.showExperimentProgress).not.toHaveBeenCalled()
+  expect(vaultServicesMocks.showExperimentFollowupDue).not.toHaveBeenCalled()
+
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-15T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toEqual({
+    kind: 'skip',
+    reason: 'experiment support is not due for the selected date',
+  })
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledWith(
+    expect.objectContaining({ date: '2026-07-15', kind: 'missed-log' }),
+  )
+  expect(vaultServicesMocks.showExperimentProgress).not.toHaveBeenCalled()
+})
+
+it('binds a tagged pre-bed check-in to only the prior local date', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-prior-day-checkin-context-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const created = await createExperiment({
+    slug: 'prior-day-checkin-owner',
+    startedOn: '2026-07-01',
+    title: 'Prior Day Check-in Owner',
+    vaultRoot,
+  })
+  await updateExperiment({
+    assistantSupport: {
+      checkInCadence: 'daily',
+      missedLogFollowup: 'default_on',
+      remindersEnabled: true,
+    },
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionEnd: '2026-07-14',
+      interventionStart: '2026-07-01',
+      sessionsPerWeek: 7,
+      targetSessions: 14,
+    },
+    vaultRoot,
+  })
+  const automation = await createPlanSupportAutomation({
+    ownerSeriesId: `experiment:${created.experiment.id}`,
+    slug: 'prior-day-checkin-support',
+    supportKind: 'check_in',
+    tags: [EXPERIMENT_CHECK_IN_PRIOR_DAY_TAG],
+    vaultRoot,
+  })
+
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      asOf: '2026-07-04',
+      dueDecision: {
+        date: '2026-07-03',
+        decision: {
+          action: 'notify',
+          date: '2026-07-03',
+          kind: 'missed-log',
+        },
+        relation: 'prior_day',
+      },
+      experimentId: created.experiment.id,
+      kind: 'experiment',
+      supportKind: 'check_in',
+      supportSeriesId: `experiment:${created.experiment.id}`,
+    },
+  })
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledWith(
+    expect.objectContaining({ date: '2026-07-03', kind: 'missed-log' }),
+  )
+  expect(vaultServicesMocks.showExperimentProgress).toHaveBeenCalledOnce()
+})
+
+it('prepares the canonical weekly-digest due decision for the exact occurrence date', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-weekly-support-context-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const created = await createExperiment({
+    slug: 'weekly-digest-owner',
+    startedOn: '2026-07-01',
+    title: 'Weekly Digest Owner',
+    vaultRoot,
+  })
+  await updateExperiment({
+    assistantSupport: { weeklyDigestEnabled: true },
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionEnd: '2026-07-21',
+      interventionStart: '2026-07-01',
+    },
+    vaultRoot,
+  })
+  const automation = await createPlanSupportAutomation({
+    ownerSeriesId: `experiment:${created.experiment.id}`,
+    slug: 'weekly-digest-support',
+    supportKind: 'weekly_digest',
+    vaultRoot,
+  })
+
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-07T09:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      asOf: '2026-07-07',
+      dueDecision: {
+        date: '2026-07-07',
+        decision: {
+          action: 'notify',
+          date: '2026-07-07',
+          kind: 'weekly-digest',
+        },
+        relation: 'occurrence_day',
+      },
+      experimentId: created.experiment.id,
+      kind: 'experiment',
+      supportKind: 'weekly_digest',
+      supportSeriesId: `experiment:${created.experiment.id}`,
+    },
+  })
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledOnce()
+
+  vaultServicesMocks.showExperimentFollowupDue.mockClear()
+  vaultServicesMocks.showExperimentProgress.mockClear()
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-08T09:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toEqual({
+    kind: 'skip',
+    reason: 'experiment support is not due for the selected date',
+  })
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledOnce()
+  expect(vaultServicesMocks.showExperimentFollowupDue).toHaveBeenCalledWith(
+    expect.objectContaining({ date: '2026-07-08', kind: 'weekly-digest' }),
+  )
+  expect(vaultServicesMocks.showExperimentProgress).not.toHaveBeenCalled()
 })
 
 it('fails generic experiment support closed when its owner becomes inactive or is deleted', async () => {
@@ -907,6 +1217,23 @@ it('requires typed consent and an active matching owner for regimen support', as
     supportKind: 'check_in',
     vaultRoot,
   })
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: habitAutomation.automationId,
+    expectedUpdatedAt: habitAutomation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: habitAutomation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      kind: 'habit',
+      regimen: { status: 'active' },
+      regimenId: habit.record.entity.regimenId,
+      supportKind: 'check_in',
+      supportSeriesId: `habit:${habit.record.entity.regimenId}`,
+    },
+  })
   await expect(runExperimentLifecycleOutcomePrecondition({
     ...habitAutomation,
     vault: vaultRoot,
@@ -926,12 +1253,49 @@ it('requires typed consent and an active matching owner for regimen support', as
   })
 
   const supplement = await upsertRegimen({
+    dose: 200,
     kind: 'supplement',
+    schedule: 'with dinner',
     startedOn: '2026-07-01',
     status: 'active',
+    substance: 'magnesium glycinate',
     title: 'Magnesium review',
+    unit: 'mg',
     vaultRoot,
   })
+  const supplementAutomation = await createPlanSupportAutomation({
+    ownerSeriesId: `supplement:${supplement.record.entity.regimenId}`,
+    slug: 'supplement-review-support',
+    supportKind: 'review',
+    vaultRoot,
+  })
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: supplementAutomation.automationId,
+    expectedUpdatedAt: supplementAutomation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: supplementAutomation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      kind: 'supplement',
+      regimen: {
+        dose: 200,
+        id: supplement.record.entity.regimenId,
+        kind: 'supplement',
+        schedule: 'with dinner',
+        startedOn: '2026-07-01',
+        status: 'active',
+        substance: 'magnesium glycinate',
+        unit: 'mg',
+      },
+      regimenId: supplement.record.entity.regimenId,
+      supportKind: 'review',
+      supportSeriesId: `supplement:${supplement.record.entity.regimenId}`,
+    },
+  })
+
   const unconsentedAutomation = await createPlanSupportAutomation({
     ownerSeriesId: `supplement:${supplement.record.entity.regimenId}`,
     slug: 'supplement-review-without-consent',
@@ -943,6 +1307,74 @@ it('requires typed consent and an active matching owner for regimen support', as
   })).resolves.toEqual({
     kind: 'skip',
     reason: 'plan-owned support automation has no persisted support consent',
+  })
+})
+
+it('binds regimen support context to the exact owner id when another title collides', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'regimen-plan-support-id-collision-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const target = await upsertRegimen({
+    dose: 25,
+    kind: 'supplement',
+    schedule: 'with breakfast',
+    startedOn: '2026-07-01',
+    status: 'active',
+    substance: 'zinc picolinate',
+    title: 'Zzzz exact target',
+    unit: 'mg',
+    vaultRoot,
+  })
+  const targetId = target.record.entity.regimenId
+  const collision = await upsertRegimen({
+    dose: 999,
+    kind: 'supplement',
+    schedule: 'at bedtime',
+    startedOn: '2026-07-02',
+    status: 'active',
+    substance: 'collision decoy',
+    title: targetId,
+    unit: 'mg',
+    vaultRoot,
+  })
+  expect(collision.record.entity.regimenId).not.toBe(targetId)
+  expect(collision.record.entity.title).toBe(targetId)
+
+  const automation = await createPlanSupportAutomation({
+    ownerSeriesId: `supplement:${targetId}`,
+    slug: 'supplement-id-collision-support',
+    supportKind: 'review',
+    vaultRoot,
+  })
+  await expect(prepareExperimentLifecycleScheduledTurn({
+    automationId: automation.automationId,
+    expectedUpdatedAt: automation.updatedAt,
+    now: '2026-07-04T12:00:00.000Z',
+    productBaseUrl: 'https://example.test',
+    tags: automation.tags,
+    vault: vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'continue',
+    planSupportContext: {
+      kind: 'supplement',
+      regimen: {
+        dose: 25,
+        id: targetId,
+        kind: 'supplement',
+        schedule: 'with breakfast',
+        startedOn: '2026-07-01',
+        status: 'active',
+        substance: 'zinc picolinate',
+        title: 'Zzzz exact target',
+        unit: 'mg',
+      },
+      regimenId: targetId,
+      supportKind: 'review',
+      supportSeriesId: `supplement:${targetId}`,
+    },
   })
 })
 

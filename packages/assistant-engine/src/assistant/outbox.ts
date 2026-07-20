@@ -18,6 +18,7 @@ import {
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
+import { archiveAutomationIfActiveUntilElapsed } from '@murphai/core'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -100,6 +101,9 @@ import {
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
 } from './device-activity-cron-tags.js'
 import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
+import {
+  runExperimentLifecycleDeliveryAuthorityPrecondition,
+} from './experiment-support-automations.js'
 import {
   resolveAssistantOutboxAutomationAuthorityError,
 } from './outbox/automation-authority.js'
@@ -1088,10 +1092,23 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     return null
   }
 
-  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+  const now = new Date()
+  let parentAutomation = await readAssistantDeviceActivityParentAutomation({
     metadata,
     vault: input.vault,
   })
+  if (
+    parentAutomation?.activeUntil &&
+    now.getTime() >= Date.parse(parentAutomation.activeUntil)
+  ) {
+    const expiry = await archiveAutomationIfActiveUntilElapsed({
+      expectedUpdatedAt: parentAutomation.updatedAt,
+      lookup: parentAutomation.automationId,
+      now,
+      vaultRoot: input.vault,
+    })
+    parentAutomation = expiry.record
+  }
   if (
     !parentAutomation ||
     parentAutomation.status !== 'active' ||
@@ -1107,6 +1124,21 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
       },
     })
   ) {
+    return new VaultCliError(
+      'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      'Device activity automation authority changed before outbound delivery.',
+    )
+  }
+
+  const lifecycleAuthority =
+    await runExperimentLifecycleDeliveryAuthorityPrecondition({
+      automationId: parentAutomation.automationId,
+      expectedUpdatedAt: parentAutomation.updatedAt,
+      now,
+      tags: parentAutomation.tags,
+      vault: input.vault,
+    })
+  if (lifecycleAuthority.kind === 'skip') {
     return new VaultCliError(
       'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
       'Device activity automation authority changed before outbound delivery.',

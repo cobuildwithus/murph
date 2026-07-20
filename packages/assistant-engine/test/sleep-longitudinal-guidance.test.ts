@@ -104,15 +104,18 @@ describe('longitudinal sleep guidance', () => {
     )
   })
 
-  it('uses the provider-neutral sleep-pattern command without turning coverage gaps into sleep facts', async () => {
+  it('uses the provider-neutral sleep-pattern owner in attended and scheduled turns without turning coverage gaps into sleep facts', async () => {
     const skill = await readSkill('sleep-improvement')
     const dataFirst = readSection(skill, 'Data First')
 
-    expect(dataFirst).toContain('vault-cli wearables sleep pattern --format json')
-    expect(dataFirst).toContain('`--window-days` (default 28, maximum 366)')
     expect(dataFirst).toContain(
-      'Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone',
+      'use `vault-cli wearables sleep pattern --format json` on attended turns',
     )
+    expect(dataFirst).toContain(
+      'On scheduled turns, use `murph.scheduled_read` with `action: "sleep_pattern"` instead',
+    )
+    expect(dataFirst).toContain('`windowDays` (default 28, maximum 366)')
+    expect(dataFirst).toContain('explicit IANA reporting fallback')
     expect(dataFirst).toContain('Read the returned `summary.notes` before interpreting it')
     expect(dataFirst).toContain(
       'missing wearable dates are missing coverage, not proof of no sleep',
@@ -220,7 +223,12 @@ describe('longitudinal sleep guidance', () => {
     const levers = readSection(skill, 'Practical Levers')
     const melatonin = readSection(skill, 'Melatonin As A Clock Signal')
 
-    expect(dataFirst).toContain('vault-cli wearables sleep pattern --format json')
+    expect(dataFirst).toContain(
+      '`vault-cli wearables sleep pattern --format json` on attended turns',
+    )
+    expect(dataFirst).toContain(
+      'On scheduled turns, use `murph.scheduled_read` with `action: "sleep_pattern"` instead',
+    )
     expect(dataFirst).toContain('Missing wearable dates are missing coverage')
     expect(dataFirst).toContain('mixed providers')
     expect(dataFirst).toContain('DST')

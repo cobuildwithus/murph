@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationDeviceActivityKind,
   AutomationDeviceActivitySource,
   AutomationRoute,
+  AutomationSupportKind,
 } from '@murphai/contracts'
 
 const ASSISTANT_DEVICE_ACTIVITY_CRON_NAME_MARKER_PREFIX =
@@ -13,6 +15,8 @@ const ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX =
   'device-activity-cron:v1:'
 
 export interface AssistantDeviceActivityAuthorityInput {
+  activeUntil: string | null
+  assistantTargetOverride: AutomationAssistantTargetOverride | null
   automationId: string
   continuityPolicy: AutomationContinuityPolicy
   instructions: string
@@ -21,6 +25,8 @@ export interface AssistantDeviceActivityAuthorityInput {
     activityKind?: AutomationDeviceActivityKind
     source?: AutomationDeviceActivitySource
   }
+  supportKind: AutomationSupportKind | null
+  tags: readonly string[]
 }
 
 export interface AssistantDeviceActivityCronJobMetadata {
@@ -34,12 +40,16 @@ export function buildAssistantDeviceActivityAuthorityKey(
   automation: AssistantDeviceActivityAuthorityInput,
 ): string {
   return hashAssistantDeviceActivityAuthorityPayload({
+    activeUntil: automation.activeUntil ?? null,
     activityKind: automation.schedule.activityKind ?? null,
+    assistantTargetOverride: automation.assistantTargetOverride ?? null,
     automationId: automation.automationId,
     continuityPolicy: automation.continuityPolicy,
     instructions: automation.instructions,
     route: automation.route,
     source: automation.schedule.source ?? null,
+    supportKind: automation.supportKind ?? null,
+    tags: automation.tags,
   })
 }
 

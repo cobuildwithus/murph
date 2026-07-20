@@ -1,6 +1,9 @@
 import { createServer as createNetServer } from "node:net";
 import { describe, expect, it } from "vitest";
-import { listMurphDynamicToolNames } from "@murphai/assistant-engine/assistant-codex";
+import {
+  listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -463,7 +466,41 @@ describe("startAssistantProviderStubServer", () => {
 
 describe("expectAdvertisedMurphDynamicTools", () => {
   it("expects gated tools only when the scenario enables them", () => {
-    const allToolNames = listMurphDynamicToolNames();
+    const allToolNames = resolveMurphDynamicTools({
+      assistantConfigurationAvailable: true,
+      assistantStyleSettingsAvailable: true,
+      allowFinishWithoutReply: true,
+      automationAvailable: true,
+      clinicalRecordsConnectLinkAvailable: true,
+      computerToolsAvailable: true,
+      connectedAppsAvailable: true,
+      connectedAppsManageAvailable: true,
+      deviceAvailable: true,
+      familyPlanAvailable: true,
+      groupAvailable: true,
+      labsAvailable: true,
+      messageTargetingAvailable: true,
+      newsletterAvailable: true,
+      personalizationAvailable: true,
+      phoneCallsAvailable: true,
+      planUsageAvailable: true,
+      productFeedbackAvailable: true,
+      progressUpdatesAvailable: true,
+      subscriptionAvailable: true,
+      vaultFileSendAvailable: true,
+      voiceMemoGenerationAvailable: true,
+    }).map((tool) => `${tool.namespace}.${tool.name}`);
+    const scheduledOnlyToolNames = [
+      "murph.scheduled_read",
+      "murph.scheduled_knowledge",
+      "murph.research_scout_batch",
+      "murph.product_source",
+      "murph.maintenance_memory",
+      "murph.complete_onboarding",
+      "murph.generate_scheduled_image",
+      "murph.generate_scheduled_voice_memo",
+      "murph.generate_scheduled_song",
+    ];
     const baseToolNames = allToolNames.filter((name) =>
       !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
@@ -481,6 +518,9 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
     expect(allToolNames).toContain("murph.send_progress_update");
+    expect(
+      listMurphDynamicToolNames().filter((name) => !allToolNames.includes(name)),
+    ).toEqual(scheduledOnlyToolNames);
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),

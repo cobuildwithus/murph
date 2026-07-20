@@ -2826,6 +2826,7 @@ export async function executeMurphDynamicToolRequest(input: {
         assertSourceCurrent: assertScheduledTaskSourceCurrent,
         authority: input.scheduledTaskAuthority ?? null,
         request: input.request,
+        scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
     }

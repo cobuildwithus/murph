@@ -11,7 +11,12 @@ import {
   type ExperimentFrontmatter,
 } from '@murphai/contracts'
 import { isVaultError, loadVault, patchAutomation } from '@murphai/core'
-import { showAutomation } from '@murphai/query'
+import {
+  readRegimen,
+  showAutomation,
+  type ExperimentFollowupDueDecision,
+  type ExperimentProgressSummary,
+} from '@murphai/query'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
@@ -54,6 +59,7 @@ const PLAN_EXPERIMENT_SERIES_ID_PREFIX = 'experiment:'
 const PLAN_HABIT_SERIES_ID_PREFIX = 'habit:'
 const PLAN_SUPPLEMENT_SERIES_ID_PREFIX = 'supplement:'
 const REGIMEN_ID_PREFIX = 'reg_'
+export const EXPERIMENT_CHECK_IN_PRIOR_DAY_TAG = 'experiment-check-in-prior-day'
 const ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX = 'experiment-activity-nudge-'
 const OUTCOME_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 
@@ -471,6 +477,7 @@ export type ExperimentLifecyclePreconditionResult =
 export type PreparedExperimentLifecyclePreconditionResult =
   | {
       kind: 'continue'
+      planSupportContext?: PlanOwnedSupportScheduledContext
       promptContext?: ExperimentLifecycleScheduledContext
       scheduledTaskAuthority?: {
         automationId: string
@@ -482,7 +489,10 @@ export type PreparedExperimentLifecyclePreconditionResult =
   | { kind: 'skip'; reason: string }
 
 export type PreparedExperimentLifecycleScheduledTurnResult =
-  | { kind: 'continue' }
+  | {
+      kind: 'continue'
+      planSupportContext?: PlanOwnedSupportScheduledContext
+    }
   | {
       kind: 'continue'
       promptContext: ExperimentLifecycleScheduledContext
@@ -494,6 +504,31 @@ export type PreparedExperimentLifecycleScheduledTurnResult =
       }
     }
   | { kind: 'skip'; reason: string }
+
+export interface PlanOwnedExperimentSupportDueDecision {
+  date: string
+  decision: ExperimentFollowupDueDecision
+  relation: 'occurrence_day' | 'prior_day'
+}
+
+export type PlanOwnedSupportScheduledContext =
+  | {
+      asOf: string
+      dueDecision: PlanOwnedExperimentSupportDueDecision | null
+      experiment: ExperimentFrontmatter
+      experimentId: string
+      kind: 'experiment'
+      progress: ExperimentProgressSummary
+      supportKind: AutomationSupportKind
+      supportSeriesId: string
+    }
+  | {
+      kind: 'habit' | 'supplement'
+      regimen: Record<string, unknown>
+      regimenId: string
+      supportKind: AutomationSupportKind
+      supportSeriesId: string
+    }
 
 export interface ExperimentLifecycleScheduledContext {
   asOf: string
@@ -693,9 +728,9 @@ export function runExperimentLifecycleOutcomePrecondition(
 }
 
 /**
- * Cron-only preparation that returns an ephemeral capability proof only after
- * the non-model lifecycle owner has validated the exact automation-to-
- * experiment mapping and current consent/status.
+ * Cron-only preparation that returns ephemeral owner context or lifecycle
+ * capability proof only after the non-model owner has validated the exact
+ * automation revision, support-series binding, and current consent/status.
  */
 export async function prepareExperimentLifecycleScheduledTurn(
   input: ExperimentLifecyclePreconditionInput & {
@@ -711,7 +746,9 @@ export async function prepareExperimentLifecycleScheduledTurn(
     return result
   }
   if (!result.scheduledTaskAuthority) {
-    return { kind: 'continue' }
+    return result.planSupportContext
+      ? { kind: 'continue', planSupportContext: result.planSupportContext }
+      : { kind: 'continue' }
   }
 
   const promptContext = await readExperimentLifecycleScheduledContext({
@@ -949,9 +986,9 @@ function stripExperimentLifecycleScheduledAuthority(
 }
 
 type PlanOwnedSupportOwner =
-  | { kind: 'experiment'; lookup: string }
-  | { kind: 'habit'; lookup: string }
-  | { kind: 'supplement'; lookup: string }
+  | { kind: 'experiment'; lookup: string; supportSeriesId: string }
+  | { kind: 'habit'; lookup: string; supportSeriesId: string }
+  | { kind: 'supplement'; lookup: string; supportSeriesId: string }
 
 /**
  * Generic plan support is intentionally checked at the same three cron
@@ -961,11 +998,15 @@ type PlanOwnedSupportOwner =
  * accepted support kind. Experiment owners additionally have independent
  * assistant-support switches, so revoking one of those switches invalidates
  * an already-claimed occurrence without requiring automation reconciliation
- * to win the race.
+ * to win the race. Prepare mode also returns the bounded canonical owner
+ * snapshot needed by the scheduled turn; authority mode performs only the
+ * live checks.
  */
 async function runPlanOwnedSupportAuthorityPrecondition(
-  input: ExperimentLifecyclePreconditionInput,
-): Promise<ExperimentLifecyclePreconditionResult | null> {
+  input: ExperimentLifecyclePreconditionInput & {
+    mode: 'authority' | 'prepare'
+  },
+): Promise<PreparedExperimentLifecyclePreconditionResult | null> {
   const owner = parsePlanOwnedSupportOwner(input.tags)
   if (owner === null) {
     return null
@@ -995,6 +1036,15 @@ async function runPlanOwnedSupportAuthorityPrecondition(
       reason: 'plan-owned support automation ownership changed',
     }
   }
+  if (
+    input.expectedUpdatedAt !== undefined &&
+    automation.updatedAt !== input.expectedUpdatedAt
+  ) {
+    return {
+      kind: 'skip',
+      reason: 'plan-owned support automation revision changed',
+    }
+  }
   if (automation.supportKind === null) {
     return {
       kind: 'skip',
@@ -1004,16 +1054,22 @@ async function runPlanOwnedSupportAuthorityPrecondition(
 
   if (owner.kind === 'experiment') {
     return runPlanOwnedExperimentSupportAuthorityPrecondition({
+      automationTags: automation.tags,
       input,
       lookup: owner.lookup,
+      mode: input.mode,
       supportKind: automation.supportKind,
+      supportSeriesId: owner.supportSeriesId,
     })
   }
 
   return runPlanOwnedRegimenSupportAuthorityPrecondition({
     input,
     lookup: owner.lookup,
+    mode: input.mode,
     ownerKind: owner.kind,
+    supportKind: automation.supportKind,
+    supportSeriesId: owner.supportSeriesId,
   })
 }
 
@@ -1030,6 +1086,7 @@ function parsePlanOwnedSupportOwner(
       return {
         kind: 'experiment',
         lookup: lookup.startsWith(EXPERIMENT_ID_PREFIX) ? lookup : '',
+        supportSeriesId: parsed.seriesId,
       }
     }
     if (parsed.seriesId.startsWith(PLAN_HABIT_SERIES_ID_PREFIX)) {
@@ -1037,6 +1094,7 @@ function parsePlanOwnedSupportOwner(
       return {
         kind: 'habit',
         lookup: lookup.startsWith(REGIMEN_ID_PREFIX) ? lookup : '',
+        supportSeriesId: parsed.seriesId,
       }
     }
     if (parsed.seriesId.startsWith(PLAN_SUPPLEMENT_SERIES_ID_PREFIX)) {
@@ -1044,6 +1102,7 @@ function parsePlanOwnedSupportOwner(
       return {
         kind: 'supplement',
         lookup: lookup.startsWith(REGIMEN_ID_PREFIX) ? lookup : '',
+        supportSeriesId: parsed.seriesId,
       }
     }
   }
@@ -1051,10 +1110,13 @@ function parsePlanOwnedSupportOwner(
 }
 
 async function runPlanOwnedExperimentSupportAuthorityPrecondition(input: {
+  automationTags: readonly string[]
   input: ExperimentLifecyclePreconditionInput
   lookup: string
+  mode: 'authority' | 'prepare'
   supportKind: AutomationSupportKind
-}): Promise<ExperimentLifecyclePreconditionResult> {
+  supportSeriesId: string
+}): Promise<PreparedExperimentLifecyclePreconditionResult> {
   const services = createIntegratedVaultServices()
   let experiment: ExperimentFrontmatter
   try {
@@ -1088,37 +1150,106 @@ async function runPlanOwnedExperimentSupportAuthorityPrecondition(input: {
     : input.supportKind === 'weekly_digest'
       ? support?.weeklyDigestEnabled === true
       : support?.checkInCadence !== undefined && support.checkInCadence !== 'none'
-  return authorized
-    ? { kind: 'continue' }
-    : {
+  if (!authorized) {
+    return {
+      kind: 'skip',
+      reason: `${input.supportKind} support consent is not currently enabled`,
+    }
+  }
+  if (input.mode === 'authority' || input.input.expectedUpdatedAt === undefined) {
+    return { kind: 'continue' }
+  }
+
+  const currentLocalDate = await currentExperimentLocalIsoDate({
+    experiment,
+    now: input.input.now,
+    vaultRoot: input.input.vault,
+  })
+  if (currentLocalDate === null) {
+    return {
+      kind: 'skip',
+      reason: 'experiment support timing could not be validated',
+    }
+  }
+  let dueRead: {
+    date: string
+    kind: 'missed-log' | 'weekly-digest'
+    relation: PlanOwnedExperimentSupportDueDecision['relation']
+  } | null = null
+  if (input.supportKind === 'weekly_digest') {
+    dueRead = {
+      date: currentLocalDate,
+      kind: 'weekly-digest',
+      relation: 'occurrence_day',
+    }
+  } else if (input.supportKind === 'check_in') {
+    const priorDay = input.automationTags.includes(EXPERIMENT_CHECK_IN_PRIOR_DAY_TAG)
+    dueRead = {
+      date: priorDay ? addDaysToIsoDate(currentLocalDate, -1) : currentLocalDate,
+      kind: 'missed-log',
+      relation: priorDay ? 'prior_day' : 'occurrence_day',
+    }
+  }
+
+  let dueDecision: PlanOwnedExperimentSupportDueDecision | null = null
+  if (dueRead !== null) {
+    const result = await services.query.showExperimentFollowupDue({
+      date: dueRead.date,
+      kind: dueRead.kind,
+      lookup: input.lookup,
+      requestId: null,
+      vault: input.input.vault,
+    })
+    if (result.decision.action !== 'notify') {
+      return {
         kind: 'skip',
-        reason: `${input.supportKind} support consent is not currently enabled`,
+        reason: 'experiment support is not due for the selected date',
       }
+    }
+    dueDecision = {
+      date: result.date,
+      decision: result.decision,
+      relation: dueRead.relation,
+    }
+  }
+
+  const progress = await services.query.showExperimentProgress({
+    asOf: currentLocalDate,
+    lookup: input.lookup,
+    requestId: null,
+    vault: input.input.vault,
+  })
+  return {
+    kind: 'continue',
+    planSupportContext: {
+      asOf: progress.asOf,
+      dueDecision,
+      experiment,
+      experimentId: progress.experimentId,
+      kind: 'experiment',
+      progress: progress.progress,
+      supportKind: input.supportKind,
+      supportSeriesId: input.supportSeriesId,
+    },
+  }
 }
 
 async function runPlanOwnedRegimenSupportAuthorityPrecondition(input: {
   input: ExperimentLifecyclePreconditionInput
   lookup: string
+  mode: 'authority' | 'prepare'
   ownerKind: 'habit' | 'supplement'
-}): Promise<ExperimentLifecyclePreconditionResult> {
-  const services = createIntegratedVaultServices()
-  let data: Record<string, unknown>
-  try {
-    const shown = await services.query.showRegimen({
-      vault: input.input.vault,
-      id: input.lookup,
-      requestId: null,
-    })
-    data = shown.entity.data as Record<string, unknown>
-  } catch (error) {
-    if (error instanceof VaultCliError && error.code === 'not_found') {
-      return {
-        kind: 'skip',
-        reason: `${input.ownerKind} support owner no longer exists`,
-      }
+  supportKind: AutomationSupportKind
+  supportSeriesId: string
+}): Promise<PreparedExperimentLifecyclePreconditionResult> {
+  const regimen = await readRegimen(input.input.vault, input.lookup)
+  if (!regimen) {
+    return {
+      kind: 'skip',
+      reason: `${input.ownerKind} support owner no longer exists`,
     }
-    throw error
   }
+  const data: Record<string, unknown> = { ...regimen.entity }
 
   if (data.kind !== input.ownerKind) {
     return {
@@ -1139,7 +1270,19 @@ async function runPlanOwnedRegimenSupportAuthorityPrecondition(input: {
   // For regimens, the current canonical automation's typed supportKind is the
   // exact persisted consent record. Pausing suppresses scheduled execution;
   // an explicit manual run remains a deliberate one-off action.
-  return { kind: 'continue' }
+  if (input.mode === 'authority' || input.input.expectedUpdatedAt === undefined) {
+    return { kind: 'continue' }
+  }
+  return {
+    kind: 'continue',
+    planSupportContext: {
+      kind: input.ownerKind,
+      regimen: data,
+      regimenId: input.lookup,
+      supportKind: input.supportKind,
+      supportSeriesId: input.supportSeriesId,
+    },
+  }
 }
 
 async function currentExperimentLocalIsoDate(input: {

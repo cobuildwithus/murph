@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
+  AutomationAssistantTargetOverride,
   AutomationRoute,
   AutomationSchedule,
   AutomationSupportKind,
@@ -27,11 +28,7 @@ import type {
 type MockAutomationRecord = {
   activeUntil?: string | null
   automationId: string
-  assistantTargetOverride?: {
-    model?: string | null
-    modelProvider?: string | null
-    reasoningEffort?: string | null
-  } | null
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   instructions: string
@@ -1660,7 +1657,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('uses automation id fallback when device activity parent listener path changes', async () => {
+  it('uses the exact device parent after cursor advancement and rechecks experiment consent before delivery', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -1694,8 +1691,12 @@ describe('assistant cron runtime orchestration', () => {
       },
       slug: 'renamed-device-activity-listener',
       status: 'active',
+      supportKind: 'reminder',
       summary: null,
-      tags: ['device'],
+      tags: [
+        'device',
+        'system:support-series:experiment:exp_device_activity_owner',
+      ],
       title: 'Renamed device activity listener',
       updatedAt: '2026-04-08T08:30:00.000Z',
     }
@@ -1742,6 +1743,15 @@ describe('assistant cron runtime orchestration', () => {
       },
       updatedAt: '2026-04-08T08:59:00.000Z',
     })
+    parentAutomation.schedule = {
+      after: '2026-04-08T08:45:00.000Z',
+      afterEntityId: 'evt_device_activity_queued',
+      afterOccurredAt: '2026-04-08T08:45:00.000Z',
+      activityKind: 'run',
+      kind: 'deviceActivity',
+      source: 'whoop',
+    }
+    parentAutomation.updatedAt = '2026-04-08T08:31:00.000Z'
     await writeAssistantCronStore(paths, {
       version: 1,
       jobs: [localJob],
@@ -1749,6 +1759,32 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const devicePlanSupportContext = {
+      asOf: '2026-04-08',
+      dueDecision: null,
+      experiment: {
+        assistantSupport: { remindersEnabled: true },
+        docType: 'experiment',
+        experimentId: 'exp_device_activity_owner',
+        schemaVersion: 'murph.frontmatter.experiment.v1',
+        slug: 'device-activity-owner',
+        startedOn: '2026-04-01',
+        status: 'active',
+        title: 'Device Activity Owner',
+      },
+      experimentId: 'exp_device_activity_owner',
+      kind: 'experiment',
+      progress: {
+        completedSessions: 1,
+        sensedSessions: 1,
+      },
+      supportKind: 'reminder',
+      supportSeriesId: 'experiment:exp_device_activity_owner',
+    } as const
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext: devicePlanSupportContext,
+    })
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
       target: 'linq_chat_device_activity',
       threadIsDirect: false,
@@ -1784,9 +1820,33 @@ describe('assistant cron runtime orchestration', () => {
           reasoningEffort: 'high',
         },
         threadIsDirect: false,
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining(
+          'Plan-owned support context (engine-supplied canonical snapshot):',
+        ),
+        scheduledTaskAuthority: { kind: 'none' },
       }),
     )
+    const notificationInput = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0] as {
+      instructions: string
+    }
+    expect(notificationInput.instructions).toContain('"sensedSessions":1')
+    expect(notificationInput.instructions).toContain(
+      '"supportSeriesId":"experiment:exp_device_activity_owner"',
+    )
+    expect(notificationInput.instructions).toContain(
+      '- Persisted support kind: reminder.',
+    )
+    expect(notificationInput.instructions).toContain(
+      'Do not request an owner selector, date, shell, CLI, filesystem read, progress lookup, or follow-up lookup.',
+    )
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledWith({
+      automationId: parentAutomationId,
+      expectedUpdatedAt: '2026-04-08T08:31:00.000Z',
+      now: '2026-04-08T08:59:30.000Z',
+      productBaseUrl: expect.any(String),
+      tags: parentAutomation.tags,
+      vault: vaultRoot,
+    })
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
         homeRouteFallbackAllowed: false,
@@ -1794,6 +1854,93 @@ describe('assistant cron runtime orchestration', () => {
         targetKind: 'explicit',
       }),
     )
+
+    const revokedJob = assistantCronJobSchema.parse({
+      ...localJob,
+      jobId: 'cron_device_activity_listener_revoked',
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity listener revoked',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345670',
+          parentAutomationId,
+          parentAutomationRelativePath: parentAutomation.relativePath,
+        },
+      ),
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [revokedJob],
+    })
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext: devicePlanSupportContext,
+    })
+    cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
+      .mockClear()
+      .mockResolvedValueOnce({
+        kind: 'skip',
+        reason: 'reminder support consent is not currently enabled',
+      })
+    const context = {
+      decision: {
+        kind: 'send_message' as const,
+        privateSummary: 'Prepared the device-triggered reminder.',
+        text: 'How did that run feel?',
+      },
+      deliveryOutcome: null,
+      response: 'How did that run feel?',
+    }
+    let transportAttempted = false
+    let commitAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeCommit?: (value: typeof context) => Promise<void>
+      beforeDelivery?: (value: typeof context) => Promise<void>
+    }) => {
+      await input.beforeDelivery?.(context)
+      transportAttempted = true
+      await input.beforeCommit?.(context)
+      commitAttempted = true
+      return {
+        ...context,
+        session: { sessionId: 'session-device-support-consent-race' },
+      }
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-device-activity-group',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledTimes(2)
+    expect(
+      cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition,
+    ).toHaveBeenCalledWith({
+      automationId: parentAutomationId,
+      expectedUpdatedAt: parentAutomation.updatedAt,
+      tags: parentAutomation.tags,
+      vault: vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(transportAttempted).toBe(false)
+    expect(commitAttempted).toBe(false)
+    await expect(listAssistantCronRuns({
+      job: revokedJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [expect.objectContaining({
+        error: 'reminder support consent is not currently enabled',
+        outcome: 'skipped_gate',
+        reason: 'device_activity_authority_stale',
+        status: 'skipped',
+      })],
+    })
   })
 
   it('consumes generated device activity jobs when a skip overlaps foreground preemption', async () => {
@@ -1944,7 +2091,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('runs queued device activity jobs with legacy no-override authority keys', async () => {
+  it('fails pre-revision device activity jobs closed after the authority-key hard cut', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2035,17 +2182,23 @@ describe('assistant cron runtime orchestration', () => {
     ).resolves.toEqual({
       failed: 0,
       processed: 1,
-      succeeded: 1,
+      succeeded: 0,
     })
 
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        instructions: 'Ask about the imported run.',
-      }),
-    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [expect.objectContaining({
+        outcome: 'skipped_gate',
+        reason: 'device_activity_authority_stale',
+        status: 'skipped',
+      })],
+    })
   })
 
-  it('runs queued device activity jobs with the current target override after target-only edits', async () => {
+  it('invalidates queued device activity jobs after a target-only parent revision', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2146,17 +2299,10 @@ describe('assistant cron runtime orchestration', () => {
     ).resolves.toEqual({
       failed: 0,
       processed: 1,
-      succeeded: 1,
+      succeeded: 0,
     })
 
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantTargetOverride: {
-          reasoningEffort: 'high',
-        },
-        instructions: 'Ask about the imported run.',
-      }),
-    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
       vaultRoot,
       'bank/automations/device-activity-target-listener.md',
@@ -2167,13 +2313,14 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(runs.runs).toEqual([
       expect.objectContaining({
-        error: null,
-        status: 'succeeded',
+        outcome: 'skipped_gate',
+        reason: 'device_activity_authority_stale',
+        status: 'skipped',
       }),
     ])
   })
 
-  it('accepts queued device activity outbox intents with legacy no-override authority keys', async () => {
+  it('fails pre-revision device activity outbox intents closed after the authority-key hard cut', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-device-outbox-legacy-',
     )
@@ -2240,24 +2387,14 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
-    expect(prepareDispatchIntent).toHaveBeenCalledTimes(1)
-    expect(prepareDispatchIntent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: expect.objectContaining({
-          deliveryIdempotencyKey: expect.stringContaining(
-            metadata.authorityKey,
-          ),
-        }),
-      }),
-    )
-    expect(dispatched.deliveryError).not.toEqual(
-      expect.objectContaining({
-        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
-      }),
-    )
+    expect(prepareDispatchIntent).not.toHaveBeenCalled()
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+    })
   })
 
-  it('accepts queued device activity outbox intents after target-only edits', async () => {
+  it('invalidates queued device activity outbox intents after a target-only parent revision', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-device-outbox-target-edit-',
     )
@@ -2332,12 +2469,11 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
-    expect(prepareDispatchIntent).toHaveBeenCalledTimes(1)
-    expect(dispatched.deliveryError).not.toEqual(
-      expect.objectContaining({
-        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
-      }),
-    )
+    expect(prepareDispatchIntent).not.toHaveBeenCalled()
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+    })
   })
 
   it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
@@ -4783,6 +4919,7 @@ describe('assistant cron runtime orchestration', () => {
       schedule: { at: '2026-04-08T09:00:00.000Z', kind: 'at' },
       slug: 'generic-support-revoked-before-commit',
       status: 'active',
+      supportKind: 'check_in',
       summary: null,
       tags: [
         'assistant',
@@ -4793,7 +4930,20 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
     cronMocks.prepareExperimentLifecycleScheduledTurn
-      .mockResolvedValueOnce({ kind: 'continue' })
+      .mockResolvedValueOnce({
+        kind: 'continue',
+        planSupportContext: {
+          kind: 'habit',
+          regimen: {
+            regimenId: 'reg_sleep_support',
+            status: 'active',
+            title: 'Sleep support',
+          },
+          regimenId: 'reg_sleep_support',
+          supportKind: 'check_in',
+          supportSeriesId: 'habit:reg_sleep_support',
+        },
+      })
     cronMocks.runExperimentLifecycleDeliveryAuthorityPrecondition
       .mockResolvedValueOnce({ kind: 'continue' })
       .mockResolvedValueOnce({
@@ -4822,7 +4972,16 @@ describe('assistant cron runtime orchestration', () => {
           deliveryOutcome: null
           response: string
         }) => Promise<void>
+        instructions: string
+        scheduledTaskAuthority?: unknown
       }) => {
+        expect(notificationInput.instructions).toContain(
+          '"supportSeriesId":"habit:reg_sleep_support"',
+        )
+        expect(notificationInput.instructions).toContain(
+          'Ground this turn in the exact parent-owned active regimen record.',
+        )
+        expect(notificationInput.scheduledTaskAuthority).toEqual({ kind: 'none' })
         const context = {
           decision: {
             kind: 'send_message' as const,
@@ -4858,6 +5017,174 @@ describe('assistant cron runtime orchestration', () => {
       vaultRoot,
       'automation-generic-support-revoked-before-commit',
     )?.status).toBe('archived')
+  })
+
+  it('prepares an experiment support retry from its original occurrence across local midnight', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T20:00:00.000Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-experiment-support-midnight-retry-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'experiment support midnight retry',
+      now: new Date('2026-04-08T20:00:00.000Z'),
+      prompt: 'Send the accepted experiment reminder.',
+      resolveTargetDefaults: false,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '23:59',
+      },
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the experiment support retry automation fixture.')
+    }
+    automation.supportKind = 'reminder'
+    automation.tags = [
+      ...automation.tags,
+      'system:support-series:experiment:exp_midnight_retry',
+    ]
+    const occurrenceAt = '2026-04-09T03:59:00.000Z'
+    const retryAt = '2026-04-09T04:00:20.000Z'
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        consecutiveFailures: 1,
+        lastError: 'Previous provider attempt failed.',
+        lastFailedAt: '2026-04-09T03:59:50.000Z',
+        lastRunAt: '2026-04-09T03:59:50.000Z',
+        pendingOccurrenceAt: occurrenceAt,
+        retryAfterAt: retryAt,
+      },
+    }))
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext: {
+        asOf: '2026-04-08',
+        dueDecision: null,
+        experiment: {
+          experimentId: 'exp_midnight_retry',
+          slug: 'midnight-retry',
+          status: 'active',
+          title: 'Midnight Retry',
+        },
+        experimentId: 'exp_midnight_retry',
+        kind: 'experiment',
+        progress: { asOf: '2026-04-08' },
+        supportKind: 'reminder',
+        supportSeriesId: 'experiment:exp_midnight_retry',
+      },
+    })
+
+    vi.setSystemTime(new Date(retryAt))
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 })
+
+    expect(cronMocks.prepareExperimentLifecycleScheduledTurn).toHaveBeenCalledWith({
+      automationId: canonicalJob.jobId,
+      expectedUpdatedAt: automation.updatedAt,
+      now: occurrenceAt,
+      productBaseUrl: expect.any(String),
+      tags: automation.tags,
+      vault: vaultRoot,
+    })
+  })
+
+  it('serializes only the parent-selected experiment check-in due decision', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-experiment-check-in-decisions-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'experiment check-in decisions',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the experiment check-in automation fixture.')
+    }
+    automation.supportKind = 'check_in'
+    automation.tags = [
+      ...automation.tags,
+      'system:support-series:experiment:exp_check_in_decisions',
+    ]
+    const experiment = {
+      id: 'exp_check_in_decisions',
+      slug: 'check-in-decisions',
+      status: 'active' as const,
+      title: 'Check-in Decisions',
+    }
+    const emptyWindow = {
+      baselineEnd: null,
+      baselineStart: null,
+      interventionEnd: '2026-04-21',
+      interventionStart: '2026-04-01',
+      sessionDate: null,
+    }
+    const planSupportContext = {
+      asOf: '2026-04-08',
+      dueDecision: {
+        date: '2026-04-07',
+        decision: {
+          action: 'notify',
+          date: '2026-04-07',
+          dedupeKey: 'exp_check_in_decisions:missed-log:2026-04-07',
+          experiment,
+          kind: 'missed-log',
+          reason: 'planned_session_log_missing',
+          schema: 'murph.experiment-followup-due.v1',
+          window: emptyWindow,
+        },
+        relation: 'prior_day',
+      },
+      experiment: {
+        experimentId: experiment.id,
+        slug: experiment.slug,
+        status: experiment.status,
+        title: experiment.title,
+      },
+      experimentId: experiment.id,
+      kind: 'experiment',
+      progress: {
+        asOf: '2026-04-08',
+        completedSessions: 2,
+      },
+      supportKind: 'check_in',
+      supportSeriesId: `experiment:${experiment.id}`,
+    } as const
+    cronMocks.prepareExperimentLifecycleScheduledTurn.mockResolvedValueOnce({
+      kind: 'continue',
+      planSupportContext,
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 })
+
+    const notificationInput = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0] as {
+      instructions: string
+      scheduledTaskAuthority: unknown
+    }
+    expect(notificationInput.instructions).toContain(JSON.stringify(planSupportContext))
+    expect(notificationInput.instructions).toContain(
+      'When a due decision is present, the trusted parent has already selected its exact date and verified that it says notify; do not reinterpret or replace that decision.',
+    )
+    expect(notificationInput.instructions).not.toContain('2026-04-08:missed-log')
+    expect(notificationInput.scheduledTaskAuthority).toEqual({ kind: 'none' })
   })
 
   it('retries final-results lifecycle cleanup before stale one-shot expiry', async () => {
@@ -9870,11 +10197,18 @@ function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): stri
   }
 
   return buildAssistantDeviceActivityAuthorityKey({
-    ...automation,
+    activeUntil: automation.activeUntil ?? null,
+    assistantTargetOverride: automation.assistantTargetOverride ?? null,
+    automationId: automation.automationId,
+    continuityPolicy: automation.continuityPolicy,
+    instructions: automation.instructions,
+    route: automation.route,
     schedule: {
       activityKind: automation.schedule.activityKind,
       source: automation.schedule.source,
     },
+    supportKind: automation.supportKind ?? null,
+    tags: automation.tags,
   })
 }
 

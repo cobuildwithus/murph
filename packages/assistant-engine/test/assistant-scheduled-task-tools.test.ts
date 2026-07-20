@@ -342,6 +342,7 @@ describe('scheduled task dynamic tools', () => {
       hostedToolContext: createScheduledGroupToolContext(
         assertScheduledGroupRouteCurrent,
       ),
+      scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
       sourceCurrentAssertion,
       vaultRoot,
     })

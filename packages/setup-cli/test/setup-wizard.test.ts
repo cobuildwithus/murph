@@ -96,13 +96,9 @@ test('setup wizard completion controller rejects unexpected exits and preserves 
   await assert.rejects(controller.waitForResult(), /wizard exited early/u)
 })
 
-test('setup wizard scheduled updates keep the starter bundle unless explicitly overridden', () => {
-  assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), [
-    'environment-health-watch',
-    'weekly-health-snapshot',
-  ])
+test('setup wizard scheduled updates keep the starter update unless explicitly overridden', () => {
+  assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), ['weekly-health-snapshot'])
   assert.deepEqual(resolveSetupWizardInitialScheduledUpdates(undefined), [
-    'environment-health-watch',
     'weekly-health-snapshot',
   ])
   assert.deepEqual(resolveSetupWizardInitialScheduledUpdates([]), [])
@@ -112,15 +108,15 @@ test('setup wizard scheduled updates keep the starter bundle unless explicitly o
   )
   assert.deepEqual(
     toggleSetupWizardScheduledUpdate(
-      ['environment-health-watch'],
+      ['morning-mindfulness'],
       'weekly-health-snapshot',
     ),
-    ['environment-health-watch', 'weekly-health-snapshot'],
+    ['morning-mindfulness', 'weekly-health-snapshot'],
   )
   assert.deepEqual(
     toggleSetupWizardScheduledUpdate(
-      ['environment-health-watch', 'weekly-health-snapshot'],
-      'environment-health-watch',
+      ['morning-mindfulness', 'weekly-health-snapshot'],
+      'morning-mindfulness',
     ),
     ['weekly-health-snapshot'],
   )
@@ -182,12 +178,12 @@ test('setup wizard exported defaults and wrapper controller keep platform-specif
   assert.deepEqual(
     resolveSetupWizardInitialScheduledUpdates([
       'weekly-health-snapshot',
-      'environment-health-watch',
+      'morning-mindfulness',
       'weekly-health-snapshot',
       'unknown-preset',
     ]),
     [
-      'environment-health-watch',
+      'morning-mindfulness',
       'weekly-health-snapshot',
       'unknown-preset',
     ],
@@ -229,10 +225,7 @@ test.sequential('setup wizard preserves an explicit empty channel selection on d
       assistantOss: null,
       assistantPreset: 'skip',
       channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
+      scheduledUpdates: ['weekly-health-snapshot'],
       wearables: [],
     })
   })
@@ -310,7 +303,7 @@ test('setup wizard extracted option and public-url helpers keep labels and trimm
   assert.equal(formatSetupChannel('email'), 'Email')
   assert.equal(formatSetupWearable('garmin'), 'Garmin')
   assert.equal(formatSetupWearable('oura'), 'Oura')
-  assert.equal(formatSetupScheduledUpdate('environment-health-watch'), 'Environment health watch')
+  assert.equal(formatSetupScheduledUpdate('morning-mindfulness'), 'Morning mindfulness')
   assert.equal(formatSetupScheduledUpdate('custom-update'), 'custom-update')
   assert.equal(formatSetupPublicUrlStrategy('local'), 'Local callbacks')
   assert.equal(formatSetupPublicUrlStrategy('hosted'), 'Hosted web app')
@@ -407,10 +400,7 @@ test.sequential('setup wizard carries Codex local selection into confirm review'
       assistantOss: true,
       assistantPreset: 'codex',
       channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
+      scheduledUpdates: ['weekly-health-snapshot'],
       wearables: [],
     })
   })
@@ -455,10 +445,7 @@ test.sequential('setup wizard preserves current provider-backed Codex selection'
       assistantOss: false,
       assistantPreset: 'codex',
       channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
+      scheduledUpdates: ['weekly-health-snapshot'],
       wearables: [],
     })
   })
@@ -933,10 +920,7 @@ test.sequential('setup wizard keeps Codex cloud review guidance when no public-l
       assistantOss: false,
       assistantPreset: 'codex',
       channels: [],
-      scheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
+      scheduledUpdates: ['weekly-health-snapshot'],
       wearables: [],
     })
   })

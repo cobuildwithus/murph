@@ -3,6 +3,10 @@ import { createHmac, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  ID_PREFIXES,
+  isContractId,
+} from "@murphai/contracts";
+import {
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
@@ -77,9 +81,16 @@ const experimentAdherenceChatId = `chat_local_junction_adherence_${runId}`;
 const experimentAdherenceSlug = `hosted-running-block-${runId}`;
 const experimentActivityNudgeSlug = `experiment-activity-nudge-${experimentAdherenceSlug}`;
 const experimentSetupText = "Set up my wearable-counted running block.";
-const experimentSetupReplyText = "Your running block is active and Garmin runs count automatically.";
+const experimentStartReplyText = [
+  "Your running block is active and Garmin runs count automatically.",
+  "Want a short note only at meaningful milestones?",
+].join(" ");
+const experimentActivityNudgeSetupText =
+  "Yes, send a short note only at meaningful running milestones.";
+const experimentSetupReplyText =
+  "Got it — I’ll only send a short note at meaningful running milestones.";
 const experimentActivityNudgeInstructions = [
-  `Read vault-cli experiment progress ${experimentAdherenceSlug} --format json first.`,
+  "Use the engine-supplied canonical experiment support snapshot for current progress; do not run a shell, CLI, or another lookup.",
   "Send one short progress celebration only for a meaningful milestone; never ask the user to log the workout.",
   "Skip silently when the activity is already covered or no progress moment is useful.",
 ].join(" ");
@@ -261,9 +272,24 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(experimentAdherenceChatId)}/messages`;
+    const garminSources = requirePlan().sources.filter(
+      (source) => source.sourceProviderSlug === "garmin",
+    );
+    expect(garminSources).toHaveLength(1);
+    const externalAccountId = `${requirePlan().connection.externalAccountId}-${runId}-adherence`;
+    const connection = await activeScenario.seedJunctionDeviceSyncConnection({
+      connectedAt: activityPlan.seededAt,
+      displayName: "Garmin",
+      externalAccountId,
+      memberId: experimentAdherenceUserId,
+      sources: garminSources,
+    });
+    expect(connection.sourceCount).toBe(1);
+
+    const experimentStartProviderBaseline = countAssistantResponsesApiRequests();
     const setupOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
     activeScenario.queueAssistantResponses(
-      buildExperimentAdherenceSetupResponses(activityPlan),
+      buildExperimentAdherenceStartResponses(activityPlan),
       { matchInputContains: experimentSetupText },
     );
     const setupResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -282,26 +308,47 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       scenario: activeScenario,
       userId: experimentAdherenceUserId,
     });
-    expect(requireLinqStub().readObservedMessageText(setupReply)).toBe(experimentSetupReplyText);
+    expect(requireLinqStub().readObservedMessageText(setupReply)).toBe(
+      experimentStartReplyText,
+    );
     await assertHostedRunnerCompletedWithoutError({
-      context: "experiment-adherence setup",
+      context: "experiment-adherence start",
       scenario: activeScenario,
       userId: experimentAdherenceUserId,
     });
-
-    const garminSources = requirePlan().sources.filter(
-      (source) => source.sourceProviderSlug === "garmin",
+    const experimentId = requireStartedExperimentIdSince(
+      experimentStartProviderBaseline,
     );
-    expect(garminSources).toHaveLength(1);
-    const externalAccountId = `${requirePlan().connection.externalAccountId}-${runId}-adherence`;
-    const connection = await activeScenario.seedJunctionDeviceSyncConnection({
-      connectedAt: activityPlan.seededAt,
-      displayName: "Garmin",
-      externalAccountId,
-      memberId: experimentAdherenceUserId,
-      sources: garminSources,
+
+    const nudgeSetupOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    activeScenario.queueAssistantResponses(
+      buildExperimentActivityNudgeSetupResponses(activityPlan, experimentId),
+      { matchInputContains: experimentActivityNudgeSetupText },
+    );
+    const nudgeSetupResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      experimentAdherenceUserId,
+      experimentAdherenceChatId,
+      {
+        eventId: `evt_junction_experiment_nudge_setup_${runId}`,
+        messageId: `msg_junction_experiment_nudge_setup_${runId}`,
+        text: experimentActivityNudgeSetupText,
+      },
+    ));
+    expect(nudgeSetupResponse.status).toBe(202);
+    const nudgeSetupReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: nudgeSetupOutboundBaseline,
+      expectedPath: replyPath,
+      scenario: activeScenario,
+      userId: experimentAdherenceUserId,
     });
-    expect(connection.sourceCount).toBe(1);
+    expect(requireLinqStub().readObservedMessageText(nudgeSetupReply)).toBe(
+      experimentSetupReplyText,
+    );
+    await assertHostedRunnerCompletedWithoutError({
+      context: "experiment activity-nudge setup",
+      scenario: activeScenario,
+      userId: experimentAdherenceUserId,
+    });
 
     const triggeredRunningStart = new Date();
     const triggeredRunning = buildJunctionWorkoutDirtyResource({
@@ -316,13 +363,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     const nudgeOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
     const nudgeProviderBaseline = countAssistantResponsesApiRequests();
     activeScenario.queueAssistantResponses([
-      buildAssistantProviderVaultCliCall([
-        "experiment",
-        "progress",
-        experimentAdherenceSlug,
-        "--format",
-        "json",
-      ]),
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "One sensed running milestone; no manual log request is needed.",
         text: experimentActivityNudgeReplyText,
@@ -379,9 +419,13 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(nudgeOutboundBaseline + 1);
-    expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 2);
+    expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 1);
 
     const nudgeProviderText = collectAssistantProviderRequestTextSince(nudgeProviderBaseline);
+    expect(nudgeProviderText).toContain(
+      "Plan-owned support context (engine-supplied canonical snapshot):",
+    );
+    expect(nudgeProviderText).toContain(experimentId);
     expect(nudgeProviderText).toContain(experimentAdherenceSlug);
     expect(nudgeProviderText).toMatch(/"sensedSessions"\s*:\s*1/u);
     expect(nudgeProviderText).toMatch(/"completedSessions"\s*:\s*1/u);
@@ -631,7 +675,7 @@ function buildJunctionWorkoutDirtyResource(input: {
   };
 }
 
-function buildExperimentAdherenceSetupResponses(
+function buildExperimentAdherenceStartResponses(
   plan: ExperimentAdherenceActivityPlan,
 ) {
   return [
@@ -641,6 +685,8 @@ function buildExperimentAdherenceSetupResponses(
       experimentAdherenceSlug,
       "--request-id",
       `hosted-running-block-start-${runId}`,
+      "--format",
+      "json",
       "--title",
       "Hosted running block",
       "--started-on",
@@ -667,11 +713,22 @@ function buildExperimentAdherenceSetupResponses(
       "biomarker:resting-heart-rate",
       "--missed-log-followup",
       "never",
+      "--reminders-enabled",
       "--setup-answer",
       `activity_nudge_automation_slug=${experimentActivityNudgeSlug}`,
     ]),
+    experimentStartReplyText,
+  ] as const;
+}
+
+function buildExperimentActivityNudgeSetupResponses(
+  plan: ExperimentAdherenceActivityPlan,
+  experimentId: string,
+) {
+  return [
     buildAssistantProviderMurphToolCall("automation", {
       action: "save",
+      activeUntil: `${addDaysToIsoDate(plan.interventionEnd, 1)}T00:00:00.000Z`,
       continuityPolicy: "fresh",
       instructions: experimentActivityNudgeInstructions,
       schedule: {
@@ -682,6 +739,8 @@ function buildExperimentAdherenceSetupResponses(
       slug: experimentActivityNudgeSlug,
       status: "active",
       summary: "Sparse milestone celebrations for sensed running sessions.",
+      supportKind: "reminder",
+      supportSeriesId: `experiment:${experimentId}`,
       tags: ["experiment", "activity-nudge"],
       title: "Running block activity nudge",
     }),
@@ -732,6 +791,34 @@ function collectAssistantProviderRequestTextSince(baseline: number): string {
     .slice(baseline)
     .flatMap((request) => collectJsonStrings(JSON.parse(request.body)))
     .join("\n\n");
+}
+
+function requireStartedExperimentIdSince(baseline: number): string {
+  const experimentIds = new Set<string>();
+  const responseRequests = requireScenario().assistantProviderRequests
+    .filter((request) => request.url === "/v1/responses")
+    .slice(baseline);
+
+  for (const request of responseRequests) {
+    for (const text of collectJsonStrings(JSON.parse(request.body))) {
+      if (!text.includes(experimentAdherenceSlug)) {
+        continue;
+      }
+      for (const match of text.matchAll(/"experimentId"\s*:\s*"([^"]+)"/gu)) {
+        const candidate = match[1];
+        if (isContractId(candidate, ID_PREFIXES.experiment)) {
+          experimentIds.add(candidate);
+        }
+      }
+    }
+  }
+
+  if (experimentIds.size !== 1) {
+    throw new Error(
+      `Expected exactly one started experiment id in the scoped provider output; found ${experimentIds.size}.`,
+    );
+  }
+  return [...experimentIds][0]!;
 }
 
 function collectJsonStrings(value: unknown): string[] {

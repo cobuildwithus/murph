@@ -232,7 +232,6 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
-      '- When useful, use web search to find one or two credible studies, reviews, or guidelines that suggest a pattern worth testing against the vault. Keep the user\'s vault data as the deciding evidence. Put external source provenance in the `weekly-health-insights` section body when it materially supports the mechanism, but keep the outbound note URL-free unless the user asks for links. Do not block the run if web search is unavailable or not useful.',
       '',
       'Good finding shapes include:',
       '- Bloodwork plus behavior: lab markers, symptoms, workouts, food timing, or supplement use that move with sleep, HRV, recovery mismatch, fatigue, soreness, or GI notes.',

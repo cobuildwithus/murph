@@ -15,6 +15,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
+  advanceAutomationDeviceActivityCursor,
   createExperiment,
   initializeVault,
   patchAutomation,
@@ -31,6 +32,10 @@ import {
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
+import {
+  buildAssistantDeviceActivityAuthorityKey,
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
+} from '../src/assistant/device-activity-cron-tags.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
@@ -3248,6 +3253,245 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('delivers a queued device activity reminder while its exact parent and consent remain current', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-device-activity-current-',
+    )
+    const fixture = await createDeviceActivityPlanReminderFixture({
+      slug: 'device-activity-current',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      deliveryIdempotencyKey: fixture.deliveryIdempotencyKey,
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'How did that session feel?',
+      sessionId: 'session-device-activity-current',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-device-activity-current',
+      vault: vaultRoot,
+    })
+    const advanced = await advanceAutomationDeviceActivityCursor({
+      after: '2026-07-16T12:00:45.000Z',
+      afterEntityId: 'evt_device_activity_current',
+      afterOccurredAt: '2026-07-16T12:00:45.000Z',
+      expectedActivityKind: fixture.cursorAuthority.activityKind,
+      expectedContinuityPolicy: fixture.cursorAuthority.continuityPolicy,
+      expectedInstructions: fixture.cursorAuthority.instructions,
+      expectedRoute: fixture.cursorAuthority.route,
+      expectedSource: fixture.cursorAuthority.source,
+      lookup: fixture.automationId,
+      now: new Date('2026-07-16T12:01:00.000Z'),
+      vaultRoot,
+    })
+    expect(advanced).toMatchObject({
+      advanced: true,
+      record: {
+        updatedAt: '2026-07-16T12:01:00.000Z',
+      },
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        providerMessageId: 'provider-device-activity-current',
+        target: 'telegram-chat',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.deliveryError).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it('archives an expired device activity parent and blocks queued delivery before provider transport', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-16T12:00:30.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-device-activity-expired-',
+    )
+    const fixture = await createDeviceActivityPlanReminderFixture({
+      activeUntil: '2026-07-16T12:01:00.000Z',
+      slug: 'device-activity-expired',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      deliveryIdempotencyKey: fixture.deliveryIdempotencyKey,
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'How did that session feel?',
+      sessionId: 'session-device-activity-expired',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-device-activity-expired',
+      vault: vaultRoot,
+    })
+
+    vi.setSystemTime(new Date('2026-07-16T12:02:00.000Z'))
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date(),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+    })
+    await expect(showAutomation({
+      automationId: fixture.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({ status: 'archived' })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('blocks a retryable device activity reminder when experiment consent is revoked without changing the parent revision', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-device-activity-consent-',
+    )
+    const fixture = await createDeviceActivityPlanReminderFixture({
+      slug: 'device-activity-consent',
+      vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      new VaultCliError(
+        'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+        'Hosted background delivery yielded before provider entry.',
+        {
+          assistantDeliveryFailureClass: 'transient',
+          retryable: true,
+        },
+      ),
+    )
+    const firstAttempt = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      deliveryIdempotencyKey: fixture.deliveryIdempotencyKey,
+      explicitTarget: 'telegram-chat',
+      message: 'How did that session feel?',
+      sessionId: 'session-device-activity-consent',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-device-activity-consent',
+      vault: vaultRoot,
+    })
+    expect(firstAttempt.kind).toBe('queued')
+    expect(firstAttempt.intent.status).toBe('retryable')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    await updateExperiment({
+      assistantSupport: { remindersEnabled: false },
+      relativePath: fixture.experimentRelativePath,
+      vaultRoot,
+    })
+    const retry = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: firstAttempt.intent.intentId,
+      now: new Date('2026-07-16T12:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(retry.intent.status).toBe('failed')
+    expect(retry.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { change: 'support-kind' as const, label: 'support kind changes' },
+    { change: 'target' as const, label: 'its model target changes' },
+    { change: 'tags' as const, label: 'its exact tags change' },
+    { change: 'active-until' as const, label: 'its finite window changes' },
+    { change: 'paused' as const, label: 'it is paused' },
+    { change: 'archived' as const, label: 'it is archived' },
+  ])(
+    'blocks a queued device activity reminder after $label',
+    async ({ change }) => {
+      const { vaultRoot } = await createInitializedAssistantVault(
+        `assistant-outbox-device-activity-${change}-`,
+      )
+      const fixture = await createDeviceActivityPlanReminderFixture({
+        slug: `device-activity-${change}`,
+        vaultRoot,
+      })
+      const queued = await deliverAssistantOutboxMessage({
+        channel: 'telegram',
+        deliveryIdempotencyKey: fixture.deliveryIdempotencyKey,
+        dispatchMode: 'queue-only',
+        explicitTarget: 'telegram-chat',
+        message: 'How did that session feel?',
+        sessionId: `session-device-activity-${change}`,
+        threadId: 'telegram-chat',
+        threadIsDirect: true,
+        turnId: `turn-device-activity-${change}`,
+        vault: vaultRoot,
+      })
+
+      if (change === 'support-kind') {
+        await patchAutomation({
+          lookup: fixture.automationId,
+          now: new Date('2026-07-16T12:01:00.000Z'),
+          supportKind: 'check_in',
+          vaultRoot,
+        })
+      } else if (change === 'target') {
+        await patchAutomation({
+          assistantTargetOverride: { reasoningEffort: 'low' },
+          lookup: fixture.automationId,
+          now: new Date('2026-07-16T12:01:00.000Z'),
+          vaultRoot,
+        })
+      } else if (change === 'tags') {
+        await patchAutomation({
+          lookup: fixture.automationId,
+          now: new Date('2026-07-16T12:01:00.000Z'),
+          tags: [...fixture.tags, 'changed-authority-tag'],
+          vaultRoot,
+        })
+      } else if (change === 'active-until') {
+        await patchAutomation({
+          activeUntil: '2026-07-30T12:00:00.000Z',
+          lookup: fixture.automationId,
+          now: new Date('2026-07-16T12:01:00.000Z'),
+          vaultRoot,
+        })
+      } else {
+        await patchAutomation({
+          lookup: fixture.automationId,
+          now: new Date('2026-07-16T12:01:00.000Z'),
+          status: change,
+          vaultRoot,
+        })
+      }
+
+      const dispatched = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: queued.intent.intentId,
+        now: new Date('2026-07-16T12:02:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('failed')
+      expect(dispatched.deliveryError).toMatchObject({
+        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      })
+      expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    },
+  )
+
   it('rechecks each sequential drain intent at provider time and consumes an expired required send', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-16T12:00:00.000Z'))
@@ -4811,6 +5055,85 @@ async function createInitializedAssistantVault(prefix: string): Promise<{
   return {
     paths,
     vaultRoot,
+  }
+}
+
+async function createDeviceActivityPlanReminderFixture(input: {
+  activeUntil?: string
+  slug: string
+  vaultRoot: string
+}) {
+  const experiment = await createExperiment({
+    slug: `${input.slug}-experiment`,
+    startedOn: '2026-07-01',
+    title: 'Device activity reminder owner',
+    vaultRoot: input.vaultRoot,
+  })
+  await updateExperiment({
+    assistantSupport: { remindersEnabled: true },
+    relativePath: experiment.experiment.relativePath,
+    vaultRoot: input.vaultRoot,
+  })
+  const automation = await upsertAutomation({
+    ...scaffoldAutomationPayload(),
+    ...(input.activeUntil === undefined ? {} : { activeUntil: input.activeUntil }),
+    instructions: 'Send only the accepted activity reminder.',
+    now: new Date('2026-07-16T12:00:00.000Z'),
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'telegram-chat',
+      identityId: null,
+      participantId: null,
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+    },
+    schedule: {
+      activityKind: 'run',
+      after: '2026-07-16T11:00:00.000Z',
+      kind: 'deviceActivity',
+    },
+    slug: `${input.slug}-automation`,
+    supportKind: 'reminder',
+    tags: [
+      buildAutomationSupportSeriesTag(
+        `experiment:${experiment.experiment.id}`,
+      ),
+    ],
+    title: 'Device activity reminder',
+    vaultRoot: input.vaultRoot,
+  })
+  if (automation.record.schedule.kind !== 'deviceActivity') {
+    throw new Error('Expected a device activity automation fixture.')
+  }
+  const metadata = {
+    authorityKey: buildAssistantDeviceActivityAuthorityKey({
+      ...automation.record,
+      schedule: {
+        activityKind: automation.record.schedule.activityKind,
+        source: automation.record.schedule.source,
+      },
+    }),
+    occurrenceKey: '0123456789abcdef0123456789abcdef01234567',
+    parentAutomationId: automation.record.automationId,
+    parentAutomationRelativePath: automation.record.relativePath,
+  }
+
+  return {
+    automationId: automation.record.automationId,
+    cursorAuthority: {
+      activityKind: automation.record.schedule.activityKind,
+      continuityPolicy: automation.record.continuityPolicy,
+      instructions: automation.record.instructions,
+      route: automation.record.route,
+      source: automation.record.schedule.source,
+    },
+    deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+      discriminator: { operation: 'assistant-device-activity-notification' },
+      metadata,
+    }),
+    experimentRelativePath: experiment.experiment.relativePath,
+    tags: automation.record.tags,
   }
 }
 

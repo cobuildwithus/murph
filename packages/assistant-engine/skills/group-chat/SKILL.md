@@ -242,7 +242,10 @@ receives all currently consented server-approved health projections except group
 email; a challenge receives only its exact immutable projection. A
 `group_notification` has no `group_shared` access. Never pass a room, route,
 participant, member, scope, kind, or record limit. The scheduled result omits
-raw member ids; attribute standings
+raw member ids. Health updates receive a compact occurrence-pinned summary: the
+top-level scope and metric dictionaries define the numeric indexes used by each
+member's retained-share counts and current-week averages, while retained sleep
+windows stay explicit. Attribute standings
 only by a returned display name. If a display name has not landed, treat
 attribution as unknown and do not score or guess the person. It is empty until
 members have connected the relevant data and their runtime has next woken;

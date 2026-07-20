@@ -23,7 +23,7 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 ## Data First
 
 - Check 14-30 days of sleep midpoint, wake time, bedtime, weekday/weekend drift, naps, travel, shift schedule, light exposure if available, workouts, and caffeine timing.
-- Read the provider-neutral canonical timing view with `vault-cli wearables sleep pattern --format json` before interpreting a multi-night clock pattern. Narrow it only when useful with `--date`, `--from`/`--to`, repeatable `--provider`, or `--window-days`; use `--time-zone <IANA>` only as an explicit reporting fallback when a night lacks a canonical zone.
+- Before interpreting a multi-night clock pattern, read the provider-neutral canonical timing view with `vault-cli wearables sleep pattern --format json` on attended turns. On scheduled turns, use `murph.scheduled_read` with `action: "sleep_pattern"` instead; narrow either read only when useful with `date`, `from`/`to`, `providers`, or `windowDays`, and use `timeZone` only as an explicit validated IANA reporting fallback when a night lacks a canonical zone.
 - Read `summary.notes` before advising. Missing wearable dates are missing coverage, not proof of no sleep; nap-only dates are excluded when identified; legacy nights with unknown sleep identity stay unknown; mixed providers, device latency, stale sync, duplicate/overlapping episodes, travel, DST, or mixed time zones can create apparent shifts; omit clock-time conclusions when no validated zone exists.
 - Use the user's required wake time and real constraints before prescribing morning light or bedtime changes.
 - Look for variability first; irregular wake times can masquerade as delayed sleep phase.

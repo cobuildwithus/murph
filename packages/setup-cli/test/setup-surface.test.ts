@@ -384,10 +384,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
       channelStatuses: wizardCalls[0]?.channelStatuses,
       deviceSyncLocalBaseUrl: 'http://127.0.0.1:9000',
       initialChannels: [],
-      initialScheduledUpdates: [
-        'environment-health-watch',
-        'weekly-health-snapshot',
-      ],
+      initialScheduledUpdates: ['weekly-health-snapshot'],
       initialWearables: [],
       platform: 'linux',
       publicBaseUrl: 'https://public.example',

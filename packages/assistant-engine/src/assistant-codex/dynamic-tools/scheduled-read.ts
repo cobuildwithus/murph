@@ -5,21 +5,24 @@ import { z } from 'zod'
 
 import {
   isContractId,
+  isValidIanaTimeZone,
   memoryRecordMetadataSchema,
   VAULT_LAYOUT,
 } from '@murphai/contracts'
-import { getMemoryRecord, readMemoryDocument } from '@murphai/core'
+import { getMemoryRecord, loadVault, readMemoryDocument } from '@murphai/core'
 import {
   buildHostedVaultShareProjectionScopeKey,
   flattenSharedVaultShareProjectionStore,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  type SharedGroupMemberView,
 } from '@murphai/hosted-execution/vault-share'
 import {
   readSharedVaultShareProjectionStore,
 } from '@murphai/hosted-execution/vault-share-store-node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  buildSharedGroupWeeklyMembers,
   explainWearableDriftRuntime,
   listCanonicalEntities,
   lookupEntityById,
@@ -28,6 +31,7 @@ import {
   summarizeWearableLatestRuntime,
   summarizeWearableMetricLatestRuntime,
   summarizeWearableMetricTrendRuntime,
+  summarizeWearableSleepPatternRuntime,
   summarizeWearableSourceHealthRuntime,
 } from '@murphai/query'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
@@ -59,10 +63,11 @@ const KNOWLEDGE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const REGISTERED_SKILL_SLUGS = new Set<string>(
   ASSISTANT_SKILLS.map((skill) => skill.slug),
 )
-const GROUP_HEALTH_PROJECTION_SCOPE_KEYS = new Set(
+const GROUP_HEALTH_PROJECTION_SCOPES =
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
     .filter((scope) => scope.projectionKind !== 'group-email.v0')
-    .map(buildHostedVaultShareProjectionScopeKey),
+const GROUP_HEALTH_PROJECTION_SCOPE_KEYS = new Set(
+  GROUP_HEALTH_PROJECTION_SCOPES.map(buildHostedVaultShareProjectionScopeKey),
 )
 const GROUP_CHALLENGE_SCHEDULED_SECTION_HEADINGS = {
   baselines: 'Baselines',
@@ -123,6 +128,10 @@ const GENERIC_SCHEDULED_READ_ACTIONS = [
   'record',
   'skill_get',
 ] as const satisfies readonly ScheduledReadAction[]
+const PRIVATE_GENERIC_SCHEDULED_READ_ACTIONS = [
+  ...GENERIC_SCHEDULED_READ_ACTIONS,
+  'sleep_pattern',
+] as const satisfies readonly ScheduledReadAction[]
 const dateSchema = z.string().regex(ISO_DATE_PATTERN)
 const boundedTokenSchema = z
   .string()
@@ -138,6 +147,14 @@ const knowledgeSlugSchema = z
   .regex(KNOWLEDGE_SLUG_PATTERN)
 const canonicalFamilySchema = z.enum(ALL_QUERY_ENTITY_FAMILIES)
 const providersSchema = z.array(boundedTokenSchema).max(8)
+const timeZoneSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(64)
+  .refine(isValidIanaTimeZone, {
+    message: 'Time zone must be a valid IANA time zone.',
+  })
 const skillSlugSchema = z
   .string()
   .trim()
@@ -227,6 +244,13 @@ const wearableDriftSchema = z.object({
   windowDays: z.number().int().min(2).max(30).default(14),
 }).strict()
 
+const wearableSleepPatternSchema = z.object({
+  action: z.literal('sleep_pattern'),
+  ...wearableFiltersShape,
+  timeZone: timeZoneSchema.optional(),
+  windowDays: z.number().int().min(1).max(366).default(28),
+}).strict()
+
 const wearableSourcesSchema = z.object({
   action: z.literal('sources'),
   ...wearableFiltersShape,
@@ -267,6 +291,7 @@ const scheduledReadArgumentsSchema = z.discriminatedUnion('action', [
   wearableMetricLatestSchema,
   wearableMetricTrendSchema,
   wearableDriftSchema,
+  wearableSleepPatternSchema,
   wearableSourcesSchema,
   recordSchema,
   skillGetSchema,
@@ -325,6 +350,7 @@ export function readScheduledReadDynamicToolRequest(input: {
       'streams',
       'tags',
       'to',
+      'timeZone',
       'windowDays',
     ],
     toolName: 'murph.scheduled_read',
@@ -344,6 +370,7 @@ export async function executeScheduledReadDynamicTool(input: {
   assertSourceCurrent: AssistantScheduledTaskSourceCurrentAssertion
   authority: AssistantScheduledTaskAuthority | null
   request: Extract<ScheduledReadDynamicToolRequest, { kind: 'scheduled-read' }>
+  scheduledOccurrenceAt?: string | null
   vaultRoot: string | null
 }): Promise<{
   rpcResult: {
@@ -410,10 +437,10 @@ export async function executeScheduledReadDynamicTool(input: {
                 },
               )
             : authority.kind === 'group_health_update'
-              ? await readGroupSharedProjection(
+              ? await readGroupHealthSummary(
                   input.vaultRoot,
                   input.request.request,
-                  { kind: 'all_health' },
+                  input.scheduledOccurrenceAt ?? null,
                 )
               : null
           : null
@@ -462,11 +489,12 @@ function resolveScheduledReadActions(
       return ['group_challenge_context', 'group_shared', 'skill_get']
     case 'group_health_update':
       return [...GENERIC_SCHEDULED_READ_ACTIONS, 'group_shared']
-    case 'generic_notification':
     case 'group_notification':
+      return GENERIC_SCHEDULED_READ_ACTIONS
+    case 'generic_notification':
     case 'managed_knowledge_ledger':
     case 'research_ledger':
-      return GENERIC_SCHEDULED_READ_ACTIONS
+      return PRIVATE_GENERIC_SCHEDULED_READ_ACTIONS
   }
 }
 
@@ -678,6 +706,18 @@ async function executeVaultRead(
           windowDays: request.windowDays,
         }),
       }
+    case 'sleep_pattern':
+      return {
+        action: request.action,
+        summary: await summarizeWearableSleepPatternRuntime(vaultRoot, {
+          date: request.date,
+          from: request.from,
+          providers: request.providers,
+          timeZone: request.timeZone,
+          to: request.to,
+          windowDays: request.windowDays,
+        }),
+      }
     case 'sources':
       return {
         action: request.action,
@@ -700,9 +740,7 @@ async function executeVaultRead(
 async function readGroupSharedProjection(
   vaultRoot: string,
   request: z.infer<typeof groupSharedSchema>,
-  scope:
-    | { kind: 'all_health' }
-    | { kind: 'exact'; projectionScopeKey: string },
+  scope: { kind: 'exact'; projectionScopeKey: string },
 ): Promise<unknown> {
   const read = await readSharedVaultShareProjectionStore(vaultRoot)
   if (read.status === 'corrupt' || read.status === 'read_failed') {
@@ -722,11 +760,7 @@ async function readGroupSharedProjection(
         displayName: member.displayName,
         shares: member.shares
           .filter((share) =>
-            scope.kind === 'exact'
-              ? share.projectionScopeKey === scope.projectionScopeKey
-              : GROUP_HEALTH_PROJECTION_SCOPE_KEYS.has(
-                  share.projectionScopeKey,
-                ))
+            share.projectionScopeKey === scope.projectionScopeKey)
           .map((share) => ({
             projectionKind: share.projectionKind,
             projectionScope: share.projectionScope,
@@ -736,11 +770,8 @@ async function readGroupSharedProjection(
               .map((record) => ({
                 data: record.data,
                 occurredAt: record.occurredAt,
-                ...(scope.kind === 'exact'
-                  ? { recordKey: record.recordKey }
-                  : {}),
-                ...(scope.kind === 'exact' &&
-                    record.sourceRevision !== undefined
+                recordKey: record.recordKey,
+                ...(record.sourceRevision !== undefined
                   ? { sourceRevision: record.sourceRevision }
                   : {}),
               })),
@@ -755,6 +786,176 @@ async function readGroupSharedProjection(
     sharingMemberCount: members.length,
     status: members.length > 0 ? 'ok' : 'empty',
   }
+}
+
+async function readGroupHealthSummary(
+  vaultRoot: string,
+  request: z.infer<typeof groupSharedSchema>,
+  scheduledOccurrenceAt: string | null,
+): Promise<unknown | null> {
+  const referenceAt = readExactIsoTimestamp(scheduledOccurrenceAt)
+  if (referenceAt === null) {
+    return null
+  }
+  const read = await readSharedVaultShareProjectionStore(vaultRoot)
+  if (read.status === 'corrupt' || read.status === 'read_failed') {
+    return emptyGroupHealthSummary(request.action, referenceAt, 'unavailable')
+  }
+
+  let timeZone: string
+  try {
+    timeZone = (await loadVault({ vaultRoot })).metadata.timezone
+  } catch {
+    return null
+  }
+  if (read.status === 'empty') {
+    return emptyGroupHealthSummary(request.action, referenceAt, 'empty', timeZone)
+  }
+
+  const members = flattenSharedVaultShareProjectionStore(read.store)
+    .map((member) => ({
+      ...member,
+      shares: member.shares.filter((share) =>
+        GROUP_HEALTH_PROJECTION_SCOPE_KEYS.has(share.projectionScopeKey)),
+    }))
+    .filter((member) => member.shares.length > 0)
+  const weeklyMembers = buildSharedGroupWeeklyMembers({
+    members,
+    referenceAt,
+    timeZone,
+  })
+  const weeklyMemberById = new Map(
+    weeklyMembers.map((member) => [member.memberId, member]),
+  )
+  const presentScopeKeys = new Set(
+    members.flatMap((member) =>
+      member.shares.map((share) => share.projectionScopeKey)),
+  )
+  const scopes = GROUP_HEALTH_PROJECTION_SCOPES
+    .map((projectionScope) => ({
+      projectionScope,
+      projectionScopeKey:
+        buildHostedVaultShareProjectionScopeKey(projectionScope),
+    }))
+    .filter(({ projectionScopeKey }) => presentScopeKeys.has(projectionScopeKey))
+  const scopeIndexByKey = new Map(
+    scopes.map(({ projectionScopeKey }, index) => [projectionScopeKey, index]),
+  )
+  const metrics = [...new Map(
+    weeklyMembers.flatMap((member) =>
+      member.weeklyStats.map((stat) => [
+        JSON.stringify([stat.stream, stat.unit]),
+        { stream: stat.stream, unit: stat.unit },
+      ] as const)),
+  ).values()]
+    .sort((left, right) =>
+      left.stream.localeCompare(right.stream) ||
+      (left.unit ?? '').localeCompare(right.unit ?? ''))
+  const metricIndexByKey = new Map(
+    metrics.map((metric, index) => [
+      JSON.stringify([metric.stream, metric.unit]),
+      index,
+    ]),
+  )
+
+  return {
+    action: request.action,
+    currentWeekFormat: ['metricIndex', 'average'],
+    memberCount: members.length,
+    members: members.map((member) => {
+      const weekly = weeklyMemberById.get(member.memberId)
+      return {
+        currentWeek: (weekly?.weeklyStats ?? [])
+          .map((stat): [number, number] => [
+            metricIndexByKey.get(JSON.stringify([stat.stream, stat.unit]))!,
+            stat.currentWeekAvg,
+          ])
+          .sort((left, right) => left[0] - right[0]),
+        displayName: member.displayName,
+        shares: member.shares
+          .map((share): [number, number] => [
+            scopeIndexByKey.get(share.projectionScopeKey)!,
+            Math.min(
+              share.records.length,
+              HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+            ),
+          ])
+          .sort((left, right) => left[0] - right[0]),
+        sleepWindows: compactRetainedSleepWindows(member, scopeIndexByKey),
+      }
+    }),
+    metrics,
+    referenceAt,
+    schema: 'murph.group-health-summary.v1',
+    scopeFormat: ['scopeIndex', 'retainedRecordCount'],
+    scopes: scopes.map(({ projectionScope, projectionScopeKey }) => ({
+      projectionKind: projectionScope.projectionKind,
+      projectionScopeKey,
+      ...('selector' in projectionScope
+        ? { selector: projectionScope.selector }
+        : {}),
+    })),
+    sharingMemberCount: members.length,
+    sleepWindowFormat: ['scopeIndex', 'date', 'sleepStartAt', 'sleepEndAt'],
+    status: members.length > 0 ? 'ok' : 'empty',
+    timeZone,
+  }
+}
+
+function compactRetainedSleepWindows(
+  member: SharedGroupMemberView,
+  scopeIndexByKey: ReadonlyMap<string, number>,
+): Array<[number, string, string, string]> {
+  return member.shares.flatMap((share) => {
+    if (share.projectionKind !== 'sleep-times.v0') {
+      return []
+    }
+    const scopeIndex = scopeIndexByKey.get(share.projectionScopeKey)
+    if (scopeIndex === undefined) {
+      return []
+    }
+    return share.records
+      .slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS)
+      .flatMap((record): Array<[number, string, string, string]> => {
+        const data = record.data
+        return 'sleepStartAt' in data && 'sleepEndAt' in data
+          ? [[scopeIndex, data.date, data.sleepStartAt, data.sleepEndAt]]
+          : []
+      })
+  })
+}
+
+function emptyGroupHealthSummary(
+  action: 'group_shared',
+  referenceAt: string,
+  status: 'empty' | 'unavailable',
+  timeZone?: string,
+): object {
+  return {
+    action,
+    currentWeekFormat: ['metricIndex', 'average'],
+    memberCount: 0,
+    members: [],
+    metrics: [],
+    referenceAt,
+    schema: 'murph.group-health-summary.v1',
+    scopeFormat: ['scopeIndex', 'retainedRecordCount'],
+    scopes: [],
+    sharingMemberCount: 0,
+    sleepWindowFormat: ['scopeIndex', 'date', 'sleepStartAt', 'sleepEndAt'],
+    status,
+    ...(timeZone ? { timeZone } : {}),
+  }
+}
+
+function readExactIsoTimestamp(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) || date.toISOString() !== value
+    ? null
+    : value
 }
 
 async function readBoundGroupChallengeContext(

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
-  listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -166,8 +166,7 @@ function quoteShellArgument(value: string): string {
 /**
  * Asserts the real Codex app-server advertised exactly the Murph dynamic
  * tools in the most recent recorded `/v1/responses` request body.
- * `listMurphDynamicToolNames()` returns namespaced ids; Codex advertises the
- * bare tool names inside the `murph` namespace entry.
+ * Codex advertises bare tool names inside the `murph` namespace entry.
  */
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
@@ -183,56 +182,31 @@ export function expectAdvertisedMurphDynamicTools(
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
-  const expectedToolNames = listMurphDynamicToolNames()
-    .filter((name) => {
-      if (
-        options.computerToolsAvailable !== true
-        && name.startsWith("murph.computer_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.connectedAppsAvailable !== true
-        && name.startsWith("murph.connected_apps_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.messageTargetingAvailable !== true
-        && (
-          name === "murph.react_to_message"
-          || name === "murph.select_reply_target"
-        )
-      ) {
-        return false;
-      }
-
-      if (
-        options.progressUpdatesAvailable === false
-        && name === "murph.send_progress_update"
-      ) {
-        return false;
-      }
-
-      if (
-        options.vaultFileSendAvailable !== true
-        && name === "murph.send_vault_file"
-      ) {
-        return false;
-      }
-
-      if (
-        options.phoneCallsAvailable !== true
-        && name === "murph.create_phone_call"
-      ) {
-        return false;
-      }
-
-      return true;
+  const expectedToolNames = resolveMurphDynamicTools({
+    assistantConfigurationAvailable: true,
+    assistantStyleSettingsAvailable: true,
+    automationAvailable: true,
+    clinicalRecordsConnectLinkAvailable: true,
+    computerToolsAvailable: options.computerToolsAvailable,
+    connectedAppsAvailable: options.connectedAppsAvailable,
+    deviceAvailable: true,
+    familyPlanAvailable: true,
+    groupAvailable: true,
+    labsAvailable: true,
+    messageTargetingAvailable: options.messageTargetingAvailable,
+    newsletterAvailable: true,
+    personalizationAvailable: true,
+    phoneCallsAvailable: options.phoneCallsAvailable,
+    planUsageAvailable: true,
+    productFeedbackAvailable: true,
+    progressUpdatesAvailable: options.progressUpdatesAvailable,
+    subscriptionAvailable: true,
+    vaultFileSendAvailable: options.vaultFileSendAvailable,
+    voiceMemoGenerationAvailable: true,
+  })
+    .map((tool) => {
+      return tool.name;
     })
-    .map((name) => name.replace(/^murph\./u, ""))
     .sort();
   expect(lastResponsesRequest).toBeDefined();
   expect(

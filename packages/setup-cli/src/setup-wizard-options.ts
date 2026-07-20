@@ -48,7 +48,6 @@ export const setupWizardScheduledUpdateOptions: readonly SetupWizardScheduledUpd
 
 const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
   'weekly-health-snapshot',
-  'environment-health-watch',
 ] as const
 
 export const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [

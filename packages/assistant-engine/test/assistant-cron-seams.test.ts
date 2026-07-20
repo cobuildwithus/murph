@@ -42,7 +42,10 @@ describe('assistant cron preset seams', () => {
     const presets = listAssistantCronPresets()
     const mindfulness = presets.find((preset) => preset.id === 'morning-mindfulness')
 
-    expect(presets.length).toBeGreaterThan(0)
+    expect(presets.map((preset) => preset.id)).toEqual([
+      'morning-mindfulness',
+      'weekly-health-snapshot',
+    ])
     expect(mindfulness).toMatchObject({
       category: 'mindfulness',
       id: 'morning-mindfulness',

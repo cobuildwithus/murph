@@ -1095,7 +1095,7 @@ describe('device activity triggered automations', () => {
     )
   })
 
-  it('repairs legacy already-queued device activity jobs before rewriting authority keys', async () => {
+  it('leaves a pre-revision queued occurrence for fail-closed consumption without requeueing it', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'run',
       after: '2026-06-07T12:00:00.000Z',
@@ -1157,23 +1157,13 @@ describe('device activity triggered automations', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
-      matched: 1,
+      matched: 0,
       nextWakeAt: '2026-06-07T12:07:00.000Z',
       scheduled: 0,
     })
 
     expect(await readQueuedCronJobs(vaultRoot)).toEqual([legacyQueued])
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledOnce()
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
-      expect.objectContaining({
-        after: '2026-06-07T12:05:00.000Z',
-        afterOccurredAt: '2026-06-07T12:05:00.000Z',
-        afterEntityId: 'evt_run_legacy_queued',
-        expectedActivityKind: 'run',
-        lookup: 'auto_run_legacy_queued',
-        vaultRoot,
-      }),
-    )
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
 
     await markQueuedCronJobsConsumed(vaultRoot, '2026-06-07T12:07:30.000Z')
     deviceActivityMocks.automations = [
@@ -1201,7 +1191,7 @@ describe('device activity triggered automations', () => {
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
   })
 
-  it('keeps already-queued device activity jobs covered after target-only edits', async () => {
+  it('does not rewrite an already-queued occurrence after a target-only parent revision', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'run',
       after: '2026-06-07T12:00:00.000Z',
@@ -1239,6 +1229,7 @@ describe('device activity triggered automations', () => {
     automation.assistantTargetOverride = {
       reasoningEffort: 'high',
     }
+    automation.updatedAt = '2026-06-07T12:06:30.000Z'
     deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
     await expect(
       scheduleDeviceActivityTriggeredAutomations({
@@ -1246,23 +1237,13 @@ describe('device activity triggered automations', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual({
-      matched: 1,
+      matched: 0,
       nextWakeAt: '2026-06-07T12:07:00.000Z',
       scheduled: 0,
     })
 
     expect(await readQueuedCronJobs(vaultRoot)).toEqual(queuedBeforeEdit)
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledOnce()
-    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
-      expect.objectContaining({
-        after: '2026-06-07T12:05:00.000Z',
-        afterOccurredAt: '2026-06-07T12:05:00.000Z',
-        afterEntityId: 'evt_run_target_edit_queued',
-        expectedActivityKind: 'run',
-        lookup: 'auto_run_target_edit_queued',
-        vaultRoot,
-      }),
-    )
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
   })
 
   it('restores a replaced occurrence slot after a listener cursor patch failure', async () => {
