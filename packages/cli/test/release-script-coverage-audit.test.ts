@@ -2428,6 +2428,16 @@ cobuild_repo_tool_bin() {
 
       writeHarnessFile(
         harnessRoot,
+        'scripts/install-git-hooks',
+        `#!/usr/bin/env bash
+set -euo pipefail
+touch .fake-tools/install-git-hooks.called
+`,
+        true,
+      )
+
+      writeHarnessFile(
+        harnessRoot,
         '.fake-tools/cobuild-close-exec-plan',
         `#!/usr/bin/env bash
 set -euo pipefail
@@ -2529,6 +2539,8 @@ Updated: 2026-04-24
           `finish-task harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
         )
       }
+
+      expect(existsSync(path.join(harnessRoot, '.fake-tools/install-git-hooks.called'))).toBe(true)
 
       expect(
         existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/2026-04-24-harness.md')),
