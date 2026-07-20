@@ -2,9 +2,8 @@ import { hostedPhoneCallStartResponseSchema } from '@murphai/hosted-execution'
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
+  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
-  type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
@@ -30,9 +29,10 @@ describe('assistant capability-offers prompt contract', () => {
   })
 
   it('does not expose external-capable sections to maintenance turns', () => {
-    const layers = buildAssistantNotificationDecisionSystemPromptLayers(
-      createNotificationDecisionPromptInput({ maintenanceTurn: true }),
-    )
+    const layers = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+      currentLocalDate: '2026-04-15',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }).layers
 
     expect(layers.stableRouteCapabilityPrompt).toBe('')
 
@@ -157,26 +157,32 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
-  it('puts proactive challenge permission handling in the scheduled group prompt', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptLayers(
-      createNotificationDecisionPromptInput({
-        channel: 'linq',
-        conversationScope: 'group',
-        hostedRuntime: true,
-      }),
-    ).prompt
+  it('does not fork challenge behavior into a scheduled-only prompt', () => {
+    const commonInput = createCommonCodexPromptInput({
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
+    const attended = buildAssistantSystemPromptLayers(commonInput)
+    const scheduled = buildAssistantSystemPromptLayers({
+      ...commonInput,
+      turnTrigger: 'automation-cron',
+    })
 
-    expect(prompt).toContain('For running-challenge standings')
-    expect(prompt).toContain('report all available rankings plus each named blocker')
-    expect(prompt).toContain('required scoring scope that is `not_granted`')
-    expect(prompt).toContain('`device-sync-status.v0` when the scoring scope is granted but lacks current data')
-    expect(prompt).toContain('Include each exact missing scope only when at least one participant affected by that scope')
-    expect(prompt).toContain('neither explicitly declined it nor a prior offer recorded on the challenge page')
-    expect(prompt).toContain('proactively call `action="post_join_offer"` once')
-    expect(prompt).toContain('never imply that reacting to the standings grants anything')
-    expect(prompt).toContain('If the tool returns `sent`, record those scopes as offered')
-    expect(prompt).toContain('Never offer the scoring scope merely because it is granted but missing data')
-    expect(prompt).toContain('other sync/device cases get ordinary open-Murph, sync, or reconnect guidance and no permission card')
+    expect(scheduled.staticCacheableCorePrompt).toBe(
+      attended.staticCacheableCorePrompt,
+    )
+    expect(scheduled.stableRouteCapabilityPrompt).toBe(
+      attended.stableRouteCapabilityPrompt,
+    )
+    expect(scheduled.threadContextPrompt).toBe(attended.threadContextPrompt)
+    expect(scheduled.dynamicTurnContextPrompt).toContain(
+      'Scheduled delivery contract:',
+    )
+    expect(scheduled.prompt).not.toContain('For running-challenge standings')
+    expect(scheduled.prompt).not.toContain(
+      'proactively call `action="post_join_offer"` once',
+    )
   })
 
   it('keeps bounded device diagnostics inside the closed group permission contract', () => {
@@ -334,22 +340,6 @@ function createCommonCodexPromptInput(
     modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,
-    ...overrides,
-  }
-}
-
-function createNotificationDecisionPromptInput(
-  overrides: Partial<AssistantNotificationDecisionSystemPromptInput> = {},
-): AssistantNotificationDecisionSystemPromptInput {
-  return {
-    assistantHostedDeviceConnectAvailable: true,
-    assistantHostedDeviceConnectProviders: [
-      { label: 'Oura', provider: 'oura' },
-      { label: 'WHOOP', provider: 'whoop' },
-    ],
-    channel: 'telegram',
-    currentLocalDate: '2026-04-15',
-    currentTimeZone: 'Asia/Kuala_Lumpur',
     ...overrides,
   }
 }

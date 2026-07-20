@@ -2184,13 +2184,14 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   })
 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.not.objectContaining({
+      profile: expect.anything(),
+    }),
+  )
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.not.objectContaining({
         codexConfigOverrides: expect.anything(),
-      }),
-      profile: expect.objectContaining({
-        threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
       }),
     }),
   )
@@ -2376,7 +2377,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
-test('sendAssistantNotificationLocal exposes device authority only to direct non-maintenance turns', async () => {
+test('sendAssistantNotificationLocal forwards the ordinary hosted capability context only to non-maintenance turns', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
@@ -2388,6 +2389,10 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
       sourceProvider: null,
     })),
   }
+  const automationTool = { request: vi.fn() }
+  const connectedApps = { request: vi.fn() }
+  const labsTool = { request: vi.fn() }
+  const personalizationTool = { request: vi.fn() }
   const observedHostedToolContexts: Array<
     NotificationTurnProviderInput['hostedToolContext']
   > = []
@@ -2404,8 +2409,13 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
   })
   const executionContext = {
     hosted: {
+      automationTool,
+      connectedApps,
       deviceTool,
+      labsTool,
       memberId: 'member-notification-device-scope',
+      personalizationTool,
+      providerFetch: fetch,
       userEnvKeys: [],
     },
   }
@@ -2426,7 +2436,14 @@ test('sendAssistantNotificationLocal exposes device authority only to direct non
   })
 
   expect(observedHostedToolContexts).toHaveLength(2)
+  expect(observedHostedToolContexts[0]?.automationTool).toBe(automationTool)
+  expect(observedHostedToolContexts[0]?.connectedApps).toBe(connectedApps)
   expect(observedHostedToolContexts[0]?.deviceTool).toBe(deviceTool)
+  expect(observedHostedToolContexts[0]?.labsTool).toBe(labsTool)
+  expect(observedHostedToolContexts[0]?.personalizationTool).toBe(
+    personalizationTool,
+  )
+  expect(observedHostedToolContexts[0]?.computerToolsAvailable).toBe(true)
   expect(observedHostedToolContexts[1]).toBeNull()
 })
 
@@ -2489,7 +2506,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
         .toBe(groupPermissionOfferTool)
       expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
       expect(hostedToolContext?.groupTool).toBeNull()
-      expect(providerInput.profile?.toolProfile).toBe('notification-turn')
+      expect(providerInput.profile).toBeUndefined()
       expect(groupSharedRead).not.toHaveBeenCalled()
 
       await providerInput.onProviderRequestStarted?.({
@@ -2601,7 +2618,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
   expect(providerStartHook).toHaveBeenCalledTimes(1)
 })
 
-test('sendAssistantNotificationLocal omits shared-group authority from direct scheduled turns', async () => {
+test('sendAssistantNotificationLocal forwards one hosted context and leaves audience gating to the ordinary planner', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No group update required."}\n```',
   })
@@ -2626,13 +2643,10 @@ test('sendAssistantNotificationLocal omits shared-group authority from direct sc
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
-      expect(providerInput.hostedToolContext?.groupSharedReader ?? null).toBeNull()
-      const groupTools = resolveMurphDynamicTools({
-        groupAvailable: providerInput.hostedToolContext?.groupTool != null,
-        groupSharedReadAvailable:
-          providerInput.hostedToolContext?.groupSharedReader != null,
-      }).filter((tool) => tool.namespace === 'murph' && tool.name === 'group')
-      expect(groupTools).toEqual([])
+      expect(providerInput.hostedToolContext?.groupSharedReader).toEqual({
+        request: groupSharedRead,
+      })
+      expect(providerInput.profile).toBeUndefined()
       return {
         kind: 'succeeded',
         providerTurn: providerResult,

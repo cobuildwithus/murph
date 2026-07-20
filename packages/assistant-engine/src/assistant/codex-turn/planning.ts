@@ -1,7 +1,4 @@
-import type {
-  AssistantSession,
-  AssistantTurnTrigger,
-} from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantVoiceOptionElevenLabsVoiceId,
   type AssistantPersonalityPreferences,
@@ -68,7 +65,7 @@ import type {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
@@ -208,12 +205,11 @@ export interface AssistantPromptTimeContext {
 
 export type AssistantCodexTurnPromptProfile =
   | 'conversation'
-  | 'notification-decision'
+  | 'maintenance'
   | 'assistant-ask-continuation'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
-  | 'notification-turn'
   | 'maintenance-turn'
   | 'output-only-turn'
 
@@ -283,12 +279,10 @@ const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext 
 function resolveAssistantCodexTurnExecutionProfile(
   input: {
     profile: AssistantCodexTurnThreadScopeProfile | null | undefined
-    turnTrigger: AssistantTurnTrigger | null | undefined
   },
 ): AssistantCodexTurnResolvedExecutionProfile {
   const threadScope = resolveAssistantCodexThreadScope({
     profile: input.profile,
-    turnTrigger: input.turnTrigger,
   })
 
   return {
@@ -300,24 +294,11 @@ function resolveAssistantCodexTurnExecutionProfile(
 
 export function resolveAssistantCodexThreadScope(input: {
   profile?: AssistantCodexTurnThreadScopeProfile | null
-  turnTrigger?: AssistantTurnTrigger | null
 }): AssistantCodexThreadScope {
   if (
     input.profile?.threadScope === 'isolated-thread' ||
     input.profile?.nativeResumePolicy === 'disabled'
   ) {
-    return 'isolated-thread'
-  }
-
-  if (input.profile?.threadScope === 'session-thread') {
-    return 'session-thread'
-  }
-
-  if (input.turnTrigger === 'automation-cron') {
-    return 'isolated-thread'
-  }
-
-  if (input.profile?.promptProfile === 'notification-decision') {
     return 'isolated-thread'
   }
 
@@ -348,7 +329,6 @@ export async function buildCodexTurnExecutionPlan(input: {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
-    turnTrigger: input.input.turnTrigger,
   })
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
   const preferenceContext = await resolveAssistantTurnPreferenceContext(input.input.vault)
@@ -558,6 +538,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantCliContract: string | null
     injectOnboardingGuidance: boolean
   }) => {
+    if (input.profile.promptProfile === 'maintenance') {
+      return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+        currentLocalDate: input.promptTimeContext.currentLocalDate,
+        currentTimeZone: input.promptTimeContext.currentTimeZone,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
     if (input.profile.promptProfile === 'assistant-ask-continuation') {
       return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
         assistantContextSnapshotPrompt,
@@ -566,65 +555,45 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     }
 
-    return input.profile.promptProfile === 'notification-decision'
-      ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
-            assistantContextSnapshotPrompt,
-            assistantDynamicContextPrompts: hostedDynamicContextPrompts,
-            maintenanceTurn,
-            assistantHostedDeviceConnectAvailable:
-              privateInteractiveAudience &&
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            assistantToolNameAliases,
-            assistantTone: preferenceContext.assistantTone,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            conversationScope,
-            hostedRuntime: input.executionContext?.hosted != null,
-            scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
-          }, {
-            toolSchemaHash,
-          })
-      : buildAssistantSystemPromptWithCacheMetadata({
-            assistantCliContract: options.assistantCliContract,
-            assistantContextSnapshotPrompt,
-            assistantDynamicContextPrompts: hostedDynamicContextPrompts,
-            assistantHostedAutomationAvailable:
-              input.hostedToolContext?.automationTool != null,
-            assistantHostedDeviceConnectAvailable:
-              privateInteractiveAudience &&
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            assistantHostedLabsAvailable:
-              privateInteractiveProviderTurn &&
-              input.hostedToolContext?.labsTool != null,
-            assistantKnowledgeToolsAvailable:
-              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-            assistantToolNameAliases,
-            assistantPersonality:
-              assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
-                ? preferenceContext.assistantPersonality
-                : null,
-            assistantStyleSettingsAvailable,
-            assistantTone: preferenceContext.assistantTone,
-            cliAccess: input.sharedPlan.cliAccess,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            conversationScope,
-            hostedRuntime: input.executionContext?.hosted != null,
-            murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
-              input.sharedPlan.cliAccess.env,
-            ),
-            onboardingGuidance: options.injectOnboardingGuidance,
-            modelBehaviorProfile,
-            turnTrigger: input.input.turnTrigger ?? null,
-          }, {
-            toolSchemaHash,
-          })
+    return buildAssistantSystemPromptWithCacheMetadata({
+      assistantCliContract: options.assistantCliContract,
+      assistantContextSnapshotPrompt,
+      assistantDynamicContextPrompts: hostedDynamicContextPrompts,
+      assistantHostedAutomationAvailable:
+        input.hostedToolContext?.automationTool != null,
+      assistantHostedDeviceConnectAvailable:
+        privateInteractiveAudience &&
+        promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+      assistantHostedDeviceConnectProviders:
+        promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+      assistantHostedLabsAvailable:
+        privateInteractiveProviderTurn &&
+        input.hostedToolContext?.labsTool != null,
+      assistantKnowledgeToolsAvailable:
+        promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantToolNameAliases,
+      assistantPersonality:
+        assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
+          ? preferenceContext.assistantPersonality
+          : null,
+      assistantStyleSettingsAvailable,
+      assistantTone: preferenceContext.assistantTone,
+      cliAccess: input.sharedPlan.cliAccess,
+      channel: resolvedChannel,
+      currentLocalDate: input.promptTimeContext.currentLocalDate,
+      currentTimeZone: input.promptTimeContext.currentTimeZone,
+      conversationScope,
+      hostedRuntime: input.executionContext?.hosted != null,
+      murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
+        input.sharedPlan.cliAccess.env,
+      ),
+      onboardingGuidance: options.injectOnboardingGuidance,
+      modelBehaviorProfile,
+      scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
+      turnTrigger: input.input.turnTrigger ?? null,
+    }, {
+      toolSchemaHash,
+    })
   }
   const buildDeveloperInstructions = (
     promptResult: ReturnType<typeof buildAssistantSystemPromptWithCacheMetadata>,
@@ -715,8 +684,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         groupAvailable:
           input.hostedToolContext?.groupTool != null,
         groupPermissionOfferAvailable:
+          hostedGroupRuntime &&
           input.hostedToolContext?.groupPermissionOfferTool != null,
         groupSharedReadAvailable:
+          hostedGroupRuntime &&
           input.hostedToolContext?.groupSharedReader != null,
         newsletterAvailable:
           input.hostedToolContext?.newsletterTool != null,

@@ -1253,8 +1253,8 @@ describe('Codex model catalog', () => {
       },
       input,
       profile: {
-        promptProfile: 'notification-decision',
-        toolProfile: 'notification-turn',
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
         threadScope: 'isolated-thread',
       },
       promptTimeContext: {

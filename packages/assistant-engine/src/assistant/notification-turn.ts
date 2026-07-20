@@ -111,19 +111,11 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
   assistantNotificationSendDecisionSchema,
 ])
 
-const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
-  Omit<AssistantCodexTurnThreadScopeProfile, 'nativeResumePolicy'>
-> = {
-  promptProfile: 'notification-decision',
-  threadScope: 'session-thread',
-  toolProfile: 'notification-turn',
-}
-
-const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
+const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
-  promptProfile: 'notification-decision',
+  promptProfile: 'maintenance',
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
@@ -334,46 +326,29 @@ export async function sendAssistantNotificationLocal(
       }
 
       const turnId = createAssistantTurnId()
-      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
-      const hostedDeviceTool =
-        !isAssistantNotificationMaintenanceExactSkip(input) &&
-        conversationScope === 'direct'
-          ? executionContext?.hosted?.deviceTool ?? null
-          : null
-      const hostedGroupSharedReader =
-        !isAssistantNotificationMaintenanceExactSkip(input)
-        && conversationScope === 'group'
-          ? executionContext?.hosted?.groupSharedReader ?? null
-          : null
-      const hostedGroupPermissionOfferTool =
-        !isAssistantNotificationMaintenanceExactSkip(input)
-        && conversationScope === 'group'
-          ? executionContext?.hosted?.groupPermissionOfferTool ?? null
-          : null
-      const hostedToolContext =
-        hostedNewsletterTool
-        || hostedDeviceTool
-        || hostedGroupPermissionOfferTool
-        || hostedGroupSharedReader
-          ? createAssistantHostedToolContext({
-              deviceTool: hostedDeviceTool,
-              groupPermissionOfferTool: hostedGroupPermissionOfferTool,
-              groupSharedReader: hostedGroupSharedReader,
-              newsletterTool: hostedNewsletterTool,
-              messageInput,
-              newsletterOutbox: {
-                turnId,
-                vault: input.vault,
-              },
-              recordNewsletterSendResult: (result) => {
-                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                  current: newsletterSendResult ?? null,
-                  next: result.result,
-                })
-              },
-              session: resolved.session,
-            })
-          : null
+      const hostedExecutionContext = isAssistantNotificationMaintenanceExactSkip(input)
+        ? null
+        : executionContext?.hosted ?? null
+      const hostedToolContext = hostedExecutionContext
+        ? createAssistantHostedToolContext({
+            computerToolsAvailable:
+              typeof hostedExecutionContext.providerFetch === 'function',
+            executionContext: hostedExecutionContext,
+            getConversationScope: () => conversationScope,
+            messageInput,
+            newsletterOutbox: {
+              turnId,
+              vault: input.vault,
+            },
+            recordNewsletterSendResult: (result) => {
+              newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
+                current: newsletterSendResult ?? null,
+                next: result.result,
+              })
+            },
+            session: resolved.session,
+          })
+        : null
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
@@ -394,7 +369,11 @@ export async function sendAssistantNotificationLocal(
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         const notificationTurnProfile =
-          resolveAssistantNotificationTurnProfile(input)
+          isAssistantNotificationMaintenanceExactSkip(input)
+            ? ASSISTANT_MAINTENANCE_TURN_PROFILE
+            : undefined
+        const notificationThreadScope =
+          notificationTurnProfile?.threadScope ?? 'session-thread'
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
@@ -410,7 +389,9 @@ export async function sendAssistantNotificationLocal(
             : undefined,
           plan: sharedPlan,
           progressDelivery,
-          profile: notificationTurnProfile,
+          ...(notificationTurnProfile
+            ? { profile: notificationTurnProfile }
+            : {}),
           resolvedSession: resolved.session,
           route,
           turnCreatedAt,
@@ -427,7 +408,7 @@ export async function sendAssistantNotificationLocal(
             await applyAssistantSessionCodexResumeStateAction({
               action: resolveAssistantProviderResumeStateAction({
                 codexThreadId: providerOutcome.codexThreadId,
-                threadScope: notificationTurnProfile.threadScope,
+                threadScope: notificationThreadScope,
               }),
               assistantContractFingerprint:
                 providerOutcome.assistantContractFingerprint,
@@ -1364,14 +1345,6 @@ async function deliverAssistantNotificationMessage(input: {
         session: input.session,
       }
   }
-}
-
-function resolveAssistantNotificationTurnProfile(
-  input: AssistantNotificationInput,
-) {
-  return isAssistantNotificationMaintenanceExactSkip(input)
-    ? ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
-    : ASSISTANT_NOTIFICATION_TURN_PROFILE
 }
 
 function resolveAssistantNotificationProviderResumeStateAction(input: {

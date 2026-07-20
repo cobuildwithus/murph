@@ -164,8 +164,8 @@ describe('assistant Codex turn planning', () => {
       plan: createSharedPlan(),
       profile: {
         nativeResumePolicy: 'disabled',
-        promptProfile: 'notification-decision',
-        toolProfile: 'notification-turn',
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
       },
       resolvedSession: createSession(),
       route: createRoute(),
@@ -174,9 +174,9 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.profile).toEqual({
-      promptProfile: 'notification-decision',
+      promptProfile: 'conversation',
       threadScope: 'isolated-thread',
-      toolProfile: 'notification-turn',
+      toolProfile: 'provider-turn',
     })
   })
 
@@ -288,7 +288,7 @@ describe('assistant Codex turn planning', () => {
       input: createMessageInput(),
       preferenceContext,
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'maintenance',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
       },
@@ -308,8 +308,6 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       'deduplication and update targeting only',
     )
-    expect(maintenancePlan.systemPrompt).not.toContain('Notification execution rules:')
-    expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
     expect(maintenancePlan.systemPrompt).not.toContain(
@@ -320,35 +318,35 @@ describe('assistant Codex turn planning', () => {
     // the provider boundary; maintenance turns must never carry it.
     expect(maintenancePlan.sessionContext).toBeUndefined()
 
-    const notificationPlan = await resolveAssistantRouteTurnPlan({
+    const ordinaryPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),
       preferenceContext,
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'conversation',
         threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext,
       route: createRoute(),
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    const notificationToolNames = notificationPlan.dynamicTools.map(
+    const ordinaryToolNames = ordinaryPlan.dynamicTools.map(
       (tool) => tool.name,
     )
-    expect(notificationToolNames).toContain('generate_image')
-    expect(notificationToolNames).toContain('attach_response_media')
-    expect(notificationToolNames).not.toContain('assistant_style')
-    expect(notificationPlan.systemPrompt).toContain('hypertension')
-    expect(notificationPlan.systemPrompt).toContain('device sync pending')
-    expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
-    expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
-    expect(notificationPlan.systemPrompt).not.toContain(
+    expect(ordinaryToolNames).toContain('generate_image')
+    expect(ordinaryToolNames).toContain('attach_response_media')
+    expect(ordinaryToolNames).toContain('assistant_style')
+    expect(ordinaryPlan.systemPrompt).toContain('hypertension')
+    expect(ordinaryPlan.systemPrompt).toContain('device sync pending')
+    expect(ordinaryPlan.systemPrompt).not.toContain('Scheduled delivery contract:')
+    expect(ordinaryPlan.systemPrompt).not.toContain('Maintenance execution rules:')
+    expect(ordinaryPlan.systemPrompt).toContain(
       'Assistant personality preferences',
     )
-    expect(notificationPlan.systemPrompt).not.toContain('Humor 10/10')
-    expect(notificationPlan.sessionContext).toEqual({
+    expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
+    expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
     })
 
@@ -360,12 +358,13 @@ describe('assistant Codex turn planning', () => {
           automationId: 'automation_newsletter',
           occurrenceAt: '2026-07-12T13:00:00.000Z',
         },
+        turnTrigger: 'automation-cron',
       },
       preferenceContext,
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'conversation',
         threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext,
       route: createRoute(),
@@ -379,10 +378,10 @@ describe('assistant Codex turn planning', () => {
       '## Compose each edition',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'same vault read and write tools as an interactive Murph turn',
+      'Scheduled delivery contract:',
     )
-    expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Scheduled turns do not own automation lifecycle',
+    expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
+      ordinaryToolNames,
     )
 
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
@@ -392,22 +391,22 @@ describe('assistant Codex turn planning', () => {
       profile: {
         promptProfile: 'conversation',
         threadScope: 'isolated-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext,
       route: createRoute(),
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(conversationNotificationPlan.systemPrompt).not.toContain(
+    expect(conversationNotificationPlan.systemPrompt).toContain(
       'Assistant personality preferences for this private conversation',
     )
-    expect(conversationNotificationPlan.systemPrompt).not.toContain(
+    expect(conversationNotificationPlan.systemPrompt).toContain(
       'Humor 10/10',
     )
     expect(
       conversationNotificationPlan.dynamicTools.map((tool) => tool.name),
-    ).not.toContain('assistant_style')
+    ).toContain('assistant_style')
   })
 
   it('rejects notification execution for an unverified external audience', async () => {
@@ -419,9 +418,9 @@ describe('assistant Codex turn planning', () => {
         threadIsDirect: null,
       },
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'conversation',
         threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext: {
         currentLocalDate: '2026-07-12',
@@ -1054,7 +1053,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('exposes labs only to private interactive provider turns', async () => {
+  it('exposes labs to private ordinary turns, including scheduled work', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -1110,18 +1109,23 @@ describe('assistant Codex turn planning', () => {
     const maintenance = await resolveAssistantRouteTurnPlan({
       ...common,
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'maintenance',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
       },
       sharedPlan: createPrivateSharedPlan(),
     })
-    const notification = await resolveAssistantRouteTurnPlan({
+    const scheduled = await resolveAssistantRouteTurnPlan({
       ...common,
+      input: {
+        ...common.input,
+        scheduledOccurrenceAt: '2026-07-16T14:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      },
       profile: {
-        promptProfile: 'notification-decision',
-        threadScope: 'isolated-thread',
-        toolProfile: 'notification-turn',
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
       },
       sharedPlan: createPrivateSharedPlan(),
     })
@@ -1142,8 +1146,11 @@ describe('assistant Codex turn planning', () => {
     expect(group.developerInstructions).not.toContain('Lab test discovery:')
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
     expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
-    expect(notification.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
-    expect(notification.systemPrompt).not.toContain('Lab test discovery:')
+    expect(scheduled.dynamicTools.map((tool) => tool.name)).toContain('labs')
+    expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
+      direct.dynamicTools.map((tool) => tool.name),
+    )
+    expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
     expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
@@ -1378,7 +1385,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('plans a scheduled turn with only lazy shared reads and permission offers', async () => {
+  it('gives attended and scheduled group turns the same lazy shared-read and permission-offer tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1406,37 +1413,55 @@ describe('assistant Codex turn planning', () => {
       groupTool: null,
     }
 
-    const plan = await resolveAssistantRouteTurnPlan({
-      executionContext: {
-        hosted: {
-          groupPermissionOfferTool,
-          groupSharedReader,
-          memberId: 'member-group-container',
-          progressDeliveryDependencies: {},
-          providerFetch: null,
-          userEnvKeys: [],
+    const resolveGroupPlan = (turnTrigger?: 'automation-cron') =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            groupPermissionOfferTool,
+            groupSharedReader,
+            memberId: 'member-group-container',
+            progressDeliveryDependencies: {},
+            providerFetch: null,
+            userEnvKeys: [],
+          },
         },
-      },
-      hostedToolContext,
-      input: {
-        ...createMessageInput(),
-        turnTrigger: 'automation-cron',
-      },
-      profile: {
-        promptProfile: 'notification-decision',
-        threadScope: 'isolated-thread',
-        toolProfile: 'notification-turn',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-07-18',
-        currentTimeZone: 'America/New_York',
-      },
-      route: createRoute(),
-      session: createSession(),
-      sharedPlan: createSharedPlan(),
-    })
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          ...(turnTrigger ? { turnTrigger } : {}),
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-18',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          effectiveThreadIsDirect: false,
+          threadIsDirect: false,
+        }),
+      })
+    const attendedPlan = await resolveGroupPlan()
+    const scheduledPlan = await resolveGroupPlan('automation-cron')
 
-    const groupTools = plan.dynamicTools.filter((tool) =>
+    expect(scheduledPlan.dynamicTools.map(({ inputSchema, name, namespace }) => ({
+      inputSchema,
+      name,
+      namespace,
+    }))).toEqual(
+      attendedPlan.dynamicTools.map(({ inputSchema, name, namespace }) => ({
+        inputSchema,
+        name,
+        namespace,
+      })),
+    )
+
+    const groupTools = scheduledPlan.dynamicTools.filter((tool) =>
       tool.namespace === 'murph' && tool.name === 'group')
     expect(groupTools).toHaveLength(1)
     expect(groupTools[0]).toMatchObject({
@@ -1448,6 +1473,39 @@ describe('assistant Codex turn planning', () => {
     })
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+
+    const directPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          groupPermissionOfferTool,
+          groupSharedReader,
+          memberId: 'member-private-runtime',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input: {
+        ...createMessageInput(),
+        turnTrigger: 'automation-cron',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-18',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    expect(directPlan.dynamicTools).not.toContainEqual(
+      expect.objectContaining({ namespace: 'murph', name: 'group' }),
+    )
   })
 
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
@@ -1723,9 +1781,9 @@ describe('assistant Codex turn planning', () => {
         assistantVoice: 'warm' as const,
       },
       profile: {
-        promptProfile: 'notification-decision' as const,
+        promptProfile: 'conversation' as const,
         threadScope: 'session-thread' as const,
-        toolProfile: 'notification-turn' as const,
+        toolProfile: 'provider-turn' as const,
       },
       promptTimeContext: {
         currentLocalDate: '2026-07-16',
@@ -3012,9 +3070,9 @@ describe('assistant Codex turn planning', () => {
         vault,
       },
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'conversation',
         threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
@@ -3054,9 +3112,9 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         profile: {
-          promptProfile: 'notification-decision',
+          promptProfile: 'conversation',
           threadScope: 'session-thread',
-          toolProfile: 'notification-turn',
+          toolProfile: 'provider-turn',
         },
         promptTimeContext: {
           currentLocalDate: '2026-05-04',
@@ -3091,9 +3149,9 @@ describe('assistant Codex turn planning', () => {
         vault,
       },
       profile: {
-        promptProfile: 'notification-decision',
+        promptProfile: 'conversation',
         threadScope: 'session-thread',
-        toolProfile: 'notification-turn',
+        toolProfile: 'provider-turn',
       },
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
@@ -3133,9 +3191,9 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         profile: {
-          promptProfile: 'notification-decision',
+          promptProfile: 'conversation',
           threadScope: 'isolated-thread',
-          toolProfile: 'notification-turn',
+          toolProfile: 'provider-turn',
         },
         promptTimeContext: {
           currentLocalDate: '2026-05-04',

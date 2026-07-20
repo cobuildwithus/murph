@@ -7,12 +7,10 @@ import {
 } from '../src/assistant/model-behavior.js'
 import {
   buildAssistantSystemPrompt,
+  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
-  buildAssistantNotificationDecisionSystemPromptLayers,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
-  type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
@@ -1351,19 +1349,14 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).not.toContain('provenance materially matters')
   })
 
-  it('bans Markdown links in scheduled notification text contracts', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+  it('applies ordinary user-facing formatting rules to scheduled output', () => {
+    const prompt = buildAssistantSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         channel: 'linq',
       }),
     ).prompt
 
-    expect(prompt).toContain(
-      'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
-    )
-    expect(prompt).toContain(
-      'Do not include Markdown tables, headers, fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
-    )
+    expect(prompt).toContain('Scheduled delivery contract:')
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
     )
@@ -1455,14 +1448,15 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(layers.threadContextPrompt).not.toContain('Execution context:')
 
-    expect(layers.dynamicTurnContextPrompt).toBe(`Today's date for the user is April 15, 2026.
-
-Layer partition assistant context snapshot.
-
-Execution context:
-- This turn was triggered by an existing scheduled automation run.
-- The automation already exists and is active.
-- Treat the user prompt as the execution instructions for this scheduled run.`)
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Today\'s date for the user is April 15, 2026.',
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Treat the user prompt as the execution instructions for this scheduled run.',
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain(
+      'Scheduled delivery contract:',
+    )
     expect(layers.dynamicTurnContextPrompt).not.toContain('Asia/Kuala_Lumpur')
     expect(layers.dynamicTurnContextPrompt).not.toContain('upcoming wake-day')
     expect(layers.dynamicTurnContextPrompt).toContain(
@@ -1475,42 +1469,45 @@ Execution context:
     expect(layers.prompt.endsWith(layers.dynamicTurnContextPrompt)).toBe(true)
   })
 
-  it('keeps notification decision context per-turn with no thread layer', () => {
+  it('gives scheduled work the ordinary turn prompt layers', () => {
     const input = createCommonNotificationPromptInput({
       assistantContextSnapshotPrompt: 'Notification layer partition snapshot.',
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
     })
-    const layers = buildAssistantNotificationDecisionSystemPromptLayers(input)
+    const scheduledLayers = buildAssistantSystemPromptLayers(input)
+    const regularLayers = buildAssistantSystemPromptLayers({
+      ...input,
+      scheduledOccurrenceAt: null,
+      turnTrigger: null,
+    })
 
-    expect(layers.threadContextPrompt).toBe('')
-    expect(layers.dynamicTurnContextPrompt).toContain(
+    expect(scheduledLayers.staticCacheableCorePrompt).toBe(
+      regularLayers.staticCacheableCorePrompt,
+    )
+    expect(scheduledLayers.stableRouteCapabilityPrompt).toBe(
+      regularLayers.stableRouteCapabilityPrompt,
+    )
+    expect(scheduledLayers.threadContextPrompt).toBe(
+      regularLayers.threadContextPrompt,
+    )
+    expect(scheduledLayers.threadContextPrompt).toContain(
       "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
     )
-    expect(layers.dynamicTurnContextPrompt).toContain(
-      "Today's date for the user is April 15, 2026.",
-    )
-    expect(layers.dynamicTurnContextPrompt).toContain(
+    expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
       'Notification layer partition snapshot.',
     )
-    expect(layers.dynamicTurnContextPrompt).toContain('Notification execution rules:')
-    expect(layers.dynamicTurnContextPrompt).toContain(
-      'If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.',
+    expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
+      'Scheduled delivery contract:',
     )
-    expect(layers.dynamicTurnContextPrompt).toContain(
-      'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
-    )
-    expect(layers.prompt).toBe(
-      [
-        [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt].join('\n\n'),
-        layers.dynamicTurnContextPrompt,
-      ].join('\n\n'),
+    expect(regularLayers.dynamicTurnContextPrompt).not.toContain(
+      'Scheduled delivery contract:',
     )
   })
 
-  it('applies assistant tone preference to notification decision prompts', () => {
+  it('applies assistant tone preference to ordinary scheduled turns', () => {
     const prompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptWithCacheMetadata(
         createCommonNotificationPromptInput({
           assistantTone: 'casual',
         }),
@@ -1523,7 +1520,7 @@ Execution context:
     )
 
     const defaultPrompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptWithCacheMetadata(
         createCommonNotificationPromptInput(),
       ).prompt
     expect(defaultPrompt).toContain('Assistant tone preference:')
@@ -1531,12 +1528,10 @@ Execution context:
     expect(defaultPrompt).toContain('standard capitalization and punctuation')
 
     const maintenancePrompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-        createCommonNotificationPromptInput({
-          assistantTone: 'formal',
-          maintenanceTurn: true,
-        }),
-      ).prompt
+      buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+        currentLocalDate: '2026-04-15',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      }).prompt
     expect(maintenancePrompt).not.toContain('Assistant tone preference:')
   })
 
@@ -1545,7 +1540,7 @@ Execution context:
       currentLocalDate: '2026-04-03',
     }))
     const notificationPrompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptWithCacheMetadata(
         createCommonNotificationPromptInput({
           currentLocalDate: '2026-04-03',
         }),
@@ -1565,7 +1560,7 @@ Execution context:
     expect(notificationPrompt).toContain(
       'Today\'s date for the user is April 3, 2026.',
     )
-    expect(notificationPrompt).not.toContain('upcoming wake-day')
+    expect(notificationPrompt).toContain('upcoming wake-day')
     expect(notificationPrompt).not.toContain(
       'Today\'s date for the user is 2026-04-03.',
     )
@@ -1705,11 +1700,11 @@ Execution context:
     expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
-  it('keeps the notification decision prefix stable across dynamic turn context', () => {
+  it('keeps the ordinary scheduled-turn prefix stable across dynamic context', () => {
     const cacheInput = {
       toolSchemaHash: 'assistant-notification-tools-test',
     }
-    const promptA = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+    const promptA = buildAssistantSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         assistantContextSnapshotPrompt:
           'Notification vault overview for user A.\n\nNotification active experiment for user A.',
@@ -1719,7 +1714,7 @@ Execution context:
       }),
       cacheInput,
     )
-    const promptB = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+    const promptB = buildAssistantSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
         assistantContextSnapshotPrompt:
           'Notification vault overview for user B.\n\nNotification active experiment for user B.',
@@ -1757,13 +1752,12 @@ Execution context:
       promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
     )
 
-    expect(stablePrefix).not.toContain('Notification execution rules:')
     expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
     expect(stablePrefix).not.toContain('Notification vault overview for user A.')
     expect(stablePrefix).not.toContain(
       'Notification active experiment for user A.',
     )
-    expect(dynamicSuffix).toContain('Notification execution rules:')
+    expect(dynamicSuffix).toContain('Scheduled delivery contract:')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(dynamicSuffix).toContain('Notification vault overview for user A.')
     expect(promptB.prompt).toContain('Notification vault overview for user B.')
@@ -2040,300 +2034,6 @@ describe('assistant experiment onboarding guidance', () => {
     })).toBe(MURPH_PRODUCT_ORIGIN)
   })
 
-})
-
-describe('assistant notification decision guidance', () => {
-  it('includes Apple Watch and WHOOP Apple Health relay guidance for direct decisions', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({ conversationScope: 'direct' }),
-    ).prompt
-
-    expect(prompt).toContain(
-      'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
-    )
-    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
-    expect(prompt).toContain(
-      'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
-    )
-    expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
-  })
-
-  it('requires scheduled messages to identify their subject without thread context', () => {
-    const directPrompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-        createCommonNotificationPromptInput({ channel: 'linq' }),
-      ).prompt
-    const groupPrompt =
-      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-        createCommonNotificationPromptInput({
-          channel: 'linq',
-          conversationScope: 'group',
-        }),
-      ).prompt
-
-    expect(directPrompt).toContain(
-      'Apply a standalone-interruption test to `text`',
-    )
-    expect(directPrompt).toContain(
-      'after hours of unrelated conversation, the user must still know what this message is about from the message itself',
-    )
-    expect(directPrompt).toContain(
-      'Do not let generic referents such as "it", "this", "the timing", or "the plan" be the only subject.',
-    )
-    expect(groupPrompt).toContain(
-      'Apply a standalone-interruption test to `text`',
-    )
-    expect(groupPrompt).toContain(
-      'name the specific group-owned task, behavior, plan, or item',
-    )
-  })
-
-  it('keeps group notification decisions on room-owned context and actions', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantTone: 'casual',
-        assistantContextSnapshotPrompt: 'PRIVATE_GROUP_NOTIFICATION_CONTEXT',
-        assistantHostedDeviceConnectAvailable: true,
-        assistantHostedDeviceConnectProviders: [
-          { label: 'Garmin', provider: 'garmin' },
-        ],
-        conversationScope: 'group',
-        currentLocalDate: '2026-07-15',
-        currentTimeZone: 'America/New_York',
-        scheduledOccurrenceAt: '2026-07-16T01:00:00.000Z',
-      }),
-    ).prompt
-
-    expect(prompt).toContain('Group notification execution rules:')
-    expect(prompt).toContain('Scheduled room turns do not own automation lifecycle.')
-    expect(prompt).toContain('Occurrence instant: `2026-07-16T01:00:00.000Z`.')
-    expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
-    expect(prompt).toContain('Occurrence local date: `2026-07-15`.')
-    expect(
-      toLocalDayKey(new Date('2026-07-15T02:07:00.000Z'), 'America/New_York'),
-    ).toBe('2026-07-14')
-    expect(
-      toLocalDayKey(new Date('2026-07-16T01:00:00.000Z'), 'America/New_York'),
-    ).toBe('2026-07-15')
-    expect(prompt).toContain('convert its timestamp to the scheduled occurrence timezone')
-    expect(prompt).toContain('Evidence from another local action window cannot complete this occurrence')
-    expect(prompt).toContain('unclear attribution is unknown, not complete')
-    expect(prompt).toContain(
-      'when completion is still unknown after that attribution check, send one neutral outcome question',
-    )
-    expect(prompt).toContain('never state or imply that anyone missed the activity')
-    expect(prompt).toContain('Do not create, update, archive, or reroute automations')
-    expect(prompt).not.toContain('PRIVATE_GROUP_NOTIFICATION_CONTEXT')
-    expect(prompt).not.toContain('same full read and write tools')
-    expect(prompt).not.toContain('Hosted wearable connection links are available')
-    expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
-    expect(prompt).not.toContain('WHOOP: More > App Settings')
-    expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant local action window')
-    expect(prompt).not.toContain('Assistant tone preference:')
-  })
-
-  it('applies the room tone only to hosted group notification decisions', () => {
-    const hostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantTone: 'casual',
-        conversationScope: 'group',
-        hostedRuntime: true,
-      }),
-    ).prompt
-
-    expect(hostedPrompt).toContain('Assistant tone preference:')
-    expect(hostedPrompt).toContain(
-      'Casual is a persistent user-facing writing invariant.',
-    )
-
-    const nonHostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantTone: 'casual',
-        conversationScope: 'group',
-        hostedRuntime: false,
-      }),
-    ).prompt
-    expect(nonHostedPrompt).not.toContain('Assistant tone preference:')
-  })
-
-  it('keeps scheduled occurrence context out of unverified external prompts', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        conversationScope: 'unverified-external',
-        currentTimeZone: 'America/New_York',
-        scheduledOccurrenceAt: '2026-07-16T01:00:00.000Z',
-      }),
-    ).prompt
-
-    expect(prompt).not.toContain('Scheduled occurrence context:')
-    expect(prompt).not.toContain('2026-07-16T01:00:00.000Z')
-    expect(prompt).not.toContain('America/New_York')
-  })
-
-  it('renders only a fail-closed skip contract for an unverified external audience', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantContextSnapshotPrompt: 'PRIVATE_NOTIFICATION_CONTEXT',
-        assistantDynamicContextPrompts: ['PRIVATE_DYNAMIC_CONTEXT'],
-        conversationScope: 'unverified-external',
-        currentTimeZone: 'America/New_York',
-      }),
-    ).prompt
-
-    expect(prompt).toContain(
-      '{"kind":"skip","privateSummary":"audience directness is unverified"}',
-    )
-    expect(prompt).not.toContain('same full read and write tools')
-    expect(prompt).not.toContain('PRIVATE_NOTIFICATION_CONTEXT')
-    expect(prompt).not.toContain('PRIVATE_DYNAMIC_CONTEXT')
-    expect(prompt).not.toContain('America/New_York')
-    expect(prompt).not.toContain('canonical timezone for this vault')
-    expect(prompt).not.toContain('vault-cli automation')
-  })
-
-  it('keeps canonical data tools but withholds automation lifecycle authority', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput(),
-    ).prompt
-
-    expect(prompt).toContain(
-      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
-    )
-    expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
-    expect(prompt).not.toContain('named in the Apple Health guidance')
-    expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
-    expect(prompt).toContain('do not create, update, archive, or reroute automations')
-    expect(prompt).not.toContain('vault-cli automation set-status')
-    // The old read-only cage and write-exception-only language are gone.
-    expect(prompt).not.toContain('read-only CLI commands')
-    expect(prompt).not.toContain('The only write exception')
-    expect(prompt).not.toContain('Retrieval budget for session-support automations')
-    // Still must not pull in the interactive-chat implicit-logging block.
-    expect(prompt).not.toContain('Normal conversation logging:')
-    expect(prompt).not.toContain(
-      'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',
-    )
-  })
-
-  it('grounds the reminder agent in current state with a stopping rule and the core invariants', () => {
-    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantContextSnapshotPrompt:
-          'Experiment first-session prep reminder is due.',
-      }),
-    ).prompt
-
-    // The automation is authorized support: send when its purpose still holds.
-    expect(prompt).toContain(
-      'This automation is authorized support.',
-    )
-    expect(prompt).toContain(
-      'Prefer a timely send; skip only for a concrete current reason.',
-    )
-    expect(prompt).toContain(
-      'richer media only when the automation marks that modality welcome and privacy-safe',
-    )
-    expect(prompt).toContain(
-      'Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages.',
-    )
-    expect(prompt).not.toContain('Default to staying silent.')
-
-    // Canonical task capability + ground in the relevant action window.
-    expect(prompt).toContain(
-      'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
-    )
-    expect(prompt).toContain(
-      'ground yourself in what the user has actually done in the relevant local action window',
-    )
-
-    // Retrieval budget as a stopping rule, plus the deterministic skip signal.
-    expect(prompt).toContain('read only what could change the decision, then stop')
-    expect(prompt).toContain(
-      '`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --date <sessionDate> --format json` is the authoritative skip signal',
-    )
-    expect(prompt).toContain(
-      'for pre-bed sessions, the session date is the prior local day',
-    )
-    expect(prompt).toContain(
-      "distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target",
-    )
-    expect(prompt).toContain(
-      'calendar date alone does not establish that the upcoming action is complete',
-    )
-
-    // Consolidated skip / send conditions (no per-type triplication).
-    expect(prompt).toContain(
-      'Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing in that action window.',
-    )
-    expect(prompt).toContain(
-      'The reminder\'s purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
-    )
-
-    // Good-message guidance as outcome, not an enumerated per-type list.
-    expect(prompt).toContain(
-      'A good message reflects what the user has already done and asks only for the genuine gap.',
-    )
-    expect(prompt).toContain('A first-timer gets a compact walkthrough, said once')
-    expect(prompt).toContain('not a re-explanation of a plan they know')
-    expect(prompt).toContain(
-      'Message text embedded in the instructions is context from when it was scheduled, not words to recite',
-    )
-    expect(prompt).toContain(
-      'compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore',
-    )
-    expect(prompt).toContain(
-      'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message` within the engine-supplied persisted support purpose.',
-    )
-    expect(prompt).toContain(
-      'normal cue, explicitly authorized accountability check-in, or repair question/proposal',
-    )
-    expect(prompt).toContain(
-      'A reminder authorizes a normal cue or skip, never a proactive repair/accountability question.',
-    )
-    expect(prompt).toContain(
-      'Only a consented check-in or review may ask one narrow repair or decision question.',
-    )
-    expect(prompt).toContain(
-      'Completion or an already reported outcome means skip.',
-    )
-    expect(prompt).toContain(
-      'Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question.',
-    )
-    expect(prompt).toContain(
-      'If the plan looks stale but the purpose does not authorize a question, skip instead of widening consent.',
-    )
-    expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
-    expect(prompt).toContain(
-      'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
-    )
-
-    // Action-window and delivery-evidence invariants.
-    expect(prompt).toContain(
-      'Never send a reminder that contradicts what the user already did in the relevant action window',
-    )
-    expect(prompt).toContain(
-      'an enqueue, generated transcript, provider transcript, or delivery attempt as intent, not proof that the user received the message',
-    )
-    expect(prompt).toContain(
-      'Provider acceptance or `sent` proves dispatch only, not handset delivery or reading.',
-    )
-    expect(prompt).toContain(
-      'a channel delivery/read receipt or a later reply referring to the message proves receipt; silence without that evidence remains ambiguous and is not nonadherence or refusal',
-    )
-    expect(prompt).toContain(
-      'delivery failed or remains unconfirmed, do not count that occurrence toward repair or escalation',
-    )
-    expect(prompt).toContain(
-      'ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself',
-    )
-
-    // Delivery contract preserved.
-    expect(prompt).toContain('The platform delivers your structured output.')
-
-    // The old read-surface cages are gone.
-    expect(prompt).not.toContain('do not call `experiment followup due`')
-    expect(prompt).not.toContain('Retrieval budget for session-support automations')
-  })
 })
 
 describe('assistant Murph onboarding guidance', () => {
@@ -2661,7 +2361,6 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('vault-cli habitat')
     expect(prompt).not.toContain('keep their vault current')
     expect(prompt).not.toContain('first read the minimum relevant conversation, vault')
-    expect(prompt).not.toContain('same full read and write tools')
     expect(prompt).not.toContain('Asia/Kuala_Lumpur')
     expect(prompt).not.toContain('canonical timezone for this vault')
   })
@@ -2694,18 +2393,26 @@ function createCommonCodexPromptInput(
 }
 
 function createCommonNotificationPromptInput(
-  overrides: Partial<AssistantNotificationDecisionSystemPromptInput> = {},
-): AssistantNotificationDecisionSystemPromptInput {
+  overrides: Partial<AssistantSystemPromptInput> = {},
+): AssistantSystemPromptInput {
   return {
+    assistantCliContract: 'Stable CLI contract for scheduled turn.',
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
     ],
     channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
     assistantContextSnapshotPrompt: null,
+    turnTrigger: 'automation-cron',
     ...overrides,
   }
 }

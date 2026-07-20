@@ -30,6 +30,5 @@ export function shouldCreateAssistantProgressDelivery(
   return input.deliverResponse === true &&
     !queueOnlySuppressesProgress &&
     input.channel !== 'email' &&
-    (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
-    (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
+    (profile?.toolProfile ?? 'provider-turn') === 'provider-turn'
 }

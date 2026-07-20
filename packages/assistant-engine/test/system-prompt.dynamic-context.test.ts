@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
@@ -37,15 +36,23 @@ describe('assistant dynamic context prompt blocks', () => {
     )
   })
 
-  it('injects runtime dynamic context into notification-decision turns too', () => {
-    const layers = buildAssistantNotificationDecisionSystemPromptLayers({
+  it('injects runtime dynamic context into ordinary scheduled turns too', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null,
       assistantContextSnapshotPrompt: 'Context snapshot block.',
       assistantDynamicContextPrompts: [
         'Connected wearable sync status for this turn:\n- WHOOP currently needs reconnect.',
       ],
       channel: 'local',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
       currentLocalDate: '2026-06-29',
       currentTimeZone: 'America/New_York',
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      turnTrigger: 'automation-cron',
     })
 
     expect(layers.dynamicTurnContextPrompt).toContain(
