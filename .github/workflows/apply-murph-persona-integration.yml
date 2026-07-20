@@ -1,13 +1,72 @@
-name: Temporary Murph persona repair helper
+name: Apply focused Murph persona repair
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [agent/murph-personas]
+    paths:
+      - .github/workflows/apply-murph-persona-integration.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  noop:
+  repair:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - run: echo "Temporary helper disabled; source repairs are committed directly."
+      - name: Checkout branch quietly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --quiet --depth=1 --branch agent/murph-personas \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
+
+      - name: Apply source repair
+        run: python scripts/repair-persona-remaining.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Build contracts
+        run: pnpm --dir packages/contracts build
+
+      - name: Run focused regressions
+        run: |
+          pnpm exec vitest run --no-coverage \
+            packages/contracts/test/assistant-personas.test.ts \
+            packages/contracts/test/preferences.test.ts \
+            packages/core/test/preferences.test.ts \
+            packages/hosted-execution/test/hosted-execution-contract-guards.test.ts \
+            packages/assistant-engine/test/persona-prompts.test.ts \
+            packages/assistant-engine/test/assistant-style-dynamic-tool.test.ts \
+            packages/assistant-engine/test/assistant-codex-turn-planning.test.ts \
+            apps/web/test/settings-assistant-style-route.test.ts \
+            apps/web/test/home-initial-visit-dialog.test.tsx \
+            apps/web/test/hosted-onboarding-member-preferences.test.ts \
+            apps/web/test/hosted-assistant-personalization-tool.test.ts \
+            apps/web/test/account-settings-snapshot.test.ts
+
+      - name: Typecheck packages
+        run: pnpm typecheck:packages
+
+      - name: Typecheck Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Check and commit
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: repair and simplify Murph persona integration [persona-repaired]"
+          git push origin HEAD:agent/murph-personas
