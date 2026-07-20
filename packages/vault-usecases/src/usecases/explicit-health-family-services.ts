@@ -867,26 +867,44 @@ function toBloodTestMatchedResult(
     return null;
   }
 
-  const matchedResult = data.results.find((value) => {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      return false;
-    }
-    const result = toKeyedRecord(value);
-    return ["analyte", "slug", "biomarkerSlug"].some((key) => {
+  const results = data.results.flatMap((value) => (
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? [toKeyedRecord(value)]
+      : []
+  ));
+  const candidatesFor = (result: Record<string, unknown>): string[] => (
+    ["analyte", "slug", "biomarkerSlug"].flatMap((key) => {
       const candidate = result[key];
-      return typeof candidate === "string"
-        && candidate.trim().toLowerCase().includes(normalizedText);
-    });
-  });
-  if (
-    matchedResult === undefined
-    || matchedResult === null
-    || typeof matchedResult !== "object"
-    || Array.isArray(matchedResult)
-  ) {
+      return typeof candidate === "string" && candidate.trim().length > 0
+        ? [candidate.trim().toLowerCase()]
+        : [];
+    })
+  );
+  let matchedResult: Record<string, unknown> | null = null;
+  for (const predicate of [
+    (candidate: string) => candidate === normalizedText,
+    (candidate: string) => (
+      candidate.startsWith(normalizedText)
+      && (
+        candidate.length === normalizedText.length
+        || !/[\p{L}\p{N}]/u.test(candidate[normalizedText.length] ?? "")
+      )
+    ),
+    (candidate: string) => candidate.includes(normalizedText),
+  ]) {
+    const matches = results.filter((result) => candidatesFor(result).some(predicate));
+    if (matches.length > 1) {
+      return null;
+    }
+    if (matches.length === 1) {
+      matchedResult = matches[0] ?? null;
+      break;
+    }
+  }
+  if (!matchedResult) {
     return null;
   }
-  const result = toKeyedRecord(matchedResult);
+  const result = matchedResult;
   const analyte = boundedBloodTestMatchedResultString(result.analyte, 80);
   if (!analyte) {
     return null;
