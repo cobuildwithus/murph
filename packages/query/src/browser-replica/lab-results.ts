@@ -250,6 +250,14 @@ function isComparableNumericRow(
 function toPresentedLabResultRow(
   row: BrowserVaultLabResultRow,
 ): BrowserVaultPresentedLabResultRow {
+  if (row.unit === null) {
+    return {
+      ...row,
+      normalizedReferenceRange: null,
+      normalizedUnit: null,
+      normalizedValue: null,
+    };
+  }
   return {
     ...row,
     normalizedReferenceRange: normalizeLabReferenceRange(row),
@@ -335,6 +343,9 @@ function parseNumericLabReferenceRange(
   if (range.low === undefined && range.high === undefined) {
     return textRange;
   }
+  if (range.text && !structuredLabRangeMatchesText(range, textRange, reportedUnit)) {
+    return null;
+  }
   const highComparator = textRange !== null && textRange.high === range.high
     ? textRange.highComparator
     : undefined;
@@ -349,6 +360,24 @@ function parseNumericLabReferenceRange(
     ...(lowComparator ? { lowComparator } : {}),
     unit: reportedUnit,
   };
+}
+
+function structuredLabRangeMatchesText(
+  range: BrowserVaultLabResultReferenceRange,
+  textRange: ParsedNumericLabReferenceRange | null,
+  reportedUnit: string | null,
+): textRange is ParsedNumericLabReferenceRange {
+  if (!textRange) {
+    return false;
+  }
+  const unitsMatch = textRange.unit === null && reportedUnit === null
+    ? true
+    : unitsEquivalent(textRange.unit, reportedUnit);
+  return unitsMatch
+    && (textRange.low !== undefined) === (range.low !== undefined)
+    && (textRange.high !== undefined) === (range.high !== undefined)
+    && textRange.low === range.low
+    && textRange.high === range.high;
 }
 
 function parseNumericLabReferenceText(

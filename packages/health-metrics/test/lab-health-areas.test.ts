@@ -58,6 +58,7 @@ test("preserves unknown analytes in Other", () => {
     id: "other",
     label: "Other",
   });
+  assert.equal(resolveLabHealthArea("uric-acid").id, "other");
   assert.equal(resolveLabHealthArea("").id, "other");
   assert.equal(resolveLabHealthArea("biomarker:unmapped-marker").id, "other");
 });

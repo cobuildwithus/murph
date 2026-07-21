@@ -449,26 +449,43 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "mmol/L",
     value: 1.3,
   }).canonicalValue, 115.141);
-  assert.equal(normalizeMetricValue({
-    metricKey: "calcium",
-    unit: "mmol/L",
-    value: 2.5,
-  }).canonicalValue, 10);
-  assert.equal(normalizeMetricValue({
-    metricKey: "cholesterol-total",
-    unit: "mmol/L",
-    value: 5,
-  }).canonicalValue, 193.35);
-  assert.equal(normalizeMetricValue({
-    metricKey: "uric-acid",
-    unit: "mmol/L",
-    value: 0.3,
-  }).canonicalValue, 5.0436);
-  assert.equal(normalizeMetricValue({
-    metricKey: "bilirubin-total",
-    unit: "umol/L",
-    value: 17.1,
-  }).canonicalValue, 1);
+  const conversionOnlyLabs = [
+    {
+      expectedValue: 10,
+      metricKeys: ["calcium", "serum-calcium", "total-calcium"],
+      unit: "mmol/L",
+      value: 2.5,
+    },
+    {
+      expectedValue: 193.35,
+      metricKeys: ["cholesterol", "cholesterol-total", "total-cholesterol"],
+      unit: "mmol/L",
+      value: 5,
+    },
+    {
+      expectedValue: 5.0436,
+      metricKeys: ["serum-uric-acid", "urate", "uric-acid"],
+      unit: "mmol/L",
+      value: 0.3,
+    },
+    {
+      expectedValue: 1,
+      metricKeys: ["bilirubin", "bilirubin-total", "total-bilirubin"],
+      unit: "umol/L",
+      value: 17.1,
+    },
+  ] as const;
+  for (const { expectedValue, metricKeys, unit, value } of conversionOnlyLabs) {
+    for (const metricKey of metricKeys) {
+      assert.equal(resolveMetricDefinition(metricKey), null);
+      assert.deepEqual(normalizeMetricValue({ metricKey, unit, value }), {
+        canonicalUnit: "mg/dL",
+        canonicalValue: expectedValue,
+        unit,
+        warnings: [],
+      });
+    }
+  }
   assert.deepEqual(normalizeMetricValue({
     metricKey: "total-protein",
     unit: "g/L",

@@ -46,11 +46,19 @@ export function normalizeMetricValue(input: {
     case "triglycerides":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 88.57, definition.displayName);
     case "calcium":
+    case "serum-calcium":
+    case "total-calcium":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 4, definition.displayName);
+    case "cholesterol":
+    case "cholesterol-total":
     case "total-cholesterol":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 38.67, definition.displayName);
+    case "serum-uric-acid":
+    case "urate":
     case "uric-acid":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 16.812, definition.displayName);
+    case "bilirubin":
+    case "bilirubin-total":
     case "total-bilirubin":
       return normalizeMicromolarMassConcentration(input.value, unit, 17.1, definition.displayName);
     case "apob":
