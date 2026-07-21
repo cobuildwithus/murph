@@ -289,6 +289,23 @@ export async function sendAssistantScheduledAutomationContinuation(
   if (!executionContext) {
     return null
   }
+  const automationTurn = buildAssistantAutomationTurnEnvelope({
+    assistantTargetOverride: resolveAssistantCronAutomationTargetOverride(resolved),
+    deliveryDispatchMode: 'queue-only',
+    executionContext,
+    scheduledInvocationAuthority: resolveAssistantCronScheduledInvocationAuthority({
+      job: resolved,
+      occurrenceAt: input.occurrenceAt,
+      trigger: 'scheduled',
+    }),
+    scheduledOccurrenceAt: input.occurrenceAt,
+    // Completion mailbox retries do not share the cron failure counter that
+    // bounds first-attempt Flex usage, so they intentionally stay standard.
+    serviceTier: null,
+    signal: input.signal ?? undefined,
+    turnEnvironment: input.turnEnvironment ?? null,
+    turnTrigger: 'automation-cron',
+  })
 
   const assertSourceLive = async (): Promise<void> => {
     await input.assertLive?.()
@@ -342,7 +359,7 @@ export async function sendAssistantScheduledAutomationContinuation(
     beforeToolExecution?: AssistantNotificationInput['beforeToolExecution']
     responsePolicy: AssistantNotificationInput['responsePolicy']
   }): Promise<AssistantNotificationResult> => await sendAssistantNotificationLocal({
-    abortSignal: input.signal ?? undefined,
+    ...automationTurn,
     alias: null,
     allowBindingRebind: false,
     answeredMailboxItemIds: [input.answeredMailboxItemId],
@@ -356,12 +373,10 @@ export async function sendAssistantScheduledAutomationContinuation(
     channel: resolved.job.target.channel,
     deferCommitUntilDeliveryAccepted: true,
     deliveryDedupeToken: deliveryIdempotencyKey,
-    deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey,
     deliveryKind: route.bindingDelivery?.kind ?? undefined,
     deliverySource: resolved.job.target.deliverySource,
     deliveryTarget: route.deliveryTarget,
-    executionContext,
     identityId: resolved.job.target.identityId,
     instructions: [
       buildAssistantCronExecutionInstructions(resolved),
@@ -375,16 +390,9 @@ export async function sendAssistantScheduledAutomationContinuation(
     participantId: resolved.job.target.participantId,
     responsePolicy: notification.responsePolicy,
     reviewedAssistantAskCompletionExpiresAt: input.expiresAt,
-    scheduledInvocationAuthority: {
-      automationId: source.automationId,
-      occurrenceAt: input.occurrenceAt,
-    },
-    scheduledOccurrenceAt: input.occurrenceAt,
     sessionId: null,
     threadId: resolved.job.target.threadId,
     threadIsDirect: false,
-    turnEnvironment: input.turnEnvironment ?? null,
-    turnTrigger: 'automation-auto-reply',
     vault: input.vault,
     workingDirectory: input.vault,
   })

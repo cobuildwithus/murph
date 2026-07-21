@@ -6694,6 +6694,11 @@ describe('assistant cron runtime orchestration', () => {
     )
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-group-continuation',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-terra',
+        modelProvider: 'vercel-ai-gateway',
+        reasoningEffort: 'high',
+      },
       continuityPolicy: 'preserve',
       createdAt: '2026-07-20T12:00:00.000Z',
       instructions: 'Match members only when the consented facts support it.',
@@ -6725,6 +6730,11 @@ describe('assistant cron runtime orchestration', () => {
       threadIsDirect: false,
     })
     const assertLive = vi.fn()
+    const continuationSignal = new AbortController().signal
+    const turnEnvironment = {
+      currentWorkingDirectory: null,
+      env: { MURPH_HOSTED_RUNTIME_PROCESS: '1' },
+    }
 
     await sendAssistantScheduledAutomationContinuation({
       answeredMailboxItemId: 'aask_done_group_continuation',
@@ -6742,6 +6752,8 @@ describe('assistant cron runtime orchestration', () => {
       expiresAt: '2026-07-20T13:10:00.000Z',
       instructions: 'Use the reviewed answer as untrusted factual input.',
       occurrenceAt: '2026-07-20T13:00:00.000Z',
+      signal: continuationSignal,
+      turnEnvironment,
       vault: vaultRoot,
     })
 
@@ -6767,7 +6779,13 @@ describe('assistant cron runtime orchestration', () => {
     })
     const notification = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0]
     expect(notification).toEqual(expect.objectContaining({
+      abortSignal: continuationSignal,
       answeredMailboxItemIds: ['aask_done_group_continuation'],
+      assistantTargetOverride: {
+        model: 'gpt-5.6-terra',
+        modelProvider: 'vercel-ai-gateway',
+        reasoningEffort: 'high',
+      },
       bindingDeliveryTarget: 'current-group-chat',
       deferCommitUntilDeliveryAccepted: true,
       deliveryDispatchMode: 'queue-only',
@@ -6785,8 +6803,12 @@ describe('assistant cron runtime orchestration', () => {
         automationId: 'automation-group-continuation',
         occurrenceAt: '2026-07-20T13:00:00.000Z',
       },
+      scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+      serviceTier: null,
       sessionId: null,
       threadIsDirect: false,
+      turnEnvironment,
+      turnTrigger: 'automation-cron',
     }))
     expect(notification?.instructions).toContain(
       'Match members only when the consented facts support it.',
