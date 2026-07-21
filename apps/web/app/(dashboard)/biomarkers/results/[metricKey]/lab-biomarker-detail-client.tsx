@@ -9,7 +9,7 @@ import {
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabBiomarkerDetail,
-  type BrowserVaultLabResultRow,
+  type BrowserVaultPresentedLabResultRow,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
@@ -36,6 +36,7 @@ import {
   formatLabDate,
   formatLabFlag,
   formatLabReferenceRange,
+  formatLabResultReferenceRange,
   formatLabUnit,
   labResultYear,
 } from "@/src/lib/biomarkers/lab-result-display";
@@ -51,7 +52,7 @@ interface LabBiomarkerDetailClientProps {
 }
 
 interface LabResultYearGroup {
-  rows: BrowserVaultLabResultRow[];
+  rows: BrowserVaultPresentedLabResultRow[];
   year: string;
 }
 
@@ -351,7 +352,7 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
 
         <ol>
           {group.rows.map((row) => {
-            const referenceRange = formatLabReferenceRange(row.referenceRange, row.unit);
+            const referenceRange = formatLabResultReferenceRange(row);
             const source = row.labName ?? row.sourceLabel;
 
             return (
@@ -536,7 +537,7 @@ function BackToBiomarkersLink() {
   );
 }
 
-function groupRowsByYear(rows: readonly BrowserVaultLabResultRow[]): LabResultYearGroup[] {
+function groupRowsByYear(rows: readonly BrowserVaultPresentedLabResultRow[]): LabResultYearGroup[] {
   const groups = new Map<string, LabResultYearGroup>();
 
   for (const row of rows.slice().reverse()) {
@@ -587,9 +588,8 @@ function formatChartCaption(
 
 /**
  * The chart plots normalized comparable values, so a reference band is only
- * truthful when every charted row reported the same numeric bounds on the
- * same scale as its plotted value. Any disagreement or missing range means
- * no band.
+ * truthful when every charted row has the same normalized numeric bounds.
+ * Any disagreement or missing numeric range means no band.
  */
 function resolveChartedReferenceRange(
   detail: BrowserVaultLabBiomarkerDetail,
@@ -608,17 +608,20 @@ function resolveChartedReferenceRange(
     if (plottedValue === undefined) {
       continue;
     }
-    // Equal values alone cannot prove no conversion happened (0 converts to
-    // 0), so the reported unit must also match the plotted unit.
     if (
-      row.value !== plottedValue
-      || formatLabUnit(row.unit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
+      row.normalizedValue !== plottedValue
+      || formatLabUnit(row.normalizedUnit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
     ) {
       return null;
     }
 
-    const low = row.referenceRange?.low ?? null;
-    const high = row.referenceRange?.high ?? null;
+    const normalizedRange = row.normalizedReferenceRange;
+    if (normalizedRange?.lowComparator || normalizedRange?.highComparator) {
+      return null;
+    }
+
+    const low = normalizedRange?.low ?? null;
+    const high = normalizedRange?.high ?? null;
     if (low === null && high === null) {
       return null;
     }

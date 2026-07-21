@@ -21,6 +21,8 @@ export type {
   BrowserVaultLabBiomarkerDetail,
   BrowserVaultLabBiomarkerSeriesPoint,
   BrowserVaultMeasuredBiomarker,
+  BrowserVaultNormalizedLabReferenceRange,
+  BrowserVaultPresentedLabResultRow,
 } from "./browser-replica/lab-results.ts";
 export type {
   BrowserVaultBiomarkerMetricBinding,

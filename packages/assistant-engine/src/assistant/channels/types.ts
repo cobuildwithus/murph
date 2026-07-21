@@ -32,6 +32,7 @@ export interface AssistantChannelActivityHandle {
 }
 
 export interface TelegramRuntimeDependencies {
+  authorityBoundTarget?: string | null
   env?: NodeJS.ProcessEnv
   fetchImplementation?: TelegramFetchImplementation
   maxDeliveryAttempts?: number

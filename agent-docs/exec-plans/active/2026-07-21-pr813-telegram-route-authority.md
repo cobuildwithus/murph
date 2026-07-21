@@ -68,10 +68,11 @@ Updated: 2026-07-21
    runtime effects boundary and carry its exact proof through scheduled turns
    and the ordinary outbox.
 4. Recheck the proof before Telegram text, image, reaction, and voice provider
-   entry; keep direct delivery and Linq ownership unchanged.
+   entry and reject Bot API target migration while that proof is bound; keep
+   direct delivery and Linq ownership unchanged.
 5. Update durable docs, run focused and canonical verification, complete the
    required coverage audit and parent final review, close the plan, push, and
-   run ReviewGPT round 3 concurrently with CI.
+   run the next ReviewGPT correction round concurrently with CI.
 
 ## Decisions
 
@@ -86,6 +87,12 @@ Updated: 2026-07-21
   failure is retryable, a local authority/target mismatch is stale, and Web
   ownership revocation remains its existing permanent unauthorized result.
   Translating those outcomes into another error layer would add no safety.
+- Treat the round-3 High finding as accepted: Telegram's existing
+  `migrate_to_chat_id` retry could change the provider target after the live
+  route check. Carry the already-authorized serialized target into the existing
+  Telegram helpers and reject a different migrated target before retrying.
+  Ordinary immediate sends retain migration because they omit that constraint;
+  recovery for a scheduled route remains an explicit re-save from the new chat.
 
 ## Verification
 
@@ -101,6 +108,13 @@ Updated: 2026-07-21
   and `MURPH_TEST_DIFF_VITEST_MAX_WORKERS=2`: all selected packages/apps,
   scenario integrity, lint, Web dev smoke/build, and Cloudflare Node/Workers
   lanes completed successfully.
-- Pending: coverage audit completion, `pnpm verify:acceptance`, final
-  privacy/diff checks, exact-head preflight, green PR CI, and ReviewGPT
+- Passed the prior pushed head's full acceptance verification and exact-head
+  PR CI. For the provider-migration correction, affected typechecks and focused
+  text, image, reaction, voice, descriptor, and hosted callback tests pass.
+- Passed canonical diff verification for the provider-migration correction,
+  including all affected reverse dependents and Cloudflare Node/Workers lanes.
+  The required coverage audit added one hosted image/reaction wiring regression;
+  all focused suites and final privacy/diff checks pass.
+- Pending for the final correction head: acceptance verification, hosted-local
+  proof, exact-head preflight, green PR CI, and ReviewGPT
   `ROUND_OUTCOME: PASS`.

@@ -1,9 +1,11 @@
 import {
   groupLabItemsByHealthArea,
   normalizeMetricKey,
+  normalizeMetricValue,
   normalizeUnit,
   resolveIndexedLabHealthArea,
   resolveLabResultMetricDefinition,
+  unitsEquivalent,
   type LabHealthArea,
   type MetricPoint,
 } from "@murphai/health-metrics";
@@ -32,9 +34,20 @@ export interface BrowserVaultMeasuredBiomarker {
   firstDate: string;
   healthArea: LabHealthArea;
   lastDate: string;
-  latest: BrowserVaultLabResultRow;
+  latest: BrowserVaultPresentedLabResultRow;
   metricKey: string;
   resultCount: number;
+}
+
+export interface BrowserVaultNormalizedLabReferenceRange
+  extends BrowserVaultLabResultReferenceRange {
+  highComparator?: "<" | "<=";
+  lowComparator?: ">" | ">=";
+}
+
+export interface BrowserVaultPresentedLabResultRow
+  extends BrowserVaultLabResultRow {
+  normalizedReferenceRange: BrowserVaultNormalizedLabReferenceRange | null;
 }
 
 export interface BrowserVaultLabBiomarkerDetail {
@@ -43,9 +56,9 @@ export interface BrowserVaultLabBiomarkerDetail {
   comparableUnit: string | null;
   displayName: string;
   hasIncompatibleHistory: boolean;
-  latest: BrowserVaultLabResultRow;
+  latest: BrowserVaultPresentedLabResultRow;
   metricKey: string;
-  rows: BrowserVaultLabResultRow[];
+  rows: BrowserVaultPresentedLabResultRow[];
 }
 
 export function toBrowserVaultLabResultRows(input: {
@@ -179,7 +192,7 @@ function buildLabBiomarkerDetail(
   metricKey: string,
   inputRows: readonly BrowserVaultLabResultRow[],
 ): BrowserVaultLabBiomarkerDetail | null {
-  const rows = sortBrowserVaultLabResultRows(inputRows);
+  const rows = sortBrowserVaultLabResultRows(inputRows).map(toPresentedLabResultRow);
   const latest = rows.at(-1);
   if (!latest) return null;
 
@@ -187,7 +200,7 @@ function buildLabBiomarkerDetail(
   const comparableUnit = comparableCandidates.at(-1)?.normalizedUnit ?? null;
   const comparableRows = comparableUnit === null
     ? []
-    : rows.filter((row): row is BrowserVaultLabResultRow & {
+    : rows.filter((row): row is BrowserVaultPresentedLabResultRow & {
         normalizedUnit: string;
         normalizedValue: number;
       } => isComparableNumericRow(row) && row.normalizedUnit === comparableUnit);
@@ -218,14 +231,245 @@ function buildLabBiomarkerDetail(
 }
 
 function isComparableNumericRow(
-  row: BrowserVaultLabResultRow,
-): row is BrowserVaultLabResultRow & { normalizedUnit: string; normalizedValue: number } {
+  row: BrowserVaultPresentedLabResultRow,
+): row is BrowserVaultPresentedLabResultRow & { normalizedUnit: string; normalizedValue: number } {
   return row.value !== null
     && row.comparator === null
     && typeof row.normalizedValue === "number"
     && Number.isFinite(row.normalizedValue)
     && typeof row.normalizedUnit === "string"
     && row.normalizedUnit.length > 0;
+}
+
+function toPresentedLabResultRow(
+  row: BrowserVaultLabResultRow,
+): BrowserVaultPresentedLabResultRow {
+  if (row.unit === null) {
+    return {
+      ...row,
+      normalizedReferenceRange: null,
+      normalizedUnit: null,
+      normalizedValue: null,
+    };
+  }
+  return {
+    ...row,
+    normalizedReferenceRange: normalizeLabReferenceRange(row),
+  };
+}
+
+function normalizeLabReferenceRange(
+  row: BrowserVaultLabResultRow,
+): BrowserVaultNormalizedLabReferenceRange | null {
+  if (
+    row.normalizedValue === null
+    || row.normalizedUnit === null
+    || row.referenceRange === null
+  ) {
+    return null;
+  }
+
+  const parsed = parseNumericLabReferenceRange(row.referenceRange, row.unit);
+  if (!parsed) {
+    return null;
+  }
+
+  const low = parsed.low === undefined
+    ? undefined
+    : normalizeLabReferenceBoundary({
+        metricKey: row.metricKey,
+        sourceUnit: parsed.unit,
+        targetUnit: row.normalizedUnit,
+        value: parsed.low,
+      });
+  const high = parsed.high === undefined
+    ? undefined
+    : normalizeLabReferenceBoundary({
+        metricKey: row.metricKey,
+        sourceUnit: parsed.unit,
+        targetUnit: row.normalizedUnit,
+        value: parsed.high,
+      });
+
+  if (
+    (parsed.low !== undefined && low === null)
+    || (parsed.high !== undefined && high === null)
+    || (low !== undefined && low !== null && high !== undefined && high !== null && low > high)
+  ) {
+    return null;
+  }
+
+  return {
+    ...(high !== undefined && high !== null ? { high } : {}),
+    ...(parsed.highComparator ? { highComparator: parsed.highComparator } : {}),
+    ...(low !== undefined && low !== null ? { low } : {}),
+    ...(parsed.lowComparator ? { lowComparator: parsed.lowComparator } : {}),
+  };
+}
+
+interface ParsedNumericLabReferenceRange {
+  high?: number;
+  highComparator?: "<" | "<=";
+  low?: number;
+  lowComparator?: ">" | ">=";
+  unit: string | null;
+}
+
+const LAB_RANGE_NUMBER = String.raw`[+-]?(?:(?:(?:\d{1,3}(?:,\d{3})+)|\d+)(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?`;
+const BOUNDED_LAB_RANGE_PATTERN = new RegExp(
+  String.raw`^\s*(${LAB_RANGE_NUMBER})\s*(?:-|–|—|to)\s*(${LAB_RANGE_NUMBER})\s*(.*?)\s*$`,
+  "iu",
+);
+const SYMBOLIC_LAB_RANGE_PATTERN = new RegExp(
+  String.raw`^\s*(<=|>=|<|>|≤|≥)\s*(${LAB_RANGE_NUMBER})\s*(.*?)\s*$`,
+  "u",
+);
+const PHRASED_LAB_RANGE_PATTERN = new RegExp(
+  String.raw`^\s*(less than or equal to|greater than or equal to|less than|greater than|up to|at most|at least)\s+(${LAB_RANGE_NUMBER})\s*(.*?)\s*$`,
+  "iu",
+);
+
+function parseNumericLabReferenceRange(
+  range: BrowserVaultLabResultReferenceRange,
+  reportedUnit: string | null,
+): ParsedNumericLabReferenceRange | null {
+  const textRange = range.text ? parseNumericLabReferenceText(range.text, reportedUnit) : null;
+  if (range.low === undefined && range.high === undefined) {
+    return textRange;
+  }
+  if (range.text && !structuredLabRangeMatchesText(range, textRange, reportedUnit)) {
+    return null;
+  }
+  const highComparator = textRange !== null && textRange.high === range.high
+    ? textRange.highComparator
+    : undefined;
+  const lowComparator = textRange !== null && textRange.low === range.low
+    ? textRange.lowComparator
+    : undefined;
+
+  return {
+    ...(range.high !== undefined ? { high: range.high } : {}),
+    ...(highComparator ? { highComparator } : {}),
+    ...(range.low !== undefined ? { low: range.low } : {}),
+    ...(lowComparator ? { lowComparator } : {}),
+    unit: reportedUnit,
+  };
+}
+
+function structuredLabRangeMatchesText(
+  range: BrowserVaultLabResultReferenceRange,
+  textRange: ParsedNumericLabReferenceRange | null,
+  reportedUnit: string | null,
+): textRange is ParsedNumericLabReferenceRange {
+  if (!textRange) {
+    return false;
+  }
+  const unitsMatch = textRange.unit === null && reportedUnit === null
+    ? true
+    : unitsEquivalent(textRange.unit, reportedUnit);
+  return unitsMatch
+    && (textRange.low !== undefined) === (range.low !== undefined)
+    && (textRange.high !== undefined) === (range.high !== undefined)
+    && textRange.low === range.low
+    && textRange.high === range.high;
+}
+
+function parseNumericLabReferenceText(
+  text: string,
+  reportedUnit: string | null,
+): ParsedNumericLabReferenceRange | null {
+  const bounded = BOUNDED_LAB_RANGE_PATTERN.exec(text);
+  if (bounded?.[1] && bounded[2] !== undefined) {
+    const low = parseLabRangeNumber(bounded[1]);
+    const high = parseLabRangeNumber(bounded[2]);
+    if (low === null || high === null || low > high) {
+      return null;
+    }
+    return {
+      high,
+      low,
+      unit: readOptionalString(bounded[3]) ?? reportedUnit,
+    };
+  }
+
+  const symbolic = SYMBOLIC_LAB_RANGE_PATTERN.exec(text);
+  if (symbolic?.[1] && symbolic[2] !== undefined) {
+    return oneSidedLabReferenceRange(
+      symbolic[1],
+      symbolic[2],
+      readOptionalString(symbolic[3]) ?? reportedUnit,
+    );
+  }
+
+  const phrased = PHRASED_LAB_RANGE_PATTERN.exec(text);
+  if (phrased?.[1] && phrased[2] !== undefined) {
+    return oneSidedLabReferenceRange(
+      phrased[1].toLowerCase(),
+      phrased[2],
+      readOptionalString(phrased[3]) ?? reportedUnit,
+    );
+  }
+
+  return null;
+}
+
+function oneSidedLabReferenceRange(
+  comparator: string,
+  rawValue: string,
+  unit: string | null,
+): ParsedNumericLabReferenceRange | null {
+  const value = parseLabRangeNumber(rawValue);
+  if (value === null) {
+    return null;
+  }
+
+  switch (comparator) {
+    case "<":
+    case "less than":
+      return { high: value, highComparator: "<", unit };
+    case "<=":
+    case "≤":
+    case "less than or equal to":
+    case "up to":
+    case "at most":
+      return { high: value, highComparator: "<=", unit };
+    case ">":
+    case "greater than":
+      return { low: value, lowComparator: ">", unit };
+    case ">=":
+    case "≥":
+    case "greater than or equal to":
+    case "at least":
+      return { low: value, lowComparator: ">=", unit };
+    default:
+      return null;
+  }
+}
+
+function parseLabRangeNumber(value: string): number | null {
+  const parsed = Number(value.replaceAll(",", ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeLabReferenceBoundary(input: {
+  metricKey: string;
+  sourceUnit: string | null;
+  targetUnit: string;
+  value: number;
+}): number | null {
+  const normalized = normalizeMetricValue({
+    metricKey: input.metricKey,
+    unit: input.sourceUnit,
+    value: input.value,
+  });
+  if (
+    normalized.canonicalValue !== null
+    && unitsEquivalent(normalized.canonicalUnit, input.targetUnit)
+  ) {
+    return normalized.canonicalValue;
+  }
+
+  return unitsEquivalent(input.sourceUnit, input.targetUnit) ? input.value : null;
 }
 
 function normalizeMetricFilterKey(metricKey: string): string {

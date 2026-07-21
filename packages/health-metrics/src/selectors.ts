@@ -69,7 +69,7 @@ export function selectMetricValue(input: {
   ];
   const comparable = resolveComparableMetricPointValue(selected, definition);
   if (!comparable) {
-    return emptySelection(definition, requestedBiomarkerKey, "no_data", policySelection.warnings);
+    return emptySelection(definition, requestedBiomarkerKey, "no_data", warnings);
   }
 
   return {
@@ -133,20 +133,60 @@ function selectPointByPolicy(
   policy: MetricSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const numericPoints = points.filter((point) => hasDisplayableValue(point, definition));
+  const comparablePoints = points.filter((point) => resolveComparableMetricPointValue(point, definition) !== null);
+  let selection: MetricPolicySelectionResult;
   switch (policy.kind) {
     case "qualified-latest":
-      return { point: sortedLatest(numericPoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers))).at(0) ?? null };
+      selection = {
+        point: sortedLatest(
+          comparablePoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers)),
+        ).at(0) ?? null,
+      };
+      break;
     case "daily-aggregate":
-      return selectDailyAggregatePoint(numericPoints, policy, definition);
+      selection = selectDailyAggregatePoint(
+        policy.statistic === "count" ? points : comparablePoints,
+        policy,
+        definition,
+      );
+      break;
     case "latest-lab": {
-      const labPoints = numericPoints.filter((point) => point.source.kind === "test-result");
-      return { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      const labPoints = comparablePoints.filter((point) => point.source.kind === "test-result");
+      selection = { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      break;
     }
     case "latest-device-estimate":
     case "latest-valid":
-      return { point: sortedLatest(numericPoints).at(0) ?? null };
+      selection = { point: sortedLatest(comparablePoints).at(0) ?? null };
+      break;
   }
+
+  const unitWarnings = policy.kind === "daily-aggregate" && policy.statistic === "count"
+    ? []
+    : collectIncomparableUnitWarnings(points, definition);
+  return unitWarnings.length === 0
+    ? selection
+    : { ...selection, warnings: [...(selection.warnings ?? []), ...unitWarnings] };
+}
+
+function collectIncomparableUnitWarnings(
+  points: readonly MetricPoint[],
+  definition: MetricDefinition,
+): MetricSelectionWarning[] {
+  if (
+    definition.canonicalUnit === null
+    || !points.some((point) =>
+      point.value !== null
+      && Number.isFinite(point.value)
+      && resolveComparableMetricPointValue(point, definition) === null
+    )
+  ) {
+    return [];
+  }
+  return [{
+    code: "UNIT_NOT_NORMALIZED",
+    message: `${definition.displayName} excluded values that could not be normalized to ${definition.canonicalUnit}.`,
+  }];
 }
 
 function selectDailyAggregatePoint(
@@ -165,20 +205,11 @@ function selectDailyAggregatePoint(
   const candidates = points.filter((point) => point.effectiveDate >= windowStart && point.effectiveDate <= anchorDate);
   const minimumPoints = policy.minimumPoints ?? 0;
 
-  const useCanonicalValues = policy.statistic !== "count" && definition.canonicalUnit !== null;
   const values = candidates
-    .map((point) => useCanonicalValues
-      ? point.canonicalValue
-      : resolveComparableMetricPointValue(point, definition)?.value ?? null)
+    .map((point) => resolveComparableMetricPointValue(point, definition)?.value ?? null)
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const warnings: MetricSelectionWarning[] = [];
 
-  if (useCanonicalValues && candidates.some((point) => point.value !== null && point.canonicalValue === null)) {
-    warnings.push({
-      code: "UNIT_NOT_NORMALIZED",
-      message: `${definition.displayName} daily aggregate excluded values that could not be normalized to ${definition.canonicalUnit}.`,
-    });
-  }
   if (candidates.some((point) => point.comparator)) {
     warnings.push({
       code: "COMPARATOR_VALUE",
@@ -209,10 +240,13 @@ function selectDailyAggregatePoint(
   const recordIds = uniqueStrings(candidates.flatMap(metricPointRecordIds));
   const unit = policy.statistic === "count"
     ? "count"
-    : useCanonicalValues
+    : definition.canonicalUnit !== null
       ? definition.canonicalUnit
       : latest.canonicalUnit ?? latest.unit ?? definition.displayUnit;
-  const aggregateIsCanonical = policy.statistic === "count" || useCanonicalValues || latest.canonicalUnit !== null || !definition.canonicalUnit;
+  const aggregateIsCanonical = policy.statistic === "count"
+    || definition.canonicalUnit !== null
+    || latest.canonicalUnit !== null
+    || !definition.canonicalUnit;
 
   return {
     point: {
@@ -305,10 +339,6 @@ function fastingRank(point: MetricPoint): number {
   return point.context.fastingStatus === "fasting" ? 1 : 0;
 }
 
-function hasDisplayableValue(point: MetricPoint, definition: MetricDefinition): boolean {
-  return resolveComparableMetricPointValue(point, definition) !== null;
-}
-
 function qualifiersMatch(point: MetricPoint, required: Record<string, string | number | boolean>): boolean {
   const qualifiers = point.context.qualifiers ?? {};
   return Object.entries(required).every(([key, value]) => qualifiers[key] === value);
@@ -367,19 +397,14 @@ function collectSelectionWarnings(input: {
   if (input.selected.comparator) {
     warnings.push({ code: "COMPARATOR_VALUE", message: "Selected value includes a lab comparator." });
   }
-  if (input.definition.canonicalUnit && !input.selected.canonicalUnit) {
-    warnings.push({
-      code: "UNIT_NOT_NORMALIZED",
-      message: `${input.definition.displayName} could not be normalized to ${input.definition.canonicalUnit}.`,
-    });
-  } else if (
+  const comparable = resolveComparableMetricPointValue(input.selected, input.definition);
+  if (
     input.definition.canonicalUnit
-    && input.selected.canonicalUnit
-    && !unitsEquivalent(input.selected.canonicalUnit, input.definition.canonicalUnit)
+    && (!comparable || !unitsEquivalent(comparable.unit, input.definition.canonicalUnit))
   ) {
     warnings.push({
       code: "UNIT_NOT_NORMALIZED",
-      message: `${input.definition.displayName} is normalized as ${input.selected.canonicalUnit}; expected ${input.definition.canonicalUnit}.`,
+      message: `${input.definition.displayName} could not be normalized to ${input.definition.canonicalUnit}.`,
     });
   }
 

@@ -31,8 +31,23 @@ export function LabResultValue({
       );
     }
 
-    const visibleNumber = formatLabResultValue({ ...result, unit: null });
-    const unit = result.unit ? formatLabUnit(result.unit) : null;
+    const normalizedValue = typeof result.normalizedValue === "number"
+      && Number.isFinite(result.normalizedValue)
+      ? result.normalizedValue
+      : null;
+    const normalizedUnit = typeof result.normalizedUnit === "string"
+      && result.normalizedUnit.trim().length > 0
+      ? result.normalizedUnit
+      : null;
+    const hasNormalizedValue = normalizedValue !== null && normalizedUnit !== null;
+    const visibleNumber = formatLabResultValue({
+      ...result,
+      normalizedUnit: null,
+      unit: null,
+      value: hasNormalizedValue ? normalizedValue : result.value,
+    });
+    const displayedUnit = hasNormalizedValue ? normalizedUnit : result.unit;
+    const unit = displayedUnit ? formatLabUnit(displayedUnit) : null;
     const visualValue = (
       <>
         <span className="min-w-0 break-words font-serif text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
