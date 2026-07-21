@@ -22,17 +22,10 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
     vi.clearAllMocks();
   });
 
-  it.each([
-    ["low", "thread_usage_low", "This chat is running low on Murph usage."],
-    ["exhausted", "thread_usage_limit_reached", "Murph usage is paused for this chat."],
-  ] as const)("appends a first-party group funding link while the group is %s", async (
-    capacityState,
-    noticeCode,
-    message,
-  ) => {
+  it("appends a first-party group funding link while the group is exhausted", async () => {
     const prisma = { kind: "prisma" } as never;
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      capacityState,
+      capacityState: "exhausted",
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
@@ -40,11 +33,11 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
-      message,
-      noticeCode,
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
       prisma,
     })).resolves.toBe(
-      `${message}\n\n` +
+      "Murph usage is paused for this chat.\n\n" +
       "Add group usage: " +
       "https://www.withmurph.ai/groups/fund/group_join_code_1234",
     );
@@ -61,10 +54,10 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
-      message: "This chat is running low on Murph usage.",
-      noticeCode: "thread_usage_low",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
       prisma: {} as never,
-    })).resolves.toBe("This chat is running low on Murph usage.");
+    })).resolves.toBe("Murph usage is paused for this chat.");
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   });
 

@@ -1656,10 +1656,13 @@ describe("hosted mailbox conversation import adapter", () => {
         );
       },
       async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_linq_group_identity_001",
-      }),
+      item: {
+        ...createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_linq_group_identity_001",
+        }),
+        usageRunningLow: true,
+      },
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -1718,6 +1721,7 @@ describe("hosted mailbox conversation import adapter", () => {
       Object.hasOwn(event.sourceMetadata ?? {}, "groupReactionContext"),
       false,
     );
+    assert.equal(Object.hasOwn(event, "usageRunningLow"), false);
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
 
@@ -1732,6 +1736,7 @@ describe("hosted mailbox conversation import adapter", () => {
       candidates.inputs[0]?.event.groupReactionContext,
       groupReactionContext,
     );
+    assert.equal(candidates.inputs[0]?.event.usageRunningLow, true);
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {
@@ -2620,6 +2625,11 @@ describe("hosted mailbox conversation import adapter", () => {
       eventId: "evt_synthetic_telegram_001",
       message: {
         channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: TEST_USER_ID,
+          threadId: "123456789",
+        },
         telegramMessage: {
           attachments: [
             {
@@ -2650,6 +2660,7 @@ describe("hosted mailbox conversation import adapter", () => {
           schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
           text: "telegram hello",
           threadId: "123456789",
+          threadIsDirect: false,
         },
       },
     });
@@ -2677,7 +2688,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "telegram");
-    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(event.conversation?.threadIsDirect, false);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -2690,6 +2701,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
     assert.deepEqual(event.sourceMetadata, {
+      externalThreadRouteAuthorityPresent: true,
       kind: "telegram",
       mediaGroupId: event.sourceMetadata?.kind === "telegram"
         ? event.sourceMetadata.mediaGroupId

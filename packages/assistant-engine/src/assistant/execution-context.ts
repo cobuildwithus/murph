@@ -6,6 +6,9 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from '@murphai/hosted-execution/contracts'
+import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationSchedule,
@@ -352,7 +355,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     threadIsDirect: boolean
   }): {
-    groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool
+    groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool
     groupSharedReader: AssistantHostedGroupSharedReader
   } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
@@ -390,6 +393,11 @@ export interface AssistantHostedExecutionContext {
     target: string
     threadIsDirect: boolean
   }>
+  resolveScheduledExternalThreadRoute?(input: {
+    channel: 'telegram'
+    signal?: AbortSignal | null
+    target: string
+  }): Promise<HostedExecutionExternalThreadRouteAuthority>
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -530,6 +538,12 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
+        : {}),
+      ...(typeof hosted?.resolveScheduledExternalThreadRoute === 'function'
+        ? {
+            resolveScheduledExternalThreadRoute:
+              hosted.resolveScheduledExternalThreadRoute,
+          }
         : {}),
       userEnvKeys:
         hosted?.userEnvKeys

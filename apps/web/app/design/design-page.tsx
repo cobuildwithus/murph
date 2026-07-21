@@ -3,10 +3,12 @@
 import { useSearchParams, useRouter } from "next/navigation";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
+import { SectionsContent } from "./sections-content";
 
 const TABS = [
   { id: "brand", label: "Brand" },
   { id: "components", label: "Components" },
+  { id: "sections", label: "Sections" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -41,7 +43,13 @@ export function DesignPage() {
         </div>
       </div>
 
-      {activeTab === "brand" ? <BrandContent /> : <ComponentsContent />}
+      {activeTab === "brand" ? (
+        <BrandContent />
+      ) : activeTab === "sections" ? (
+        <SectionsContent />
+      ) : (
+        <ComponentsContent />
+      )}
     </main>
   );
 }

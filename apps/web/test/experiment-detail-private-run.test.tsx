@@ -14,10 +14,12 @@ import { describe, expect, it } from "vitest";
 
 import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
 import { ExperimentSummaryTiles } from "@/src/components/experiments/experiment-detail/experiment-summary-tiles";
+import { ResultsSummary } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
 import {
   TrendChart,
   buildTrendChartPoints,
+  buildWindowAverageDomain,
 } from "@/src/components/experiments/experiment-detail/trend-chart";
 import {
   resolveBrowserVaultExperimentRun,
@@ -823,12 +825,29 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain(outcome.conclusion.plainLanguage);
     expect(markup).toContain(outcome.confidence.reasons[0]);
     expect(markup).toContain(outcome.conclusion.caveats[0]);
-    expect(markup).toContain("medium confidence");
+    expect(markup).toContain("Saved result");
+    expect(markup.match(/medium confidence/gu)).toHaveLength(1);
     expect(markup).toContain("Window averages");
+    expect(markup).toContain('data-slot="chart"');
     expect(markup).toContain("Baseline average");
     expect(markup).toContain("Experiment average");
     expect(markup).toContain("3 of 3 days measured");
     expect(markup).not.toContain("What the saved analysis says");
+
+    const privateRunRouteMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+        showFinishedOutcomeSummary={false}
+      />,
+    );
+
+    expect(privateRunRouteMarkup).not.toContain("Saved result");
+    expect(privateRunRouteMarkup).not.toContain(outcome.conclusion.headline);
+    expect(privateRunRouteMarkup).not.toContain(outcome.conclusion.plainLanguage);
+    expect(privateRunRouteMarkup).toContain(outcome.confidence.reasons[0]);
+    expect(privateRunRouteMarkup.match(/medium confidence/gu)).toHaveLength(1);
 
     const emptyMetricMarkup = renderToStaticMarkup(
       <ResultsTab
@@ -846,8 +865,33 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(emptyMetricMarkup).toContain(outcome.conclusion.headline);
-    expect(emptyMetricMarkup).toContain("Your canonical saved analysis is shown below");
+    expect(emptyMetricMarkup).toContain("does not include comparable metric windows to chart");
     expect(emptyMetricMarkup).not.toContain("does not have a canonical saved outcome to render");
+  });
+
+  it("stacks experiment trend cards in one column", () => {
+    const trend = {
+      active: [{ day: 4, value: 58 }],
+      baseline: [{ day: 3, value: 62 }],
+      baselineAvg: 62,
+      currentValue: 58,
+      currentValueLabel: "experiment average" as const,
+      delta: "-4 bpm",
+      history: [],
+      label: "Resting heart rate",
+      startDate: "2026-04-01",
+      unit: "bpm",
+    };
+    const markup = renderToStaticMarkup(
+      <ResultsSummary
+        signals={[]}
+        trends={[trend, { ...trend, label: "Nighttime heart rate" }]}
+      />,
+    );
+
+    expect(markup).toContain("flex min-w-0 flex-col gap-4");
+    expect(markup).not.toContain("md:grid-cols-2");
+    expect(markup).not.toContain("xl:grid-cols-2");
   });
 
   it("renders done private runs as finished results", async () => {
@@ -1162,6 +1206,69 @@ describe("experiment detail private-run composition", () => {
       expect.objectContaining({ day: -3, history: 63 }),
       expect.objectContaining({ day: 1, baseline: 62, history: 62 }),
     ]));
+  });
+
+  it("keeps saved window averages flat without changing the daily trend bridge", () => {
+    const points = buildTrendChartPoints({
+      active: [
+        { day: 1, value: 58 },
+        { day: 3, value: 58 },
+      ],
+      baseline: [
+        { day: 0, value: 62 },
+        { day: 1, value: 62 },
+      ],
+      baselineAvg: 62,
+      currentValue: 58,
+      delta: "-4 bpm",
+      history: [],
+      label: "Resting Heart Rate",
+      startDate: "2026-04-01",
+      unit: "bpm",
+      windowComparison: {
+        baselineDaysWithData: 5,
+        baselineTotalDays: 7,
+        interventionDaysWithData: 14,
+        interventionTotalDays: 14,
+      },
+    }, false);
+
+    expect(points).toEqual(expect.arrayContaining([
+      expect.objectContaining({ day: 1, active: 58, baseline: 62 }),
+      expect.objectContaining({ day: 3, active: 58 }),
+    ]));
+    expect(points).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ day: 1, active: 62 }),
+    ]));
+
+    const dailyPoints = buildTrendChartPoints({
+      active: [{ day: 3, value: 58 }],
+      baseline: [
+        { day: 0, value: 62 },
+        { day: 1, value: 62 },
+      ],
+      baselineAvg: 62,
+      currentValue: 58,
+      delta: "-4 bpm",
+      history: [],
+      label: "Resting Heart Rate",
+      startDate: "2026-04-01",
+      unit: "bpm",
+    }, false);
+
+    expect(dailyPoints).toEqual(expect.arrayContaining([
+      expect.objectContaining({ day: 1, active: 62, baseline: 62 }),
+      expect.objectContaining({ day: 3, active: 58 }),
+    ]));
+  });
+
+  it("gives saved window averages a proportional visual domain", () => {
+    const narrowDifference = buildWindowAverageDomain(94.8, 94.1);
+    expect(narrowDifference[0]).toBeCloseTo(89.71);
+    expect(narrowDifference[1]).toBeCloseTo(99.19);
+
+    expect(buildWindowAverageDomain(50, 40)).toEqual([30, 60]);
+    expect(buildWindowAverageDomain(0, 0)).toEqual([-0.5, 0.5]);
   });
 
   it("formats converted percent expected ranges with measured biomarker units", async () => {

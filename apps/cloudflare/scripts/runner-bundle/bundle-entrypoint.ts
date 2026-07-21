@@ -53,14 +53,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunks, so path comments, content hashes, and platform-specific emit jitter
 // have more surface.
 //
-// The total ceiling stayed fixed at 9,300,000B after #397 shrank the bundle.
-// PR #824 intentionally adds the complete 24-query Epic retrieval plan and its
-// raw-admission support behind the existing turn-scoped lazy boundary. The
-// exact PR head measured 9,327,862B on local macOS while the entry and static
-// boot-closure budgets remained within their existing caps, so advance only by
-// that measured total overage. Investigate the listed largest inputs before
-// raising this budget again.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_327_862;
+// PR #813's reviewed route-authority boundary, after merging current main,
+// measured 9,314,428B on CI Linux and 9,364,555B on local macOS. Ratchet the
+// fixed total backstop to the exact larger measurement; dynamic chunk jitter
+// still receives no extra margin or platform-specific branch. PR #824's full
+// Epic query/admission expansion plus that mainline integration measures
+// 9,371,132B on local macOS, 6,577B over the newer mainline ceiling; advance
+// only by that exact combined-graph overage.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_371_132;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

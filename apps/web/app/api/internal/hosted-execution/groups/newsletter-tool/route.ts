@@ -24,7 +24,6 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (body.action === "prepare") {
     const result = await prepareHostedGroupNewsletterParticipants({
-      groupId: body.groupId,
       runtimeMemberId: memberId,
     });
     return jsonOk({

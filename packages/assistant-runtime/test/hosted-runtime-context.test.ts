@@ -8,6 +8,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import type {
   AssistantInputCursor,
@@ -679,6 +680,67 @@ test("hosted Linq inbound wake self-heals managed Linq auto-reply when the hoste
         channel: "linq",
         eligibleAfter: null,
       },
+    ]);
+  } finally {
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
+    await cleanup();
+  }
+});
+
+test("hosted routed Telegram inbound self-heals managed Telegram auto-reply", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedWakeContext(
+        vaultRoot,
+        buildHostedExecutionMemberActivatedWake({
+          eventId: "evt_telegram_activation_without_channels",
+          memberChannels: { email: false, linq: false, telegram: false },
+          memberId: "member_telegram_group",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        }),
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+      assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, []);
+
+      await prepareHostedWakeContext(
+        vaultRoot,
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "evt_telegram_group_message_received",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+          routeAuthority: {
+            channel: "telegram",
+            containerMemberId: "member_telegram_group",
+            threadId: "-100123",
+          },
+          telegramMessage: {
+            messageId: "message_123",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "hello group",
+            threadId: "-100123",
+            threadIsDirect: false,
+          },
+          userId: "member_telegram_group",
+        }),
+        {
+          ...buildHostedAssistantSeedRuntimeEnv(),
+          TELEGRAM_BOT_TOKEN: "telegram-test-token",
+        },
+        {
+          ...HOSTED_RUNTIME_RESOLVED_CONFIG,
+          channelCapabilities: {
+            ...HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
+            telegramBotConfigured: true,
+          },
+        },
+      );
+    });
+
+    assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [
+      { channel: "telegram", eligibleAfter: null },
     ]);
   } finally {
     restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);

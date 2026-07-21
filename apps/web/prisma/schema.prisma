@@ -497,6 +497,8 @@ model HostedMember {
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
+  assistantPersona               String?                         @map("assistant_persona")
+  assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
   assistantTone                  String?                         @map("assistant_tone")
   assistantToneCausalSeq         BigInt?                         @map("assistant_tone_causal_seq")
   assistantVoice                 String?                         @map("assistant_voice")

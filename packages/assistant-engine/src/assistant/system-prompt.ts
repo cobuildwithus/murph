@@ -9,6 +9,7 @@ import {
 } from "../assistant-skill-assets.js";
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   defaultAssistantTonePreference,
   toLocalDayKey,
@@ -20,6 +21,7 @@ import {
 } from "@murphai/hosted-execution/env";
 import type { AssistantTurnTrigger } from "@murphai/operator-config/assistant-cli-contracts";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
+import { buildAssistantPersonaPrompt } from "./persona-prompts.js";
 import {
   buildAssistantExecutionBehaviorText,
   type AssistantModelBehaviorProfile,
@@ -46,6 +48,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedLabsAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantPersona?: AssistantPersonaId | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
   assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
@@ -310,6 +313,9 @@ function buildStableRouteCapabilityPrompt(
   }
   return joinPromptSections(
     buildAssistantTurnPriorityText(conversationScope),
+    input.hostedRuntime === true
+      ? buildAssistantLowUsageGuidanceText()
+      : null,
     conversationScope === "direct"
       ? buildAssistantNonBlockingDelegationText()
       : null,
@@ -378,6 +384,14 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantCliContractText(input.assistantCliContract)
       : null
   );
+}
+
+function buildAssistantLowUsageGuidanceText(): string {
+  return [
+    "Low hosted usage:",
+    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then casually mention in at most one short sentence that your time together may pause soon unless more usage is added.",
+    "- Do not expose token counts, prices, internal accounting, or contributor identity. Do not dramatize, guilt, pressure, send a separate warning, or repeat the warning if it already appeared in the recent conversation.",
+  ].join("\n");
 }
 
 function buildAssistantLabsGuidanceText(): string {
@@ -596,6 +610,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
+    conversationScope === "direct" && input.assistantPersona
+      ? buildAssistantPersonaPrompt(input.assistantPersona)
+      : null,
     assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
       : null,

@@ -13,6 +13,26 @@
     "assistant": {
       "type": "object",
       "properties": {
+        "persona": {
+          "type": "string",
+          "enum": [
+            "classic",
+            "navy-seal",
+            "stoic-philosopher",
+            "wise-elder",
+            "medical-detective",
+            "longevity-scientist",
+            "hype-coach",
+            "zen-monk",
+            "best-friend",
+            "championship-coach",
+            "science-professor",
+            "mountain-guide",
+            "grandma",
+            "biohacker",
+            "drill-sergeant"
+          ]
+        },
         "tone": {
           "type": "string",
           "enum": [

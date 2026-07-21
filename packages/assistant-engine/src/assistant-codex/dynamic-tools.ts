@@ -845,10 +845,6 @@ export const MURPH_NEWSLETTER_TOOL = {
         type: 'string',
         enum: ['prepare', 'send'],
       },
-      groupId: {
-        type: 'string',
-        minLength: 1,
-      },
       subject: {
         type: 'string',
         minLength: 1,
@@ -870,7 +866,7 @@ export const MURPH_NEWSLETTER_TOOL = {
         default: null,
       },
     },
-    required: ['action', 'groupId'],
+    required: ['action'],
   },
 } as const
 
@@ -1451,13 +1447,11 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('prepare'),
-      groupId: z.string().trim().min(1),
     })
     .strict(),
   z
     .object({
       action: z.literal('send'),
-      groupId: z.string().trim().min(1),
       html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
       subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
       text: z
@@ -3732,7 +3726,6 @@ async function executeNewsletterTool(input: {
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
       result: {
-        groupId: result.result.groupId,
         missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
           result.result.missingEmailParticipants,
         ),
@@ -4935,7 +4928,7 @@ function parseNewsletterArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.newsletter.input',
-        schemaRootKeys: ['action', 'groupId'],
+        schemaRootKeys: ['action', 'html', 'subject', 'text'],
         toolName: 'murph.newsletter',
       }),
     }
@@ -4943,10 +4936,7 @@ function parseNewsletterArguments(
   if (parsed.data.action === 'prepare') {
     return {
       ok: true,
-      request: {
-        action: 'prepare',
-        groupId: parsed.data.groupId,
-      },
+      request: { action: 'prepare' },
     }
   }
 
@@ -4954,7 +4944,6 @@ function parseNewsletterArguments(
     ok: true,
     request: {
       action: 'send',
-      groupId: parsed.data.groupId,
       html: parsed.data.html,
       subject: parsed.data.subject,
       ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),

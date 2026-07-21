@@ -1248,6 +1248,12 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
         messageId: '987654321',
         threadId: 'thread-1',
       },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
       sourceRef: createHostedMailboxSourceRef({
         eventId: 'evt_selected_reply_target',
         laneSeq: '1',

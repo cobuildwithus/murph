@@ -951,6 +951,12 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
     }): Promise<HostedMember> {
       const now = new Date("2026-05-02T00:00:00.000Z");
       return {
+        assistantPersona: input.data.assistantPersona ?? null,
+        assistantPersonaCausalSeq:
+          input.data.assistantPersonaCausalSeq === undefined ||
+          input.data.assistantPersonaCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantPersonaCausalSeq),
         assistantDetail: null,
         assistantDetailCausalSeq:
           input.data.assistantDetailCausalSeq === undefined ||

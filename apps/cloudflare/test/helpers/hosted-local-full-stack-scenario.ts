@@ -59,6 +59,7 @@ import {
   bindHostedActiveTelegramMember,
   listHostedRuntimeLogsForTest,
   readHostedLinqWorkspaceIsolationStateForTest,
+  readHostedThreadRouteForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -72,6 +73,7 @@ import {
   type HostedMailboxAppendForTestResponse,
   type HostedLinqWorkspaceIsolationStateForTest,
   type HostedRuntimeLogForTestRow,
+  type HostedThreadRouteForTest,
 } from "#hosted-web-testing";
 
 const execFileAsync = promisify(execFile);
@@ -128,6 +130,10 @@ export interface HostedLocalFullStackScenario {
     chatId: string;
     memberId: string;
   }): Promise<HostedLinqWorkspaceIsolationStateForTest>;
+  readHostedThreadRoute(input: {
+    channel: "linq" | "telegram";
+    threadId: string;
+  }): Promise<HostedThreadRouteForTest | null>;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -410,6 +416,11 @@ export async function startHostedLocalFullStackScenario(input: {
           chatId: stateInput.chatId,
           environment: buildScenarioSeedEnvironment(),
           memberId: stateInput.memberId,
+        }),
+      readHostedThreadRoute: async (routeInput) =>
+        await readHostedThreadRouteForTest({
+          ...routeInput,
+          environment: buildScenarioSeedEnvironment(),
         }),
       runWake: async (wake, userId, runInput) =>
         await appendHostedWakeAndWakeWorker({

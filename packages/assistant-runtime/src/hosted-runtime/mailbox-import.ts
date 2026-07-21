@@ -79,6 +79,7 @@ export interface HostedMailboxResolvedImportItem {
   // lane consumed watermark: it must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
+  usageRunningLow?: true;
   item: HostedMailboxItem;
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
   route: HostedMailboxRoutePlan;
@@ -404,6 +405,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const outcome = await input.importItem({
       durablyConsumed: itemIsDurablyConsumedReplay,
+      ...(lane === "conversation"
+        && !itemIsDurablyConsumedReplay
+        && fetched.conversationUsageStatus === "low"
+        ? { usageRunningLow: true as const }
+        : {}),
       item,
       payload,
       route,

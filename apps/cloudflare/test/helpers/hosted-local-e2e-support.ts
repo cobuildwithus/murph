@@ -175,6 +175,7 @@ export function expectAdvertisedMurphDynamicTools(
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     messageTargetingAvailable?: boolean;
+    newsletterAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
@@ -205,6 +206,13 @@ export function expectAdvertisedMurphDynamicTools(
           name === "murph.react_to_message"
           || name === "murph.select_reply_target"
         )
+      ) {
+        return false;
+      }
+
+      if (
+        options.newsletterAvailable !== true
+        && name === "murph.newsletter"
       ) {
         return false;
       }

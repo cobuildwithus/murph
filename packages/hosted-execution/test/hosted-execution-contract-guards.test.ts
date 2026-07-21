@@ -144,6 +144,32 @@ describe("hosted execution wake guards", () => {
       userId: "user_guard",
     });
 
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-persona",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-20T00:00:00.000Z",
+        preferences: {
+          persona: "navy-seal",
+          tone: "casual",
+          voice: "drill-sergeant",
+        },
+        requestedFields: ["persona", "tone", "voice"],
+        userId: "user_guard",
+      }),
+    ).toEqual({
+      eventId: "member-preferences-wake-persona",
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-20T00:00:00.000Z",
+      preferences: {
+        persona: "navy-seal",
+        tone: "casual",
+        voice: "drill-sergeant",
+      },
+      requestedFields: ["persona", "tone", "voice"],
+      userId: "user_guard",
+    });
+
     const wake = parseHostedExecutionWake({
       eventId: "member-preferences-wake-1",
       kind: "member.preferences.updated",
@@ -184,6 +210,17 @@ describe("hosted execution wake guards", () => {
         userId: "user_guard",
       }),
     ).toThrow(/tone, voice, or personality/u);
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-invalid-persona",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-20T00:00:00.000Z",
+        preferences: {
+          persona: "celebrity-guru",
+        },
+        userId: "user_guard",
+      }),
+    ).toThrow(/persona/u);
     expect(() =>
       parseHostedExecutionWake({
         eventId: "member-preferences-wake-invalid",

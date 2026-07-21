@@ -122,37 +122,6 @@ export function BiomarkersPageClient({
         </Alert>
       ) : null}
 
-      {authenticated && !authRequired && freshness === "stale"
-        && status !== "loading" && status !== "error"
-        && (savedLabResultCount > 0 || !refreshPending) ? (
-        <Alert aria-live="polite">
-          <AlertTitle>
-            {refreshPending ? "Refreshing your lab history" : "Your lab history may be out of date"}
-          </AlertTitle>
-          <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                {refreshPending
-                  ? savedLabResultCount > 0
-                    ? "Your saved results remain available while Murph checks for newer data."
-                    : "Murph is checking for newer saved lab results."
-                  : savedLabResultCount > 0
-                    ? "These are the last saved results. Refresh to check for newer data."
-                    : "No lab results are available in this saved view. Refresh to check for newer data."}
-              </span>
-              <Button
-                disabled={refreshPending}
-                onClick={() => void refresh()}
-                size="sm"
-                variant="outline"
-              >
-                {refreshPending ? "Refreshing…" : "Refresh"}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       {authenticated && !authRequired && deviceMetrics.length > 0 ? (
         <DeviceMetricsSection items={deviceMetrics} />
       ) : null}
@@ -377,7 +346,7 @@ function EmptyBiomarkersState({
               : hasSavedLabResults
                 ? "Your saved lab records remain available, but none are classified for this index yet."
               : stale
-                ? "Refresh to check for newer data, or send Murph a lab report."
+                ? "Murph checks for newer data in the background. You can also send Murph a lab report."
                 : "Send Murph a lab report to start building your history."}
         </CardDescription>
       </CardHeader>

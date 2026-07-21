@@ -111,6 +111,62 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
+  it.each([
+    ['low', 'direct', true, true],
+    ['low', 'group', false, true],
+    ['healthy', 'direct', true, false],
+    ['healthy', 'group', false, false],
+  ] as const)('keeps %s usage context correct for a %s reply', async (
+    _usageStatus,
+    _scope,
+    threadIsDirect,
+    usageRunningLow,
+  ) => {
+    const vault = await createTempVault()
+    const source = 'linq'
+    const candidate = createAssistantInputCandidate({
+      optionalInboxCaptureId: null,
+      source,
+      ...(threadIsDirect
+        ? {}
+        : {
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: 'linq' as const,
+              partCount: 1,
+              reactionEligible: true,
+              replyToMessageId: null,
+              service: 'iMessage',
+            },
+          }),
+      text: 'Can you help with today’s plan?',
+      threadIsDirect,
+      ...(usageRunningLow ? { usageRunningLow: true as const } : {}),
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: [source],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    if (usageRunningLow) {
+      expect(sendInput.turnContext).toContain('Hosted usage context:')
+      expect(sendInput.turnContext).toContain(
+        "This conversation's remaining Murph usage is running low.",
+      )
+    } else {
+      expect(sendInput.turnContext ?? '').not.toContain('Hosted usage context:')
+      expect(sendInput.turnContext ?? '').not.toContain('remaining Murph usage')
+    }
+    expect(sendInput.prompt).not.toContain('remaining Murph usage')
+  })
+
   it('sends from the staged assistant input without prompt-time inbox loading', async () => {
     const vault = await createTempVault()
     const onEvent = vi.fn()
@@ -1861,6 +1917,7 @@ function createAssistantInputCandidate(input: {
   sourceMetadata?: AssistantInputSourceMetadata
   text: string | null
   threadIsDirect: boolean | null
+  usageRunningLow?: true
 }): AssistantInputCandidate {
   const inputId = input.inputId ?? 'ain_11111111111111111111111111111111'
   const occurredAt = input.occurredAt ?? '2026-04-08T00:00:00.000Z'
@@ -1927,6 +1984,9 @@ function createAssistantInputCandidate(input: {
       text: input.text,
       transcriptText: null,
       userMessageContent: null,
+      ...(input.usageRunningLow === true
+        ? { usageRunningLow: true as const }
+        : {}),
     },
     projection: {
       captureId: input.optionalInboxCaptureId,

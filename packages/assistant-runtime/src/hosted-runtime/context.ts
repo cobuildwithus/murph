@@ -233,6 +233,10 @@ export async function applyHostedMemberPreferences(
     preferences: wake.requestedFields === undefined
       ? wake.preferences
       : {
+          ...(wake.requestedFields.includes("persona")
+            && wake.preferences.persona !== undefined
+            ? { persona: wake.preferences.persona }
+            : {}),
           ...(wake.preferences.personality === undefined
             ? {}
             : { personality: wake.preferences.personality }),

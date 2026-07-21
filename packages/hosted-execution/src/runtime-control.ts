@@ -730,6 +730,9 @@ export interface HostedMailboxLaneConsumed {
 }
 
 export interface HostedMailboxFetchResponse {
+  // Optional for deploy-window compatibility. Web emits this only for an
+  // allowed conversation batch whose current effective capacity is low.
+  conversationUsageStatus?: "low" | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -1251,7 +1254,6 @@ export interface HostedRuntimeNewsletterScheduledAuthority {
 }
 
 export interface HostedRuntimeNewsletterToolSendRequest {
-  groupId: string;
   html: string;
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
   subject: string;
@@ -1260,7 +1262,6 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 
 export interface HostedRuntimeNewsletterToolPrepareRequest {
   action: "prepare";
-  groupId: string;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }
