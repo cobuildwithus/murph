@@ -20,10 +20,7 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const usageLimitBannerCopy: Record<
-  Exclude<
-    HostedAiUsageGateNoticeCode,
-    "thread_usage_limit_reached" | "thread_usage_low"
-  >,
+  Exclude<HostedAiUsageGateNoticeCode, "thread_usage_limit_reached">,
   {
     body: string;
     title: string;
@@ -57,10 +54,7 @@ export function UsageLimitBanner({
   recommendedAction,
   resetAt,
 }: UsageLimitBannerProps) {
-  if (
-    noticeCode === "thread_usage_limit_reached"
-    || noticeCode === "thread_usage_low"
-  ) {
+  if (noticeCode === "thread_usage_limit_reached") {
     return null;
   }
 

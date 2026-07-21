@@ -58,8 +58,8 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 sm:gap-10">
-      <header className="flex max-w-4xl flex-col gap-3 border-b border-border pb-6 sm:pb-8">
+    <div className="flex w-full flex-col gap-8 sm:gap-10">
+      <header className="flex flex-col gap-3 border-b border-border pb-6 sm:pb-8">
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           Private experiment report
         </span>
@@ -84,6 +84,7 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
         onPrivateRunRetry={browserVault.refresh}
         privateRunError={browserVault.error}
         privateRunStatus={browserVault.status}
+        showFinishedOutcomeSummary={false}
         showHeader={false}
       />
     </div>

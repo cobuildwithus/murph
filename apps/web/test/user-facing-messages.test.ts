@@ -19,7 +19,6 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
-  "linq.ai_usage.thread_low",
   "linq.ai_usage.thread_limit_reached",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
@@ -50,7 +49,6 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: "https://withmurph.ai/home",
   },
-  "linq.ai_usage.thread_low": {},
   "linq.ai_usage.thread_limit_reached": {},
 } satisfies {
   [K in UserFacingMessageTemplateKey]: UserFacingMessageContextByKey[K];
@@ -116,18 +114,6 @@ describe("user-facing message variants", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
       expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
-    }
-  });
-
-  it("keeps low thread usage copy coarse and neutral", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.thread_low")) {
-      expect(text).toMatch(/chat|Murph usage/iu);
-      expect(text).toMatch(
-        /low|small|limited|nearly|nearing|close|almost|approach|not much/iu,
-      );
-      expect(text).not.toMatch(
-        /\$|USD|dollars?|checkout|payer|contributor|https?:\/\//iu,
-      );
     }
   });
 

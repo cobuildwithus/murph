@@ -6,6 +6,7 @@ import {
 
 import {
   requireArray,
+  requireBoolean,
   requireObject,
   requireString,
   readNullableNumber,
@@ -69,6 +70,14 @@ export function parseHostedExecutionTelegramMessage(
       record.threadId,
       "Hosted execution Telegram message telegramMessage.threadId",
     ),
+    ...(record.threadIsDirect === undefined
+      ? {}
+      : {
+          threadIsDirect: requireBoolean(
+            record.threadIsDirect,
+            "Hosted execution Telegram message telegramMessage.threadIsDirect",
+          ),
+        }),
   };
 }
 

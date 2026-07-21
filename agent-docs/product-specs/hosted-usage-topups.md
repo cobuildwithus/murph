@@ -231,11 +231,19 @@ Keep the wording factual, conversational, and low-pressure. Use only a full
 first-party Settings URL, never a shortened URL. Do not add recurring nudges,
 marketing language, urgency, or cold re-engagement.
 
-Immediately before both the crossing send and a later denied-gate retry,
-delivery re-reads the current personal usage-status projection. It appends the
-canonical first-party **Add usage** action only when the recommended action is
-currently `add_usage`; a failed projection or any ineligible state sends the
-neutral copy unchanged.
+Low capacity is conversational rather than a notice. An allowed ordinary 1:1
+or group mailbox fetch carries a coarse trusted `low` bit into that accepted
+turn. Murph completes the request first, then may add one casual sentence that
+the conversation may pause soon unless more usage is added. The prompt forbids
+token counts, prices, internal accounting, contributor identity, pressure, and
+repetition when the recent conversation already contains the warning. The bit
+does not schedule or send a separate outbound message.
+
+Immediately before both the exhaustion crossing send and a later denied-gate
+retry, delivery re-reads the current personal usage-status projection. It
+appends the canonical first-party **Add usage** action only when the recommended
+action is currently `add_usage`; a failed projection or any ineligible state
+sends the neutral copy unchanged.
 
 A fulfilled grant invalidates a queued stale exhaustion notice. If credit is
 later exhausted again, at most one new reply-anchored notice is eligible for
@@ -259,6 +267,7 @@ Stripe webhook -> HostedStripeEvent -> verified purchase reconciliation
                                       -> immutable credit grant
 Usage callback -> canonical HostedAiUsage -> included allowance settlement
                                          -> immutable credit debit
+Allowed mailbox fetch -> coarse low-capacity bit -> accepted turn context
 Projection -> Settings / Home / assistant handoff
 ```
 
@@ -690,20 +699,30 @@ Stripe and call the same idempotent reconciler by purchase ID.
    payer-encrypted Price and Customer references nullable. Existing Web remains
    compatible because no old writer creates detached rows.
 3. Deploy Web first. It contains the group funding route, `read_usage` consumer,
-   low/exhausted notice projection, target-aware Checkout, and detached-payer
-   reconciliation. Old Cloudflare/runner bundles do not send `read_usage` and
-   remain compatible during this window.
-4. Deploy the Cloudflare/runner bundle that advertises and parses `read_usage`,
-   then verify the exact runner fingerprint converges. A new runner must not be
-   allowed to send the action to an older Web deployment.
+   optional low-capacity mailbox projection, exhausted-notice projection,
+   target-aware Checkout, and detached-payer reconciliation. Older runtimes
+   ignore the optional low-capacity field and remain compatible during this
+   window.
+4. Deploy the Cloudflare/runner bundle that parses the optional low-capacity
+   field and advertises `read_usage`, then verify the exact runner fingerprint
+   converges. A new runner must not be allowed to send the action to an older
+   Web deployment. The new stable hosted developer guidance deliberately
+   changes the assistant contract fingerprint: every existing direct or group
+   session that would otherwise use native resume starts one new provider
+   thread on its first post-deploy conversation turn. That turn replays the
+   committed transcript fallback, bounded to 24 messages, 4,000 bytes per
+   message, and 12,000 bytes total; later turns resume the new thread. A rollback
+   rotates sessions that already adopted the new fingerprint once more.
 5. After the new Web deployment is current and the prior function window has
    drained, run the hosted Web contract migration. It installs both
    detached-payer checks as `NOT VALID` new-write guards and then validates
    existing rows.
-6. Before widening exposure, smoke group funding, a paid webhook grant, the
-   runtime recheck and subsequent usage debit, low and exhausted notices, payer
-   deletion, and later negative/positive refund or dispute adjustments in
-   Stripe test mode.
+6. Before widening exposure, smoke one pre-existing healthy hosted session:
+   its first turn must rotate and reply without low context, and its second turn
+   must resume the new provider thread. Also smoke group funding, a paid webhook
+   grant, the runtime recheck and subsequent usage debit, low direct/group
+   next-turn context, the exhausted notice, payer deletion, and later
+   negative/positive refund or dispute adjustments in Stripe test mode.
 
 Rollback disables new Checkout creation and the Add usage actions first. It
 does not delete purchases or grants and must not disable the existing usage
@@ -744,8 +763,8 @@ Current focused unit and component coverage exercises:
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;
-- coarse group usage reads, low/exhausted delivery-time funding links, and
-  route-authorized idempotent low-usage delivery; and
+- coarse group usage reads, trusted low-capacity next-turn context, and the
+  route-authorized exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

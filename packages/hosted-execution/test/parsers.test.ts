@@ -2250,7 +2250,6 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       groupId: "group_123",
     })).toEqual({
       action: "prepare",
-      groupId: "group_123",
     });
     expect(() => parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
@@ -2266,7 +2265,6 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       text: "Weekly health note",
     })).toEqual({
       action: "send",
-      groupId: "group_123",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
@@ -2279,7 +2277,6 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       subject: "Weekly health note",
     })).toEqual({
       action: "send",
-      groupId: "group_123",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: null,

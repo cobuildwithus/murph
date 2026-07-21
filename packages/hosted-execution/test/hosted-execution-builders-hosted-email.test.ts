@@ -508,6 +508,47 @@ describe("hosted execution wake builders", () => {
     expect(wake.message.telegramMessage.attachments?.[0]).not.toBe(attachments[0]);
   });
 
+  it("requires matching thread-container authority for non-direct Telegram wakes", () => {
+    const telegramMessage = {
+      messageId: "message_group_123",
+      schema: "murph.hosted-telegram-message.v1" as const,
+      text: "hello group",
+      threadId: "thread_group_123",
+      threadIsDirect: false,
+    };
+
+    expect(() => buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "telegram-group-missing-authority",
+      occurredAt,
+      telegramMessage,
+      userId: "member_personal_123",
+    })).toThrow("requires thread route authority");
+
+    expect(buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "telegram-group-authorized",
+      occurredAt,
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: "member_thread_container_123",
+        threadId: "thread_group_123",
+      },
+      telegramMessage,
+      userId: "member_thread_container_123",
+    })).toMatchObject({
+      message: {
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: "member_thread_container_123",
+          threadId: "thread_group_123",
+        },
+        telegramMessage: {
+          threadIsDirect: false,
+        },
+      },
+      userId: "member_thread_container_123",
+    });
+  });
+
   it("distinguishes omitted versus explicit nullable email routing metadata", () => {
     const omitted = buildHostedExecutionEmailConversationMessageWake({
       eventId: "email-omitted",

@@ -73,6 +73,7 @@ describe("telegram parser", () => {
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
+      threadIsDirect: false,
     })).toEqual({
       attachments: [
         {
@@ -92,6 +93,7 @@ describe("telegram parser", () => {
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
+      threadIsDirect: false,
     });
 
     expect(parseHostedExecutionTelegramMessage({
@@ -149,5 +151,14 @@ describe("telegram parser", () => {
         threadId: "thread-1",
       }),
     ).toThrow(/attachments must be an array/i);
+
+    expect(() =>
+      parseHostedExecutionTelegramMessage({
+        messageId: "message-1",
+        schema: "murph.hosted-telegram-message.v1",
+        threadId: "thread-1",
+        threadIsDirect: "false",
+      }),
+    ).toThrow(/threadIsDirect must be a boolean/i);
   });
 });

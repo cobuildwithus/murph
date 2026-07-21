@@ -31,6 +31,7 @@ import type {
   HostedExecutionCodexAuthRequestedWake,
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedExecutionVaultShareDeliveryWake,
   HostedExecutionVaultShareRevokeWake,
   HostedExecutionTelegramConversationMessagePayload,
@@ -118,6 +119,13 @@ function cloneConversationMessagePayload(
     case "telegram":
       return {
         ...value,
+        ...(value.routeAuthority === undefined
+          ? {}
+          : {
+              routeAuthority: value.routeAuthority === null
+                ? null
+                : cloneExternalThreadRouteAuthority(value.routeAuthority),
+            }),
         telegramMessage: cloneTelegramMessage(value.telegramMessage),
       };
     case "email":
@@ -255,15 +263,19 @@ function assertHostedExecutionConversationMessageWorkspaceTarget(input: {
   message: HostedExecutionConversationMessagePayload;
   userId: string;
 }): void {
-  if (input.message.channel !== "linq") {
-    return;
+  if (input.message.channel === "linq") {
+    assertHostedExecutionLinqConversationMessageWorkspaceTarget({
+      linqMessage: input.message.linqMessage,
+      routeAuthority: input.message.routeAuthority,
+      userId: input.userId,
+    });
+  } else if (input.message.channel === "telegram") {
+    assertHostedExecutionTelegramConversationMessageWorkspaceTarget({
+      routeAuthority: input.message.routeAuthority,
+      telegramMessage: input.message.telegramMessage,
+      userId: input.userId,
+    });
   }
-
-  assertHostedExecutionLinqConversationMessageWorkspaceTarget({
-    linqMessage: input.message.linqMessage,
-    routeAuthority: input.message.routeAuthority,
-    userId: input.userId,
-  });
 }
 
 function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
@@ -300,21 +312,64 @@ function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
 export function buildHostedExecutionTelegramConversationMessageWake(input: {
   eventId: string;
   occurredAt: string;
+  routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
   telegramMessage: HostedExecutionTelegramMessage;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionTelegramConversationMessagePayload;
 } {
+  assertHostedExecutionTelegramConversationMessageWorkspaceTarget({
+    routeAuthority: input.routeAuthority,
+    telegramMessage: input.telegramMessage,
+    userId: input.userId,
+  });
   return {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
       channel: "telegram",
+      ...(input.routeAuthority === undefined
+        ? {}
+        : {
+            routeAuthority: input.routeAuthority === null
+              ? null
+              : cloneExternalThreadRouteAuthority(input.routeAuthority),
+          }),
       telegramMessage: cloneTelegramMessage(input.telegramMessage),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,
   };
+}
+
+function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: {
+  routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
+  telegramMessage: HostedExecutionTelegramMessage;
+  userId: string;
+}): void {
+  if (input.telegramMessage.threadIsDirect !== false) {
+    return;
+  }
+  if (!input.routeAuthority) {
+    throw new TypeError(
+      "Hosted non-direct Telegram conversation wake requires thread route authority.",
+    );
+  }
+  if (input.routeAuthority.channel !== "telegram") {
+    throw new TypeError(
+      "Hosted non-direct Telegram conversation wake route authority must be Telegram.",
+    );
+  }
+  if (input.routeAuthority.containerMemberId !== input.userId) {
+    throw new TypeError(
+      "Hosted non-direct Telegram conversation wake must target its route container.",
+    );
+  }
+  if (input.routeAuthority.threadId !== input.telegramMessage.threadId) {
+    throw new TypeError(
+      "Hosted non-direct Telegram conversation wake route authority must match its chat.",
+    );
+  }
 }
 
 export function buildHostedExecutionEmailConversationMessageWake(input: {

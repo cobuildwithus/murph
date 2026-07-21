@@ -23,6 +23,31 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)(
+    'adds the conversational low-usage rule for hosted %s chats',
+    (conversationScope) => {
+      const layers = buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope,
+        hostedRuntime: true,
+      })
+
+      expect(layers.stableRouteCapabilityPrompt).toContain('Low hosted usage:')
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'complete the user\'s current request first',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'your time together may pause soon unless more usage is added',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'Do not expose token counts',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'Do not dramatize, guilt, pressure, send a separate warning, or repeat',
+      )
+    },
+  )
+
   it('injects runtime dynamic context before the context snapshot on conversation turns', () => {
     const layers = buildAssistantSystemPromptLayers(baseConversationInput)
 
