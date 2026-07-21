@@ -194,7 +194,11 @@ The initial lane permits one retrieval
 generation per unique member/provider connection; later retry, reconnect, or
 refresh requires a bounded raw-evidence retention lifecycle. The Epic beta
 requests only Patient read, laboratory Observation search, and DiagnosticReport
-search, with no offline-access scope. The hosted runner receives only a
+search, with no offline-access scope. Each retrieval run also freezes the exact
+adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
+and deterministic `sliceId` values distinguish repeated resource-type queries
+and bounded history windows, but they are acquisition identity only and never
+participate in canonical FHIR identity. The hosted runner receives only a
 credential-free descriptor and bounded raw FHIR pages through the three signed
 retrieval operations; Cloudflare proves and forwards the active attempt, lease
 generation, and workspace version before web revalidates the fence shape and
@@ -435,7 +439,12 @@ which bounds immutable raw-evidence directories until a future retention owner
 can preserve canonical raw references across refreshes.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
-resuming from the vault-owned operational checkpoint after preemption. Then
+resuming from the vault-owned operational checkpoint after preemption. The
+versioned runtime contract accepts either the current resource-family descriptor
+or explicit query slices; query-aware raw pages and completion state remain
+grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
+manifests and v1 checkpoints remain readable. Web continues to emit the current
+descriptor until the compatible runner deployment is complete. Then
 `@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
 immediately before atomically committing immutable raw pages and the retrieval
 manifest, and again before lazily invoking

@@ -9,6 +9,7 @@ import {
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
 import type {
+  HostedClinicalRecordsQueryRunDescriptor,
   HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import {
@@ -137,6 +138,107 @@ describe("hosted clinical records maintenance", () => {
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("completed");
+  });
+
+  it("resumes repeated resource types as independent query slices after preemption", async () => {
+    const { retrievalScopes: _retrievalScopes, ...runBase } = RUN;
+    const queryRun: HostedClinicalRecordsQueryRunDescriptor = {
+      ...runBase,
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: ["observation-labs", "observation-vitals"].map((queryScopeId, index) => ({
+        coverage: "whole-family",
+        queryFingerprint: String(index + 1).repeat(64),
+        queryScopeId,
+        resourceType: "Observation",
+        sliceId: "whole",
+      })),
+    };
+    const fetchPage = vi.fn().mockResolvedValue({
+      body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+      nextCursor: null,
+      status: "page",
+    });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 3,
+      reviewDecisionCount: 0,
+    });
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: queryRun, status: "ready" }),
+    });
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => fetchPage.mock.calls.length === 1,
+      vaultRoot,
+      wake: WAKE,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      checkpoint: {
+        completedResourceTypes: ["Observation"],
+        completedRetrievalSlices: [
+          { queryScopeId: "observation-labs", sliceId: "whole" },
+        ],
+        currentResourceIndex: 1,
+        pages: [expect.objectContaining({
+          queryScopeId: "observation-labs",
+          resourceType: "Observation",
+          sliceId: "whole",
+        })],
+      },
+      identity: queryRun,
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => false,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      queryScopeId: "observation-labs",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      sliceId: "whole",
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      queryScopeId: "observation-vitals",
+      resourceType: "Observation",
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: [
+        { queryScopeId: "observation-labs", sliceId: "whole" },
+        { queryScopeId: "observation-vitals", sliceId: "whole" },
+      ],
+      pages: [
+        expect.objectContaining({ queryScopeId: "observation-labs" }),
+        expect.objectContaining({ queryScopeId: "observation-vitals" }),
+      ],
+      retrievalProtocol: "query-slices-v2",
+    }));
+    expect(result.counts.fetchedResourceFamilyCount).toBe(1);
+    expect(port.readRun).toHaveBeenCalledTimes(2);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    })).resolves.toBeNull();
   });
 
   it("persists typed evidence and a partial outcome for a terminal family error", async () => {

@@ -3,6 +3,8 @@ import {
   clinicalFhirResourceTypeSchema,
   clinicalFhirRetrievalScopeSchema,
   clinicalFhirRetrievalScopesSchema,
+  clinicalFhirRetrievalSliceSchema,
+  clinicalFhirRetrievalSlicesSchema,
   clinicalIsoDateTimeSchema,
   clinicalSourceSystemSchema,
 } from "@murphai/clinical-records";
@@ -88,13 +90,15 @@ export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
 
 export const hostedClinicalRecordsRetrievalScopeSchema =
   clinicalFhirRetrievalScopeSchema;
+export const hostedClinicalRecordsRetrievalSliceSchema =
+  clinicalFhirRetrievalSliceSchema;
 
 const hostedClinicalRecordsRetrievalScopesSchema = z
   .array(hostedClinicalRecordsRetrievalScopeSchema)
   .min(1)
   .pipe(clinicalFhirRetrievalScopesSchema);
 
-export const hostedClinicalRecordsRunDescriptorSchema = z.object({
+const hostedClinicalRecordsRunDescriptorBaseShape = {
   connectionId: identifierSchema,
   fetchedAt: clinicalIsoDateTimeSchema,
   fhirBaseUrlHash: sha256Schema,
@@ -104,10 +108,25 @@ export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   providerDirectoryEntryId: identifierSchema.optional(),
   requestedScopes: z.array(z.string().min(1).max(200)).max(50),
   retrievalJobId: identifierSchema,
-  retrievalScopes: hostedClinicalRecordsRetrievalScopesSchema,
   runId: identifierSchema,
   sourceSystem: clinicalSourceSystemSchema,
+} satisfies z.ZodRawShape;
+
+export const hostedClinicalRecordsLegacyRunDescriptorSchema = z.object({
+  ...hostedClinicalRecordsRunDescriptorBaseShape,
+  retrievalScopes: hostedClinicalRecordsRetrievalScopesSchema,
 }).strict();
+
+export const hostedClinicalRecordsQueryRunDescriptorSchema = z.object({
+  ...hostedClinicalRecordsRunDescriptorBaseShape,
+  retrievalProtocol: z.literal("query-slices-v2"),
+  retrievalSlices: clinicalFhirRetrievalSlicesSchema,
+}).strict();
+
+export const hostedClinicalRecordsRunDescriptorSchema = z.union([
+  hostedClinicalRecordsQueryRunDescriptorSchema,
+  hostedClinicalRecordsLegacyRunDescriptorSchema,
+]);
 
 export const hostedClinicalRecordsReadRunResponseSchema = z.discriminatedUnion("status", [
   z.object({
@@ -121,13 +140,29 @@ export const hostedClinicalRecordsReadRunResponseSchema = z.discriminatedUnion("
   }).strict(),
 ]);
 
-export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
+const hostedClinicalRecordsFetchPageRequestBaseShape = {
   cursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
   generation: z.number().int().min(1),
   requestId: identifierSchema,
   resourceType: clinicalFhirResourceTypeSchema,
   runId: identifierSchema,
+} satisfies z.ZodRawShape;
+
+export const hostedClinicalRecordsLegacyFetchPageRequestSchema = z.object(
+  hostedClinicalRecordsFetchPageRequestBaseShape,
+).strict();
+
+export const hostedClinicalRecordsQueryFetchPageRequestSchema = z.object({
+  ...hostedClinicalRecordsFetchPageRequestBaseShape,
+  queryScopeId: clinicalFhirRetrievalSliceSchema.options[0].shape.queryScopeId,
+  retrievalProtocol: z.literal("query-slices-v2"),
+  sliceId: clinicalFhirRetrievalSliceSchema.options[0].shape.sliceId,
 }).strict();
+
+export const hostedClinicalRecordsFetchPageRequestSchema = z.union([
+  hostedClinicalRecordsQueryFetchPageRequestSchema,
+  hostedClinicalRecordsLegacyFetchPageRequestSchema,
+]);
 
 export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion("status", [
   z.object({
@@ -151,10 +186,19 @@ export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
 export type HostedClinicalRecordsRetrievalScope = z.infer<
   typeof hostedClinicalRecordsRetrievalScopeSchema
 >;
+export type HostedClinicalRecordsRetrievalSlice = z.infer<
+  typeof hostedClinicalRecordsRetrievalSliceSchema
+>;
 export type HostedClinicalRecordsConnectLinkResponse = z.infer<
   typeof hostedClinicalRecordsConnectLinkResponseSchema
 >;
 export type HostedClinicalRecordsRunDescriptor = z.infer<
+  typeof hostedClinicalRecordsLegacyRunDescriptorSchema
+>;
+export type HostedClinicalRecordsQueryRunDescriptor = z.infer<
+  typeof hostedClinicalRecordsQueryRunDescriptorSchema
+>;
+export type HostedClinicalRecordsAnyRunDescriptor = z.infer<
   typeof hostedClinicalRecordsRunDescriptorSchema
 >;
 export type HostedClinicalRecordsReadRunResponse = z.infer<
@@ -219,7 +263,7 @@ function isLoopbackHostname(hostname: string): boolean {
 
 export function parseHostedClinicalRecordsRunDescriptor(
   value: unknown,
-): HostedClinicalRecordsRunDescriptor {
+): HostedClinicalRecordsAnyRunDescriptor {
   return hostedClinicalRecordsRunDescriptorSchema.parse(value);
 }
 

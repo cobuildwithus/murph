@@ -34,6 +34,8 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
 ] as const);
 
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
+export const CLINICAL_FHIR_MAX_RETRIEVAL_SLICES =
+  CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
 export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
 export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS =
@@ -76,6 +78,9 @@ const clinicalFhirPathIdSchema = z
   .max(120)
   .regex(CLINICAL_FHIR_PATH_ID_PATTERN, "Expected a path-safe clinical FHIR identifier.")
   .refine((value) => value !== "." && value !== "..", "Expected a path-safe clinical FHIR identifier.");
+
+export const clinicalFhirQueryScopeIdSchema = clinicalFhirPathIdSchema;
+export const clinicalFhirSliceIdSchema = clinicalFhirPathIdSchema;
 
 export const clinicalFhirManifestPathSchema = clinicalRawPathSchema.refine((value) => {
   const parts = value.split("/");
@@ -206,6 +211,135 @@ export const clinicalFhirRetrievalScopesSchema = z
     });
   });
 
+const clinicalFhirRetrievalSliceIdentityShape = {
+  queryScopeId: clinicalFhirQueryScopeIdSchema,
+  sliceId: clinicalFhirSliceIdSchema,
+} satisfies z.ZodRawShape;
+
+export const clinicalFhirRetrievalSliceRefSchema = z
+  .object(clinicalFhirRetrievalSliceIdentityShape)
+  .strict();
+
+export const clinicalFhirRetrievalSliceSchema = z.discriminatedUnion("coverage", [
+  z
+    .object({
+      ...clinicalFhirRetrievalSliceIdentityShape,
+      coverage: z.literal("whole-family"),
+      queryFingerprint: sha256HexSchema,
+      resourceType: clinicalFhirResourceTypeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...clinicalFhirRetrievalSliceIdentityShape,
+      coverage: z.literal("bounded-window"),
+      from: clinicalIsoDateTimeSchema,
+      queryFingerprint: sha256HexSchema,
+      resourceType: clinicalFhirResourceTypeSchema,
+      to: clinicalIsoDateTimeSchema,
+    })
+    .strict()
+    .superRefine((slice, context) => {
+      if (Date.parse(slice.from) >= Date.parse(slice.to)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected bounded FHIR retrieval slice from to precede to.",
+          path: ["from"],
+        });
+      }
+    }),
+]);
+
+export const clinicalFhirRetrievalSlicesSchema = z
+  .array(clinicalFhirRetrievalSliceSchema)
+  .min(1)
+  .max(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES)
+  .superRefine((slices, context) => {
+    const seenSliceIds = new Set<string>();
+    const closedQueryScopes = new Set<string>();
+    const queryScopes = new Map<string, typeof slices>();
+    let activeQueryScopeId: string | undefined;
+
+    slices.forEach((slice, index) => {
+      const identity = retrievalSliceIdentityKey(slice);
+      if (seenSliceIds.has(identity)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected retrieval slice identity to be unique within its query scope.",
+          path: [index, "sliceId"],
+        });
+      }
+      seenSliceIds.add(identity);
+
+      if (slice.queryScopeId !== activeQueryScopeId) {
+        if (activeQueryScopeId !== undefined) {
+          closedQueryScopes.add(activeQueryScopeId);
+        }
+        if (closedQueryScopes.has(slice.queryScopeId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected slices for a query scope to be contiguous.",
+            path: [index, "queryScopeId"],
+          });
+        }
+        activeQueryScopeId = slice.queryScopeId;
+      }
+
+      const querySlices = queryScopes.get(slice.queryScopeId) ?? [];
+      querySlices.push(slice);
+      queryScopes.set(slice.queryScopeId, querySlices);
+    });
+
+    for (const querySlices of queryScopes.values()) {
+      const first = querySlices[0];
+      if (!first) continue;
+      querySlices.forEach((slice) => {
+        if (
+          slice.resourceType !== first.resourceType
+          || slice.queryFingerprint !== first.queryFingerprint
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected one resource type and query fingerprint per query scope.",
+          });
+        }
+      });
+      if (first.coverage === "whole-family") {
+        if (querySlices.length !== 1) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected a whole-family query scope to contain exactly one slice.",
+          });
+        }
+        continue;
+      }
+      for (let index = 1; index < querySlices.length; index += 1) {
+        const previous = querySlices[index - 1];
+        const current = querySlices[index];
+        if (
+          !previous
+          || !current
+          || previous.coverage !== "bounded-window"
+          || current.coverage !== "bounded-window"
+          || Date.parse(previous.to) > Date.parse(current.from)
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected bounded retrieval slices to be ordered and non-overlapping.",
+            path: [index, "from"],
+          });
+        }
+      }
+    }
+  });
+
+export const clinicalFhirRetrievalPlanSchema = z
+  .object({
+    schemaVersion: z.literal("murph.clinical-retrieval-plan.v1"),
+    slices: clinicalFhirRetrievalSlicesSchema,
+  })
+  .strict();
+
 export const clinicalRawManifestErrorSchema = z
   .object({
     resourceType: clinicalFhirResourceTypeSchema.optional(),
@@ -214,7 +348,7 @@ export const clinicalRawManifestErrorSchema = z
   })
   .strict();
 
-export const clinicalRawManifestSchema = z
+export const clinicalRawManifestV2Schema = z
   .object({
     schemaVersion: z.literal("murph.clinical-raw-manifest.v2"),
     kind: z.literal("clinical_fhir_retrieval"),
@@ -268,6 +402,165 @@ export const clinicalRawManifestSchema = z
       }
     }
   });
+
+export const clinicalRawManifestV3ResourceFileSchema = z
+  .object({
+    queryScopeId: clinicalFhirQueryScopeIdSchema,
+    sliceId: clinicalFhirSliceIdSchema,
+    resourceType: clinicalFhirResourceTypeSchema,
+    relativePath: clinicalRawRelativePathSchema,
+    count: z.number().int().min(0).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE),
+    sha256: sha256HexSchema,
+    pageUrlHash: sha256HexSchema.optional(),
+    nextPageUrlHash: sha256HexSchema.optional(),
+  })
+  .strict()
+  .superRefine((resourceFile, context) => {
+    const pathParts = resourceFile.relativePath.split("/");
+    if (
+      pathParts.length < 4
+      || pathParts[0] !== resourceFile.queryScopeId
+      || pathParts[1] !== resourceFile.sliceId
+      || pathParts[2] !== resourceFile.resourceType
+      || pathParts.slice(3).some((part) => part.length === 0 || part === ".")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected a relative path beneath the declared query, slice, and resource type directories.",
+        path: ["relativePath"],
+      });
+    }
+  });
+
+const clinicalRawManifestV3ResourceFilesSchema = z
+  .array(clinicalRawManifestV3ResourceFileSchema)
+  .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES)
+  .superRefine((resourceFiles, context) => {
+    const totalResourceCount = resourceFiles.reduce(
+      (sum, resourceFile) => sum + resourceFile.count,
+      0,
+    );
+    if (totalResourceCount > CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Clinical raw FHIR manifest total resource count exceeds ${CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES}.`,
+      });
+    }
+    const seenRelativePaths = new Set<string>();
+    resourceFiles.forEach((resourceFile, index) => {
+      if (seenRelativePaths.has(resourceFile.relativePath)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Clinical raw FHIR manifest resource file relativePath values must be unique.",
+          path: [index, "relativePath"],
+        });
+      }
+      seenRelativePaths.add(resourceFile.relativePath);
+    });
+  });
+
+const clinicalRawManifestV3ErrorSchema = z.union([
+  z.object({
+    code: z.string().min(1).max(80),
+    message: z.string().min(1).max(500),
+  }).strict(),
+  z.object({
+    code: z.string().min(1).max(80),
+    message: z.string().min(1).max(500),
+    queryScopeId: clinicalFhirQueryScopeIdSchema,
+    resourceType: clinicalFhirResourceTypeSchema,
+    sliceId: clinicalFhirSliceIdSchema,
+  }).strict(),
+]);
+
+export const clinicalRawManifestV3Schema = z
+  .object({
+    schemaVersion: z.literal("murph.clinical-raw-manifest.v3"),
+    kind: z.literal("clinical_fhir_retrieval"),
+    connectionId: clinicalFhirPathIdSchema,
+    retrievalJobId: clinicalFhirPathIdSchema,
+    providerDirectoryEntryId: z.string().min(1).max(120).optional(),
+    sourceSystem: clinicalSourceSystemSchema,
+    fhirBaseUrlHash: sha256HexSchema,
+    patientIdHash: sha256HexSchema,
+    fetchedAt: clinicalIsoDateTimeSchema,
+    resourceFiles: clinicalRawManifestV3ResourceFilesSchema,
+    retrievalSlices: clinicalFhirRetrievalSlicesSchema,
+    completedRetrievalSlices: z.array(clinicalFhirRetrievalSliceRefSchema)
+      .max(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES),
+    requestedScopes: z.array(z.string().min(1).max(200)).max(50),
+    grantedScopes: z.array(z.string().min(1).max(200)).max(50),
+    errors: z.array(clinicalRawManifestV3ErrorSchema).max(100).optional(),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    const slices = new Map(manifest.retrievalSlices.map((slice) => [
+      retrievalSliceIdentityKey(slice),
+      slice,
+    ]));
+    const slicesWithEvidence = new Set(manifest.resourceFiles.map((resourceFile) =>
+      retrievalSliceIdentityKey(resourceFile)
+    ));
+    const slicesWithErrors = new Set((manifest.errors ?? []).flatMap((error) =>
+      "queryScopeId" in error ? [retrievalSliceIdentityKey(error)] : []
+    ));
+    const completed = new Set<string>();
+
+    manifest.resourceFiles.forEach((resourceFile, index) => {
+      const slice = slices.get(retrievalSliceIdentityKey(resourceFile));
+      if (!slice || slice.resourceType !== resourceFile.resourceType) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A declared FHIR resource file must match an explicit retrieval slice.",
+          path: ["resourceFiles", index],
+        });
+      }
+    });
+    manifest.retrievalSlices.forEach((slice, index) => {
+      const identity = retrievalSliceIdentityKey(slice);
+      if (!slicesWithEvidence.has(identity) && !slicesWithErrors.has(identity)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A retrieval slice must have raw evidence or a typed retrieval error.",
+          path: ["retrievalSlices", index],
+        });
+      }
+    });
+    (manifest.errors ?? []).forEach((error, index) => {
+      if (!("queryScopeId" in error)) return;
+      const slice = slices.get(retrievalSliceIdentityKey(error));
+      if (!slice || slice.resourceType !== error.resourceType) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A typed retrieval error must match an explicit retrieval slice.",
+          path: ["errors", index],
+        });
+      }
+    });
+    manifest.completedRetrievalSlices.forEach((sliceRef, index) => {
+      const identity = retrievalSliceIdentityKey(sliceRef);
+      if (completed.has(identity)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected completed retrieval slice identities to be unique.",
+          path: ["completedRetrievalSlices", index],
+        });
+      }
+      completed.add(identity);
+      if (!slices.has(identity) || !slicesWithEvidence.has(identity)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A completed retrieval slice must have a declared slice and raw evidence.",
+          path: ["completedRetrievalSlices", index],
+        });
+      }
+    });
+  });
+
+export const clinicalRawManifestSchema = z.union([
+  clinicalRawManifestV3Schema,
+  clinicalRawManifestV2Schema,
+]);
 
 export const clinicalFhirExternalRefSchema = versionedExternalRefSchema.omit({ facet: true });
 
@@ -357,8 +650,13 @@ export const clinicalImportPlanSchema = z
 
 export type ClinicalSourceSystem = z.infer<typeof clinicalSourceSystemSchema>;
 export type ClinicalRawManifest = z.infer<typeof clinicalRawManifestSchema>;
-export type ClinicalRawManifestResourceFile = z.infer<typeof clinicalRawManifestResourceFileSchema>;
+export type ClinicalRawManifestResourceFile =
+  | z.infer<typeof clinicalRawManifestResourceFileSchema>
+  | z.infer<typeof clinicalRawManifestV3ResourceFileSchema>;
 export type ClinicalFhirRetrievalScope = z.infer<typeof clinicalFhirRetrievalScopeSchema>;
+export type ClinicalFhirRetrievalSlice = z.infer<typeof clinicalFhirRetrievalSliceSchema>;
+export type ClinicalFhirRetrievalSliceRef = z.infer<typeof clinicalFhirRetrievalSliceRefSchema>;
+export type ClinicalFhirRetrievalPlan = z.infer<typeof clinicalFhirRetrievalPlanSchema>;
 export type ClinicalFhirExternalRef = z.infer<typeof clinicalFhirExternalRefSchema>;
 export type ClinicalImportUpsertPayload = z.infer<typeof clinicalImportUpsertPayloadSchema>;
 export type ClinicalImportDecision = z.infer<typeof clinicalImportDecisionSchema>;
@@ -586,7 +884,10 @@ export function rawRefForClinicalManifestFile(input: {
   manifestPath: string;
   resourceFile: ClinicalRawManifestResourceFile;
 }): string {
-  const resourceFile = clinicalRawManifestResourceFileSchema.parse(input.resourceFile);
+  const resourceFile = z.union([
+    clinicalRawManifestV3ResourceFileSchema,
+    clinicalRawManifestResourceFileSchema,
+  ]).parse(input.resourceFile);
   const manifestParts = clinicalFhirManifestPathSchema.parse(input.manifestPath).split("/");
   manifestParts.pop();
   const rawRef = [...manifestParts, resourceFile.relativePath].join("/");
@@ -594,12 +895,42 @@ export function rawRefForClinicalManifestFile(input: {
 }
 
 export function hasWholeFamilyClinicalFhirRetrievalScope(
-  manifest: Pick<ClinicalRawManifest, "retrievalScopes">,
+  manifest: ClinicalRawManifest,
   resourceType: string,
 ): boolean {
-  return manifest.retrievalScopes.some((scope) =>
+  const scopes = manifest.schemaVersion === "murph.clinical-raw-manifest.v2"
+    ? manifest.retrievalScopes
+    : manifest.retrievalSlices;
+  return scopes.some((scope) =>
     scope.resourceType === resourceType && scope.coverage === "whole-family"
   );
+}
+
+export function isCompleteWholeFamilyClinicalFhirRetrieval(
+  manifest: ClinicalRawManifest,
+  resourceType: string,
+): boolean {
+  if (manifest.schemaVersion === "murph.clinical-raw-manifest.v2") {
+    return manifest.completedResourceTypes.includes(
+      clinicalFhirResourceTypeSchema.parse(resourceType),
+    ) && hasWholeFamilyClinicalFhirRetrievalScope(manifest, resourceType);
+  }
+  const completed = new Set(manifest.completedRetrievalSlices.map((slice) =>
+    retrievalSliceIdentityKey(slice)
+  ));
+  return manifest.retrievalSlices.some((slice) =>
+    slice.resourceType === resourceType
+    && slice.coverage === "whole-family"
+    && completed.has(retrievalSliceIdentityKey(slice))
+  );
+}
+
+export function clinicalRawManifestResourceFileRetrievalKey(
+  resourceFile: ClinicalRawManifestResourceFile,
+): string {
+  return "queryScopeId" in resourceFile
+    ? retrievalSliceIdentityKey(resourceFile)
+    : resourceFile.resourceType;
 }
 
 export function countClinicalFhirPageResources(content: string): number {
@@ -633,4 +964,11 @@ export function countClinicalFhirPageResources(content: string): number {
 
 function isClinicalFhirResourceRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function retrievalSliceIdentityKey(input: {
+  queryScopeId: string;
+  sliceId: string;
+}): string {
+  return `${input.queryScopeId}\n${input.sliceId}`;
 }

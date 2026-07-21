@@ -9,6 +9,10 @@ import {
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFhirRetrievalScopeSchema,
   clinicalFhirRetrievalScopesSchema,
+  clinicalFhirQueryScopeIdSchema,
+  clinicalFhirRetrievalSliceRefSchema,
+  clinicalFhirRetrievalSlicesSchema,
+  clinicalFhirSliceIdSchema,
   clinicalFhirResourceTypeSchema,
   clinicalIsoDateTimeSchema,
   clinicalSourceSystemSchema,
@@ -16,6 +20,8 @@ import {
   clinicalRawPathSchema,
   countClinicalFhirPageResources,
   type ClinicalFhirRetrievalScope,
+  type ClinicalFhirRetrievalSlice,
+  type ClinicalFhirRetrievalSliceRef,
   type ClinicalImportPlan,
   type ClinicalRawManifest,
   type ClinicalSourceSystem,
@@ -37,6 +43,8 @@ import { loadRuntimeModule } from "./runtime-import.js";
 const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records";
 const JSON_MEDIA_TYPE = "application/fhir+json";
 const CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA =
+  "murph.clinical-retrieval-checkpoint.v2";
+const LEGACY_CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA =
   "murph.clinical-retrieval-checkpoint.v1";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
@@ -64,17 +72,22 @@ export interface ClinicalFhirSnapshotPage {
   content: string;
   nextPageUrlHash?: string;
   pageUrlHash?: string;
+  queryScopeId?: string;
   resourceType: string;
+  sliceId?: string;
 }
 
 export interface ClinicalFhirSnapshotImportInput {
   assertCurrent?: () => Promise<void>;
   completedResourceTypes: string[];
+  completedRetrievalSlices?: ClinicalFhirRetrievalSliceRef[];
   connectionId: string;
   errors?: Array<{
     code: string;
     message: string;
+    queryScopeId?: string;
     resourceType?: string;
+    sliceId?: string;
   }>;
   fetchedAt: string;
   fhirBaseUrlHash: string;
@@ -85,6 +98,8 @@ export interface ClinicalFhirSnapshotImportInput {
   requestedScopes: string[];
   retrievalJobId: string;
   retrievalScopes: ClinicalFhirRetrievalScope[];
+  retrievalProtocol?: "query-slices-v2";
+  retrievalSlices?: ClinicalFhirRetrievalSlice[];
   signal?: AbortSignal | null;
   sourceSystem: ClinicalSourceSystem;
   vaultRoot: string;
@@ -101,6 +116,8 @@ export interface ClinicalFhirRetrievalCheckpointIdentity {
   requestedScopes: string[];
   retrievalJobId: string;
   retrievalScopes: ClinicalFhirRetrievalScope[];
+  retrievalProtocol?: "query-slices-v2";
+  retrievalSlices?: ClinicalFhirRetrievalSlice[];
   runId: string;
   sourceSystem: ClinicalSourceSystem;
 }
@@ -108,6 +125,7 @@ export interface ClinicalFhirRetrievalCheckpointIdentity {
 export interface ClinicalFhirRetrievalCheckpoint {
   authorizationRequired: boolean;
   completedResourceTypes: string[];
+  completedRetrievalSlices?: ClinicalFhirRetrievalSliceRef[];
   currentResourceIndex: number;
   cursor: string | null;
   errors: NonNullable<ClinicalFhirSnapshotImportInput["errors"]>;
@@ -158,7 +176,7 @@ export class ClinicalFhirRetrievalCheckpointError extends Error {
   }
 }
 
-const clinicalFhirRetrievalCheckpointSchema = z.object({
+const legacyClinicalFhirRetrievalCheckpointSchema = z.object({
   authorizationRequired: z.boolean(),
   completedResourceTypes: z.array(clinicalFhirResourceTypeSchema)
     .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
@@ -196,7 +214,7 @@ const clinicalFhirRetrievalCheckpointSchema = z.object({
   }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
   resourcePageStartIndex: z.number().int().nonnegative()
     .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
-  schema: z.literal(CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA),
+  schema: z.literal(LEGACY_CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA),
   seenCursors: z.array(z.string().min(1).max(2_048))
     .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
   seenPageUrlHashes: z.array(z.string().regex(SHA256_HEX_PATTERN))
@@ -208,6 +226,140 @@ const clinicalFhirRetrievalCheckpointSchema = z.object({
   totalResourceCount: z.number().int().nonnegative()
     .max(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES),
 }).strict();
+
+const clinicalFhirRetrievalCheckpointIdentityV2Schema =
+  legacyClinicalFhirRetrievalCheckpointSchema.shape.identity.extend({
+    retrievalScopes: z.array(clinicalFhirRetrievalScopeSchema)
+      .min(1)
+      .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+    retrievalProtocol: z.literal("query-slices-v2").optional(),
+    retrievalSlices: clinicalFhirRetrievalSlicesSchema.optional(),
+  }).strict().superRefine((identity, context) => {
+    if (
+      (identity.retrievalProtocol === "query-slices-v2")
+      !== (identity.retrievalSlices !== undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected query-aware checkpoint identity to include its retrieval slices.",
+        path: ["retrievalSlices"],
+      });
+    }
+    if (identity.retrievalProtocol === "query-slices-v2" && identity.retrievalSlices) {
+      const scopes = identity.retrievalSlices.map((slice) => {
+        const { queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope } = slice;
+        return scope;
+      });
+      if (JSON.stringify(scopes) !== JSON.stringify(identity.retrievalScopes)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected query-aware checkpoint scopes to match their retrieval slices.",
+          path: ["retrievalScopes"],
+        });
+      }
+    }
+  });
+
+const clinicalFhirRetrievalCheckpointV2Schema =
+  legacyClinicalFhirRetrievalCheckpointSchema.extend({
+    completedRetrievalSlices: z.array(clinicalFhirRetrievalSliceRefSchema)
+      .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES)
+      .optional(),
+    errors: z.array(z.object({
+      code: z.string().min(1).max(128),
+      message: z.string().min(1).max(512),
+      queryScopeId: clinicalFhirQueryScopeIdSchema.optional(),
+      resourceType: clinicalFhirResourceTypeSchema.optional(),
+      sliceId: clinicalFhirSliceIdSchema.optional(),
+    }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+    identity: clinicalFhirRetrievalCheckpointIdentityV2Schema,
+    pages: z.array(z.object({
+      content: z.string(),
+      nextPageUrlHash: z.string().regex(SHA256_HEX_PATTERN).optional(),
+      pageUrlHash: z.string().regex(SHA256_HEX_PATTERN).optional(),
+      queryScopeId: clinicalFhirQueryScopeIdSchema.optional(),
+      resourceType: clinicalFhirResourceTypeSchema,
+      sliceId: clinicalFhirSliceIdSchema.optional(),
+    }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+    schema: z.literal(CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA),
+  }).strict().superRefine((checkpoint, context) => {
+    const queryAware = checkpoint.identity.retrievalProtocol === "query-slices-v2";
+    const retrievalSlices = checkpoint.identity.retrievalSlices ?? [];
+    const slicesByIdentity = new Map(retrievalSlices.map((slice) => [
+      `${slice.queryScopeId}\n${slice.sliceId}`,
+      slice,
+    ]));
+    if (queryAware !== (checkpoint.completedRetrievalSlices !== undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected query-aware checkpoint completion identities.",
+        path: ["completedRetrievalSlices"],
+      });
+    }
+    checkpoint.pages.forEach((page, index) => {
+      if (queryAware !== (page.queryScopeId !== undefined && page.sliceId !== undefined)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected query-aware checkpoint pages to include retrieval identity.",
+          path: ["pages", index],
+        });
+      }
+      if (queryAware && page.queryScopeId && page.sliceId) {
+        const slice = slicesByIdentity.get(`${page.queryScopeId}\n${page.sliceId}`);
+        if (!slice || slice.resourceType !== page.resourceType) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected checkpoint page retrieval identity to match its plan.",
+            path: ["pages", index],
+          });
+        }
+      }
+    });
+    checkpoint.errors.forEach((error, index) => {
+      const hasRetrievalIdentity = error.queryScopeId !== undefined && error.sliceId !== undefined;
+      if (
+        (error.queryScopeId === undefined) !== (error.sliceId === undefined)
+        || (queryAware && error.resourceType !== undefined && !hasRetrievalIdentity)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected typed query-aware checkpoint errors to include retrieval identity.",
+          path: ["errors", index],
+        });
+      }
+      if (queryAware && hasRetrievalIdentity) {
+        const slice = slicesByIdentity.get(`${error.queryScopeId}\n${error.sliceId}`);
+        if (!slice || (error.resourceType && slice.resourceType !== error.resourceType)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected checkpoint error retrieval identity to match its plan.",
+            path: ["errors", index],
+          });
+        }
+      }
+    });
+    checkpoint.completedRetrievalSlices?.forEach((sliceRef, index) => {
+      if (!slicesByIdentity.has(`${sliceRef.queryScopeId}\n${sliceRef.sliceId}`)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Expected checkpoint completion retrieval identity to match its plan.",
+          path: ["completedRetrievalSlices", index],
+        });
+      }
+    });
+    if (queryAware && checkpoint.currentResourceIndex > retrievalSlices.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected checkpoint position to remain within its retrieval plan.",
+        path: ["currentResourceIndex"],
+      });
+    }
+  });
+
+const clinicalFhirRetrievalCheckpointSchema = z.union([
+  clinicalFhirRetrievalCheckpointV2Schema,
+  legacyClinicalFhirRetrievalCheckpointSchema,
+]);
 
 export async function readClinicalFhirRetrievalCheckpoint(input: {
   identity: ClinicalFhirRetrievalCheckpointIdentity;
@@ -269,7 +421,7 @@ export async function writeClinicalFhirRetrievalCheckpoint(input: {
   identity: ClinicalFhirRetrievalCheckpointIdentity;
   vaultRoot: string;
 }): Promise<void> {
-  const identity = clinicalFhirRetrievalCheckpointSchema.shape.identity.parse(
+  const identity = clinicalFhirRetrievalCheckpointIdentityV2Schema.parse(
     input.identity,
   );
   const parsed = clinicalFhirRetrievalCheckpointSchema.parse({
@@ -427,6 +579,12 @@ function hashClinicalFhirRetrievalCheckpointIdentity(
     retrievalScopes: identity.retrievalScopes.map((scope) =>
       clinicalFhirRetrievalScopeSchema.parse(scope)
     ),
+    ...(identity.retrievalProtocol === "query-slices-v2"
+      ? {
+          retrievalProtocol: identity.retrievalProtocol,
+          retrievalSlices: clinicalFhirRetrievalSlicesSchema.parse(identity.retrievalSlices),
+        }
+      : {}),
     runId: identity.runId,
     sourceSystem: clinicalSourceSystemSchema.parse(identity.sourceSystem),
   };
@@ -444,6 +602,13 @@ function assertClinicalFhirRetrievalCheckpointConsistent(
     || checkpoint.pageFetchCount < checkpoint.successfulPageCount
     || new Set(checkpoint.completedResourceTypes).size
       !== checkpoint.completedResourceTypes.length
+    || (
+      "completedRetrievalSlices" in checkpoint
+      && checkpoint.completedRetrievalSlices !== undefined
+      && new Set(checkpoint.completedRetrievalSlices.map((slice) =>
+        `${slice.queryScopeId}\n${slice.sliceId}`
+      )).size !== checkpoint.completedRetrievalSlices.length
+    )
     || new Set(checkpoint.seenCursors).size !== checkpoint.seenCursors.length
     || new Set(checkpoint.seenPageUrlHashes).size
       !== checkpoint.seenPageUrlHashes.length
@@ -520,10 +685,24 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   const manifestPath = clinicalRawPathSchema.parse(
     `raw/clinical/fhir/${input.connectionId}/${input.retrievalJobId}/manifest.json`,
   );
-  const ordinalsByResourceType = new Map<string, number>();
+  const queryAware = input.retrievalProtocol === "query-slices-v2";
+  if (
+    queryAware !== (
+      input.retrievalSlices !== undefined
+      && input.completedRetrievalSlices !== undefined
+    )
+  ) {
+    throw new TypeError("Query-aware Clinical FHIR snapshot is missing retrieval identity.");
+  }
+  const ordinalsByRetrieval = new Map<string, number>();
   let totalBytes = 0;
   const pages = input.pages.map((page) => {
     const resourceType = clinicalFhirResourceTypeSchema.parse(page.resourceType);
+    const queryScopeId = page.queryScopeId;
+    const sliceId = page.sliceId;
+    if (queryAware !== (queryScopeId !== undefined && sliceId !== undefined)) {
+      throw new TypeError("Query-aware Clinical FHIR page is missing retrieval identity.");
+    }
     const byteSize = Buffer.byteLength(page.content, "utf8");
     if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
       throw new TypeError(
@@ -537,21 +716,26 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
       );
     }
 
-    const ordinal = (ordinalsByResourceType.get(resourceType) ?? 0) + 1;
-    ordinalsByResourceType.set(resourceType, ordinal);
-    const relativePath = `${resourceType}/page-${String(ordinal).padStart(4, "0")}.json`;
+    const retrievalKey = queryAware
+      ? `${queryScopeId}\n${sliceId}`
+      : resourceType;
+    const ordinal = (ordinalsByRetrieval.get(retrievalKey) ?? 0) + 1;
+    ordinalsByRetrieval.set(retrievalKey, ordinal);
+    const relativePath = queryAware
+      ? `${queryScopeId}/${sliceId}/${resourceType}/page-${String(ordinal).padStart(4, "0")}.json`
+      : `${resourceType}/page-${String(ordinal).padStart(4, "0")}.json`;
     return {
       ...page,
       rawPath: clinicalRawPathSchema.parse(
         `${path.posix.dirname(manifestPath)}/${relativePath}`,
       ),
       relativePath,
+      ...(queryAware ? { queryScopeId, sliceId } : {}),
       resourceType,
     };
   });
 
-  const manifest = clinicalRawManifestSchema.parse({
-    schemaVersion: "murph.clinical-raw-manifest.v2",
+  const manifestBase = {
     kind: "clinical_fhir_retrieval",
     connectionId: input.connectionId,
     retrievalJobId: input.retrievalJobId,
@@ -562,6 +746,30 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     fhirBaseUrlHash: input.fhirBaseUrlHash,
     patientIdHash: input.patientIdHash,
     fetchedAt: input.fetchedAt,
+    requestedScopes: input.requestedScopes,
+    grantedScopes: input.grantedScopes,
+  } as const;
+  const resourceFiles = pages.map((page) => ({
+    ...(queryAware
+      ? { queryScopeId: page.queryScopeId, sliceId: page.sliceId }
+      : {}),
+    resourceType: page.resourceType,
+    relativePath: page.relativePath,
+    count: countClinicalFhirPageResources(page.content),
+    sha256: createHash("sha256").update(page.content, "utf8").digest("hex"),
+    ...(page.pageUrlHash ? { pageUrlHash: page.pageUrlHash } : {}),
+    ...(page.nextPageUrlHash ? { nextPageUrlHash: page.nextPageUrlHash } : {}),
+  }));
+  const manifest = clinicalRawManifestSchema.parse(queryAware ? {
+    ...manifestBase,
+    schemaVersion: "murph.clinical-raw-manifest.v3",
+    resourceFiles,
+    retrievalSlices: input.retrievalSlices,
+    completedRetrievalSlices: input.completedRetrievalSlices,
+    ...(input.errors ? { errors: input.errors } : {}),
+  } : {
+    ...manifestBase,
+    schemaVersion: "murph.clinical-raw-manifest.v2",
     resourceFiles: pages.map((page) => ({
       resourceType: page.resourceType,
       relativePath: page.relativePath,
@@ -572,8 +780,6 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     })),
     retrievalScopes: input.retrievalScopes,
     completedResourceTypes: input.completedResourceTypes,
-    requestedScopes: input.requestedScopes,
-    grantedScopes: input.grantedScopes,
     ...(input.errors ? { errors: input.errors } : {}),
   });
 
