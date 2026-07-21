@@ -403,6 +403,71 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, indexed.metricKey)?.rows.length, 2);
 });
 
+test("lab-only conversion stays at the test-result boundary", () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_bun_lab", "2025-03-01T08:00:00.000Z", [
+        { analyte: "BUN", unit: "mmol/L", value: 4 },
+      ]),
+      createEvent("evt_bun_manual", "measurement", "2026-02-01T08:00:00.000Z", {
+        measurements: [{ metric: "Blood Urea Nitrogen", unit: "mmol/L", value: 4 }],
+        source: "manual",
+      }),
+      createMetricSample("smp_bun_manual", "2026-02-02T08:00:00.000Z", {
+        dayKey: "2026-02-02",
+        metric: "Blood Urea Nitrogen",
+        quality: "raw",
+        recordedAt: "2026-02-02T08:00:00.000Z",
+        source: "manual",
+        unit: "mmol/L",
+        value: 4,
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints
+    .filter((point) => point.metricKey === "blood-urea-nitrogen");
+  const labPoint = points.find((point) => point.source.kind === "test-result");
+  const manualPoints = points.filter((point) =>
+    point.source.kind === "measurement" || point.source.kind === "metric-sample"
+  );
+
+  assert.equal(labPoint?.canonicalUnit, "mg/dL");
+  assert.equal(labPoint?.canonicalValue, 11.2045);
+  assert.equal(manualPoints.length, 2);
+  assert.equal(manualPoints.every((point) => point.canonicalUnit === null), true);
+  assert.equal(manualPoints.every((point) => point.canonicalValue === null), true);
+  assert.equal(manualPoints.every((point) => point.unit === "mmol/L" && point.value === 4), true);
+
+  const selection = selectMetricValue({
+    metricKey: "blood-urea-nitrogen",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+  });
+  assert.equal(selection.status, "ready");
+  assert.equal(selection.value, 4);
+  assert.equal(selection.unit, "mmol/L");
+  assert.equal(selection.point?.source.kind, "metric-sample");
+
+  const goal = selectMetricGoalProgress({
+    goalId: "goal_bun_manual",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+    target: {
+      comparator: ">=",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "blood-urea-nitrogen",
+      targetId: "target_bun_manual",
+      unit: "mg/dL",
+      value: 10,
+    },
+  });
+  assert.equal(goal.status, "not_met");
+  assert.equal(goal.currentValue, 4);
+});
+
 test("the measured index excludes unclassified lab-record fields without deleting their rows", async () => {
   const vault = createVaultReadModel({
     entities: [

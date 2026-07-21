@@ -11,6 +11,7 @@ import {
   formatTargetValue,
   listMetricPoints,
   listMetricDefinitions,
+  normalizeLabResultMetricValue,
   normalizeMetricKey,
   normalizeUnit,
   normalizeMetricValue,
@@ -604,7 +605,7 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "%",
     value: 13.1,
   }).canonicalValue, 13.1);
-  assert.deepEqual(normalizeMetricValue({
+  assert.deepEqual(normalizeLabResultMetricValue({
     metricKey: "blood-urea-nitrogen",
     unit: "mmol/L",
     value: 4,
@@ -614,7 +615,7 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "mmol/L",
     warnings: [],
   });
-  assert.deepEqual(normalizeMetricValue({
+  assert.deepEqual(normalizeLabResultMetricValue({
     metricKey: "thyroid-stimulating-hormone",
     unit: "uIU/mL",
     value: 1.25,
@@ -624,16 +625,36 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "mIU/L",
     warnings: [],
   });
-  assert.equal(normalizeMetricValue({
+  assert.equal(normalizeLabResultMetricValue({
     metricKey: "mean-corpuscular-hemoglobin",
     unit: "pg",
     value: 29.4,
   }).canonicalUnit, "pg");
-  assert.equal(normalizeMetricValue({
+  assert.equal(normalizeLabResultMetricValue({
     metricKey: "mean-corpuscular-hemoglobin-concentration",
     unit: "g/dL",
     value: 32.5,
   }).canonicalUnit, "g/dL");
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "blood-urea-nitrogen",
+    unit: "mmol/L",
+    value: 4,
+  }), {
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: "mmol/L",
+    warnings: [],
+  });
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "thyroid-stimulating-hormone",
+    unit: "uIU/mL",
+    value: 1.25,
+  }), {
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: "uIU/mL",
+    warnings: [],
+  });
 });
 
 test("lists Murph Age source routes as metadata-only model strategy", () => {

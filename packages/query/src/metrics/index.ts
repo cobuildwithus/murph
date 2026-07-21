@@ -2,6 +2,7 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
   experimentSessionMetricIsDeclared,
+  normalizeLabResultMetricValue,
   normalizeMetricKey,
   normalizeMetricValue,
   resolveLabResultMetricDefinition,
@@ -508,8 +509,10 @@ function scalarMetricPoint(input: {
   const definition = input.definition
     ?? resolveMetricDefinition(metricKey)
     ?? createCustomMetricDefinition(metricKey, input.unit);
-  const normalized = normalizeMetricValue({
-    definition,
+  const normalizeValue = input.sourceKind === "test-result"
+    ? normalizeLabResultMetricValue
+    : normalizeMetricValue;
+  const normalized = normalizeValue({
     metricKey: definition.key,
     unit: input.unit ?? definition.displayUnit,
     value: input.value,
