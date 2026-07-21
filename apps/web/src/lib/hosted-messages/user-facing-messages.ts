@@ -19,6 +19,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
+  "linq.ai_usage.thread_low",
   "linq.ai_usage.thread_limit_reached",
 ] as const
 
@@ -52,6 +53,7 @@ export interface UserFacingMessageContextByKey {
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: string
   }
+  "linq.ai_usage.thread_low": Record<string, never>
   "linq.ai_usage.thread_limit_reached": Record<string, never>
 }
 
@@ -484,6 +486,28 @@ Sound good?`,
     `This chat hit its monthly included Murph amount. AI usage is paused until the allowance resets.`,
     `The chat's monthly included usage is reached. AI usage is paused until the chat's allowance resets.`,
     `Included Murph usage is used for this chat this month. AI usage is paused until the allowance resets.`,
+  ],
+  "linq.ai_usage.thread_low": [
+    `This chat is running low on Murph usage for the current period.`,
+    `The chat's Murph usage is getting low for this period.`,
+    `This chat has a small amount of Murph usage left in the current period.`,
+    `Murph usage for this chat is running low this period.`,
+    `The current period's Murph usage is nearly used for this chat.`,
+    `This chat is nearing its Murph usage amount for the period.`,
+    `There is not much Murph usage left for this chat this period.`,
+    `The chat is getting close to its Murph usage amount for this period.`,
+    `This period's Murph usage is running low for the chat.`,
+    `This chat has limited Murph usage remaining in the current period.`,
+    `The chat's remaining Murph usage is low for this period.`,
+    `Murph usage is nearing the period amount for this chat.`,
+    `This chat is close to using its Murph usage for the current period.`,
+    `Only a small amount of Murph usage remains for this chat this period.`,
+    `This chat's Murph usage is low for the current period.`,
+    `The chat is nearing the end of its Murph usage for this period.`,
+    `This period's remaining Murph usage is limited for the chat.`,
+    `The chat has almost used its Murph usage for the current period.`,
+    `Murph usage left for this chat is getting low this period.`,
+    `This chat is approaching its Murph usage amount for the current period.`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

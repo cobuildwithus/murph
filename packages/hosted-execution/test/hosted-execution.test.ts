@@ -287,6 +287,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(2);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -324,6 +325,14 @@ describe("hosted execution coverage gaps", () => {
       freshness: "fresh",
       reason: "current",
       shouldRefresh: false,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: { ...freshReplica, generation: 1 },
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "generation_mismatch",
+      shouldRefresh: true,
     });
     expect(assessBrowserVaultReplicaFreshness({
       now: "2026-05-04T00:03:30.000Z",

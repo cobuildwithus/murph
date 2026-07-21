@@ -37,6 +37,7 @@ interface OwnedCheckoutRequest {
 
 function useHostedUsageTopUpDialog({
   activePurchase = null,
+  checkoutUrl = CHECKOUT_URL,
   initialOpen = false,
   offers,
   purchaseReturn = null,
@@ -381,14 +382,18 @@ function useHostedUsageTopUpDialog({
         method: "POST",
         payload: { offerCode, clientRequestKey: requestKey },
         signal,
-        url: CHECKOUT_URL,
+        url: checkoutUrl,
       });
       const response = readPurchaseResponse(value);
-      const checkoutUrl = response.url ? readCheckoutUrl(response.url) : null;
-      if (response.recovered && response.status === "checkout_open" && !checkoutUrl) {
+      const resolvedCheckoutUrl = response.url ? readCheckoutUrl(response.url) : null;
+      if (
+        response.recovered
+        && response.status === "checkout_open"
+        && !resolvedCheckoutUrl
+      ) {
         throw new Error("Could not open Stripe right now. Try again.");
       }
-      return { checkoutUrl, response };
+      return { checkoutUrl: resolvedCheckoutUrl, response };
     });
 
     if (outcome.ok) {

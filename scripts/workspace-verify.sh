@@ -195,9 +195,33 @@ local_worker_budget_default() {
   normalize_positive_integer "$worker_budget" "$fallback"
 }
 
+resolve_composed_acceptance_parallel_default() {
+  local cpu_count
+
+  if [[ -n "${CI:-}" || "$verification_command" != "verify:acceptance" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  cpu_count="$(detect_logical_cpu_count)"
+  if [[ "$cpu_count" -ge 12 ]]; then
+    printf '1\n'
+    return
+  fi
+
+  printf '0\n'
+}
+
+readonly composed_acceptance_parallel="$(resolve_composed_acceptance_parallel_default)"
+
 resolve_package_coverage_concurrency_default() {
   if [[ -n "${CI:-}" ]]; then
     printf '1\n'
+    return
+  fi
+
+  if [[ "$composed_acceptance_parallel" == "1" ]]; then
+    local_concurrency_default 5 3
     return
   fi
 
@@ -215,7 +239,12 @@ resolve_typecheck_workspace_concurrency_default() {
     return
   fi
 
-  if [[ -n "${CI:-}" || "$shared_host_mode" == "1" ]]; then
+  if [[ "$shared_host_mode" == "1" && "$composed_acceptance_parallel" != "1" ]]; then
+    printf '2\n'
+    return
+  fi
+
+  if [[ -n "${CI:-}" ]]; then
     printf '2\n'
     return
   fi
@@ -237,26 +266,121 @@ resolve_test_diff_vitest_max_workers_default() {
   local_worker_budget_default "$test_diff_workspace_concurrency" 1
 }
 
-readonly app_verify_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
+resolve_package_coverage_vitest_max_workers_default() {
+  local cpu_count
+  local worker_budget
+
+  if [[ -n "${CI:-}" ]]; then
+    printf '50%%\n'
+    return
+  fi
+
+  if [[ "$composed_acceptance_parallel" == "1" ]]; then
+    cpu_count="$(detect_logical_cpu_count)"
+    # After CLI coverage releases the apps, reserve roughly one quarter of the
+    # machine for their two Vitest pools while package coverage refills.
+    worker_budget=$((cpu_count / 8))
+    normalize_positive_integer "$worker_budget" "1"
+    return
+  fi
+
+  local_worker_budget_default "$package_coverage_concurrency_limit" 1
+}
+
+resolve_package_coverage_cli_vitest_max_workers_default() {
+  local cpu_count
+  local worker_budget
+
+  if [[
+    "$composed_acceptance_parallel" != "1"
+    || -n "${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS+x}"
+  ]]; then
+    printf '%s\n' "$package_coverage_vitest_max_workers"
+    return
+  fi
+
+  cpu_count="$(detect_logical_cpu_count)"
+  worker_budget=$((cpu_count / 4))
+  if [[ "$worker_budget" -gt 4 ]]; then
+    worker_budget=4
+  fi
+  normalize_positive_integer "$worker_budget" "1"
+}
+
+resolve_acceptance_app_vitest_max_workers_default() {
+  local cpu_count
+  local worker_budget
+
+  cpu_count="$(detect_logical_cpu_count)"
+  worker_budget=$((cpu_count / 8))
+  normalize_positive_integer "$worker_budget" "1"
+}
+
+resolve_local_parallel_default() {
+  if [[ -n "${CI:-}" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  if [[ "$shared_host_mode" == "1" && "$composed_acceptance_parallel" != "1" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  printf '1\n'
+}
+
+resolve_acceptance_app_verify_delay_default() {
+  if [[ "$composed_acceptance_parallel" == "1" || -n "${CI:-}" || "$shared_host_mode" == "1" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  printf '45\n'
+}
+
+resolve_package_coverage_cli_active_concurrency_default() {
+  if [[ -n "${CI:-}" ]]; then
+    printf '1\n'
+    return
+  fi
+
+  if [[ "$composed_acceptance_parallel" == "1" ]]; then
+    printf '2\n'
+    return
+  fi
+
+  if [[ "$shared_host_mode" == "1" ]]; then
+    printf '1\n'
+    return
+  fi
+
+  printf '4\n'
+}
+
+readonly app_verify_parallel_default="$(resolve_local_parallel_default)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
-readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
+readonly acceptance_app_verify_with_coverage_default="$(resolve_local_parallel_default)"
 readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
-readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 45)"
+readonly acceptance_app_verify_delay_seconds_default="$(resolve_acceptance_app_verify_delay_default)"
 readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is
 # disabled.
 readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
-readonly test_lane_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
+readonly test_lane_parallel_default="$(resolve_local_parallel_default)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
 readonly package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
-readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"
+readonly package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
 readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
-readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"
+readonly package_coverage_vitest_max_workers_default="$(resolve_package_coverage_vitest_max_workers_default)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
+readonly package_coverage_cli_vitest_max_workers_default="$(resolve_package_coverage_cli_vitest_max_workers_default)"
+readonly package_coverage_cli_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS:-$package_coverage_cli_vitest_max_workers_default}"
+readonly acceptance_app_vitest_max_workers="$(resolve_acceptance_app_vitest_max_workers_default)"
 readonly typecheck_workspace_concurrency_default="$(resolve_typecheck_workspace_concurrency_default)"
-readonly typecheck_preflight_parallel_default="$([[ "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
+readonly typecheck_preflight_parallel_default="$([[ "$shared_host_mode" == "1" && "$composed_acceptance_parallel" != "1" ]] && echo 0 || echo 1)"
 readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly test_diff_workspace_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || local_concurrency_default 4 2)"
@@ -266,6 +390,8 @@ readonly test_diff_vitest_max_workers="${MURPH_TEST_DIFF_VITEST_MAX_WORKERS:-$te
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 tracked_background_pids=("")
+acceptance_cli_coverage_ready_file=""
+acceptance_cli_coverage_ready_dir=""
 
 verify_log() {
   printf '[workspace-verify] %s\n' "$*" >&2
@@ -331,6 +457,12 @@ cleanup_background_jobs() {
     fi
     terminate_background_pid "$pid"
   done
+
+  if [[ -n "$acceptance_cli_coverage_ready_dir" ]]; then
+    rm -rf -- "$acceptance_cli_coverage_ready_dir"
+    acceptance_cli_coverage_ready_dir=""
+    acceptance_cli_coverage_ready_file=""
+  fi
 }
 
 handle_termination_signal() {
@@ -550,6 +682,18 @@ run_app_verify_command_with_retry() {
   if [[ "$hosted_web_prisma_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1)
   fi
+  if [[ "$composed_acceptance_parallel" == "1" && -z "${MURPH_APP_VITEST_MAX_WORKERS:-}" ]]; then
+    env_args+=(MURPH_APP_VITEST_MAX_WORKERS="$acceptance_app_vitest_max_workers")
+  fi
+  if [[ "$composed_acceptance_parallel" == "1" && -z "${MURPH_VERIFY_STEP_PARALLEL:-}" ]]; then
+    case "$app_dir" in
+      "apps/web") env_args+=(MURPH_VERIFY_STEP_PARALLEL=1) ;;
+      "apps/cloudflare") env_args+=(MURPH_VERIFY_STEP_PARALLEL=0) ;;
+    esac
+  fi
+  if [[ -n "$acceptance_cli_coverage_ready_file" ]]; then
+    env_args+=(MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE="$acceptance_cli_coverage_ready_file")
+  fi
 
   run_command_with_retry \
     "Package command for ${app_dir} (verify)" \
@@ -693,7 +837,7 @@ run_workspace_package_coverage() {
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
-      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
     return $?
   fi
 
@@ -705,9 +849,26 @@ run_workspace_package_coverage() {
     return $?
   fi
 
+  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+    run_timed_step \
+      "$label" \
+      env NODE_OPTIONS=--max-old-space-size=6144 \
+        MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
+        pnpm --dir "$package_dir" test:coverage
+    return $?
+  fi
+
   run_timed_step \
     "$label" \
     env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm --dir "$package_dir" test:coverage
+}
+
+mark_acceptance_cli_coverage_complete() {
+  if [[ -z "$acceptance_cli_coverage_ready_file" ]]; then
+    return
+  fi
+
+  : >"$acceptance_cli_coverage_ready_file"
 }
 
 run_all_package_coverage() {
@@ -715,8 +876,8 @@ run_all_package_coverage() {
   local package_coverage_dirs=(
     "packages/cli"
     "packages/assistant-engine"
-    "packages/core"
     "packages/assistant-runtime"
+    "packages/core"
     "packages/setup-cli"
     "packages/assistant-cli"
     "packages/assistantd"
@@ -746,8 +907,8 @@ run_all_package_coverage() {
   local package_coverage_labels=(
     "CLI package coverage"
     "Assistant engine package coverage"
-    "Core owner coverage"
     "Assistant runtime package coverage"
+    "Core owner coverage"
     "Setup CLI package coverage"
     "Assistant CLI package coverage"
     "Assistantd package coverage"
@@ -825,6 +986,9 @@ run_all_package_coverage() {
         "${package_coverage_labels[$package_index]}" \
         "$contracts_artifacts_prepared"; then
         record_failed_package_coverage "${package_coverage_labels[$package_index]}"
+      fi
+      if [[ "${package_coverage_dirs[$package_index]}" == "packages/cli" ]]; then
+        mark_acceptance_cli_coverage_complete
       fi
       package_index=$((package_index + 1))
     done
@@ -936,6 +1100,7 @@ run_all_package_coverage() {
             unregister_background_pid "$active_pid"
             if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
               cli_coverage_active=0
+              mark_acceptance_cli_coverage_complete
             fi
             if [[ -n "$active_label" ]]; then
               record_failed_package_coverage "$active_label"
@@ -964,6 +1129,7 @@ run_all_package_coverage() {
         unregister_background_pid "$active_pid"
         if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
           cli_coverage_active=0
+          mark_acceptance_cli_coverage_complete
         fi
         reaped_any=1
       done
@@ -1084,12 +1250,17 @@ run_test_diff_package_tests() {
   local package_dirs=("$@")
   local filter_args=()
   local package_dir
+  local assistant_engine_selected=0
   local contracts_selected=0
 
   for package_dir in "${package_dirs[@]}"; do
     [[ -n "$package_dir" ]] || continue
     if [[ "$package_dir" == "packages/contracts" ]]; then
       contracts_selected=1
+      continue
+    fi
+    if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+      assistant_engine_selected=1
       continue
     fi
     filter_args+=("--filter" "./${package_dir}")
@@ -1099,6 +1270,17 @@ run_test_diff_package_tests() {
   # the artifact lock before source-first dependents start importing them.
   if [[ "$contracts_selected" == "1" ]]; then
     run_diff_contracts_test_with_workspace_artifact_lock || return $?
+  fi
+
+  # Keep the affected-owner lane aligned with the full coverage lane: the
+  # Assistant Engine suite can exceed Node's default 4 GiB heap even with one
+  # Vitest worker, so run that owner separately with its proven heap ceiling.
+  if [[ "$assistant_engine_selected" == "1" ]]; then
+    run_command_with_retry \
+      "Affected package test for packages/assistant-engine" \
+      env NODE_OPTIONS=--max-old-space-size=6144 \
+        MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
+        pnpm --dir "packages/assistant-engine" test || return $?
   fi
 
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
@@ -1293,13 +1475,28 @@ run_acceptance_app_verification_after_delay() {
 
 run_test_coverage() {
   local acceptance_typechecked="${1:-0}"
+  local prepared_runtime_artifacts=0
 
   if [[ "$acceptance_typechecked" == "1" ]]; then
     verify_log "skip repo acceptance guards already covered by typecheck"
   else
     run_repo_acceptance_guards
   fi
-  run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues
+  if [[ "$test_lane_parallel" == "1" && "$composed_acceptance_parallel" == "1" ]]; then
+    local doc_gardening_pid
+    local runtime_artifacts_pid
+
+    run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues &
+    doc_gardening_pid="$!"
+    register_background_pid "$doc_gardening_pid"
+    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked" &
+    runtime_artifacts_pid="$!"
+    register_background_pid "$runtime_artifacts_pid"
+    wait_for_background_jobs "$doc_gardening_pid" "$runtime_artifacts_pid"
+    prepared_runtime_artifacts=1
+  else
+    run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues
+  fi
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local coverage_pid
@@ -1308,9 +1505,18 @@ run_test_coverage() {
     # Coverage and app verify both depend on the prepared runtime artifacts.
     # After the cleanup/hygiene pass, local acceptance can overlap the long
     # package and app verification branches without mutating their shared setup.
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"
+    if [[ "$prepared_runtime_artifacts" != "1" ]]; then
+      run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"
+    fi
 
     if [[ "$acceptance_app_verify_with_coverage" == "1" ]]; then
+      local acceptance_parallel_status=0
+
+      if [[ "$composed_acceptance_parallel" == "1" ]]; then
+        acceptance_cli_coverage_ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-acceptance-cli-ready.XXXXXX")"
+        acceptance_cli_coverage_ready_file="$acceptance_cli_coverage_ready_dir/ready"
+      fi
+
       run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene
 
       run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene 1 "$acceptance_typechecked" &
@@ -1323,7 +1529,13 @@ run_test_coverage() {
       local app_verify_pid="$!"
       register_background_pid "$app_verify_pid"
 
-      wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$app_verify_pid"
+      wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$app_verify_pid" || acceptance_parallel_status=$?
+      if [[ -n "$acceptance_cli_coverage_ready_dir" ]]; then
+        rm -rf -- "$acceptance_cli_coverage_ready_dir"
+        acceptance_cli_coverage_ready_dir=""
+        acceptance_cli_coverage_ready_file=""
+      fi
+      return "$acceptance_parallel_status"
     else
       run_timed_step "Package coverage suite" run_test_packages_coverage 1 "$acceptance_typechecked" &
       coverage_pid="$!"
@@ -1463,6 +1675,10 @@ run_verify_cli_with_workspace_artifact_lock() {
 
 main() {
   local command="${1:-}"
+
+  if [[ "$command" == "verify:acceptance" ]]; then
+    verify_log "resources cpus=$(detect_logical_cpu_count) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage}"
+  fi
 
   case "$command" in
     "typecheck")

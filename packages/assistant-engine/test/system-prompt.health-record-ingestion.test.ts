@@ -30,12 +30,12 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain('blood-test for labs and panels')
   })
 
-  it('makes large record bundles responsive without making a child the durable owner', () => {
+  it('makes large record bundles responsive while preserving a durable source', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain('For a large or mixed bundle')
-    expect(prompt).toContain('preserve raw evidence durably and save needed high-value structure before replying')
-    expect(prompt).toContain('An optional child may enrich only exact source refs or record ids')
+    expect(prompt).toContain('preserve the source durably before replying')
+    expect(prompt).toContain('A child may write only its named family from that exact source or enrich exact returned record ids')
     expect(prompt).toContain('idempotent, provenance-aware writes and dedupe')
     expect(prompt).toContain('A spawn is not durable parse state')
     expect(prompt).toContain('otherwise say plainly which details you do not have yet')
@@ -44,14 +44,14 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).not.toContain('keep the root turn open until the child is terminal')
   })
 
-  it('keeps the durable minimum in the parent before optional enrichment', () => {
+  it('defaults small saves to the parent but permits an explicit skill split', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'Finish small, reply-needed extraction and saves in the parent.',
+      'Finish small, reply-needed extraction and saves in the parent by default.',
     )
     expect(prompt).toContain(
-      'For product lists, parent-batch the reported identity, brand, and status and capture ids before optional label enrichment.',
+      'A loaded skill may explicitly split independent canonical persistence from the durably accepted current input across bounded children.',
     )
   })
 })

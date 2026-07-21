@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HostedUsageCreditPurchaseStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,6 +13,8 @@ import {
   readHostedUsageCreditProjection,
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
+import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
+import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -33,6 +39,7 @@ type UsageCreditFixture = {
   beneficiaryMemberId: string;
   firstClient: PrismaClient;
   observer: PrismaClient;
+  payerMemberId: string;
   purchaseId: string;
   secondClient: PrismaClient;
   thirdClient: PrismaClient;
@@ -51,13 +58,18 @@ function createDeferred<T = void>(): Deferred<T> {
   return { promise, resolve };
 }
 
-async function createUsageCreditFixture(): Promise<UsageCreditFixture> {
+async function createUsageCreditFixture(input: {
+  terminalCrossOwner?: boolean;
+} = {}): Promise<UsageCreditFixture> {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
   }
 
   const fixtureId = randomUUID();
   const beneficiaryMemberId = `member_usage_credit_lock_${fixtureId}`;
+  const payerMemberId = input.terminalCrossOwner
+    ? `member_usage_credit_payer_${fixtureId}`
+    : beneficiaryMemberId;
   const purchaseId = `hucp_usage_credit_lock_${fixtureId}`;
   const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
   const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -70,6 +82,14 @@ async function createUsageCreditFixture(): Promise<UsageCreditFixture> {
       id: beneficiaryMemberId,
     },
   });
+  if (payerMemberId !== beneficiaryMemberId) {
+    await observer.hostedMember.create({
+      data: {
+        billingStatus: "active",
+        id: payerMemberId,
+      },
+    });
+  }
   await observer.hostedUsageCreditPurchase.create({
     data: {
       beneficiaryMemberId,
@@ -83,7 +103,23 @@ async function createUsageCreditFixture(): Promise<UsageCreditFixture> {
       grantUsdMicros: 5_000_000n,
       id: purchaseId,
       offerCode: "usage_5_usd",
-      payerMemberId: beneficiaryMemberId,
+      payerMemberId,
+      ...(input.terminalCrossOwner
+        ? {
+            lastReconciledAt: new Date("2026-07-16T12:05:00.000Z"),
+            paidAt: new Date("2026-07-16T12:05:00.000Z"),
+            remainingCreditUsdMicros: 5_000_000n,
+            status: HostedUsageCreditPurchaseStatus.fulfilled,
+            stripeChargeIdEncrypted: `encrypted-charge:${fixtureId}`,
+            stripeChargeLookupKey: `charge-lookup:${fixtureId}`,
+            stripeCheckoutSessionIdEncrypted: `encrypted-session:${fixtureId}`,
+            stripeCheckoutSessionLookupKey: `session-lookup:${fixtureId}`,
+            stripeCheckoutUrlEncrypted: `encrypted-url:${fixtureId}`,
+            stripePaymentIntentIdEncrypted: `encrypted-payment-intent:${fixtureId}`,
+            stripePaymentIntentLookupKey: `payment-intent-lookup:${fixtureId}`,
+            terminalAt: new Date("2026-07-16T12:05:00.000Z"),
+          }
+        : {}),
       stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}`,
       stripeCustomerLookupKey: `customer-lookup:${fixtureId}`,
       stripeLiveMode: false,
@@ -96,6 +132,7 @@ async function createUsageCreditFixture(): Promise<UsageCreditFixture> {
     beneficiaryMemberId,
     firstClient,
     observer,
+    payerMemberId,
     purchaseId,
     secondClient,
     thirdClient,
@@ -113,7 +150,14 @@ async function cleanupUsageCreditFixture(
       where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
     });
     await fixture.observer.hostedMember.deleteMany({
-      where: { id: fixture.beneficiaryMemberId },
+      where: {
+        id: {
+          in: [...new Set([
+            fixture.beneficiaryMemberId,
+            fixture.payerMemberId,
+          ])],
+        },
+      },
     });
   } finally {
     await Promise.all([
@@ -453,6 +497,101 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           deletionTransaction,
           ...(grantTransaction ? [grantTransaction] : []),
         ]);
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("rejects payer-era Stripe references after cross-owner detachment", async () => {
+      const fixture = await createUsageCreditFixture({ terminalCrossOwner: true });
+      const preparedAt = new Date("2026-07-16T12:06:00.000Z");
+      const preparedVersion = 0n;
+      const payerEraReferences = {
+        stripeChargeIdEncrypted: "encrypted:prepared-charge",
+        stripeChargeLookupKey: "charge-lookup:prepared",
+        stripeCheckoutSessionIdEncrypted: "encrypted:prepared-session",
+        stripeCheckoutSessionLookupKey: "session-lookup:prepared",
+        stripePaymentIntentIdEncrypted: "encrypted:prepared-payment-intent",
+        stripePaymentIntentLookupKey: "payment-intent-lookup:prepared",
+      };
+
+      try {
+        await fixture.firstClient.$transaction(async (tx) => {
+          await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+            memberIds: [fixture.payerMemberId],
+            now: preparedAt,
+            prisma: tx,
+          });
+          await tx.hostedMember.delete({
+            where: { id: fixture.payerMemberId },
+          });
+        }, transactionOptions);
+
+        await expect(fixture.secondClient.$transaction(async (tx) =>
+          bindHostedUsageCreditStripeReferencesTx({
+            expectedReconciliationVersion: preparedVersion,
+            lastReconciledAt: preparedAt,
+            privateReferences: payerEraReferences,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions)
+        ).rejects.toThrow(
+          "Usage-credit purchase changed before Stripe references were bound.",
+        );
+
+        await expect(fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+          select: {
+            payerMemberId: true,
+            reconciliationVersion: true,
+            stripeChargeIdEncrypted: true,
+            stripeChargeLookupKey: true,
+            stripeCheckoutSessionIdEncrypted: true,
+            stripePaymentIntentIdEncrypted: true,
+          },
+          where: { id: fixture.purchaseId },
+        })).resolves.toMatchObject({
+          payerMemberId: null,
+          reconciliationVersion: 1n,
+          stripeChargeIdEncrypted: null,
+          stripeCheckoutSessionIdEncrypted: null,
+          stripePaymentIntentIdEncrypted: null,
+        });
+
+        await fixture.thirdClient.$transaction((tx) =>
+          bindHostedUsageCreditStripeReferencesTx({
+            expectedReconciliationVersion: 1n,
+            lastReconciledAt: new Date("2026-07-16T12:07:00.000Z"),
+            privateReferences: {
+              ...payerEraReferences,
+              stripeChargeIdEncrypted: null,
+              stripeCheckoutSessionIdEncrypted: null,
+              stripePaymentIntentIdEncrypted: null,
+            },
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions);
+
+        await expect(fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+          select: {
+            payerMemberId: true,
+            reconciliationVersion: true,
+            stripeChargeIdEncrypted: true,
+            stripeChargeLookupKey: true,
+            stripeCheckoutSessionIdEncrypted: true,
+            stripePaymentIntentIdEncrypted: true,
+          },
+          where: { id: fixture.purchaseId },
+        })).resolves.toEqual({
+          payerMemberId: null,
+          reconciliationVersion: 2n,
+          stripeChargeIdEncrypted: null,
+          stripeChargeLookupKey: "charge-lookup:prepared",
+          stripeCheckoutSessionIdEncrypted: null,
+          stripePaymentIntentIdEncrypted: null,
+        });
+        await expect(fixture.observer.hostedUsageCreditEntry.count({
+          where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
+        })).resolves.toBe(0);
+      } finally {
         await cleanupUsageCreditFixture(fixture);
       }
     });

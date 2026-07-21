@@ -6,10 +6,6 @@ import { cn } from "@/src/lib/utils";
 export interface BiomarkerDeviceReadingCardProps {
   category: string | null;
   className?: string;
-  date: string;
-  dateLabel: string;
-  historyLabel: string;
-  readingCount: number;
   routeId: string;
   stale: boolean;
   summary: string | null;
@@ -20,10 +16,6 @@ export interface BiomarkerDeviceReadingCardProps {
 export function BiomarkerDeviceReadingCard({
   category,
   className,
-  date,
-  dateLabel,
-  historyLabel,
-  readingCount,
   routeId,
   stale,
   summary,
@@ -59,7 +51,7 @@ export function BiomarkerDeviceReadingCard({
       </div>
 
       {summary ? (
-        <p className="mt-3 line-clamp-2 text-pretty text-sm/6 text-muted-foreground">
+        <p className="mt-3 mb-5 line-clamp-2 text-pretty text-sm/6 text-muted-foreground">
           {summary}
         </p>
       ) : null}
@@ -68,16 +60,6 @@ export function BiomarkerDeviceReadingCard({
         <p className="break-words font-serif text-3xl font-semibold tracking-tight tabular-nums text-foreground">
           {valueLabel}
         </p>
-        <time className="mt-1 block text-xs text-muted-foreground" dateTime={date}>
-          {dateLabel}
-        </time>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        <span>
-          {readingCount} {readingCount === 1 ? "reading" : "readings"}
-        </span>
-        <span>{historyLabel}</span>
       </div>
     </Link>
   );

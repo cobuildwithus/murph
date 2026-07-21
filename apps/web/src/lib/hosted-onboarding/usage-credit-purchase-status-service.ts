@@ -22,6 +22,7 @@ import {
   decryptHostedUsageCreditPurchaseStripeField,
   HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS,
   projectHostedUsageCreditStripeSessionState,
+  requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
 import { getPrisma } from "../prisma";
@@ -47,6 +48,7 @@ export interface HostedUsageCreditCheckoutResult {
   restartAt?: string;
   retryAllowed?: true;
   status: HostedUsageCreditPublicPurchaseStatus;
+  targetConflict?: true;
   url?: string;
 }
 
@@ -64,6 +66,7 @@ export interface HostedActiveUsageCreditPurchaseProjection
 }
 
 export async function readHostedUsageCreditPurchaseStatus(input: {
+  beneficiaryMemberId?: string;
   payerMemberId: string;
   prisma?: HostedOnboardingReadClient;
   purchaseId: string;
@@ -80,6 +83,9 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
       status: true,
     },
     where: {
+      ...(input.beneficiaryMemberId
+        ? { beneficiaryMemberId: input.beneficiaryMemberId }
+        : {}),
       id: input.purchaseId,
       payerMemberId: input.payerMemberId,
     },
@@ -92,6 +98,7 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
 }
 
 export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
+  beneficiaryMemberId?: string;
   now?: Date;
   payerMemberId: string;
   prisma?: HostedOnboardingReadClient;
@@ -120,6 +127,9 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
           status: HostedUsageCreditPurchaseStatus.created,
         },
       ],
+      ...(input.beneficiaryMemberId
+        ? { beneficiaryMemberId: input.beneficiaryMemberId }
+        : {}),
       payerMemberId: input.payerMemberId,
     },
   });
@@ -130,6 +140,9 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   const offerCode = parseHostedUsageCreditOfferCode(purchase.offerCode);
   if (!offerCode) {
     throw buildHostedUsageCreditInvariantError("purchase_offer_invalid");
+  }
+  if (!purchase.payer) {
+    throw buildHostedUsageCreditInvariantError("purchase_payer_missing");
   }
   const checkout = purchase.payer.suspendedAt
     ? buildHostedUsageCreditPurchaseStatusResult(purchase)
@@ -188,7 +201,7 @@ export async function expireHostedUsageCreditCheckout(input: {
 
   const sessionId = await decryptHostedUsageCreditPurchaseStripeField({
     field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
-    payerMemberId: purchase.payerMemberId,
+    payerMemberId: input.payerMemberId,
     prisma,
     value: purchase.stripeCheckoutSessionIdEncrypted,
   });
@@ -236,7 +249,7 @@ export async function expireHostedUsageCreditCheckout(input: {
 
     const currentSessionId = await decryptHostedUsageCreditPurchaseStripeField({
       field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
-      payerMemberId: current.payerMemberId,
+      payerMemberId: input.payerMemberId,
       prisma: tx,
       value: current.stripeCheckoutSessionIdEncrypted,
     });
@@ -309,7 +322,7 @@ export async function projectHostedUsageCreditCheckoutResult(input: {
 
   const url = await decryptHostedUsageCreditPurchaseStripeField({
     field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutUrl,
-    payerMemberId: input.purchase.payerMemberId,
+    payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(input.purchase),
     prisma: input.prisma,
     value: input.purchase.stripeCheckoutUrlEncrypted,
   });

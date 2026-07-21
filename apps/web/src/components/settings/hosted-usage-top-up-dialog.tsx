@@ -101,7 +101,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         returnedFromSuccessfulCheckout:
           props.purchaseReturn?.kind === "success" &&
           props.purchaseReturn.purchaseId === purchase.purchaseId,
+        scope: props.scope,
         status: purchase.status,
+        targetConflict: purchase.targetConflict,
       })
     : null;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
@@ -117,7 +119,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         <DialogTrigger
           render={<Button type="button" variant="outline" size="lg" />}
         >
-          {purchaseTriggerLabel ?? "Add usage"}
+          {purchaseTriggerLabel ?? (props.scope === "group" ? "Add group usage" : "Add usage")}
         </DialogTrigger>
       ) : null}
       <DialogContent
@@ -134,14 +136,22 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               ? statusContent.title
               : props.offers.length === 0
                 ? "Usage credit unavailable"
-                : "Add usage"}
+                : props.scope === "group"
+                  ? "Add group usage"
+                  : "Add usage"}
           </DialogTitle>
           <DialogDescription>
             {purchase
-              ? "Murph checks Stripe before changing your available usage."
+              ? purchase.targetConflict
+                ? "Manage the unfinished checkout before starting one for this usage destination."
+                : props.scope === "group"
+                ? "Murph checks Stripe before changing this group's available usage."
+                : "Murph checks Stripe before changing your available usage."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
-                : "Choose how much usage credit to add in a one-time payment. Stripe confirms the payment before Murph adds it."}
+                : props.scope === "group"
+                  ? "Choose how much usage credit to add to this group in a one-time payment. Stripe confirms the payment before Murph adds it."
+                  : "Choose how much usage credit to add in a one-time payment. Stripe confirms the payment before Murph adds it."}
           </DialogDescription>
         </DialogHeader>
 
@@ -259,7 +269,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   <ChoiceCard
                     key={offer.offerCode}
                     ref={index === 0 ? firstOfferRef : undefined}
-                    id={`usage-top-up-${index}`}
+                    id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
                     value={offer.offerCode}
                     disabled={hasAttempt}
                     title={
@@ -267,7 +277,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                         {offer.amountLabel}
                       </span>
                     }
-                    description={<span className="sr-only">Usage credit</span>}
+                    description={
+                      <span className="sr-only">
+                        {props.scope === "group" ? "Group usage credit" : "Usage credit"}
+                      </span>
+                    }
                   />
                 ))}
               </RadioGroup>

@@ -3049,17 +3049,13 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
     )
     expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
-    expect(workspaceVerify).toContain(
-      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 45)"',
-    )
+    expect(workspaceVerify).toContain('resolve_acceptance_app_verify_delay_default()')
     expect(workspaceVerify).toContain(
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
     )
+    expect(workspaceVerify).toContain('resolve_package_coverage_vitest_max_workers_default()')
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
-    )
-    expect(workspaceVerify).toContain(
-      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"',
+      'resolve_package_coverage_cli_active_concurrency_default()',
     )
     expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
     expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
@@ -3160,7 +3156,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     expect(cliCoverageBranch).toBeTruthy()
     expect(packageCoverageDirs).toBeTruthy()
     expect(cliCoverageBranch).toContain(
-      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
     expect(cliCoverageBranch).toContain(
       'pnpm --dir packages/contracts test:coverage:prepared',

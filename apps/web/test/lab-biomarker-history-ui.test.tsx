@@ -105,17 +105,19 @@ test("measured biomarkers are grouped by health area and link to private histori
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("Your biomarkers");
-    expect(text).toContain("3 biomarkers");
+    expect(text).toContain("2 biomarkers");
     expect(text).toContain("Blood sugar");
     expect(text).toContain("Heart & lipids");
-    expect(text).toContain("Other");
     expect(text).toContain("2019 to 2026");
-    expect(text).toContain("Detected");
-    expect(text).toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).toContain("High");
     expect(text).not.toContain("No lab flag");
     expect(text.indexOf("Blood sugar")).toBeLessThan(text.indexOf("Heart & lipids"));
-    expect(text.indexOf("Heart & lipids")).toBeLessThan(text.indexOf("Other"));
+    const labGroups = [...rendered.container.querySelectorAll("details")];
+    expect(labGroups).toHaveLength(2);
+    expect(labGroups.every((group) => !group.hasAttribute("open"))).toBe(true);
+    const firstSummary = labGroups[0]?.querySelector("summary");
+    expect(firstSummary?.textContent).toContain("Blood sugar");
+    expect(firstSummary?.parentElement?.querySelector("ul")?.className).toContain("md:grid-cols-2");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );
@@ -129,14 +131,74 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(latestDate?.textContent).toContain("2026");
     expect(hba1cLink?.textContent).toContain("High");
     expect(hba1cLink?.closest("li")?.parentElement?.tagName).toBe("UL");
-    expect(
-      rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]'),
-    ).not.toBeNull();
-    const customHeading = [...rendered.container.querySelectorAll("h3")]
-      .find((heading) => heading.textContent?.includes("Deliberately Long"));
-    expect(customHeading?.className).toContain("break-words");
-    expect(customHeading?.className).not.toContain("truncate");
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]')).toBeNull();
+    expect(text).not.toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).not.toContain("Library");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("unclassified saved lab rows stay out of the index without pretending the record is empty", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).toContain("saved lab records remain available");
+    expect(text).not.toContain("Report sequence");
+    expect(text).not.toContain("Other");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("stale unclassified lab rows are acknowledged as saved results", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.freshness = "stale";
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("These are the last saved results. Refresh to check for newer data.");
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("No lab results are available in this saved view");
+    expect(text).not.toContain("Report sequence");
   } finally {
     await rendered.cleanup();
   }
