@@ -1005,7 +1005,6 @@ export async function runAssistantAutomationPass(
         executionContext,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
-        ...(input.operationScope ? { operationScope: input.operationScope } : {}),
         shouldYield: input.shouldDeferCron ?? null,
         vault: input.vault,
         signal: input.signal,

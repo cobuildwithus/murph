@@ -18,9 +18,8 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
-  type HostedExecutionAssistantAskAcceptedInputOrigin,
-  type HostedExecutionAssistantAskAutomationOccurrenceOrigin,
   type HostedExecutionAssistantAskCompletedPayload,
+  type HostedExecutionAssistantAskCompletedWake,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
   type HostedExecutionConversationMessageWake,
@@ -104,7 +103,6 @@ export interface HostedAssistantAskControlResult {
 }
 
 type HostedAssistantAskLegacyAuthority = {
-  deliveryMode: "legacy";
   expiresAt: string;
   originAssistantInputId: string;
   originMemberId: string;
@@ -115,20 +113,12 @@ type HostedAssistantAskLegacyAuthority = {
 
 type HostedAssistantAskConsentedAuthority = {
   expiresAt: string;
+  origin: HostedExecutionAssistantAskOrigin;
   originMemberId: string;
   permissionText: string;
   question: string;
   targetLabel: null;
-} & (
-  | {
-      deliveryMode: "reviewed_exact";
-      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-    }
-  | {
-      deliveryMode: "automation_continuation";
-      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
-    }
-);
+};
 
 type HostedAssistantAskAuthority =
   | HostedAssistantAskLegacyAuthority
@@ -368,13 +358,13 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
     value: input.question,
   });
-  const invocation = normalizeHostedGroupMemberAssistantAskInvocation({
+  const origin = normalizeHostedGroupMemberAssistantAskOrigin({
     origin: input.origin,
   });
   const requestId = createHostedGroupMemberAssistantAskRequestId({
     grantId,
     groupRuntimeMemberId: input.memberId,
-    origin: invocation.origin,
+    origin,
   });
 
   return prisma.$transaction(async (tx) => {
@@ -393,7 +383,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
         grantId,
         groupRuntimeMemberId: input.memberId,
         now,
-        origin: invocation.origin,
+        origin,
         question,
         requestId,
         tx,
@@ -411,7 +401,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     if (!await isEligibleGroupAssistantAskInvocationTx({
       groupRuntimeMemberId: input.memberId,
       now,
-      origin: invocation.origin,
+      origin,
       tx,
     })) {
       return unavailableAdmission("origin_unavailable");
@@ -435,7 +425,7 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     };
     const ask: HostedExecutionAssistantAskRequestedPayload = {
       expiresAt,
-      origin: invocation.origin,
+      origin,
       question,
       target,
     };
@@ -518,10 +508,10 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       if (existingCompletion) {
         return {
           mailboxWake: existingCompletionIsValid
-            ? {
-                expectedUserId: authority.originMemberId,
-                mailboxItemId: completionId,
-              }
+            ? resolveHostedAssistantAskCompletionMailboxWake({
+                authority,
+                completionId,
+              })
             : null,
           response: {
             action: "prepare",
@@ -530,7 +520,7 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
           },
         };
       }
-      if (authority.deliveryMode !== "legacy") {
+      if ("origin" in authority) {
         return {
           mailboxWake: null,
           response: {
@@ -556,10 +546,10 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
     if (existingCompletion) {
       return {
         mailboxWake: existingCompletionIsValid
-          ? {
-              expectedUserId: authority.originMemberId,
-              mailboxItemId: completionId,
-            }
+          ? resolveHostedAssistantAskCompletionMailboxWake({
+              authority,
+              completionId,
+            })
           : null,
         response: existingCompletionIsValid
           ? { action: "complete", status: "already_completed" }
@@ -600,13 +590,29 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
     }
 
     return {
-      mailboxWake: {
-        expectedUserId: authority.originMemberId,
-        mailboxItemId: completionId,
-      },
+      mailboxWake: resolveHostedAssistantAskCompletionMailboxWake({
+        authority,
+        completionId,
+      }),
       response: { action: "complete", status: "completed" },
     };
   });
+}
+
+function resolveHostedAssistantAskCompletionMailboxWake(input: {
+  authority: HostedAssistantAskAuthority;
+  completionId: string;
+}): HostedAssistantAskMailboxWake | null {
+  if (
+    "origin" in input.authority
+    && input.authority.origin.kind === "automation_occurrence"
+  ) {
+    return null;
+  }
+  return {
+    expectedUserId: input.authority.originMemberId,
+    mailboxItemId: input.completionId,
+  };
 }
 
 export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
@@ -703,13 +709,7 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || completionWake.eventId !== completionId
     || completionWake.userId !== input.boundRuntimeMemberId
     || !("origin" in completionWake.ask)
-    || (
-      completionWake.ask.origin.kind !== "accepted_input"
-      && (
-        completionWake.ask.origin.kind !== "automation_occurrence"
-        || !("permissionText" in completionWake.ask)
-      )
-    )
+    || completionWake.ask.origin.kind !== "accepted_input"
     || completionWake.ask.expiresAt !== completionItem.expiresAt
     || createHostedAssistantAskCompletionId(completionWake.ask.requestId)
       !== completionId
@@ -743,11 +743,8 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   const authority = requestRead.authority;
   if (
     !authority
-    || authority.deliveryMode !== (
-      completionWake.ask.origin.kind === "accepted_input"
-        ? "reviewed_exact"
-        : "automation_continuation"
-    )
+    || !("origin" in authority)
+    || authority.origin.kind !== "accepted_input"
     || authority.originMemberId !== input.boundRuntimeMemberId
     || authority.expiresAt !== completionWake.ask.expiresAt
     || !hostedAssistantAskOriginsEqual(
@@ -909,6 +906,41 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
     return unavailableAdmission("grant_unavailable");
   }
 
+  if (wake.ask.origin.kind === "automation_occurrence") {
+    const completionId = createHostedAssistantAskCompletionId(input.requestId);
+    const completionItem = await readHostedMailboxItemById({
+      mailboxItemId: completionId,
+      prisma: input.tx,
+    });
+    if (completionItem) {
+      const completion = await readMatchingHostedAssistantAskCompletionTx({
+        completionId,
+        existingDedupeKey: completionItem.dedupeKey,
+        existingExpiresAt: completionItem.expiresAt ?? null,
+        existingKind: completionItem.kind,
+        existingUserId: completionItem.userId,
+        expectedAuthority: {
+          expiresAt: wake.ask.expiresAt,
+          origin: wake.ask.origin,
+          originMemberId: input.groupRuntimeMemberId,
+          permissionText: authority.permissionText,
+          question: wake.ask.question,
+          targetLabel: null,
+        },
+        expectedRequestId: input.requestId,
+        now: input.now,
+        tx: input.tx,
+      });
+      if (!completion) {
+        return unavailableAdmission("completion_unavailable");
+      }
+      return {
+        mailboxWake: null,
+        result: { ...completion.ask.result, status: "completed" },
+      };
+    }
+  }
+
   return {
     mailboxWake: {
       expectedUserId: input.existingUserId,
@@ -978,7 +1010,6 @@ async function readHostedAssistantAskAuthorityTx(input: {
 
     return {
       authority: {
-        deliveryMode: "legacy",
         expiresAt: wake.ask.expiresAt,
         originAssistantInputId: wake.ask.originAssistantInputId,
         originMemberId: membershipAuthority.membership.memberId,
@@ -1025,18 +1056,8 @@ async function readHostedAssistantAskAuthorityTx(input: {
     question: wake.ask.question,
     targetLabel: null,
   } as const;
-  const origin = wake.ask.origin;
   return {
-    // Delivery is derived from the trusted origin kind, not a separate wire
-    // field: an automation occurrence resumes its current canonical group
-    // turn, while an accepted input is reviewed and delivered exactly.
-    authority: origin.kind === "automation_occurrence"
-      ? {
-          ...consentedAuthorityCommon,
-          deliveryMode: "automation_continuation",
-          origin,
-        }
-      : { ...consentedAuthorityCommon, deliveryMode: "reviewed_exact", origin },
+    authority: { ...consentedAuthorityCommon, origin: wake.ask.origin },
     terminalReason: null,
   };
 }
@@ -1293,20 +1314,34 @@ async function isMatchingHostedAssistantAskCompletionTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
+  return Boolean(await readMatchingHostedAssistantAskCompletionTx(input));
+}
+
+async function readMatchingHostedAssistantAskCompletionTx(input: {
+  completionId: string;
+  existingDedupeKey: string;
+  existingExpiresAt: string | null;
+  existingKind: string;
+  existingUserId: string;
+  expectedAuthority: HostedAssistantAskAuthority;
+  expectedRequestId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedExecutionAssistantAskCompletedWake | null> {
   if (
     input.existingDedupeKey !== input.completionId
     || input.existingExpiresAt !== input.expectedAuthority.expiresAt
     || input.existingKind !== "assistant.ask.completed"
     || input.existingUserId !== input.expectedAuthority.originMemberId
   ) {
-    return false;
+    return null;
   }
   const wake = await readHostedMailboxWakeByItemId({
     availableAt: input.now,
     mailboxItemId: input.completionId,
     prisma: input.tx,
   });
-  return Boolean(
+  return (
     wake
     && isHostedExecutionAssistantAskCompletedWake(wake)
     && wake.eventId === input.completionId
@@ -1315,8 +1350,8 @@ async function isMatchingHostedAssistantAskCompletionTx(input: {
       authority: input.expectedAuthority,
       payload: wake.ask,
       requestId: input.expectedRequestId,
-    }),
-  );
+    })
+  ) ? wake : null;
 }
 
 function buildHostedAssistantAskCompletedPayload(input: {
@@ -1331,24 +1366,16 @@ function buildHostedAssistantAskCompletedPayload(input: {
     result: input.result,
     targetLabel: input.authority.targetLabel,
   };
-  if (input.authority.deliveryMode === "legacy") {
+  if (!("origin" in input.authority)) {
     return {
       ...common,
       originAssistantInputId: input.authority.originAssistantInputId,
       originSessionId: input.authority.originSessionId,
     };
   }
-  if (input.authority.deliveryMode === "reviewed_exact") {
-    return {
-      ...common,
-      origin: input.authority.origin,
-      targetLabel: null,
-    };
-  }
   return {
     ...common,
     origin: input.authority.origin,
-    permissionText: input.authority.permissionText,
     targetLabel: null,
   };
 }
@@ -1366,7 +1393,7 @@ function hostedAssistantAskCompletionMatchesAuthority(input: {
   ) {
     return false;
   }
-  if (input.authority.deliveryMode === "legacy") {
+  if (!("origin" in input.authority)) {
     return !("origin" in input.payload)
       && input.payload.originAssistantInputId
         === input.authority.originAssistantInputId
@@ -1381,11 +1408,7 @@ function hostedAssistantAskCompletionMatchesAuthority(input: {
   ) {
     return false;
   }
-  return input.authority.deliveryMode !== "automation_continuation"
-    || (
-      "permissionText" in input.payload
-      && input.payload.permissionText === input.authority.permissionText
-    );
+  return true;
 }
 
 function resolveHostedAssistantAskMembership(input: {
@@ -1495,49 +1518,35 @@ function isHostedAssistantAskBoundGroupConversation(
     && wake.message.routeAuthority.threadId === wake.message.linqMessage.chatId;
 }
 
-function normalizeHostedGroupMemberAssistantAskInvocation(input: {
+function normalizeHostedGroupMemberAssistantAskOrigin(input: {
   origin: HostedExecutionAssistantAskOrigin;
-}):
-  | {
-      deliveryMode: "reviewed_exact";
-      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-    }
-  | {
-      deliveryMode: "automation_continuation";
-      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
-    } {
+}): HostedExecutionAssistantAskOrigin {
   if (input.origin.kind === "accepted_input") {
     return {
-      deliveryMode: "reviewed_exact",
-      origin: {
-        assistantInputId: normalizeHostedAssistantAskText({
-          label: "Hosted assistant ask accepted input ID",
-          maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-          value: input.origin.assistantInputId,
-        }),
-        kind: input.origin.kind,
-        sessionId: normalizeHostedAssistantAskText({
-          label: "Hosted assistant ask origin session ID",
-          maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-          value: input.origin.sessionId,
-        }),
-      },
+      assistantInputId: normalizeHostedAssistantAskText({
+        label: "Hosted assistant ask accepted input ID",
+        maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+        value: input.origin.assistantInputId,
+      }),
+      kind: input.origin.kind,
+      sessionId: normalizeHostedAssistantAskText({
+        label: "Hosted assistant ask origin session ID",
+        maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+        value: input.origin.sessionId,
+      }),
     };
   }
   return {
-    deliveryMode: "automation_continuation",
-    origin: {
-      automationId: normalizeHostedAssistantAskText({
-        label: "Hosted assistant ask automation ID",
-        maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
-        value: input.origin.automationId,
-      }),
-      kind: input.origin.kind,
-      occurrenceAt: normalizeHostedAssistantAskTimestamp(
-        input.origin.occurrenceAt,
-        "Hosted assistant ask occurrence",
-      ),
-    },
+    automationId: normalizeHostedAssistantAskText({
+      label: "Hosted assistant ask automation ID",
+      maxCodePoints: HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
+      value: input.origin.automationId,
+    }),
+    kind: input.origin.kind,
+    occurrenceAt: normalizeHostedAssistantAskTimestamp(
+      input.origin.occurrenceAt,
+      "Hosted assistant ask occurrence",
+    ),
   };
 }
 

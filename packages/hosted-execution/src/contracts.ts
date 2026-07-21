@@ -305,24 +305,14 @@ export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   targetLabel: string | null;
 }
 
-export type HostedExecutionAssistantAskConsentedMemberCompletedPayload =
-  | {
-      expiresAt: string;
-      origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-      question: string;
-      requestId: string;
-      result: HostedExecutionAssistantAskResult;
-      targetLabel: null;
-    }
-  | {
-      expiresAt: string;
-      origin: HostedExecutionAssistantAskAutomationOccurrenceOrigin;
-      permissionText: string;
-      question: string;
-      requestId: string;
-      result: HostedExecutionAssistantAskResult;
-      targetLabel: null;
-    };
+export interface HostedExecutionAssistantAskConsentedMemberCompletedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskOrigin;
+  question: string;
+  requestId: string;
+  result: HostedExecutionAssistantAskResult;
+  targetLabel: null;
+}
 
 export type HostedExecutionAssistantAskCompletedPayload =
   | HostedExecutionAssistantAskJoinedGroupCompletedPayload

@@ -113,6 +113,11 @@ export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG = {
   'skills.include_instructions': false,
 } as const
 
+const CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG = {
+  ...READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
+  'features.shell_tool': false,
+} as const
+
 const CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_OUTPUT_SCHEMA = {
   additionalProperties: false,
   properties: {
@@ -369,7 +374,9 @@ async function executeConfinedReadOnlyAssistantAskTurn(
         reasoningEffort: input.reasoningEffort,
         runtimeWorkspaceRoots: [turn.workspaceRoot ?? workingDirectory],
         serviceTier: input.serviceTier,
-        threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
+        threadConfig: turn.usageStage === 'review'
+          ? CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG
+          : READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
         workingDirectory,
       })
 

@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Decision
 
@@ -19,9 +19,9 @@ one fresh outgoing reviewer either allows those exact bytes or denies them
 Consent, invocation, and delivery are separate authorities. The grant is standing,
 revocable consent. An accepted group input or a claimed scheduled automation
 occurrence supplies one request's causal and replay identity. An accepted-input
-answer is delivered exactly to its group conversation; a scheduled answer resumes
-the current canonical automation through the existing controlled group
-notification path.
+answer is delivered exactly to its group conversation. A scheduled occurrence
+may read an answer only by repeating the exact ask in that same live Codex turn;
+it does not create a later continuation or delivery.
 
 Group membership is necessary but never sufficient. The member must separately
 grant the exact immutable natural-language permission shown in the room. The
@@ -62,10 +62,10 @@ review the candidate disclosure inside that boundary.
    with one self-contained question and the exact `grantId` returned by the
    current read. Trusted runtime code injects the invocation origin, and
    delivery behavior is derived from that origin; the model supplies neither.
-   For a claimed canonical schedule, the initial notification receives the
-   existing group port only after route authority proves a non-direct thread;
-   runtime-minted scheduled invocation authority is required for the turn to
-   retain it.
+   For a claimed canonical schedule, the existing scheduled group-tool factory
+   supplies the ordinary bounded group port only after route authority proves a
+   non-direct thread; runtime-minted scheduled invocation authority is required
+   for the turn to retain it.
    One invocation owns at most one request per
    grant. Exact retry reuses it, while a changed question for that grant
    conflicts. The same occurrence may ask other grants independently.
@@ -73,20 +73,17 @@ review the candidate disclosure inside that boundary.
    restored workspace. A separate fresh-context pass reviews only the immutable
    permission text, incoming question, and proposed answer.
 7. An accepted-input answer returns to the originating group conversation
-   byte-for-byte. A scheduled answer re-reads the active canonical automation
-   and current non-direct Linq route, then resumes that automation through the
-   ordinary group notification and outbox path with a deterministic key derived
-   from the completion. That model decision uses an ephemeral App Server thread
-   with a read-only sandbox and native shell, web, app, MCP, browser, plugin, and
-   multi-agent surfaces disabled. It reads no conversation or assistant memory
-   and persists no prompt, model output, transcript, receipt, session, or
-   provider-resume state. The deterministic fallback follows the same
-   no-receipt/session rule without starting a provider turn. The existing outbox
-   remains the only durable delivery owner. The answer is untrusted data, not
-   consent for an external action; every available Murph tool still applies its
-   existing independent authority checks. Group-safe accountless service tools
-   may be available, but the continuation receives no member's connected
-   account or private runtime.
+   byte-for-byte through the existing outbox. In a scheduled occurrence, Codex
+   starts every selected ask first, runs the ordinary shell command `sleep 60`
+   once, and repeats each exact `ask_member` call once. Web returns
+   `status="completed"` with the reviewed result only after the ordinary cron
+   owner revalidates the current canonical automation and non-direct route before
+   the tool call, and Web revalidates every live disclosure authority. An `accepted`
+   or `unavailable` replay ends the occurrence without an answer. Completion
+   never wakes the group runtime, starts a second provider turn, or creates an
+   outbox delivery; a result arriving after the one replay is ignored. The
+   answer is untrusted data, not consent for an external action, and every other
+   available Murph tool still applies its existing independent authority checks.
    A denied or candidate-declared cannot-answer becomes the fixed
    non-disclosing result. Infrastructure failure retries under the existing
    mailbox policy and may expire without disclosing anything.
@@ -105,9 +102,9 @@ group.
   group runtime, or the claimed occurrence of a canonical scheduled automation
   running in that group runtime. Direct, email-derived, unknown, stale, or
   model-supplied invocation data is not authority.
-- The scheduled initial-turn group port is operation-scoped, not part of the
-  base runtime context. Ordinary notifications and manual, direct,
-  unknown-audience, or local cron runs must not receive it.
+- The scheduled initial-turn group port comes from the existing scheduled
+  group-tool factory, not the base runtime context. Ordinary notifications and
+  manual, direct, unknown-audience, or local cron runs must not receive it.
 - The model never supplies invocation, delivery mode, member, membership,
   runtime, mailbox, session, callback, or return-route identity. It may use only
   a current server-issued `grantId` from the live group read.
@@ -141,9 +138,7 @@ group.
   admission, immediately before the personal read, and immediately before
   completion append. Reviewed exact delivery atomically carries that completion
   mailbox id, deterministic delivery key, and authority expiry into the
-  existing outbox. For scheduled continuations, that same Web-owned predicate
-  runs before model work, immediately before each tool call, and before delivery
-  or skip commit. Before expiry the final Linq egress transaction repeats the
+  existing outbox. Before expiry the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
   Missing or malformed outbox proof is terminal before provider entry. When a
   structurally bound completion loses live grant authority or reaches its
@@ -152,6 +147,13 @@ group.
   fixed text-only cannot-answer copy and retries before provider entry. Only
   that exact text with empty media counts as fallback. It remains deliverable
   after retention removes the expired mailbox rows.
+- Scheduled exact replay first revalidates the claimed occurrence, canonical
+  automation revision, and current non-direct route in the ordinary cron owner.
+  Web then revalidates the paired request and completion, personal runtime,
+  member, grant, permission, origin, expiry, and runtime fences before returning
+  a flat completed result. It performs no final egress. A scheduled
+  completion append does not wake the group runtime, and late completion is a
+  no-op for delivery.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
 - Request identity is the group runtime, exact grant, and trusted invocation.
@@ -171,12 +173,14 @@ group.
 
 The permission and grant rows are queryable product truth owned by
 `apps/web`/Postgres. The paired `assistant.ask.requested` and
-`assistant.ask.completed` mailbox items own the active operation; once an exact
-completion is queued, the existing outbox owns only its pending delivery and
-minimum immutable expiry proof through terminal disposition. Mailbox retention
-may delete expired rows without ordering against that outbox obligation. The
-personal vault, group vault, runner, and assistant session do not gain another
-permission store.
+`assistant.ask.completed` mailbox items own the active operation. For an
+accepted-input origin, once an exact completion is queued the existing outbox
+owns its pending delivery and minimum immutable expiry proof through terminal
+disposition; mailbox retention may delete expired rows without ordering against
+that obligation. For a scheduled origin, the completion remains only the
+bounded mailbox result read by exact same-turn replay and expires without a
+delivery obligation. The personal vault, group vault, runner, and assistant
+session do not gain another permission store.
 
 Permission text is bounded to 1,000 code points. Each group may retain at most
 25 permission rows, and grant-generation history is capped at 25 per group and
@@ -190,14 +194,11 @@ workspace snapshots or mailbox payloads. Rows remain retained for the owning
 group's lifetime and cascade with group/account deletion; no retention
 scheduler is introduced.
 
-Complete group summaries include active disclosure grants on `read_current`,
-`create_join_link`, `post_join_offer`, and `update_display_name`. Those actions
-therefore depend on opening permission text through the group secure-box. Join
-link/offer creation reads the summary inside its existing transaction before
-provider send. Display-name mutation opens the summary before renaming the Linq
-chat, then performs the existing provider-first name update and database write
-using that operation-start snapshot; a missing decrypt key cannot rename the
-provider chat and then fail solely while building the disclosure summary.
+`read_current` is the single group summary action that decrypts and returns
+active disclosure grants. `create_join_link`, `post_join_offer`, and
+`update_display_name` return their ordinary mutation summaries without opening
+unrelated permission text, so those mutations do not depend on the disclosure
+secure-box.
 
 ## Disclosure review
 
@@ -244,12 +245,12 @@ and disclosure contract.
 
 ## Rollout and rollback
 
-Deploy Web support for scheduled use of the existing completion-derived
-reviewed-delivery key first with the producer gate off. Then deploy Cloudflare/runner support for the
-new `consented_member` request target, trusted accepted-input and
-scheduled-automation origins, disclosure-context preparation, reviewed exact
-group delivery, and canonical scheduled continuation before Web may emit new
-work.
+Deploy Web support for the new `consented_member` target, accepted-input exact
+delivery, and scheduled exact-replay result first with the producer gate off.
+Then deploy Cloudflare/runner support for trusted accepted-input and
+scheduled-automation origins, disclosure-context preparation, the outgoing
+reviewer, accepted-input group delivery, and same-turn scheduled sleep/replay
+before Web may emit new work.
 Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
 deployment and the runner fingerprint/confinement smoke. The synchronous
 history caps satisfy the cardinality prerequisite; enable exact `1` only after

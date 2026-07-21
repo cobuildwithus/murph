@@ -1874,6 +1874,24 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+    if (action === "ask_member" && status === "completed") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["answer", "outcome", "status"]),
+        "Hosted runtime group tool ask_member completed response result",
+      );
+      const parsedResult = parseHostedExecutionAssistantAskResult(
+        { answer: result.answer, outcome: result.outcome },
+        "Hosted runtime group tool ask_member completed result",
+      );
+      return {
+        action,
+        result: {
+          ...parsedResult,
+          status,
+        },
+      };
+    }
     if (action === "ask" && status === "clarification_required") {
       assertAllowedObjectKeys(
         result,

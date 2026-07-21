@@ -548,19 +548,6 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("group_not_found");
   }
 
-  const prisma = getPrisma();
-  let disclosureGrants: Awaited<
-    ReturnType<typeof readActiveHostedGroupDisclosureGrantsForGroup>
-  >;
-  try {
-    disclosureGrants = await readActiveHostedGroupDisclosureGrantsForGroup({
-      groupId: existingGroupId,
-      prisma,
-    });
-  } catch {
-    return unavailable("group_summary_unavailable");
-  }
-
   try {
     await updateHostedLinqChatDisplayName({
       chatId: access.chatId,
@@ -570,7 +557,7 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
-  const updated = await prisma.$transaction(
+  const updated = await getPrisma().$transaction(
     async (tx) => {
       return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
         displayName,
@@ -585,10 +572,7 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     action: "update_display_name",
     result: updated
       ? {
-          group: toHostedRuntimeGroupSummary(
-            updated,
-            disclosureGrants,
-          ),
+          group: updated,
           status: "ok",
         }
       : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
@@ -747,15 +731,10 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       requestedVaultShareProjectionScopes,
       tx,
     });
-    const disclosureGrants = await readActiveHostedGroupDisclosureGrantsForGroup({
-      groupId: result.group.id,
-      prisma: tx,
-    });
     return {
       kind: "ok" as const,
       ownerMemberId: ownerAccess.ownerMemberId,
       ...result,
-      disclosureGrants,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -788,10 +767,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
   return {
     action: "create_join_link",
     result: {
-      group: toHostedRuntimeGroupSummary(
-        created.group,
-        created.disclosureGrants,
-      ),
+      group: created.group,
       joinUrl,
       status: "ok",
     },
@@ -867,10 +843,17 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
       originAssistantInputId: input.originAssistantInputId,
     });
   const postedAt = new Date();
+  const sendAuthorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in sendAuthorized) {
+    return unavailable(sendAuthorized.unavailableReason);
+  }
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
-      chatId: authorized.chatId,
+      chatId: sendAuthorized.chatId,
       idempotencyKey: providerIdempotencyKey,
       message: consentMessage,
     });
@@ -964,10 +947,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
-    const disclosureGrants = await readActiveHostedGroupDisclosureGrantsForGroup({
-      groupId: result.group.id,
-      prisma: tx,
-    });
     const offerPost = hasEveryHostedGroupMemberGrantedProjectionScopes(
       result.group,
       projectionScopes,
@@ -986,7 +965,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       offerPost,
       ownerMemberId: ownerAccess.ownerMemberId,
       ...result,
-      disclosureGrants,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (created.kind !== "ok") {
@@ -1007,10 +985,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     return {
       action: "post_join_offer",
       result: {
-        group: toHostedRuntimeGroupSummary(
-          created.group,
-          created.disclosureGrants,
-        ),
+        group: created.group,
         joinUrl,
         status: "sent",
       },
@@ -1068,10 +1043,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   return {
     action: "post_join_offer",
     result: {
-      group: toHostedRuntimeGroupSummary(
-        created.group,
-        created.disclosureGrants,
-      ),
+      group: created.group,
       joinUrl,
       status: "sent",
     },

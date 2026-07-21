@@ -110,8 +110,7 @@ describe("consented member Assistant Ask contracts", () => {
     expect(
       parseHostedExecutionAssistantAskCompletedPayload(reviewedCompletion),
     ).toEqual(reviewedCompletion);
-    // A reviewed (accepted-input) completion never carries the private
-    // permission text that only the internal automation path discloses.
+    // Completion payloads never carry private permission text.
     expect(() => parseHostedExecutionAssistantAskCompletedPayload({
       ...reviewedCompletion,
       permissionText: "should not appear on a reviewed completion",
@@ -193,6 +192,14 @@ describe("group disclosure tool contracts", () => {
 
     for (const response of [
       { action: "ask_member", result: { status: "accepted" } },
+      {
+        action: "ask_member",
+        result: {
+          answer: "Tuesday after 3pm.",
+          outcome: "answered",
+          status: "completed",
+        },
+      },
       { action: "ask_member", result: { status: "unavailable", unavailableReason: "denied" } },
     ]) expect(parseHostedRuntimeGroupToolResponse(response)).toMatchObject(response);
     expect(() => parseHostedRuntimeGroupToolResponse({

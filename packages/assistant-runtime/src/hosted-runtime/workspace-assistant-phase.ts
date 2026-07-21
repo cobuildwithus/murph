@@ -551,30 +551,6 @@ function createHostedAssistantAutomationOperationScope(
         scopeInput.turnEnvironment,
       );
     },
-    async runScheduledAutomationOccurrence<T>(scopeInput: {
-      executionContext: AssistantExecutionContext;
-      operation(
-        executionContext: AssistantExecutionContext,
-        turnEnvironment: AssistantTurnEnvironment | null,
-      ): Promise<T>;
-      threadIsDirect: boolean | null;
-      turnEnvironment: AssistantTurnEnvironment | null;
-    }): Promise<T> {
-      const scopedExecutionContext = scopeInput.threadIsDirect === false
-        ? scopeHostedGroupToolToAssistantOperation({
-            emailDeliveryContexts: [],
-            executionContext: scopeInput.executionContext,
-            groupSharedReadAvailable: false,
-            groupEmailIngress: false,
-            groupToolPort: input.runtime.platform.groupToolPort ?? null,
-            linqDeliveryContexts: [],
-          })
-        : scopeInput.executionContext;
-      return await scopeInput.operation(
-        scopedExecutionContext,
-        scopeInput.turnEnvironment,
-      );
-    },
   };
 }
 
@@ -733,6 +709,9 @@ function createHostedScheduledGroupTools(input: {
 }): {
   groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool;
   groupSharedReader: AssistantHostedGroupSharedReader;
+  groupTool: NonNullable<
+    NonNullable<AssistantExecutionContext["hosted"]>["groupTool"]
+  >;
 } | null {
   const channel = input.channel.trim().toLowerCase();
   const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
@@ -742,6 +721,7 @@ function createHostedScheduledGroupTools(input: {
     || input.threadIsDirect !== false
     || !containerMemberId
     || !target
+    || !input.groupToolPort
   ) {
     return null;
   }
@@ -820,7 +800,11 @@ function createHostedScheduledGroupTools(input: {
     },
   };
 
-  return { groupPermissionOfferTool, groupSharedReader };
+  return {
+    groupPermissionOfferTool,
+    groupSharedReader,
+    groupTool: input.groupToolPort,
+  };
 }
 
 function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<
@@ -1201,7 +1185,6 @@ export async function runHostedWorkspaceAssistantPhase(
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
         resolveScheduledLinqRoute: async ({
           homeRouteFallbackAllowed,
-          reviewedCompletion,
           signal,
           target,
           targetKind,
@@ -1216,17 +1199,6 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           const authority = await assertEngagement({
-            ...(reviewedCompletion
-              ? {
-                  answeredMailboxItemIds: [
-                    reviewedCompletion.answeredMailboxItemId,
-                  ],
-                  assistantAskCompletionExpiresAt:
-                    reviewedCompletion.expiresAt,
-                  assistantAskFallback: false,
-                  idempotencyKey: reviewedCompletion.idempotencyKey,
-                }
-              : {}),
             authorityCheckOnly: true,
             homeRouteFallbackAllowed,
             target,
@@ -1240,9 +1212,6 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           return {
-            ...(authority.assistantAskFallbackRequired === true
-              ? { assistantAskFallbackRequired: true as const }
-              : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

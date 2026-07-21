@@ -3518,13 +3518,6 @@ describe("runHostedAssistantAutomationLane", () => {
       async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
         return await operation(executionContext, turnEnvironment);
       },
-      async runScheduledAutomationOccurrence({
-        executionContext,
-        operation,
-        turnEnvironment,
-      }) {
-        return await operation(executionContext, turnEnvironment);
-      },
     };
     await runHostedAssistantAutomationLane({
       assistantRuntimeState: {

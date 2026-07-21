@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Decision
 
@@ -453,44 +453,40 @@ On an allow, the completion control path revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
-discriminant owns what happens next: `accepted_input` bypasses the provider
+discriminant owns what happens next. `accepted_input` bypasses a provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
-original group route, while `automation_occurrence` re-reads the active
-canonical automation and current non-direct Linq route before resuming the
-   ordinary controlled group notification and outbox path. A completion-derived
-   delivery key makes retries idempotent. The same Web-owned completion predicate
-   runs before model work, before each tool call, and before delivery or skip
-   commit. The model decision uses an ephemeral App Server thread with a
-   read-only sandbox and native shell, web, app, MCP, browser, plugin, and
-   multi-agent surfaces disabled. It reads no memory and persists no prompt,
-   output, transcript, receipt, session, or provider-resume state. The
-   deterministic fallback uses the same no-receipt/session rule without entering
-   the provider; the existing outbox is the durable delivery owner.
-   The continuation still receives tools independently authorized for the current
-   scheduled group turn. Cannot-answer uses the fixed non-disclosing result. The original private-to-group continuation retains its
+original group route through the existing outbox. `automation_occurrence` does
+not wake the group runtime or create a delivery. The live scheduled Codex turn
+starts every selected ask, uses one ordinary `sleep 60`, then repeats each exact
+`ask_member` call once. Web returns a flat completed result only after
+the ordinary cron owner revalidates the current canonical automation and
+non-direct Linq route immediately before the tool call, and Web revalidates the
+same request, completion, member, grant, permission, target runtime, origin,
+expiry, and runtime fences. An accepted or unavailable replay ends the turn without an
+answer; later completion is ignored. Cannot-answer uses the fixed non-disclosing
+result. The original private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
 produce new generations, so old work cannot cross either lifecycle boundary.
 For accepted-input delivery, if live authority disappears after an exact answer
 is queued, its existing outbox intent retains the completion id, deterministic
 delivery key, and authority expiry through terminal disposition. The runner
-   rewrites that intent's text and media to the fixed text-only cannot-answer copy
-   before provider entry. At
-expiry it uses the outbox-owned deadline even if mailbox retention has already
+rewrites that intent's text and media to the fixed text-only cannot-answer copy
+before provider entry. At expiry it uses the outbox-owned deadline even if
+mailbox retention has already
 removed the request and completion rows; before expiry Web still owns live
 revocation revalidation. The final egress claim permits only the structurally
-bound fixed fallback without reviving the private grant. Automation-occurrence
-completion may create an ordinary group-notification delivery intent only while
-the completion, current grant, canonical automation revision, and route remain
-authorized.
+bound fixed fallback without reviving the private grant. Scheduled-origin
+completion has no outbox obligation and remains readable only by the one exact
+same-turn replay while its live authority remains current.
 
 Web caps retained permission history at 25 rows per group and retained grant
 generations at 25 per group and 25 per member. Counts run under the canonical
 group/member locks after deterministic request/reaction replay checks. Thus an
 exact replay still succeeds at the cap while only a fresh append receives the
-typed limit disposition. Group summaries returned by `create_join_link`,
-`post_join_offer`, and `update_display_name` include decrypted active disclosure
-grants. Display-name handling opens that summary before the Linq rename so a
-secure-box failure cannot be introduced after the provider mutation.
+typed limit disposition. Only `read_current` decrypts and returns active
+disclosure grants. Mutation summaries from `create_join_link`, `post_join_offer`,
+and `update_display_name` do not open unrelated permission text or depend on
+that secure-box operation.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime

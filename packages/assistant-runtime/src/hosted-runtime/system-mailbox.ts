@@ -22,7 +22,6 @@ import {
 } from "./events.ts";
 import {
   isHostedAssistantAskCompletionPreemptedError,
-  isHostedAssistantAskAutomationCompletedWake,
 } from "./events/assistant-ask-completion.ts";
 import type {
   HostedMailboxItemImportOutcome,
@@ -527,17 +526,12 @@ async function executePendingHostedSystemMailboxItem(input: {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
-  const baseExecutionContext =
+  const executionContext =
     input.executionContext
     ?? buildHostedSystemMailboxExecutionContext({
       runtime: input.runtime,
       wake: input.pendingItem.wake,
     });
-  const executionContext = scopeHostedScheduledAssistantAskGroupTool({
-    executionContext: baseExecutionContext,
-    groupToolPort: input.runtime.platform.groupToolPort ?? null,
-    wake: input.pendingItem.wake,
-  });
 
   return executeHostedMailboxEvent({
     executionContext,
@@ -559,27 +553,6 @@ async function executePendingHostedSystemMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
   });
-}
-
-function scopeHostedScheduledAssistantAskGroupTool(input: {
-  executionContext: AssistantExecutionContext;
-  groupToolPort: HostedSystemMailboxRuntime["platform"]["groupToolPort"] | null;
-  wake: HostedExecutionSystemWake;
-}): AssistantExecutionContext {
-  if (
-    input.wake.kind !== "assistant.ask.completed"
-    || !isHostedAssistantAskAutomationCompletedWake(input.wake)
-    || !input.executionContext.hosted
-    || !input.groupToolPort
-  ) {
-    return input.executionContext;
-  }
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      groupTool: input.groupToolPort,
-    },
-  };
 }
 
 function buildHostedSystemMailboxExecutionContext(input: {

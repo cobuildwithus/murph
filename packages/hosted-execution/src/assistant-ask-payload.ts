@@ -1,6 +1,5 @@
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
-  HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAssistantAskCompletedPayload,
@@ -136,33 +135,6 @@ export function parseHostedExecutionAssistantAskCompletedPayload(
     `${label}.origin`,
   );
   assertHostedExecutionAssistantAskNullTargetLabel(record.targetLabel, label);
-  // Delivery is derived from the trusted origin kind: an automation occurrence
-  // completes internally (and carries the disclosed permission text), an
-  // accepted input is the reviewed exact group delivery.
-  if (origin.kind === "automation_occurrence") {
-    assertExactHostedExecutionAssistantAskKeys(record, [
-      "expiresAt",
-      "origin",
-      "permissionText",
-      "question",
-      "requestId",
-      "result",
-      "targetLabel",
-    ], label);
-    return {
-      expiresAt,
-      origin,
-      permissionText: parseHostedExecutionAssistantAskBoundedText({
-        label: `${label}.permissionText`,
-        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
-        value: record.permissionText,
-      }),
-      question,
-      requestId,
-      result,
-      targetLabel: null,
-    };
-  }
   assertExactHostedExecutionAssistantAskKeys(record, [
     "expiresAt",
     "origin",

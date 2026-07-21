@@ -158,6 +158,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
+    expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell sleep once");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("repeat each exact same ask_member call once");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("without an answer or follow-up turn");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("resumes the automation");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('In a connected group-chat turn, if read_current returns status="none"');
     expect(MURPH_GROUP_TOOL.description)
@@ -1099,7 +1105,54 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it("limits scheduled group invocations to read_current and ask_member", async () => {
+  it("keeps scheduled permission offers on the existing bounded port", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>();
+    const groupPermissionOfferRequest = vi.fn<GroupPermissionOfferRequest>(
+      async () => ({
+        action: "post_join_offer",
+        result: {
+          group: null,
+          status: "unavailable",
+          unavailableReason: "permission_offer_unavailable",
+        },
+      }),
+    );
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            automationId: "automation_call_circle",
+            kind: "automation_occurrence",
+            occurrenceAt: "2026-07-20T13:00:00.000Z",
+          },
+        }),
+        groupPermissionOfferRequest,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(groupPermissionOfferRequest).toHaveBeenCalledWith({
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    });
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects unrelated regular group mutations from scheduled invocations", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
       displayName: "Not allowed from cron",

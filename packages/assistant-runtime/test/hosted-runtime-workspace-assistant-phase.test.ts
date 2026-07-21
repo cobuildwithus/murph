@@ -817,6 +817,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!scheduledGroupTools) {
         throw new Error("Expected scheduled group capabilities.");
       }
+      expect(scheduledGroupTools.groupTool).toEqual({ request });
       expect(request).not.toHaveBeenCalled();
       await expect(scheduledGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
@@ -1035,7 +1036,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
       .mockResolvedValueOnce({
-        assistantAskFallbackRequired: true,
         targetOverride: {
           target: "chat_current_group",
           targetKind: "thread" as const,
@@ -1061,16 +1061,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
         await expect(resolveScheduledLinqRoute({
           homeRouteFallbackAllowed: false,
-          reviewedCompletion: {
-            answeredMailboxItemId: "aask_reviewed_completion",
-            expiresAt: "2026-07-20T17:10:00.000Z",
-            idempotencyKey: "reviewed-assistant-ask-completion:test",
-          },
           signal,
           target: "chat_saved_group",
           targetKind: "thread",
         })).resolves.toEqual({
-          assistantAskFallbackRequired: true,
           target: "chat_current_group",
           threadIsDirect: false,
         });
@@ -1094,12 +1088,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await runHostedWorkspaceAssistantPhase(phaseInput);
 
     expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
-      answeredMailboxItemIds: ["aask_reviewed_completion"],
-      assistantAskCompletionExpiresAt: "2026-07-20T17:10:00.000Z",
-      assistantAskFallback: false,
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: false,
-      idempotencyKey: "reviewed-assistant-ask-completion:test",
       target: "chat_saved_group",
       targetKind: "thread",
     }, { signal });
@@ -3990,7 +3980,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("scopes the group port only to scheduled group occurrences", async () => {
+  it("scopes the group port through the scheduled group tool factory", async () => {
     const groupRequest = vi.fn(async () => {
       throw new Error("The scheduled scope boundary test must not call the port.");
     });
@@ -3999,27 +3989,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    const operationScope = laneInput?.operationScope as
-      | AssistantAutomationOperationScope
-      | undefined;
-    if (!laneInput?.executionContext || !operationScope) {
-      throw new Error("Expected hosted automation operation scope.");
+    const createScheduledGroupTools =
+      laneInput?.executionContext.hosted?.createScheduledGroupTools;
+    if (!createScheduledGroupTools) {
+      throw new Error("Expected hosted scheduled group tools.");
     }
 
-    const runScheduledScope = async (threadIsDirect: boolean | null) =>
-      await operationScope.runScheduledAutomationOccurrence({
-        executionContext: laneInput.executionContext,
-        operation: async (executionContext, turnEnvironment) => {
-          expect(turnEnvironment?.env).toEqual({ BASE_ENV: "preserved" });
-          return executionContext.hosted?.groupTool != null;
-        },
-        threadIsDirect,
-        turnEnvironment: { env: { BASE_ENV: "preserved" } },
-      });
-
-    await expect(runScheduledScope(false)).resolves.toBe(true);
-    await expect(runScheduledScope(true)).resolves.toBe(false);
-    await expect(runScheduledScope(null)).resolves.toBe(false);
+    expect(createScheduledGroupTools({
+      channel: "linq",
+      target: "chat_current_group",
+      threadIsDirect: false,
+    })?.groupTool).toEqual({ request: groupRequest });
+    expect(createScheduledGroupTools({
+      channel: "linq",
+      target: "chat_direct",
+      threadIsDirect: true,
+    })).toBeNull();
+    expect(createScheduledGroupTools({
+      channel: "telegram",
+      target: "chat_other",
+      threadIsDirect: null,
+    })).toBeNull();
     expect(groupRequest).not.toHaveBeenCalled();
   });
 

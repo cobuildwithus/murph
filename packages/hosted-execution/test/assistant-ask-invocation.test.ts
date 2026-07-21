@@ -77,28 +77,27 @@ describe("Assistant Ask trusted invocation contracts", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("keeps permission context only on an automation-origin completion", () => {
+  it("keeps permission context out of every completion payload", () => {
     expect(parseHostedExecutionAssistantAskCompletedPayload({
       expiresAt: "2026-07-20T13:10:00.000Z",
       origin: scheduledOrigin,
-      permissionText: "Coarse availability for arranging Call Circle calls.",
       question: "Which coarse call windows work over the next week?",
       requestId: "aask_req_1",
       result: { answer: "Tuesday evening", outcome: "answered" },
       targetLabel: null,
     })).toMatchObject({
       origin: scheduledOrigin,
-      permissionText: "Coarse availability for arranging Call Circle calls.",
     });
-    // A reviewed (accepted-input) completion must not carry permission text.
-    expect(() => parseHostedExecutionAssistantAskCompletedPayload({
-      expiresAt: "2026-07-20T13:10:00.000Z",
-      origin: acceptedOrigin,
-      permissionText: "should not appear here",
-      question: "Which coarse call windows work over the next week?",
-      requestId: "aask_req_1",
-      result: { answer: "Tuesday evening", outcome: "answered" },
-      targetLabel: null,
-    })).toThrow(/unsupported field/u);
+    for (const origin of [acceptedOrigin, scheduledOrigin]) {
+      expect(() => parseHostedExecutionAssistantAskCompletedPayload({
+        expiresAt: "2026-07-20T13:10:00.000Z",
+        origin,
+        permissionText: "should not appear here",
+        question: "Which coarse call windows work over the next week?",
+        requestId: "aask_req_1",
+        result: { answer: "Tuesday evening", outcome: "answered" },
+        targetLabel: null,
+      })).toThrow(/unsupported field/u);
+    }
   });
 });

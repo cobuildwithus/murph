@@ -24,9 +24,6 @@ import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn-runner.js'
-import {
-  ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES,
-} from './ask-continuation.js'
 import { normalizeCodexEvent } from '../assistant-codex-events.js'
 import {
   readCodexThreadCompatibilityFingerprint,
@@ -121,14 +118,6 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   promptProfile: 'maintenance',
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
-}
-const ASSISTANT_NOTIFICATION_REVIEWED_COMPLETION_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'conversation',
-  threadScope: 'isolated-thread',
-  toolProfile: 'provider-turn',
 }
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
@@ -263,8 +252,6 @@ export async function sendAssistantNotificationLocal(
         input,
         maintenanceEvidence,
       )
-      const scheduledReviewedCompletion =
-        isAssistantNotificationScheduledReviewedCompletion(input)
       let newsletterSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
         | null = input.scheduledAutomationAuthority
@@ -274,8 +261,8 @@ export async function sendAssistantNotificationLocal(
             }
           : null
       const resolved =
-        isAssistantNotificationEphemeral(input)
-          ? createAssistantIsolatedNotificationResolvedSession({
+        isAssistantNotificationMaintenanceExactSkip(input)
+          ? createAssistantMaintenanceNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
               message: messageInput,
@@ -387,7 +374,7 @@ export async function sendAssistantNotificationLocal(
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
-        isAssistantNotificationExactSkip(input)
+        isAssistantNotificationMaintenanceExactSkip(input)
           ? null
           : startAssistantChannelTypingIndicator({
               channelDependencies:
@@ -538,9 +525,9 @@ export async function sendAssistantNotificationLocal(
           )
         }
 
-        if (isAssistantNotificationExactSkip(input)) {
+        if (isAssistantNotificationMaintenanceExactSkip(input)) {
           try {
-            assertAssistantExactSkipNotificationDecision({
+            assertAssistantMaintenanceNotificationDecision({
               decision,
               policy: input.turnPolicy,
             })
@@ -564,19 +551,17 @@ export async function sendAssistantNotificationLocal(
             deliveryOutcome: null,
             response: null,
           })
-          const savedSession = scheduledReviewedCompletion
-            ? providerResult.session
-            : await persistAssistantTurnAndSession({
-                assistantTranscriptText: null,
-                input: messageInput,
-                plan: sharedPlan,
-                persistUserPromptToTranscript: false,
-                providerResult,
-                providerResumeStateAction,
-                session: providerResult.session,
-                turnCreatedAt,
-                turnId,
-              })
+          const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptText: null,
+            input: messageInput,
+            plan: sharedPlan,
+            persistUserPromptToTranscript: false,
+            providerResult,
+            providerResumeStateAction,
+            session: providerResult.session,
+            turnCreatedAt,
+            turnId,
+          })
           return withPostTurnDeliveryExpectations({
             decision,
             response: null,
@@ -597,9 +582,6 @@ export async function sendAssistantNotificationLocal(
 
         const state = createAssistantRuntimeStateService(input.vault)
         const createNotificationReceipt = async (session: AssistantSession): Promise<void> => {
-          if (scheduledReviewedCompletion) {
-            return
-          }
           await state.turns.createReceipt({
             sessionId: session.sessionId,
             provider: selectedRoute.provider,
@@ -615,19 +597,17 @@ export async function sendAssistantNotificationLocal(
 
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
-          const savedSession = scheduledReviewedCompletion
-            ? providerResult.session
-            : await persistAssistantTurnAndSession({
-                assistantTranscriptText: responseText,
-                input: messageInput,
-                plan: sharedPlan,
-                persistUserPromptToTranscript: false,
-                providerResult,
-                providerResumeStateAction,
-                session: providerResult.session,
-                turnCreatedAt,
-                turnId,
-              })
+          const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptText: responseText,
+            input: messageInput,
+            plan: sharedPlan,
+            persistUserPromptToTranscript: false,
+            providerResult,
+            providerResumeStateAction,
+            session: providerResult.session,
+            turnCreatedAt,
+            turnId,
+          })
           const deliveryOutcome = await deliverAssistantNotificationMessage({
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
@@ -639,14 +619,12 @@ export async function sendAssistantNotificationLocal(
             turnId,
           })
           committedDeliveryOutcomeKind = deliveryOutcome.kind
-          if (!scheduledReviewedCompletion) {
-            await finalizeAssistantTurnFromDeliveryOutcome({
-              outcome: deliveryOutcome,
-              response: responseText,
-              turnId,
-              vault: input.vault,
-            })
-          }
+          await finalizeAssistantTurnFromDeliveryOutcome({
+            outcome: deliveryOutcome,
+            response: responseText,
+            turnId,
+            vault: input.vault,
+          })
           if (
             input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
             assistantNotificationDeliveryAcceptedFirstContact({
@@ -726,31 +704,27 @@ export async function sendAssistantNotificationLocal(
               )
             }
             await createNotificationReceipt(deliveryOutcome.session)
-            const savedSession = scheduledReviewedCompletion
-              ? deliveryOutcome.session
-              : await persistAssistantTurnAndSession({
-                  assistantTranscriptText: responseText,
-                  input: messageInput,
-                  plan: sharedPlan,
-                  persistUserPromptToTranscript: false,
-                  providerResult,
-                  providerResumeStateAction,
-                  session: deliveryOutcome.session,
-                  turnCreatedAt,
-                  turnId,
-                })
+            const savedSession = await persistAssistantTurnAndSession({
+              assistantTranscriptText: responseText,
+              input: messageInput,
+              plan: sharedPlan,
+              persistUserPromptToTranscript: false,
+              providerResult,
+              providerResumeStateAction,
+              session: deliveryOutcome.session,
+              turnCreatedAt,
+              turnId,
+            })
             const finalizedDeliveryOutcome = {
               ...deliveryOutcome,
               session: savedSession,
             }
-            if (!scheduledReviewedCompletion) {
-              await finalizeAssistantTurnFromDeliveryOutcome({
-                outcome: finalizedDeliveryOutcome,
-                response: responseText,
-                turnId,
-                vault: input.vault,
-              })
-            }
+            await finalizeAssistantTurnFromDeliveryOutcome({
+              outcome: finalizedDeliveryOutcome,
+              response: responseText,
+              turnId,
+              vault: input.vault,
+            })
             return finalizedDeliveryOutcome
           } catch (error) {
             await abandonQueuedNotificationDeliveryAfterCommitFailure({
@@ -818,13 +792,9 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input.responseText,
     'notification response',
   )
-  const scheduledReviewedCompletion =
-    isAssistantNotificationScheduledReviewedCompletion(input.input)
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
-  const state = scheduledReviewedCompletion
-    ? null
-    : createAssistantRuntimeStateService(input.input.vault)
+  const state = createAssistantRuntimeStateService(input.input.vault)
   throwIfAssistantNotificationAborted(input.input.abortSignal)
 
   const exactTextDecision: AssistantNotificationDecision = {
@@ -839,9 +809,6 @@ async function sendAssistantExactTextNotificationLocal(input: {
   })
 
   const createExactTextReceipt = async (session: AssistantSession): Promise<void> => {
-    if (!state) {
-      return
-    }
     await state.turns.createReceipt({
       deliveryRequested: true,
       metadata: {
@@ -871,29 +838,6 @@ async function sendAssistantExactTextNotificationLocal(input: {
     turnId,
   })
 
-  const finalizeExactTextDelivery = async (): Promise<void> => {
-    if (scheduledReviewedCompletion) {
-      return
-    }
-    await finalizeAssistantTurnFromDeliveryOutcome({
-      outcome: deliveryOutcome,
-      response: responseText,
-      turnId,
-      vault: input.input.vault,
-    })
-  }
-  const persistExactTextSession = async (): Promise<AssistantSession> => {
-    if (scheduledReviewedCompletion) {
-      return deliveryOutcome.session
-    }
-    return await persistAssistantExactTextNotificationSession({
-      responseText,
-      session: deliveryOutcome.session,
-      turnCreatedAt,
-      vault: input.input.vault,
-    })
-  }
-
   let savedSession: AssistantSession
   if (input.input.deferCommitUntilDeliveryAccepted === true) {
     try {
@@ -917,8 +861,18 @@ async function sendAssistantExactTextNotificationLocal(input: {
       }
 
       await createExactTextReceipt(deliveryOutcome.session)
-      await finalizeExactTextDelivery()
-      savedSession = await persistExactTextSession()
+      await finalizeAssistantTurnFromDeliveryOutcome({
+        outcome: deliveryOutcome,
+        response: responseText,
+        turnId,
+        vault: input.input.vault,
+      })
+      savedSession = await persistAssistantExactTextNotificationSession({
+        responseText,
+        session: deliveryOutcome.session,
+        turnCreatedAt,
+        vault: input.input.vault,
+      })
     } catch (error) {
       await abandonQueuedNotificationDeliveryAfterCommitFailure({
         deliveryOutcome,
@@ -928,7 +882,12 @@ async function sendAssistantExactTextNotificationLocal(input: {
       throw error
     }
   } else {
-    await finalizeExactTextDelivery()
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      outcome: deliveryOutcome,
+      response: responseText,
+      turnId,
+      vault: input.input.vault,
+    })
 
     if (
       input.input.deliveryDispatchMode !== 'queue-only' &&
@@ -943,7 +902,12 @@ async function sendAssistantExactTextNotificationLocal(input: {
     if (deliveryOutcome.kind === 'failed') {
       throw deliveryOutcome.error
     }
-    savedSession = await persistExactTextSession()
+    savedSession = await persistAssistantExactTextNotificationSession({
+      responseText,
+      session: deliveryOutcome.session,
+      turnCreatedAt,
+      vault: input.input.vault,
+    })
   }
 
   if (
@@ -960,7 +924,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
     })
   }
 
-  await state?.status.refreshSnapshot().catch((error) => {
+  await state.status.refreshSnapshot().catch((error) => {
     warnAssistantBestEffortFailure({
       error,
       operation: 'status snapshot refresh',
@@ -1245,8 +1209,6 @@ function buildAssistantNotificationMessageInput(
   const instructions = normalizeRequiredText(input.instructions, 'instructions')
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
-  const reviewedCompletionModelTurn =
-    isAssistantNotificationReviewedCompletionModelTurn(input)
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
@@ -1255,12 +1217,6 @@ function buildAssistantNotificationMessageInput(
           ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
-    : reviewedCompletionModelTurn
-      ? {
-          codexConfigOverrides:
-            ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES,
-          suppressProviderFailureTranscriptAudit: true,
-        }
     : scheduledOccurrence
       ? {}
       : { suppressProviderFailureTranscriptAudit: true }
@@ -1303,7 +1259,6 @@ function buildAssistantNotificationMessageInput(
     outboxAutomationAuthority: input.outboxAutomationAuthority ?? null,
     participantId: input.participantId,
     persistUserPromptOnFailure: false,
-    providerThreadEphemeral: reviewedCompletionModelTurn,
     profile: input.profile,
     prompt: maintenanceEvidence
       ? `${instructions}\n\n${maintenanceEvidence}`
@@ -1311,11 +1266,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    sandbox: reviewedCompletionModelTurn
-      ? 'read-only'
-      : scheduledOccurrence
-        ? input.sandbox
-        : 'read-only',
+    sandbox: scheduledOccurrence ? input.sandbox : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
@@ -1436,7 +1387,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
   if (
-    isAssistantNotificationEphemeral(input.input) ||
+    isAssistantNotificationMaintenanceExactSkip(input.input) ||
     !isAssistantNotificationScheduledOccurrence(input.input)
   ) {
     return 'preserve-existing'
@@ -1447,7 +1398,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
     : 'preserve-existing'
 }
 
-function createAssistantIsolatedNotificationResolvedSession(input: {
+function createAssistantMaintenanceNotificationResolvedSession(input: {
   boundaryDefaultTarget:
     Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
   defaults: Parameters<typeof resolveAssistantSessionTarget>[0]['defaults']
@@ -1497,41 +1448,6 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
-function isAssistantNotificationExactSkip(
-  input: AssistantNotificationInput,
-): boolean {
-  return isAssistantNotificationMaintenanceExactSkip(input)
-}
-
-function isAssistantNotificationReviewedCompletion(
-  input: AssistantNotificationInput,
-): boolean {
-  return normalizeNullableString(
-    input.reviewedAssistantAskCompletionExpiresAt,
-  ) !== null
-}
-
-function isAssistantNotificationReviewedCompletionModelTurn(
-  input: AssistantNotificationInput,
-): boolean {
-  return isAssistantNotificationScheduledReviewedCompletion(input) &&
-    input.responsePolicy?.kind !== 'require_send_exact_text'
-}
-
-function isAssistantNotificationScheduledReviewedCompletion(
-  input: AssistantNotificationInput,
-): boolean {
-  return isAssistantNotificationReviewedCompletion(input) &&
-    input.scheduledInvocationAuthority != null
-}
-
-function isAssistantNotificationEphemeral(
-  input: AssistantNotificationInput,
-): boolean {
-  return isAssistantNotificationExactSkip(input) ||
-    isAssistantNotificationScheduledReviewedCompletion(input)
-}
-
 function isAssistantNotificationScheduledOccurrence(
   input: Pick<AssistantNotificationInput, 'scheduledOccurrenceAt'>,
 ): boolean {
@@ -1545,10 +1461,6 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
-  if (isAssistantNotificationReviewedCompletionModelTurn(input)) {
-    return ASSISTANT_NOTIFICATION_REVIEWED_COMPLETION_TURN_PROFILE
-  }
-
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
@@ -1590,12 +1502,12 @@ function isAssistantMaintenanceMemoryMutationCommand(
   )
 }
 
-function assertAssistantExactSkipNotificationDecision(input: {
+function assertAssistantMaintenanceNotificationDecision(input: {
   decision: AssistantNotificationDecision
   policy: AssistantNotificationTurnPolicy | null | undefined
 }): void {
   if (
-    input.policy &&
+    input.policy?.kind === 'maintenance-exact-skip' &&
     input.decision.kind === 'skip' &&
     input.decision.privateSummary === input.policy.privateSummary
   ) {

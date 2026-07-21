@@ -46,6 +46,7 @@ import {
   isHostedGroupDisclosureProducerEnabled,
   requestHostedGroupMemberAssistantAsk,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
+import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
@@ -205,7 +206,6 @@ function scheduledCompletionWake(
     ask: {
       expiresAt: requestWake.ask.expiresAt,
       origin: SCHEDULED_ORIGIN,
-      permissionText: PERMISSION_TEXT,
       question: QUESTION,
       requestId: requestWake.eventId,
       result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
@@ -630,7 +630,7 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     });
   });
 
-  it("appends a scheduled result for a canonical group continuation", async () => {
+  it("stores a scheduled result for the current turn to read", async () => {
     const wake = scheduledDisclosureRequestWake();
     const completionId = createHostedAssistantAskCompletionId(wake.eventId);
     const { prisma } = createPrisma();
@@ -649,17 +649,13 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
         result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
       },
     })).resolves.toEqual({
-      mailboxWake: {
-        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
-        mailboxItemId: completionId,
-      },
+      mailboxWake: null,
       response: { action: "complete", status: "completed" },
     });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         ask: expect.objectContaining({
           origin: SCHEDULED_ORIGIN,
-          permissionText: PERMISSION_TEXT,
           requestId: wake.eventId,
           result: { answer: "Tomorrow at 3pm works.", outcome: "answered" },
         }),
@@ -674,50 +670,98 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("revalidates the exact live grant at provider dispatch entry", async () => {
-    const requestWake = disclosureRequestWake();
-    const completionWake = reviewedCompletionWake(requestWake);
-    const { tx } = createPrisma();
+  it("returns a completed scheduled result when the same ask is repeated", async () => {
+    const requestWake = scheduledDisclosureRequestWake();
+    const completionWake = scheduledCompletionWake(requestWake);
+    const { prisma } = createPrisma();
     mocks.readHostedMailboxItemById.mockImplementation(async (input: {
       mailboxItemId: string;
-    }) => input.mailboxItemId === completionWake.eventId
-      ? mailboxItemForWake(completionWake)
-      : input.mailboxItemId === requestWake.eventId
-        ? mailboxItemForWake(requestWake)
+    }) => input.mailboxItemId === requestWake.eventId
+      ? mailboxItemForWake(requestWake)
+      : input.mailboxItemId === completionWake.eventId
+        ? mailboxItemForWake(completionWake)
         : null);
     mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
       mailboxItemId: string;
-    }) => input.mailboxItemId === completionWake.eventId
-      ? completionWake
-      : input.mailboxItemId === requestWake.eventId
-        ? requestWake
+    }) => input.mailboxItemId === requestWake.eventId
+      ? requestWake
+      : input.mailboxItemId === completionWake.eventId
+        ? completionWake
         : null);
-    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
 
-    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-      answeredMailboxItemIds: [completionWake.eventId],
-      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
-      assistantAskFallback: false,
-      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      idempotencyKey:
-        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
-          completionWake.eventId,
-        ),
-      now: NOW,
-      tx: tx as never,
-    })).resolves.toBeUndefined();
-    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).toHaveBeenCalledWith({
-      expectedTargetMemberId: TARGET_MEMBER_ID,
-      grantId: GRANT_ID,
-      membershipId: MEMBERSHIP_ID,
-      permissionDigest: PERMISSION_DIGEST,
-      tx: expect.any(Object),
+    await expect(requestDisclosure(prisma, {
+      origin: SCHEDULED_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        answer: "Tomorrow at 3pm works.",
+        outcome: "answered",
+        status: "completed",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("does not return a stored scheduled result after the grant is revoked", async () => {
+    const requestWake = scheduledDisclosureRequestWake();
+    const completionWake = scheduledCompletionWake(requestWake);
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === requestWake.eventId
+      ? mailboxItemForWake(requestWake)
+      : input.mailboxItemId === completionWake.eventId
+        ? mailboxItemForWake(completionWake)
+        : null);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(requestWake);
+    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
+
+    await expect(requestDisclosure(prisma, {
+      origin: SCHEDULED_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "grant_unavailable" },
     });
   });
 
-  it("revalidates the exact live grant for a scheduled continuation dispatch", async () => {
+  it("does not reveal a stored scheduled result after the group runtime fence is inactive", async () => {
     const requestWake = scheduledDisclosureRequestWake();
     const completionWake = scheduledCompletionWake(requestWake);
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === requestWake.eventId
+      ? mailboxItemForWake(requestWake)
+      : input.mailboxItemId === completionWake.eventId
+        ? mailboxItemForWake(completionWake)
+        : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === requestWake.eventId
+      ? requestWake
+      : input.mailboxItemId === completionWake.eventId
+        ? completionWake
+        : null);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockRejectedValueOnce(
+      new HostedOnboardingError({
+        code: "HOSTED_ASSISTANT_ASK_RUNTIME_INACTIVE",
+        httpStatus: 403,
+        message: "Hosted Assistant Ask runtime access is inactive.",
+      }),
+    );
+
+    await expect(requestDisclosure(prisma, {
+      origin: SCHEDULED_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "origin_unavailable" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the exact live grant at provider dispatch entry", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
     const { tx } = createPrisma();
     mocks.readHostedMailboxItemById.mockImplementation(async (input: {
       mailboxItemId: string;

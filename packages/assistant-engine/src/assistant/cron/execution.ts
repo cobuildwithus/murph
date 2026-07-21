@@ -8,10 +8,6 @@ import {
 import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
-import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
-  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
-} from '@murphai/hosted-execution/assistant-identifiers'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
@@ -31,13 +27,11 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   sendAssistantNotificationLocal,
-  type AssistantNotificationInput,
   type AssistantNotificationResult,
   type AssistantNotificationTurnPolicy,
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
-import type { AssistantAutomationOperationScope } from '../automation/operation-scope.js'
 import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
@@ -174,19 +168,6 @@ export interface AssistantCronRunnableProjectionInput
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
 }
 
-export interface AssistantScheduledAutomationContinuationInput {
-  answeredMailboxItemId: string
-  assertLive?: (() => Promise<void> | void) | null
-  automationId: string
-  executionContext: AssistantExecutionContext
-  expiresAt: string
-  instructions: string
-  occurrenceAt: string
-  signal?: AbortSignal | null
-  turnEnvironment?: AssistantTurnEnvironment | null
-  vault: string
-}
-
 export interface RunnableAssistantCronCanonicalEntry {
   job: AssistantCronJob
   runtimeState: AssistantCronCanonicalRuntimeRecord
@@ -212,227 +193,6 @@ export function computeAssistantCronBackgroundMaintenanceYieldRetryAt(
     ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
     Date.parse(nowIso),
   )
-}
-
-/**
- * Continue an already-consumed scheduled occurrence on its current canonical
- * group route. This deliberately does not claim or finalize cron state: the
- * original occurrence already owns that lifecycle. The active automation,
- * current route, normal notification turn, and ordinary outbox remain the
- * sole owners of authority and delivery.
- */
-export async function sendAssistantScheduledAutomationContinuation(
-  input: AssistantScheduledAutomationContinuationInput,
-): Promise<AssistantNotificationResult | null> {
-  const source = (await listCanonicalAssistantCronRecords(input.vault, ['active']))
-    .find((record) =>
-      record.kind === 'automation' && record.automationId === input.automationId
-    )
-  if (!source || source.kind !== 'automation') {
-    return null
-  }
-
-  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
-    resolveAssistantStatePaths(input.vault),
-  )
-  const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-  const resolved: ResolvedAssistantCronJob = {
-    kind: 'canonical',
-    source,
-    runtimeState,
-    job: projectCanonicalAssistantCronJob({
-      source,
-      runtimeState,
-    }),
-  }
-  const sourceAuthority = await resolveAssistantCronCanonicalSourceAuthority({
-    job: resolved,
-    now: new Date(),
-    trigger: 'scheduled',
-    vault: input.vault,
-  })
-  if (sourceAuthority.kind !== 'current') {
-    return null
-  }
-
-  validateAssistantCronDeliveryTarget(
-    resolved.job.target,
-    assistantCronExecutionDeliveryTargetProfile({
-      executionContext: input.executionContext,
-    }),
-  )
-  const deliveryIdempotencyKey =
-    createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
-      input.answeredMailboxItemId,
-    )
-  const reviewedCompletion = {
-    answeredMailboxItemId: input.answeredMailboxItemId,
-    expiresAt: input.expiresAt,
-    idempotencyKey: deliveryIdempotencyKey,
-  }
-  const route = await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-    executionContext: input.executionContext,
-    reviewedCompletion,
-    signal: input.signal ?? new AbortController().signal,
-    target: resolved.job.target,
-  })
-  if (resolved.job.target.channel !== 'linq' || route.threadIsDirect !== false) {
-    return null
-  }
-
-  const executionContext = scopeAssistantCronScheduledGroupTools({
-    channel: resolved.job.target.channel,
-    executionContext: input.executionContext,
-    route,
-    routeAuthorityVerified: true,
-  })
-  if (!executionContext) {
-    return null
-  }
-  const automationTurn = buildAssistantAutomationTurnEnvelope({
-    assistantTargetOverride: resolveAssistantCronAutomationTargetOverride(resolved),
-    deliveryDispatchMode: 'queue-only',
-    executionContext,
-    scheduledInvocationAuthority: resolveAssistantCronScheduledInvocationAuthority({
-      job: resolved,
-      occurrenceAt: input.occurrenceAt,
-      trigger: 'scheduled',
-    }),
-    scheduledOccurrenceAt: input.occurrenceAt,
-    // Completion mailbox retries do not share the cron failure counter that
-    // bounds first-attempt Flex usage, so they intentionally stay standard.
-    serviceTier: null,
-    signal: input.signal ?? undefined,
-    turnEnvironment: input.turnEnvironment ?? null,
-    turnTrigger: 'automation-cron',
-  })
-
-  const assertSourceLive = async (): Promise<void> => {
-    await input.assertLive?.()
-    const current = await resolveAssistantCronCanonicalSourceAuthority({
-      job: resolved,
-      now: new Date(),
-      trigger: 'scheduled',
-      vault: input.vault,
-    })
-    if (current.kind !== 'current') {
-      throw new AssistantCronCanonicalSourceInvalidatedError(current)
-    }
-    await assertAssistantCronLifecycleNotificationStillAuthorized({
-      job: resolved,
-      vault: input.vault,
-    })
-  }
-  const assertCompletionLive = async (): Promise<void> => {
-    await assertSourceLive()
-    const currentRoute = await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-      executionContext: input.executionContext,
-      reviewedCompletion,
-      signal: input.signal ?? new AbortController().signal,
-      target: resolved.job.target,
-    })
-    if (currentRoute.assistantAskFallbackRequired === true) {
-      throw new AssistantScheduledAutomationCompletionFallbackRequiredError()
-    }
-    const expectedTarget = normalizeNullableString(
-      route.deliveryTarget ?? route.bindingDelivery?.target,
-    )
-    const currentTarget = normalizeNullableString(
-      currentRoute.deliveryTarget ?? currentRoute.bindingDelivery?.target,
-    )
-    if (
-      currentRoute.threadIsDirect !== false ||
-      !expectedTarget ||
-      currentTarget !== expectedTarget
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_ASK_COMPLETION_ROUTE_STALE',
-        'Reviewed Assistant Ask completion route changed before the next effect.',
-        { retryable: true },
-      )
-    }
-  }
-  const sendNotification = async (notification: {
-    beforeCommit: AssistantNotificationInput['beforeCommit']
-    beforeDelivery: AssistantNotificationInput['beforeDelivery']
-    beforeProviderAcceptedInputs?: AssistantNotificationInput['beforeProviderAcceptedInputs']
-    beforeToolExecution?: AssistantNotificationInput['beforeToolExecution']
-    responsePolicy: AssistantNotificationInput['responsePolicy']
-  }): Promise<AssistantNotificationResult> => await sendAssistantNotificationLocal({
-    ...automationTurn,
-    alias: null,
-    allowBindingRebind: false,
-    answeredMailboxItemIds: [input.answeredMailboxItemId],
-    approvalPolicy: 'never',
-    beforeCommit: notification.beforeCommit,
-    beforeDelivery: notification.beforeDelivery,
-    beforeProviderAcceptedInputs: notification.beforeProviderAcceptedInputs,
-    beforeToolExecution: notification.beforeToolExecution,
-    bindingDeliveryTarget:
-      route.bindingDelivery?.target ?? route.deliveryTarget ?? undefined,
-    channel: resolved.job.target.channel,
-    deferCommitUntilDeliveryAccepted: true,
-    deliveryDedupeToken: deliveryIdempotencyKey,
-    deliveryIdempotencyKey,
-    deliveryKind: route.bindingDelivery?.kind ?? undefined,
-    deliverySource: resolved.job.target.deliverySource,
-    deliveryTarget: route.deliveryTarget,
-    identityId: resolved.job.target.identityId,
-    instructions: [
-      buildAssistantCronExecutionInstructions(resolved),
-      input.instructions,
-    ].join('\n\n'),
-    operatorAuthority: 'direct-operator',
-    outboxAutomationAuthority: {
-      automationId: source.automationId,
-      expectedUpdatedAt: source.updatedAt,
-    },
-    participantId: resolved.job.target.participantId,
-    responsePolicy: notification.responsePolicy,
-    reviewedAssistantAskCompletionExpiresAt: input.expiresAt,
-    sessionId: null,
-    threadId: resolved.job.target.threadId,
-    threadIsDirect: false,
-    vault: input.vault,
-    workingDirectory: input.vault,
-  })
-
-  const sendFallback = async (): Promise<AssistantNotificationResult> =>
-    await sendNotification({
-      beforeCommit: assertSourceLive,
-      beforeDelivery: assertSourceLive,
-      responsePolicy: {
-        kind: 'require_send_exact_text',
-        text: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
-      },
-    })
-
-  if (route.assistantAskFallbackRequired === true) {
-    return await sendFallback()
-  }
-
-  try {
-    return await sendNotification({
-      beforeCommit: async ({ deliveryOutcome }) => {
-        if (deliveryOutcome) {
-          await assertSourceLive()
-          return
-        }
-        await assertCompletionLive()
-      },
-      beforeDelivery: assertCompletionLive,
-      beforeProviderAcceptedInputs: async () => {
-        await assertCompletionLive()
-      },
-      beforeToolExecution: assertCompletionLive,
-      responsePolicy: { kind: 'allow_send_or_skip' },
-    })
-  } catch (error) {
-    if (!(error instanceof AssistantScheduledAutomationCompletionFallbackRequiredError)) {
-      throw error
-    }
-    return await sendFallback()
-  }
 }
 
 export async function claimResolvedAssistantCronJob(input: {
@@ -678,7 +438,6 @@ interface ExecuteClaimedAssistantCronJobInput {
   job: ResolvedAssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  operationScope?: AssistantAutomationOperationScope | null
   paths: AssistantStatePaths
   shouldYield?: (() => boolean) | null
   signal?: AbortSignal
@@ -964,6 +723,50 @@ export async function executeClaimedAssistantCronJob(
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
             })
+          const assertNotificationStillAuthorized = async (): Promise<void> => {
+            const authority = await resolveAssistantCronCanonicalSourceAuthority({
+              job: input.job,
+              now: new Date(),
+              trigger: input.trigger,
+              vault: input.vault,
+            })
+            if (authority.kind !== 'current') {
+              canonicalSourceDisposition = authority.kind
+              throw new AssistantCronCanonicalSourceInvalidatedError(authority)
+            }
+            await assertAssistantCronLifecycleNotificationStillAuthorized({
+              job: input.job,
+              vault: input.vault,
+            })
+
+            if (notificationExecutionContext?.hosted?.groupTool) {
+              const currentRoute =
+                await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                  executionContext: input.executionContext ?? null,
+                  signal: yieldCancellation.signal,
+                  target: claimedJob.target,
+                })
+              const expectedTarget = normalizeNullableString(
+                deliveryRoute.bindingDelivery?.target
+                  ?? deliveryRoute.deliveryTarget,
+              )
+              const currentTarget = normalizeNullableString(
+                currentRoute.bindingDelivery?.target
+                  ?? currentRoute.deliveryTarget,
+              )
+              if (
+                currentRoute.threadIsDirect !== false
+                || !expectedTarget
+                || currentTarget !== expectedTarget
+              ) {
+                throw new VaultCliError(
+                  'ASSISTANT_CRON_GROUP_ROUTE_STALE',
+                  'Scheduled group route changed before the next tool or delivery.',
+                  { retryable: true },
+                )
+              }
+            }
+          }
           const notificationInput: Parameters<
             typeof sendAssistantNotificationLocal
           >[0] = {
@@ -981,37 +784,10 @@ export async function executeClaimedAssistantCronJob(
                   },
                 }
               : {}),
-            beforeDelivery: async () => {
-              const authority = await resolveAssistantCronCanonicalSourceAuthority({
-                job: input.job,
-                now: new Date(),
-                trigger: input.trigger,
-                vault: input.vault,
-              })
-              if (authority.kind !== 'current') {
-                canonicalSourceDisposition = authority.kind
-                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
-              }
-              await assertAssistantCronLifecycleNotificationStillAuthorized({
-                job: input.job,
-                vault: input.vault,
-              })
-            },
+            beforeDelivery: assertNotificationStillAuthorized,
+            beforeToolExecution: assertNotificationStillAuthorized,
             beforeCommit: async (context) => {
-              const authority = await resolveAssistantCronCanonicalSourceAuthority({
-                job: input.job,
-                now: new Date(),
-                trigger: input.trigger,
-                vault: input.vault,
-              })
-              if (authority.kind !== 'current') {
-                canonicalSourceDisposition = authority.kind
-                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
-              }
-              await assertAssistantCronLifecycleNotificationStillAuthorized({
-                job: input.job,
-                vault: input.vault,
-              })
+              await assertNotificationStillAuthorized()
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -1064,21 +840,7 @@ export async function executeClaimedAssistantCronJob(
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           }
-          const result = automationTurn.scheduledInvocationAuthority
-            && input.operationScope
-            && notificationExecutionContext
-            ? await input.operationScope.runScheduledAutomationOccurrence({
-                executionContext: notificationExecutionContext,
-                operation: async (executionContext, turnEnvironment) =>
-                  await sendAssistantNotificationLocal({
-                    ...notificationInput,
-                    executionContext,
-                    turnEnvironment,
-                  }),
-                threadIsDirect: deliveryRoute.threadIsDirect,
-                turnEnvironment: input.turnEnvironment ?? null,
-              })
-            : await sendAssistantNotificationLocal(notificationInput)
+          const result = await sendAssistantNotificationLocal(notificationInput)
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
@@ -2331,10 +2093,12 @@ function scopeAssistantCronScheduledGroupTools(input: {
     createScheduledGroupTools,
     groupPermissionOfferTool: _unscopedGroupPermissionOfferTool,
     groupSharedReader: _unscopedGroupSharedReader,
+    groupTool: _unscopedGroupTool,
     ...hostedWithoutScheduledGroupTools
   } = hosted
   void _unscopedGroupPermissionOfferTool
   void _unscopedGroupSharedReader
+  void _unscopedGroupTool
   const unscopedExecutionContext: AssistantExecutionContext = {
     hosted: hostedWithoutScheduledGroupTools,
   }
@@ -2368,18 +2132,9 @@ function scopeAssistantCronScheduledGroupTools(input: {
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
-  reviewedCompletion?: {
-    answeredMailboxItemId: string
-    expiresAt: string
-    idempotencyKey: string
-  } | null
   signal: AbortSignal
   target: AssistantCronJob['target']
-}): Promise<
-  ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute> & {
-    assistantAskFallbackRequired?: true
-  }
-> {
+}): Promise<ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
   if (
     assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
@@ -2414,7 +2169,6 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   }
   const authority = await resolveScheduledLinqRoute({
     homeRouteFallbackAllowed: route.threadIsDirect !== false,
-    reviewedCompletion: input.reviewedCompletion ?? null,
     signal: input.signal,
     target,
     targetKind,
@@ -2438,9 +2192,6 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
-    ...(authority.assistantAskFallbackRequired === true
-      ? { assistantAskFallbackRequired: true as const }
-      : {}),
     bindingDelivery,
     deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
     threadIsDirect: authority.threadIsDirect,
@@ -2471,15 +2222,6 @@ class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
 class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
-  }
-}
-
-class AssistantScheduledAutomationCompletionFallbackRequiredError extends VaultCliError {
-  constructor() {
-    super(
-      'ASSISTANT_ASK_COMPLETION_FALLBACK_REQUIRED',
-      'Reviewed Assistant Ask completion must use its safe fallback.',
-    )
   }
 }
 

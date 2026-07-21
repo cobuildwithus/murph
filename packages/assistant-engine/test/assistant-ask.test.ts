@@ -457,10 +457,15 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
         ephemeral: true,
         permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
         processLifetime: 'one-shot',
-        threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
       })
       expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     }
+    expect(answerInput.threadConfig).toBe(READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG)
+    expect(answerInput.threadConfig).not.toHaveProperty('features.shell_tool')
+    expect(reviewInput.threadConfig).toEqual({
+      ...READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
+      'features.shell_tool': false,
+    })
     expect(answerInput.runtimeWorkspaceRoots).toEqual([workspaceRoot])
     expect(answerInput.baseInstructions).toContain(
       'Compare every piece of information the proposed answer would disclose against the exact permission context; if any piece is outside that permission or ambiguous, return outcome "cannot_answer" with answer null.',

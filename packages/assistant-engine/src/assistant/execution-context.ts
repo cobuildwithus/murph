@@ -350,6 +350,7 @@ export interface AssistantHostedExecutionContext {
   }): {
     groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool
     groupSharedReader: AssistantHostedGroupSharedReader
+    groupTool: AssistantHostedGroupTool
   } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
@@ -379,16 +380,10 @@ export interface AssistantHostedExecutionContext {
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
     homeRouteFallbackAllowed: boolean
-    reviewedCompletion?: {
-      answeredMailboxItemId: string
-      expiresAt: string
-      idempotencyKey: string
-    } | null
     signal?: AbortSignal | null
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
-    assistantAskFallbackRequired?: true
     target: string
     threadIsDirect: boolean
   }>

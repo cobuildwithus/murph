@@ -137,14 +137,14 @@ secret, Durable Object state, scheduler, workflow, or second container. Its
 producer gate is distinct from the original private-to-group Ask gate.
 
 1. Deploy Web with `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` so
-   the storage, consent-reaction, admission, prepare, completion, and scheduled
-   continuation authority for the existing reviewed-completion delivery key are
-   present before a new runner can emit that intent. The deployment must remain able to
+   the storage, consent-reaction, admission, prepare, completion, and exact
+   scheduled replay result are present before a new runner can request them.
+   The deployment must remain able to
    consume both old Assistant Ask payloads and the additive new shapes.
 2. Deploy Cloudflare/runner consumers for the `consented_member` request target,
    trusted accepted-input and scheduled-automation origins, disclosure-context
    preparation, the private candidate plus fresh outgoing reviewer, reviewed
-   exact group delivery, and canonical scheduled group continuation with
+   exact accepted-input group delivery, and one same-turn scheduled sleep/replay with
    `container_rollout=immediate`. Keep the Web producer gate off.
 3. Require managed-container smoke to report the new runner-bundle fingerprint
    and preserve the existing `murph-group-read` confinement proof. Verify the

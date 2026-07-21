@@ -215,7 +215,7 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
   it does not send a real private-to-group ask, an accepted-input
-  group-to-member ask, or a scheduled group-to-member internal completion
+  group-to-member ask, or a scheduled same-turn ask/replay
   through deployed Web, Temporal, Cloudflare, a live model provider, and the
   applicable messaging or no-delivery destination.
 

@@ -920,7 +920,7 @@ export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
   "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
 
 export interface HostedRuntimeGroupMemberSummary {
-  disclosureGrants: HostedRuntimeGroupDisclosureGrantSummary[];
+  disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   handle: string | null;
@@ -1129,6 +1129,7 @@ export type HostedRuntimeGroupAskResult =
 
 export type HostedRuntimeGroupMemberAskResult =
   | { status: "accepted" }
+  | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
 export type HostedRuntimeGroupToolResponse =

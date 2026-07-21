@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Accepted-Message Targeting
 
@@ -116,39 +116,35 @@ group model may select only a current opaque `grantId` returned beside that
 member and permission by `read_current`. Web binds every hidden identity and
 revalidates the group, personal runtime, membership generation, grant
 generation, permission digest, origin, expiry, and runtime fence at admission,
-before the personal read, before disclosure completion, and again in the
-existing Linq egress transaction that claims provider dispatch. Reviewed exact
-delivery carries the completion mailbox id as its causal anchor, so a revoked,
-expired, mismatched, or unanchored queued answer is terminal before provider
-entry. Leave/rejoin and revoke/regrant therefore invalidate old work. One
+before the personal read, and before disclosure completion. Accepted-input
+delivery also revalidates the same authority in the existing Linq egress
+transaction that claims provider dispatch. It carries the completion mailbox id
+as its causal anchor, so a revoked, expired, mismatched, or unanchored queued
+answer is terminal before provider entry. Leave/rejoin and revoke/regrant
+therefore invalidate old work. One
 trusted accepted-input or scheduled-automation invocation owns at most one
 consented-member request per exact grant; exact replay reuses it, a changed
 question for that grant conflicts, and another current grant in the same
 invocation remains independent without creating an implicit roster fan-out API.
 The initial turn of a claimed canonical scheduled group occurrence reuses the
-hosted automation operation scope: only after route authority resolves a
-non-direct thread does that scope attach the existing platform group port, and
-the notification retains it only with the runtime-minted occurrence authority.
+ordinary group runtime. Its existing scheduled group-tool factory attaches the
+same bounded group port only after route authority resolves a non-direct thread,
+and the notification retains it only with runtime-minted occurrence authority.
 Ordinary notifications and manual, direct, unknown-audience, or local cron runs
 do not receive that group capability.
-An automation-origin completion re-reads the active canonical automation and
-its current non-direct Linq route, then resumes that automation through the
-ordinary controlled group notification and outbox path. A deterministic key
-derived from the completion makes replay idempotent, while the automation
-revision and the same Web-owned live disclosure predicate are rechecked before
-model work, immediately before each tool call, before delivery or skip commit,
-and at final egress. The model decision uses an ephemeral App Server thread with
-a read-only sandbox and native shell, web, app, MCP, browser, plugin, and
-multi-agent surfaces disabled. It reads no memory and persists no prompt,
-output, transcript, receipt, session, or provider-resume state. The
-deterministic fallback follows the same no-receipt/session rule without starting
-a provider turn, and the existing outbox is the sole durable delivery owner. If
-authority is gone, that outbox atomically replaces text and media with the fixed
-text-only fallback. The reviewed answer remains delimited untrusted data rather
-than consent for an external action. The continuation may use only Murph tools
-independently authorized by their existing owners for that current scheduled
-group turn; it never gains access to the grantor's personal runtime or connected
-accounts.
+A scheduled Codex turn starts every needed member ask, uses one ordinary
+`sleep 60`, and repeats each exact `ask_member` call once. Web returns a
+completed result only after the ordinary cron owner revalidates the current
+canonical automation and non-direct route immediately before the tool call, and
+Web revalidates the exact request and completion, member, grant, permission,
+personal runtime, origin, expiry, and runtime fences. An accepted or unavailable
+replay ends that same turn without an answer. Scheduled completion
+never wakes the group runtime, starts another provider turn, or creates a group
+outbox delivery; a completion that arrives after the replay is ignored. The
+reviewed answer remains untrusted data rather than consent for an external
+action, and the ordinary scheduled turn may use only tools independently
+authorized by their existing owners. It never gains access to the grantor's
+personal runtime or connected accounts.
 Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.

@@ -207,7 +207,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("scopes the runtime group tool into scheduled internal Assistant Ask completions", async () => {
+  it("does not rescope the group tool for a late scheduled completion", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-",
     );
@@ -219,7 +219,6 @@ describe("hosted system mailbox notification execution context", () => {
           kind: "automation_occurrence",
           occurrenceAt: FIXED_NOW,
         },
-        permissionText: "Coarse availability for arranging calls.",
         question: "Which coarse call windows work over the next week?",
         requestId: "aask_req_system_internal",
         result: {
@@ -272,8 +271,8 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
-      expect(executionInput?.executionContext.hosted.groupTool?.request).toBe(
-        groupRequest,
+      expect(executionInput?.executionContext.hosted).not.toHaveProperty(
+        "groupTool",
       );
     } finally {
       await workspace.cleanup();

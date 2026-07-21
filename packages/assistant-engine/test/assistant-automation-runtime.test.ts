@@ -6855,13 +6855,6 @@ describe('assistant auto-reply runtime', () => {
       async runAutoReplyGroup({ executionContext: scopedContext, operation, turnEnvironment }) {
         return await operation(scopedContext, turnEnvironment)
       },
-      async runScheduledAutomationOccurrence({
-        executionContext: scopedContext,
-        operation,
-        turnEnvironment,
-      }) {
-        return await operation(scopedContext, turnEnvironment)
-      },
     }
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
@@ -6902,7 +6895,7 @@ describe('assistant auto-reply runtime', () => {
       }),
     )
     expect(runLoopMocks.processDueAssistantCronJobs.mock.calls[0]?.[0])
-      .toHaveProperty('operationScope', operationScope)
+      .not.toHaveProperty('operationScope')
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,

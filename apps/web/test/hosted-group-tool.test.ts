@@ -239,24 +239,11 @@ const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "hrv-days.v0" },
 ] as const;
 const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
-const ACTIVE_DISCLOSURE_GRANT = {
-  grantId: "grant_sleep",
-  groupLabel: "Sunday sleep crew",
-  memberId: "member_owner",
-  permissionText: "Recent sleep timing and duration",
-};
-const ACTIVE_DISCLOSURE_GRANT_PROJECTION = {
-  grantId: ACTIVE_DISCLOSURE_GRANT.grantId,
-  permissionText: ACTIVE_DISCLOSURE_GRANT.permissionText,
-};
 
-function groupSummaryWithOwnerEmailGrant(
-  disclosureGrants: Array<{ grantId: string; permissionText: string }> = [],
-) {
+function groupSummaryWithOwnerEmailGrant() {
   return {
     ...GROUP_SUMMARY,
     members: [{
-      disclosureGrants,
       grantedVaultShareProjectionKinds: ["profile-name.v0" as const, "group-email.v0" as const],
       handle: null,
       memberId: "member_owner",
@@ -755,10 +742,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       ...groupSummaryWithOwnerEmailGrant(),
       displayName: RENAMED_GROUP_SUMMARY.displayName,
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValueOnce([
-      ACTIVE_DISCLOSURE_GRANT,
-    ]);
-
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
@@ -772,9 +755,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: {
-          ...groupSummaryWithOwnerEmailGrant([
-            ACTIVE_DISCLOSURE_GRANT_PROJECTION,
-          ]),
+          ...groupSummaryWithOwnerEmailGrant(),
           displayName: RENAMED_GROUP_SUMMARY.displayName,
         },
         status: "ok",
@@ -801,15 +782,8 @@ describe("handleHostedRuntimeGroupTool", () => {
         runtimeMemberId: "member_group_runtime",
         tx: fakeTx,
       }));
-    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      prisma: expect.objectContaining({ $transaction: expect.any(Function) }),
-    });
-    expect(
-      mocks.readActiveHostedGroupDisclosureGrantsForGroup.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
-    );
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup)
+      .not.toHaveBeenCalled();
     expect(
       mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -888,40 +862,11 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
-  it("does not rename the provider chat when disclosure-summary decryption fails", async () => {
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
-      new Error("secure box unavailable"),
-    );
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: {
-        action: "update_display_name",
-        linqThread: GROUP_RUNTIME_LINQ_THREAD,
-        updateDisplayName: { displayName: "Unreadable summary" },
-      },
-    })).resolves.toEqual({
-      action: "update_display_name",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "group_summary_unavailable",
-      },
-    });
-
-    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
-    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
-  });
-
   it("creates a join link bound to the runtime member's thread container owner", async () => {
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),
       joinCode: "abc123",
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValueOnce([
-      ACTIVE_DISCLOSURE_GRANT,
-    ]);
-
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
@@ -935,9 +880,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).resolves.toEqual({
       action: "create_join_link",
       result: {
-        group: groupSummaryWithOwnerEmailGrant([
-          ACTIVE_DISCLOSURE_GRANT_PROJECTION,
-        ]),
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "ok",
       },
@@ -965,38 +908,14 @@ describe("handleHostedRuntimeGroupTool", () => {
         requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
       }),
     );
-    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      prisma: fakeTx,
-    });
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup)
+      .not.toHaveBeenCalled();
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .toHaveBeenCalledWith({
         groupId: GROUP_SUMMARY.id,
         memberId: "member_owner",
         prisma: expect.any(Object),
       });
-  });
-
-  it("aborts join-link creation when disclosure-summary decryption fails", async () => {
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
-      group: groupSummaryWithOwnerEmailGrant(),
-      joinCode: "abc123",
-    });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
-      new Error("secure box unavailable"),
-    );
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: { action: "create_join_link" },
-    })).rejects.toThrow("secure box unavailable");
-
-    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      prisma: fakeTx,
-    });
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
@@ -1727,6 +1646,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledTimes(1);
   });
 
+  it("rechecks the current Linq route immediately before sending disclosure consent", async () => {
+    mocks.assertHostedLinqRouteEgressAuthority
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("stale route"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_disclosure_request",
+        linqThread: LINQ_THREAD,
+        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
+        permissionText: "Recent sleep timing and duration",
+      },
+    })).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unauthorized",
+      },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
+  });
+
   it("posts and binds fixed exact-permission disclosure consent copy", async () => {
     const request = {
       memberId: "member_container",
@@ -1792,10 +1737,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       group: groupSummaryWithOwnerEmailGrant(),
       joinCode: "abc123",
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValueOnce([
-      ACTIVE_DISCLOSURE_GRANT,
-    ]);
-
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
@@ -1817,9 +1758,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     })).resolves.toEqual({
       action: "post_join_offer",
       result: {
-        group: groupSummaryWithOwnerEmailGrant([
-          ACTIVE_DISCLOSURE_GRANT_PROJECTION,
-        ]),
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "sent",
       },
@@ -1834,10 +1773,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         tx: fakeTx,
       }),
     );
-    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      prisma: fakeTx,
-    });
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup)
+      .not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
@@ -2141,34 +2078,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: canonicalScopes,
       tx: fakeTx,
     });
-  });
-
-  it("does not send or bind a join offer when disclosure-summary decryption fails", async () => {
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
-      group: groupSummaryWithOwnerEmailGrant(),
-      joinCode: "abc123",
-    });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
-      new Error("secure box unavailable"),
-    );
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_join_offer",
-        joinOffer: { projectionScopes: [{ projectionKind: "group-email.v0" }] },
-        linqThread: LINQ_THREAD,
-      },
-    })).rejects.toThrow("secure box unavailable");
-
-    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      prisma: fakeTx,
-    });
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
   });
 
   it("renders profile-only share scope when no optional kinds are requested", async () => {

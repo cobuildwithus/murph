@@ -11,13 +11,4 @@ export interface AssistantAutomationOperationScope {
     ): Promise<T>
     turnEnvironment: AssistantTurnEnvironment | null
   }): Promise<T>
-  runScheduledAutomationOccurrence<T>(input: {
-    executionContext: AssistantExecutionContext
-    operation(
-      executionContext: AssistantExecutionContext,
-      turnEnvironment: AssistantTurnEnvironment | null,
-    ): Promise<T>
-    threadIsDirect: boolean | null
-    turnEnvironment: AssistantTurnEnvironment | null
-  }): Promise<T>
 }
