@@ -1,7 +1,7 @@
 # Measured Biomarker Index
 
 Status: Implemented
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Purpose
 
@@ -36,15 +36,18 @@ member-facing biomarker.
 ## Information architecture
 
 1. Show device-derived measurements with actual private readings first.
-2. Show only non-empty curated lab health areas, in the stable shared registry
+2. Search and `All` / `Review` / `In range` filters apply only to the saved lab
+   index; missing source flags remain neutral and available under `All`.
+3. Show only non-empty curated lab health areas, in the stable shared registry
    order.
-3. Keep every lab area closed by default using a native disclosure. Its summary
-   shows the area label and biomarker count.
-4. When opened, use the measured-biomarker notebook index: a single partitioned
-   surface, one column on narrow screens and two columns from tablet widths.
-5. Each biomarker row shows its stable display name, result count and history
-   span, latest value and date, then links to its private longitudinal detail.
-6. Never render a catch-all `Other` area on this page. If saved lab rows exist
+4. Keep every lab area expanded by default using a native disclosure. Its
+   summary shows only the area label and disclosure chevron.
+5. Use the measured-biomarker notebook index as one partitioned surface: one
+   column on narrow screens, two from tablet widths, and three on wide screens.
+6. Each full-cell link shows only the stable display name, source status, and
+   latest value. Sort flagged results before in-range and unflagged results
+   within each health area.
+7. Never render a catch-all `Other` area on this page. If saved lab rows exist
    but none are classified, say that no recognized biomarkers are available
    while confirming that the saved records remain available.
 
@@ -77,5 +80,7 @@ commentary, and unknown custom fields.
   analytes, and representative excluded record-field classes.
 - Query tests prove excluded rows remain in the private projection and direct
   detail selection while staying out of the measured index.
-- UI tests cover device-first ordering, closed disclosures, responsive notebook
-  shape, the absence of `Other`, and the saved-but-unclassified empty state.
+- UI tests cover device-first ordering, initially expanded disclosures, search,
+  status filters, flagged-first ordering, one/two/three-column notebook shape,
+  full-cell links, the absence of `Other`, and the saved-but-unclassified empty
+  state.

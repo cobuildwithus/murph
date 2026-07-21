@@ -195,14 +195,17 @@ Large Fraunces stat number (the value) + DM Mono unit label + delta in sage gree
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
-native `<details>` disclosures, closed by default, with a Fraunces area name, a
-small DM Mono biomarker count, and one rotating chevron in the summary. The
-opened contents are one partitioned notebook surface rather than a stack of
-nested cards: one column on narrow screens, two columns from `md`, with warm
-one-pixel seams between rows. Each compact row keeps the biomarker identity and
-history on the left, latest value and date on the right, and one navigation
-chevron. Use explicit health-area classification; never show an `Other` dump or
-invent interpretation for an unclassified lab field.
+native `<details>` disclosures, expanded by default, with a Fraunces area name
+and one rotating chevron in the summary. Search and `All` / `Review` / `In
+range` filters apply only to saved lab biomarkers. The opened contents are one
+partitioned notebook surface rather than a stack of nested cards: one column on
+narrow screens, two from `md`, and three from `xl`, with warm one-pixel seams
+between cells. Each cell is one full-size link showing only the biomarker name,
+source status, and latest value; flagged results sort before in-range and
+unflagged results within their health area. Render `normal` in sage, source
+flags that need review in sienna, and missing flags neutrally as `Reported`.
+Use explicit health-area classification; never show an `Other` dump, infer that
+an unflagged result is in range, or turn a source flag into a diagnosis.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
