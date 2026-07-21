@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
+import { initializeVault } from "@murphai/core";
 import type {
   HostedClinicalRecordsQueryRunDescriptor,
   HostedClinicalRecordsRunDescriptor,
@@ -18,6 +20,7 @@ import {
   HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
 } from "@murphai/hosted-execution/clinical-records";
 import {
+  importClinicalFhirSnapshot,
   readClinicalFhirRetrievalCheckpointForRun,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
@@ -141,18 +144,7 @@ describe("hosted clinical records maintenance", () => {
   });
 
   it("resumes repeated resource types as independent query slices after preemption", async () => {
-    const { retrievalScopes: _retrievalScopes, ...runBase } = RUN;
-    const queryRun: HostedClinicalRecordsQueryRunDescriptor = {
-      ...runBase,
-      retrievalProtocol: "query-slices-v2",
-      retrievalSlices: ["observation-labs", "observation-vitals"].map((queryScopeId, index) => ({
-        coverage: "whole-family",
-        queryFingerprint: String(index + 1).repeat(64),
-        queryScopeId,
-        resourceType: "Observation",
-        sliceId: "whole",
-      })),
-    };
+    const queryRun = createQueryRun(["observation-labs", "observation-vitals"]);
     const fetchPage = vi.fn().mockResolvedValue({
       body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
       nextCursor: null,
@@ -201,6 +193,21 @@ describe("hosted clinical records maintenance", () => {
       },
       identity: queryRun,
     });
+    const checkpointFiles = await readdir(path.join(
+      vaultRoot,
+      ".runtime",
+      "operations",
+      "clinical-records",
+    ));
+    const persistedCheckpoint = JSON.parse(await readFile(path.join(
+      vaultRoot,
+      ".runtime",
+      "operations",
+      "clinical-records",
+      checkpointFiles[0]!,
+    ), "utf8"));
+    expect(persistedCheckpoint.schema)
+      .toBe("murph.clinical-retrieval-checkpoint.v2");
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
@@ -235,6 +242,135 @@ describe("hosted clinical records maintenance", () => {
     expect(result.counts.fetchedResourceFamilyCount).toBe(1);
     expect(port.readRun).toHaveBeenCalledTimes(2);
     expect(fetchPage).toHaveBeenCalledTimes(2);
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    })).resolves.toBeNull();
+  });
+
+  it("completes a maximum-cap query plan with pagination headroom", async () => {
+    const queryScopeIds = Array.from(
+      { length: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES },
+      (_, index) => `observation-query-${index}`,
+    );
+    const queryRun = createQueryRun(queryScopeIds);
+    const nextPageUrlHash = "b".repeat(64);
+    const fetchPage = vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>(
+      async (request) => {
+        if (
+          "queryScopeId" in request
+          && request.queryScopeId === queryScopeIds[0]
+          && request.cursor === null
+        ) {
+          return {
+            body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+            nextCursor: "first-query-page-2",
+            nextPageUrlHash,
+            status: "page",
+          };
+        }
+        return {
+          body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+          nextCursor: null,
+          ...(request.cursor ? { pageUrlHash: nextPageUrlHash } : {}),
+          status: "page",
+        };
+      },
+    );
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES + 2,
+      reviewDecisionCount: 0,
+    });
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: queryRun, status: "ready" }),
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES + 1);
+    expect(importSnapshot).toHaveBeenCalledOnce();
+    const importedSnapshot = importSnapshot.mock.calls[0]?.[0];
+    expect(importedSnapshot?.completedRetrievalSlices)
+      .toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES);
+    expect(importedSnapshot?.completedRetrievalSlices).toEqual(expect.arrayContaining([
+      { queryScopeId: queryScopeIds[0], sliceId: "whole" },
+      {
+        queryScopeId: queryScopeIds[CLINICAL_FHIR_MAX_RETRIEVAL_SLICES - 1],
+        sliceId: "whole",
+      },
+    ]));
+    expect(importedSnapshot?.pages)
+      .toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES + 1);
+    expect(result.counts.fetchedPageCount)
+      .toBe(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES + 1);
+    expect(result.status).toBe("completed");
+  });
+
+  it("terminalizes authorization inside the maximum query-plan error envelope", async () => {
+    await initializeVault({ createdAt: RUN.fetchedAt, vaultRoot });
+    const queryScopeIds = Array.from(
+      { length: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES },
+      (_, index) => `observation-query-${index}`,
+    );
+    const queryRun = createQueryRun(queryScopeIds);
+    const fetchPage = vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>()
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: null,
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        retryable: false,
+        status: "unavailable",
+      });
+    const port = createPort({
+      fetchPage,
+      readRun: vi.fn().mockResolvedValue({ run: queryRun, status: "ready" }),
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: importClinicalFhirSnapshot,
+      vaultRoot,
+      wake: WAKE,
+    });
+    const manifest = JSON.parse(await readFile(path.join(
+      vaultRoot,
+      "raw",
+      "clinical",
+      "fhir",
+      RUN.connectionId,
+      RUN.retrievalJobId,
+      "manifest.json",
+    ), "utf8"));
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(manifest).toMatchObject({
+      completedRetrievalSlices: [{
+        queryScopeId: queryScopeIds[0],
+        sliceId: "whole",
+      }],
+      schemaVersion: "murph.clinical-raw-manifest.v3",
+    });
+    expect(manifest.errors).toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES - 1);
+    expect(manifest.resourceFiles).toHaveLength(1);
+    expect(result.status).toBe("partial");
     await expect(readClinicalFhirRetrievalCheckpointForRun({
       identity: WAKE,
       vaultRoot,
@@ -1481,6 +1617,23 @@ type HostedRuntimeClinicalRecordsPortMocks = {
   readRun: ReturnType<typeof vi.fn<HostedRuntimeClinicalRecordsPort["readRun"]>>;
   recordOutcome: ReturnType<typeof vi.fn<HostedRuntimeClinicalRecordsPort["recordOutcome"]>>;
 };
+
+function createQueryRun(
+  queryScopeIds: readonly string[],
+): HostedClinicalRecordsQueryRunDescriptor {
+  const { retrievalScopes: _retrievalScopes, ...runBase } = RUN;
+  return {
+    ...runBase,
+    retrievalProtocol: "query-slices-v2",
+    retrievalSlices: queryScopeIds.map((queryScopeId) => ({
+      coverage: "whole-family",
+      queryFingerprint: createHash("sha256").update(queryScopeId).digest("hex"),
+      queryScopeId,
+      resourceType: "Observation",
+      sliceId: "whole",
+    })),
+  };
+}
 
 function createPort(
   overrides: Partial<HostedRuntimeClinicalRecordsPort> = {},

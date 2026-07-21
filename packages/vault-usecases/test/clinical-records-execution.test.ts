@@ -105,14 +105,11 @@ describe("importClinicalFhirSnapshot", () => {
     );
     expect(persistedCheckpoint).not.toContain(FHIR_BASE_URL);
     expect(persistedCheckpoint).not.toContain(PATIENT_ID);
-
-    const legacyCheckpoint = JSON.parse(persistedCheckpoint);
-    legacyCheckpoint.schema = "murph.clinical-retrieval-checkpoint.v1";
-    await writeFile(
-      path.join(checkpointDirectory, checkpointFiles[0]!),
-      JSON.stringify(legacyCheckpoint),
-      "utf8",
-    );
+    const persistedCheckpointValue = JSON.parse(persistedCheckpoint);
+    expect(persistedCheckpointValue.schema)
+      .toBe("murph.clinical-retrieval-checkpoint.v1");
+    expect(persistedCheckpointValue.identity).not.toHaveProperty("retrievalProtocol");
+    expect(persistedCheckpointValue.identity).not.toHaveProperty("retrievalSlices");
     await expect(readClinicalFhirRetrievalCheckpoint({
       identity,
       vaultRoot: input.vaultRoot,

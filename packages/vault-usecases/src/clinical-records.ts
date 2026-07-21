@@ -424,12 +424,20 @@ export async function writeClinicalFhirRetrievalCheckpoint(input: {
   const identity = clinicalFhirRetrievalCheckpointIdentityV2Schema.parse(
     input.identity,
   );
-  const parsed = clinicalFhirRetrievalCheckpointSchema.parse({
+  const checkpointRecord = {
     ...input.checkpoint,
     identity,
     identityHash: hashClinicalFhirRetrievalCheckpointIdentity(identity),
-    schema: CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA,
-  });
+  };
+  const parsed = identity.retrievalProtocol === "query-slices-v2"
+    ? clinicalFhirRetrievalCheckpointV2Schema.parse({
+        ...checkpointRecord,
+        schema: CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA,
+      })
+    : legacyClinicalFhirRetrievalCheckpointSchema.parse({
+        ...checkpointRecord,
+        schema: LEGACY_CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA,
+      });
   assertClinicalFhirRetrievalCheckpointConsistent(parsed);
   const directory = resolveRuntimePaths(input.vaultRoot).clinicalRecordsRuntimeRoot;
   await mkdir(directory, { mode: 0o700, recursive: true });

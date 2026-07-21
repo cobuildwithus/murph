@@ -1,4 +1,5 @@
 import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   clinicalFacetSlug,
   clinicalFhirManifestPathSchema,
@@ -79,6 +80,34 @@ describe("clinical records contracts", () => {
       ...plan,
       slices: [plan.slices[0], plan.slices[0]],
     })).toThrow("identity to be unique");
+  });
+
+  it("keeps retrieval plans within the composed execution envelope", () => {
+    const slices = Array.from(
+      { length: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES },
+      (_, index) => ({
+        coverage: "whole-family" as const,
+        queryFingerprint: SHA256,
+        queryScopeId: `observation-query-${index}`,
+        resourceType: "Observation" as const,
+        sliceId: "whole",
+      }),
+    );
+
+    expect(clinicalFhirRetrievalPlanSchema.parse({
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices,
+    }).slices).toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES);
+    expect(() => clinicalFhirRetrievalPlanSchema.parse({
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices: [
+        ...slices,
+        {
+          ...slices[0],
+          queryScopeId: "one-query-beyond-the-execution-envelope",
+        },
+      ],
+    })).toThrow();
   });
 
   it("requires bounded slices to be contiguous, ordered, and non-overlapping", () => {
