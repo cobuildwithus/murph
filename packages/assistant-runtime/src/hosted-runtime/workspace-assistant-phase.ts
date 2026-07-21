@@ -708,14 +708,14 @@ function createHostedScheduledGroupTools(input: {
   target: string;
   threadIsDirect: boolean;
 }): {
-  groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool;
+  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool;
   groupSharedReader: AssistantHostedGroupSharedReader;
 } | null {
   const channel = input.channel.trim().toLowerCase();
   const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
   const target = normalizeAssistantRouteString(input.target);
   if (
-    channel !== "linq"
+    (channel !== "linq" && channel !== "telegram")
     || input.threadIsDirect !== false
     || !containerMemberId
     || !target
@@ -723,8 +723,18 @@ function createHostedScheduledGroupTools(input: {
     return null;
   }
 
-  // This state belongs to one scheduled model operation. It proves a missing
-  // grant from the model-triggered read and prevents repeated offer attempts.
+  // Linq can post a provider-side join offer. Telegram instead uses the normal
+  // create_join_link result in the assistant's ordinary chat reply.
+  if (channel === "telegram") {
+    return {
+      groupSharedReader: createHostedGroupSharedReader({
+        groupToolPort: input.groupToolPort,
+      }),
+    };
+  }
+
+  // This state belongs to one scheduled Linq model operation. It proves a
+  // missing grant from the model-triggered read and prevents repeated offers.
   const observedNotGrantedScopeKeys = new Set<string>();
   let permissionOfferAttempted = false;
   const unobservedGroupSharedReader = createHostedGroupSharedReader({

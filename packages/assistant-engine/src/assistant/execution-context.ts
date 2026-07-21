@@ -348,7 +348,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     threadIsDirect: boolean
   }): {
-    groupPermissionOfferTool: AssistantHostedGroupPermissionOfferTool
+    groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool
     groupSharedReader: AssistantHostedGroupSharedReader
   } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null

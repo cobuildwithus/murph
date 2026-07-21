@@ -26,12 +26,16 @@ import {
 } from "../src/runner-injected-credential.ts";
 
 const userId = `member_local_telegram_scheduled_reminder_${Date.now()}`;
+const groupOwnerUserId = `member_local_telegram_group_owner_${Date.now()}`;
+const telegramGroupThreadId = "-1007654321";
 const telegramBotToken = "telegram-local-scheduled-reminder-token";
 const telegramWebhookSecret = "telegram-local-scheduled-reminder-secret";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const setupReplyText = "Done - I will remind you here in a few minutes.";
 const setupRequestText = "Remind me here in a few minutes to go to sleep.";
+const groupSetupRequestText = "Set up our weekly health newsletter in this chat.";
+const groupSetupReplyText = "Got it - this Telegram group route is ready.";
 const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledReminderLeadMs = 360_000;
@@ -58,6 +62,58 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
     await telegramStub?.stop();
     telegramStub = null;
   }, 120_000);
+
+  it("routes a real Telegram group webhook through its group runtime and ordinary chat outbox", async () => {
+    await requireScenario().seedActiveHostedMember({ memberId: groupOwnerUserId });
+    await requireScenario().bindActiveHostedTelegramMember({
+      memberId: groupOwnerUserId,
+      telegramThreadId: buildTelegramThreadId(groupOwnerUserId),
+      telegramUserId: buildTelegramSenderUserId(groupOwnerUserId),
+    });
+    requireScenario().queueAssistantResponses(
+      [groupSetupReplyText],
+      { matchInputContains: groupSetupRequestText },
+    );
+
+    const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
+    const groupSendMatcher = (request: ObservedTelegramRequest) => {
+      const body = requireTelegramStub().parseObservedJson(request.body);
+      return body?.chat_id === telegramGroupThreadId
+        && body.text === groupSetupReplyText;
+    };
+    const baselineCount = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      groupSendMatcher,
+    );
+    const webhookResponse = await postTelegramWebhook(
+      buildInboundTelegramGroupUpdate(groupOwnerUserId),
+    );
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-group",
+    });
+
+    const route = await requireScenario().readHostedThreadRoute({
+      channel: "telegram",
+      threadId: telegramGroupThreadId,
+    });
+    expect(route).toMatchObject({ ownerMemberId: groupOwnerUserId });
+    if (!route) {
+      throw new Error("Expected the Telegram group webhook to create a thread route.");
+    }
+    await requireTelegramStub().waitForRequestCount({
+      expectedCount: baselineCount + 1,
+      expectedPath: expectedSendPath,
+      matchRequest: groupSendMatcher,
+      scenario: requireScenario(),
+      userId: route.containerMemberId,
+    });
+    const completed = await requireScenario().waitForHostedCompletion(
+      route.containerMemberId,
+    );
+    expect(completed.lastErrorCode ?? null).toBeNull();
+  }, 180_000);
 
   it("creates a thread-only Telegram reminder, wakes from the scheduled alarm, and sends it", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
@@ -450,6 +506,27 @@ function buildInboundTelegramUpdate(memberId: string): Record<string, unknown> {
       text: setupRequestText,
     },
     update_id: Number.parseInt(buildTelegramMessageId(memberId), 10),
+  };
+}
+
+function buildInboundTelegramGroupUpdate(memberId: string): Record<string, unknown> {
+  return {
+    message: {
+      chat: {
+        id: Number.parseInt(telegramGroupThreadId, 10),
+        title: "Hosted local family chat",
+        type: "group",
+      },
+      date: Math.floor(Date.now() / 1000),
+      from: {
+        first_name: "Hosted",
+        id: Number.parseInt(buildTelegramSenderUserId(memberId), 10),
+        is_bot: false,
+      },
+      message_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + 1,
+      text: groupSetupRequestText,
+    },
+    update_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + 1,
   };
 }
 

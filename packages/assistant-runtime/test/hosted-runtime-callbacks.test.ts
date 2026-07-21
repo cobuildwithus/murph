@@ -11406,6 +11406,10 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("persists one privacy-blind outbox child per planned group email recipient", async () => {
+    const automationAuthority = {
+      automationId: "automation_123",
+      expectedUpdatedAt: "2026-07-12T11:00:00.000Z",
+    };
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
@@ -11431,6 +11435,10 @@ describe("hosted runtime callbacks", () => {
       fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: fanoutTarget,
     }));
+    mocks.readAssistantOutboxIntent.mockResolvedValue({
+      automationAuthority,
+      intentId: "intent_123",
+    } as AssistantOutboxIntent);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -11463,6 +11471,7 @@ describe("hosted runtime callbacks", () => {
     expect(childInputs).toEqual(childInputs.map((child) => expect.objectContaining({
       actorId: "actor_123",
       answeredMailboxItemIds: ["mailbox_123"],
+      automationAuthority,
       channel: "email",
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: false,
@@ -11478,6 +11487,53 @@ describe("hosted runtime callbacks", () => {
     expect(childInputs.map((child) =>
       parseHostedEmailThreadTarget(child.explicitTarget)?.recipientMemberId
     )).toEqual(["member_one", "member_two"]);
+    expect(mocks.readAssistantOutboxIntent).toHaveBeenCalledWith(
+      HOSTED_WAKE.vaultRoot,
+      "intent_123",
+    );
+  });
+
+  it("fails before recipient sends when the group email parent authority is unavailable", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      threadIsDirect: false,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendEmail: vi.fn(async () => ({
+          fanoutRecipientMemberIds: ["member_one"],
+          target: fanoutTarget,
+        })),
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(mocks.createAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
   it("does not recreate sent, ambiguous, or exhausted newsletter recipients from the same parent attempt", async () => {
@@ -11496,6 +11552,13 @@ describe("hosted runtime callbacks", () => {
       idempotencyKey: deliveryIdempotencyKey,
       threadIsDirect: false,
     });
+    mocks.readAssistantOutboxIntent.mockResolvedValue({
+      automationAuthority: {
+        automationId: "automation_123",
+        expectedUpdatedAt: "2026-07-12T11:00:00.000Z",
+      },
+      intentId: "intent_123",
+    } as AssistantOutboxIntent);
     const existingRecipient = (
       memberId: string,
       status: "abandoned" | "failed" | "sent",
@@ -11597,6 +11660,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: fanoutTarget,
       threadIsDirect: false,
     });
+    mocks.readAssistantOutboxIntent.mockResolvedValue({
+      intentId: "intent_123",
+    } as AssistantOutboxIntent);
     const sendEmail = vi.fn(async () => ({
       fanoutRecipientMemberIds: ["member_one", "member_two"],
       target: fanoutTarget,
@@ -11650,6 +11716,9 @@ describe("hosted runtime callbacks", () => {
       "hosted-email-group-recipient:intent_123:member_one",
       "hosted-email-group-recipient:intent_123:member_two",
     ]);
+    expect(mocks.createAssistantOutboxIntent.mock.calls.every(
+      (call) => call[0].automationAuthority === null,
+    )).toBe(true);
   });
 
   it("marks a lost group-recipient email response as terminally ambiguous", async () => {

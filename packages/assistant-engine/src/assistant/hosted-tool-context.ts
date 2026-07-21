@@ -167,6 +167,7 @@ export function createAssistantHostedToolContext(input: {
   }
   const newsletterOutboxTool = newsletterPort && input.newsletterOutbox
     ? createAssistantNewsletterOutboxTool({
+        automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         newsletterTool: newsletterPort,
         sessionId: input.session.sessionId,

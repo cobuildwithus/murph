@@ -1274,7 +1274,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const channelAdapter = getAssistantChannelAdapter(primaryReplyInput.source)
   const autoReplySkipReason = channelAdapter?.canAutoReply({
     externalThreadRouteAuthorityPresent:
-      primaryReplyInput.sourceMetadata?.kind === 'linq' &&
+      (
+        primaryReplyInput.sourceMetadata?.kind === 'linq' ||
+        primaryReplyInput.sourceMetadata?.kind === 'telegram'
+      ) &&
       primaryReplyInput.sourceMetadata.externalThreadRouteAuthorityPresent === true,
     replyTargetThreadId: primaryReplyInput.replyTarget?.threadId ?? null,
     source: primaryReplyInput.source,

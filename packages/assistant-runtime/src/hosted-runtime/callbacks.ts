@@ -2740,11 +2740,23 @@ async function persistHostedEmailGroupFanoutIntents(input: {
   }
 
   const payload = input.assistantDeliveryEffect.payload;
+  let parentIntent: AssistantOutboxIntent | null;
   let existingIntents: AssistantOutboxIntent[];
   try {
-    existingIntents = await listAssistantOutboxIntents(input.vaultRoot);
+    [parentIntent, existingIntents] = await Promise.all([
+      readAssistantOutboxIntent(
+        input.vaultRoot,
+        input.assistantDeliveryEffect.effectId,
+      ),
+      listAssistantOutboxIntents(input.vaultRoot),
+    ]);
   } catch (error) {
     throw markHostedDeliveryPreProviderRetryable(error);
+  }
+  if (!parentIntent) {
+    throw markHostedDeliveryPreProviderRetryable(
+      new Error("Hosted email group fanout parent intent is unavailable."),
+    );
   }
   for (const memberId of input.fanoutRecipientMemberIds) {
     if (hasNonReplayableHostedNewsletterRecipientIntent({
@@ -2763,6 +2775,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
       await createAssistantOutboxIntent({
         actorId: payload.actorId,
         answeredMailboxItemIds: payload.answeredMailboxItemIds,
+        automationAuthority: parentIntent.automationAuthority ?? null,
         channel: "email",
         dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
         deliveryIdempotencyKey: payload.idempotencyKey,

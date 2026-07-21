@@ -94,17 +94,22 @@ for the current request.
 
 ## Additive permissions
 
-When the room adds a sharing permission to a group that already exists, default
-to `murph.group action="post_join_offer"`. Do not tell existing members to join
-again or make them open the link as the primary action. Pass only the exact
-`projectionScopes` (and the group's chosen `displayName`, when applicable);
-never author or pass offer text. Web owns the full canonical offer copy,
-including the causal consent sentence, exact scope disclosure, accepted Like
-or heart gestures, and first-party customize link. Liking or hearting adds only
-the disclosed permission snapshot; it does not make an existing member redo
-membership or their other grants. Use `create_join_link` when the room
-explicitly asks for a standalone link, not as the default for an additive
-permission.
+In an iMessage/Linq room that adds a sharing permission to an existing group,
+default to `murph.group action="post_join_offer"`. Do not tell existing members
+to join again or make them open the link as the primary action. Pass only the
+exact `projectionScopes` (and the group's chosen `displayName`, when
+applicable); never author or pass offer text. Web owns the full canonical offer
+copy, including the causal consent sentence, exact scope disclosure, accepted
+Like or heart gestures, and first-party customize link. Liking adds only the
+disclosed permission snapshot; it does not make an existing member redo
+membership or their other grants.
+
+Telegram has no provider-side `post_join_offer` path. In a Telegram group,
+call `create_join_link` with only the exact requested scopes and include the
+returned server-owned `joinUrl` in the single ordinary chat reply. This also
+applies after a scheduled Telegram shared read finds a missing grant. Never
+claim that a reaction offer was posted in Telegram. Outside Telegram, use
+`create_join_link` only when the room explicitly asks for a standalone link.
 
 ## Leaving a hosted group
 
@@ -379,10 +384,11 @@ share.
 
 Apply the answers directly. The chosen name is the automation title, the name
 used in the setup notice, and the group display name for the permissions
-surface. For the newsletter like-to-consent path, pass that same chosen name
-as `displayName` on `murph.group action="post_join_offer"`. If you mint a
-standalone join link instead, pass the same `displayName` on
-`murph.group action="create_join_link"`.
+surface. Pass that same chosen name as `displayName` on the iMessage/Linq
+newsletter like-to-consent path with
+`murph.group action="post_join_offer"`. In Telegram, use
+`murph.group action="create_join_link"`, pass the same `displayName`, and
+include its returned `joinUrl` in the ordinary setup reply.
 The chosen schedule becomes the cron expression; `0 9 * * 0` is the Sunday 9am
 default. Create or replace the newsletter with
 `murph.automation action="save_newsletter"`, passing the chosen
@@ -414,23 +420,25 @@ decision sequence in the `group-newsletter` skill. Do not duplicate or
 improvise a second run sequence from this setup section.
 
 If a member never granted email sharing and expresses interest, or the group
-asks how someone can opt into the newsletter, post a permission offer scoped to
+asks how someone can opt into the newsletter, use the channel's permission
+path above scoped to
 `group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
 different set. Pass only the exact newsletter `projectionScopes`; when this
 offer names the newsletter group, also pass the group's chosen name as
-`displayName` on the `post_join_offer` call. Web owns the complete canonical
-Like-or-heart consent sentence, exact scope disclosure, and first-party
-customize link. Never author or pass offer text. Liking or hearting the message
-adds the disclosed snapshot; the link lets a member pick a different set. For
+`displayName` on the iMessage/Linq `post_join_offer` call or Telegram
+`create_join_link` call. Web owns the complete canonical iMessage/Linq
+Like-to-consent sentence, exact scope disclosure, and first-party customize
+link. Never author or pass offer text. In iMessage, liking the message adds the
+disclosed snapshot; in Telegram, members use the returned Web link. For
 existing participants, call this permission opt-in, never joining or rejoining.
 Never silently share health data that the message did not disclose, never add
 offer text or another URL, and never repeatedly re-offer to someone who
 declined.
 
-If a member asks to be removed from the newsletter in the group chat, call
-`murph.group` with `action="revoke_own_email_share"`. That revokes only the
-current sender's own `group-email.v0` grant. If the request arrives by email
-thread reply, do not revoke from the email `From` header; reply directing them
-to opt out in the group chat or settings. Do not remove anyone else, do not
-change their health-sharing grants, and do not ask for their raw email address.
+If a member asks to be removed from the newsletter in an iMessage group chat,
+call `murph.group` with `action="revoke_own_email_share"`. That revokes only the
+current authenticated sender's own `group-email.v0` grant. Telegram group
+messages and email replies do not carry that self-opt-out authority; direct the
+member to settings or their private Murph chat instead. Do not remove anyone
+else, change their health-sharing grants, or ask for their raw email address.

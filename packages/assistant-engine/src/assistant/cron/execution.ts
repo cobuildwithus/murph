@@ -1357,15 +1357,15 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
     return null
   }
 
-  const createdAtMs = Date.parse(input.job.source.createdAt)
+  const updatedAtMs = Date.parse(input.job.source.updatedAt)
   const occurrenceAtMs = Date.parse(input.occurrenceAt)
-  if (!Number.isFinite(createdAtMs) || !Number.isFinite(occurrenceAtMs)) {
+  if (!Number.isFinite(updatedAtMs) || !Number.isFinite(occurrenceAtMs)) {
     return null
   }
 
   if (
     occurrenceAtMs <
-      createdAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
+      updatedAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
   ) {
     return null
   }
@@ -2038,7 +2038,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   if (
     !hosted ||
     input.routeAuthorityVerified !== true ||
-    input.channel !== 'linq' ||
+    (input.channel !== 'linq' && input.channel !== 'telegram') ||
     input.route.threadIsDirect !== false
   ) {
     return input.executionContext
@@ -2065,7 +2065,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   let scheduledGroupTools: ReturnType<typeof createScheduledGroupTools>
   try {
     scheduledGroupTools = createScheduledGroupTools({
-      channel: 'linq',
+      channel: input.channel,
       target,
       threadIsDirect: false,
     })

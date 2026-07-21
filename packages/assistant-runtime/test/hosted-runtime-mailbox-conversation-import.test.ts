@@ -2620,6 +2620,11 @@ describe("hosted mailbox conversation import adapter", () => {
       eventId: "evt_synthetic_telegram_001",
       message: {
         channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: TEST_USER_ID,
+          threadId: "123456789",
+        },
         telegramMessage: {
           attachments: [
             {
@@ -2650,6 +2655,7 @@ describe("hosted mailbox conversation import adapter", () => {
           schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
           text: "telegram hello",
           threadId: "123456789",
+          threadIsDirect: false,
         },
       },
     });
@@ -2677,7 +2683,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "telegram");
-    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(event.conversation?.threadIsDirect, false);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -2690,6 +2696,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(replyTarget.messageId?.startsWith("hid_"), false);
     assert.equal(replyTarget.threadId?.startsWith("hid_"), false);
     assert.deepEqual(event.sourceMetadata, {
+      externalThreadRouteAuthorityPresent: true,
       kind: "telegram",
       mediaGroupId: event.sourceMetadata?.kind === "telegram"
         ? event.sourceMetadata.mediaGroupId

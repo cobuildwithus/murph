@@ -24,6 +24,10 @@ const AUTHORITY = {
   automationId: 'automation_newsletter',
   occurrenceAt: '2026-07-12T13:00:00.000Z',
 }
+const OUTBOX_AUTOMATION_AUTHORITY = {
+  automationId: 'automation_newsletter',
+  expectedUpdatedAt: '2026-07-12T11:00:00.000Z',
+}
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
 const CHANGED_AUTHORIZATION_PROOF = 'b'.repeat(64)
 const DELIVERY_KEY =
@@ -102,6 +106,7 @@ describe('newsletter durable outbox capability', () => {
     const intents = await listAssistantOutboxIntents(vault)
     expect(intents).toHaveLength(1)
     expect(intents[0]).toMatchObject({
+      automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
       channel: 'email',
       deliveryIdempotencyKey: DELIVERY_KEY,
       emailHtml: '<p>Weekly</p>',
@@ -321,6 +326,7 @@ describe('newsletter durable outbox capability', () => {
     expect(memberIntents).toHaveLength(2)
     const retryIntent = memberIntents[1]
     expect(retryIntent).toMatchObject({
+      automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
       emailHtml: '<p>Original weekly note</p>',
       message: 'Original weekly note',
       newsletterAuthorizationProof: AUTHORIZATION_PROOF,
@@ -389,6 +395,7 @@ function createTool(input: {
   vault: string
 }) {
   return createAssistantNewsletterOutboxTool({
+    automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
     authority: AUTHORITY,
     newsletterTool: { request: input.request },
     sessionId: 'session_newsletter',

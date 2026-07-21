@@ -3660,7 +3660,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('withholds first newsletter send authority until the opt-out window elapses', async () => {
+  it('withholds newsletter send authority until the latest configuration opt-out window elapses', async () => {
     async function runOccurrence(occurrenceAt: string) {
       vi.setSystemTime(new Date(occurrenceAt))
       const { vaultRoot } = await createRuntimeContext(
@@ -3669,7 +3669,7 @@ describe('assistant cron runtime orchestration', () => {
       getVaultAutomationStore(vaultRoot).push({
         automationId: 'automation-newsletter-window',
         continuityPolicy: 'fresh',
-        createdAt: '2026-07-06T10:00:00.000Z',
+        createdAt: '2026-06-01T10:00:00.000Z',
         instructions: 'Compose the group health newsletter.',
         route: {
           channel: 'linq',
@@ -6868,6 +6868,82 @@ describe('assistant cron runtime orchestration', () => {
         threadId: '123456789',
       }),
     )
+  })
+
+  it('scopes scheduled shared reads to canonical Telegram group routes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-group-tools-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-group-tools',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group sleep reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '-100123456789',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-group-tools-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram group tools reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const groupSharedReader = {
+      async request() {
+        return {
+          status: 'unavailable' as const,
+          unavailableReason: 'synthetic_unavailable',
+        }
+      },
+    }
+    const createScheduledGroupTools = vi.fn(() => ({ groupSharedReader }))
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          memberId: 'member-telegram-group-tools',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(createScheduledGroupTools).toHaveBeenCalledWith({
+      channel: 'telegram',
+      target: '-100123456789',
+      threadIsDirect: false,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'telegram',
+        executionContext: {
+          hosted: expect.objectContaining({ groupSharedReader }),
+        },
+        threadIsDirect: false,
+      }),
+    )
+    const notificationContext = cronMocks.sendAssistantMessageLocal.mock
+      .calls.at(-1)?.[0]?.executionContext
+    expect(notificationContext?.hosted?.groupPermissionOfferTool).toBeUndefined()
   })
 
   it('executes existing email thread routes only when a sender identity is present', async () => {

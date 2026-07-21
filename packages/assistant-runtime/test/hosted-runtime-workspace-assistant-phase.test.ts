@@ -823,6 +823,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await expect(scheduledGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
+      const telegramGroupTools = createScheduledGroupTools({
+        channel: "telegram",
+        target: "telegram_current_group",
+        threadIsDirect: false,
+      });
+      expect(telegramGroupTools).not.toBeNull();
+      if (!telegramGroupTools) {
+        throw new Error("Expected scheduled Telegram group capabilities.");
+      }
+      expect(telegramGroupTools.groupPermissionOfferTool).toBeUndefined();
+      await expect(telegramGroupTools.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      })).resolves.toMatchObject({ status: "ok" });
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -836,8 +849,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      expect(sequence).toEqual(["assistant_lane", "read_shared"]);
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(sequence).toEqual(["assistant_lane", "read_shared", "read_shared"]);
+      expect(request).toHaveBeenCalledTimes(2);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -908,12 +921,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }
         return tools;
       };
+      const requirePermissionOffer = (tools: ReturnType<typeof createTools>) => {
+        const permissionOffer = tools.groupPermissionOfferTool;
+        if (!permissionOffer) {
+          throw new Error("Expected scheduled Linq permission offer capability.");
+        }
+        return permissionOffer;
+      };
       const stepsOffer = {
         projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
       };
 
       const beforeRead = createTools();
-      await expect(beforeRead.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(beforeRead).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",
@@ -924,7 +944,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await unobserved.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(unobserved.groupPermissionOfferTool.request({
+      await expect(requirePermissionOffer(unobserved).request({
         projectionScopes: [{ projectionKind: "device-sync-status.v0" }],
       })).resolves.toMatchObject({
         result: {
@@ -940,7 +960,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await grantedMissing.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(grantedMissing.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(grantedMissing).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",
@@ -952,11 +972,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await allowed.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(allowed).request(stepsOffer))
         .resolves.toMatchObject({
           result: { unavailableReason: "synthetic_web_unavailable" },
         });
-      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(allowed).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",

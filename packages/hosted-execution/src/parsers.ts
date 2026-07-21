@@ -53,6 +53,7 @@ import type {
   HostedExecutionEmailAttachmentSummary,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -536,11 +537,17 @@ export function parseHostedExecutionConversationMessagePayload(
   switch (channel) {
     case "linq":
       return parseHostedExecutionLinqConversationMessagePayload(record, channel);
-    case "telegram":
+    case "telegram": {
+      const routeAuthority = parseOptionalHostedExecutionTelegramExternalThreadRouteAuthority(
+        record.routeAuthority,
+        "Hosted execution conversation.message wake payload routeAuthority",
+      );
       return {
         channel,
+        ...(routeAuthority === undefined ? {} : { routeAuthority }),
         telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
       };
+    }
     case "email":
       return {
         ...(record.assistantStyleSettingsAuthorized === undefined
@@ -782,6 +789,23 @@ function parseOptionalHostedExecutionLinqExternalThreadRouteAuthority(
   return {
     ...authority,
     channel: "linq",
+  };
+}
+
+function parseOptionalHostedExecutionTelegramExternalThreadRouteAuthority(
+  value: unknown,
+  label: string,
+): HostedExecutionTelegramExternalThreadRouteAuthority | null | undefined {
+  const authority = parseOptionalHostedExecutionExternalThreadRouteAuthority(value, label);
+  if (!authority) {
+    return authority;
+  }
+  if (authority.channel !== "telegram") {
+    throw new TypeError(`${label} channel must be telegram.`);
+  }
+  return {
+    ...authority,
+    channel: "telegram",
   };
 }
 

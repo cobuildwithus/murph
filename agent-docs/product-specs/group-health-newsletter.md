@@ -17,6 +17,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 
 - It is one **cron automation living in the group runtime's own vault**, authored the same way reminders are.
 - It uses the existing conversation outbox for iMessage and Telegram. Email delivery **reuses** the Cloudflare outbound email path. It does not introduce a parallel sender.
+- Linked Telegram group ingress resolves the existing Web-owned thread-container route, appends the message to that container's mailbox with the signed route identity, and lets the ordinary Telegram reply/outbox path deliver current-chat editions. The admitted message also self-heals the container's managed Telegram reply channel if activation is still being processed. It adds no Telegram-specific newsletter state owner.
 - It sends **one shared email to the whole group** (a thread everyone is on), not a personalized email per member. Members reply-all; Murph participates in the thread.
 - It **reads only health data that members explicitly share** through the disclosed reaction offer or the join page. Newsletter `prepare` performs the consent-aware Web read after the model invokes the tool; no shared snapshot or destination-local share store is written into the group vault. It does not infer newsletter health access from private 1:1 Murph data.
 - Email addresses are **shared with the group by explicit grant** and are visible to co-members in the thread's `To` line — that visibility is the point of a shared reply-all thread and is exactly what the grant authorizes. Addresses are **not persisted in the group vault**; they are resolved web-side at send time and placed only in the outbound email headers.
@@ -32,14 +33,14 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | New-group requested permissions | For email delivery, Murph normally requests email plus the supported health scopes, narrowed by any explicit creator choice. For current-chat delivery, it requests only the chosen one to three health scopes and omits email. Every member may deselect any requested permission. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
-| Individual opt-out | **Revoke email sharing** (self-service, in chat or by replying in the thread). Leaves challenge/health-sharing intact. Forward-only. |
+| Individual opt-out | **Revoke email sharing** through settings or an authenticated iMessage/private Murph chat. Telegram group messages and email headers do not prove the sender's self-revocation authority. Leaves challenge/health-sharing intact. Forward-only. |
 | First send | **Announced in the group with a short opt-out window.** Never a silent immediate first fire. |
 | No-email-yet member | Grants email permission at join anyway; **auto-joins** once they add + verify an email later. |
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
 | Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. |
-| Permission offers | Lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. Liking opts into the disclosed snapshot and grants membership only when needed; the link is the fine-tune path. |
+| Permission offers | In iMessage/Linq, lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each Web-owned encrypted health snapshot can carry **the 7 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. |
@@ -76,7 +77,7 @@ A cron automation persisted in the **group runtime's** vault (`bank/automations/
 - Newsletter configuration or route changes repeat that structured save from the destination group; generic patch is status-only.
 - Name, exact scopes, tone flavor, delivery, and optional custom note live in the automation's **instruction text** — no new config table. This satisfies the persisted-state placement gate: an automation is already a canonical vault record and is the group-scoped source of truth for the newsletter.
 - One automation per group. "Any member can edit" = any member's in-chat request upserts/patches that single record (last-write-wins). `status: paused` stops it.
-- **First run after creation is not immediate.** When the newsletter is created, Murph posts a group notice and the first edition respects an opt-out window (see Security & Abuse).
+- **First run after creation or delivery/configuration re-save is not immediate.** Murph posts a group notice and email send authority is withheld until the opt-out window measured from the automation's latest `updatedAt` has elapsed (see Security & Abuse).
 
 ### Participants and featured set
 
@@ -129,7 +130,12 @@ existing assistant outbox; it never calls the provider from the tool. The
 existing hosted group fanout planner revalidates the proof, persists one child
 intent per authorized recipient before provider entry, and then sends each child
 with one envelope recipient while preserving the full authorized `To` audience
-in the shared MIME. No new queue, table, route, scheduler, or state owner exists.
+in the shared MIME. The parent carries the automation id plus expected
+configuration revision, and every fanout or safe-retry child copies that same
+authority. Editing, switching delivery, pausing, or archiving the automation
+therefore invalidates already-queued work before provider entry. Legacy parent
+intents without revision authority remain readable for compatible retry
+handling. No new queue, table, route, scheduler, or state owner exists.
 
 The parent and children share the occurrence-scoped delivery key. A later fresh
 cron turn reads their durable states: active work returns `accepted` and retains
