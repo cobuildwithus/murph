@@ -25,6 +25,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeAssistantConfigurationToolRequest,
@@ -3587,8 +3588,7 @@ function buildGroupAskRequestFailureText(error: unknown): string {
     return 'group tool request failed'
   }
   const record = error as Record<string, unknown>
-  const errorCode = typeof record.code === 'string'
-    && /^[A-Z][A-Z0-9_]{0,127}$/u.test(record.code)
+  const errorCode = isHostedRuntimeAssistantAskDiagnosticCode(record.code)
     ? record.code
     : null
   const requestId = isHostedRuntimeAssistantAskRequestId(record.requestId)
