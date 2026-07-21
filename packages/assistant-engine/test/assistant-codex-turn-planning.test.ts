@@ -507,8 +507,78 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
       'Assistant tone preference:',
     )
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
+      'Assistant persona: Navy SEAL',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
+    expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId(null),
+    )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames,
+    )
+
+    const scheduledWithoutPersonaPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      },
+      preferenceContext: {
+        ...preferenceContext,
+        assistantPersona: null,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledNewsletterPlan.developerInstructions).toBe(
+      scheduledWithoutPersonaPlan.developerInstructions,
+    )
+    expect(scheduledNewsletterPlan.assistantContractFingerprint).toBe(
+      scheduledWithoutPersonaPlan.assistantContractFingerprint,
+    )
+
+    const scheduledSavedVoicePlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      },
+      preferenceContext: {
+        ...preferenceContext,
+        assistantVoice: 'warm',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledSavedVoicePlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
 
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
