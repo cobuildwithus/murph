@@ -25,6 +25,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./browser-vault": {
+      "types": "./dist/browser-vault.d.ts",
+      "import": "./dist/browser-vault.js",
+      "default": "./dist/browser-vault.js"
+    },
     "./schemas": {
       "types": "./dist/schemas.d.ts",
       "import": "./dist/schemas.js",

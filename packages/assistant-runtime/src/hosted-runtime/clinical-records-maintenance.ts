@@ -6,8 +6,10 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFhirRetrievalScopeSchema,
+  clinicalFhirRetrievalSliceSchema,
   clinicalSourceSystemSchema,
   countClinicalFhirPageResources,
+  type ClinicalFhirRetrievalScope,
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
@@ -17,7 +19,8 @@ import {
   parseHostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsOutcomeCounts,
   type HostedClinicalRecordsRecordOutcomeRequest,
-  type HostedClinicalRecordsRunDescriptor,
+  type HostedClinicalRecordsAnyRunDescriptor,
+  type HostedClinicalRecordsRetrievalSlice,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
   ClinicalFhirRetrievalCheckpoint,
@@ -36,6 +39,10 @@ import {
 
 const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
+
+type ClinicalFhirRetrievalWork =
+  | ClinicalFhirRetrievalScope
+  | HostedClinicalRecordsRetrievalSlice;
 
 type ClinicalRecordsVaultModule = {
   clearClinicalFhirRetrievalCheckpoint(input: {
@@ -162,23 +169,29 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         : {}),
       requestedScopes: run.requestedScopes,
       retrievalJobId: run.retrievalJobId,
-      retrievalScopes: run.retrievalScopes.map((scope) =>
-        clinicalFhirRetrievalScopeSchema.parse(scope)
-      ),
+      retrievalScopes: readRunRetrievalScopes(run),
+      ...("retrievalProtocol" in run
+        ? {
+            retrievalProtocol: run.retrievalProtocol,
+            retrievalSlices: run.retrievalSlices.map((slice) =>
+              clinicalFhirRetrievalSliceSchema.parse(slice)
+            ),
+          }
+        : {}),
       runId: run.runId,
       sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
     };
     checkpoint = await vaultModule.readClinicalFhirRetrievalCheckpoint({
       identity: checkpointIdentity,
       vaultRoot: input.vaultRoot,
-    }) ?? emptyRetrievalCheckpoint();
+    }) ?? emptyRetrievalCheckpoint(
+      checkpointIdentity.retrievalProtocol === "query-slices-v2",
+    );
   }
 
-  const retrievalScopes = checkpointIdentity.retrievalScopes.map((scope) =>
-    clinicalFhirRetrievalScopeSchema.parse(scope)
-  );
+  const retrievalWork = readCheckpointRetrievalWork(checkpointIdentity);
   const sourceSystem = clinicalSourceSystemSchema.parse(checkpointIdentity.sourceSystem);
-  if (checkpoint.currentResourceIndex > retrievalScopes.length) {
+  if (checkpoint.currentResourceIndex > retrievalWork.length) {
     throw new HostedClinicalRecordsRuntimeError(
       "CLINICAL_RECORDS_CHECKPOINT_SCOPE_MISMATCH",
       "Hosted clinical records checkpoint exceeds its retrieval scope.",
@@ -187,7 +200,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   if (recoveringAuthorizationRequired) {
     finalizeAuthorizationRequiredCheckpoint({
       checkpoint,
-      retrievalScopes,
+      retrievalWork,
     });
     await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
     throwIfPreempted(input);
@@ -195,13 +208,13 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
 
   for (
     let resourceIndex = checkpoint.currentResourceIndex;
-    resourceIndex < retrievalScopes.length;
+    resourceIndex < retrievalWork.length;
     resourceIndex += 1
   ) {
     if (checkpoint.authorizationRequired) {
       break;
     }
-    const scope = retrievalScopes[resourceIndex];
+    const scope = retrievalWork[resourceIndex];
     if (!scope) {
       throw new HostedClinicalRecordsRuntimeError(
         "CLINICAL_RECORDS_SCOPE_UNAVAILABLE",
@@ -241,6 +254,13 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           cursor: checkpoint.cursor,
           generation: checkpointIdentity.generation,
           requestId: `cr-${checkpointIdentity.generation}-${resourceIndex + 1}-${checkpoint.pageFetchCount + 1}`,
+          ...(checkpointIdentity.retrievalProtocol === "query-slices-v2"
+            ? {
+                queryScopeId: requireQueryRetrievalSlice(scope).queryScopeId,
+                retrievalProtocol: checkpointIdentity.retrievalProtocol,
+                sliceId: requireQueryRetrievalSlice(scope).sliceId,
+              }
+            : {}),
           resourceType: scope.resourceType,
           runId: checkpointIdentity.runId,
         },
@@ -265,11 +285,12 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           response.errorCode
           === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
         ) {
-          finalizeAuthorizationRequiredCheckpoint({ checkpoint, retrievalScopes });
+          finalizeAuthorizationRequiredCheckpoint({ checkpoint, retrievalWork });
         } else {
           checkpoint.errors.push({
             code: response.errorCode,
             message: "Provider did not return this FHIR resource family.",
+            ...retrievalIdentityFields(scope),
             resourceType: scope.resourceType,
           });
           checkpoint.pages.splice(checkpoint.resourcePageStartIndex);
@@ -357,6 +378,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           ? { nextPageUrlHash: response.nextPageUrlHash }
           : {}),
         ...(response.pageUrlHash ? { pageUrlHash: response.pageUrlHash } : {}),
+        ...retrievalIdentityFields(scope),
         resourceType: scope.resourceType,
       });
       if (requestedCursor) {
@@ -380,7 +402,16 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       checkpoint.cursor = response.nextCursor;
       completed = checkpoint.cursor === null;
       if (completed) {
-        checkpoint.completedResourceTypes.push(scope.resourceType);
+        if (!checkpoint.completedResourceTypes.includes(scope.resourceType)) {
+          checkpoint.completedResourceTypes.push(scope.resourceType);
+        }
+        if (checkpoint.completedRetrievalSlices) {
+          const slice = requireQueryRetrievalSlice(scope);
+          checkpoint.completedRetrievalSlices.push({
+            queryScopeId: slice.queryScopeId,
+            sliceId: slice.sliceId,
+          });
+        }
         checkpoint.currentResourceIndex = resourceIndex + 1;
         checkpoint.resourcePageStartIndex = checkpoint.pages.length;
         checkpoint.seenCursors = [];
@@ -408,6 +439,9 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         });
       },
       completedResourceTypes: checkpoint.completedResourceTypes,
+      ...(checkpoint.completedRetrievalSlices
+        ? { completedRetrievalSlices: checkpoint.completedRetrievalSlices }
+        : {}),
       connectionId: checkpointIdentity.connectionId,
       ...(checkpoint.errors.length > 0 ? { errors: checkpoint.errors } : {}),
       fetchedAt: checkpointIdentity.fetchedAt,
@@ -420,7 +454,13 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         : {}),
       requestedScopes: checkpointIdentity.requestedScopes,
       retrievalJobId: checkpointIdentity.retrievalJobId,
-      retrievalScopes,
+      retrievalScopes: retrievalWork,
+      ...(checkpointIdentity.retrievalProtocol === "query-slices-v2"
+        ? {
+            retrievalProtocol: checkpointIdentity.retrievalProtocol,
+            retrievalSlices: checkpointIdentity.retrievalSlices,
+          }
+        : {}),
       signal: input.signal,
       sourceSystem,
       vaultRoot: input.vaultRoot,
@@ -481,10 +521,13 @@ async function loadClinicalRecordsVaultModule(): Promise<ClinicalRecordsVaultMod
   );
 }
 
-function emptyRetrievalCheckpoint(): ClinicalFhirRetrievalCheckpoint {
+function emptyRetrievalCheckpoint(
+  queryAware: boolean,
+): ClinicalFhirRetrievalCheckpoint {
   return {
     authorizationRequired: false,
     completedResourceTypes: [],
+    ...(queryAware ? { completedRetrievalSlices: [] } : {}),
     currentResourceIndex: 0,
     cursor: null,
     errors: [],
@@ -501,16 +544,16 @@ function emptyRetrievalCheckpoint(): ClinicalFhirRetrievalCheckpoint {
 
 function finalizeAuthorizationRequiredCheckpoint(input: {
   checkpoint: ClinicalFhirRetrievalCheckpoint;
-  retrievalScopes: ClinicalFhirRetrievalCheckpointIdentity["retrievalScopes"];
+  retrievalWork: readonly ClinicalFhirRetrievalWork[];
 }): void {
   if (input.checkpoint.authorizationRequired) {
     return;
   }
   const currentResourceIndex = input.checkpoint.currentResourceIndex;
-  const currentScope = input.retrievalScopes[currentResourceIndex];
+  const currentScope = input.retrievalWork[currentResourceIndex];
   input.checkpoint.pages.splice(input.checkpoint.resourcePageStartIndex);
   input.checkpoint.authorizationRequired = true;
-  input.checkpoint.currentResourceIndex = input.retrievalScopes.length;
+  input.checkpoint.currentResourceIndex = input.retrievalWork.length;
   input.checkpoint.cursor = null;
   input.checkpoint.resourcePageStartIndex = input.checkpoint.pages.length;
   input.checkpoint.seenCursors = [];
@@ -521,17 +564,63 @@ function finalizeAuthorizationRequiredCheckpoint(input: {
   input.checkpoint.errors.push({
     code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
     message: "Provider did not return this FHIR resource family.",
+    ...retrievalIdentityFields(currentScope),
     resourceType: currentScope.resourceType,
   });
   for (
-    const remainingScope of input.retrievalScopes.slice(currentResourceIndex + 1)
+    const remainingScope of input.retrievalWork.slice(currentResourceIndex + 1)
   ) {
     input.checkpoint.errors.push({
       code: "not-attempted",
       message: "Retrieval was not attempted after provider authorization ended.",
+      ...retrievalIdentityFields(remainingScope),
       resourceType: remainingScope.resourceType,
     });
   }
+}
+
+function readRunRetrievalScopes(
+  run: HostedClinicalRecordsAnyRunDescriptor,
+): ClinicalFhirRetrievalScope[] {
+  const scopes = "retrievalProtocol" in run
+    ? run.retrievalSlices.map((slice) => {
+        const { queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope } = slice;
+        return scope;
+      })
+    : run.retrievalScopes;
+  return scopes.map((scope) => clinicalFhirRetrievalScopeSchema.parse(scope));
+}
+
+function readCheckpointRetrievalWork(
+  identity: ClinicalFhirRetrievalCheckpointIdentity,
+): ClinicalFhirRetrievalWork[] {
+  return identity.retrievalProtocol === "query-slices-v2"
+    ? (identity.retrievalSlices ?? []).map((slice) =>
+        clinicalFhirRetrievalSliceSchema.parse(slice)
+      )
+    : identity.retrievalScopes.map((scope) =>
+        clinicalFhirRetrievalScopeSchema.parse(scope)
+      );
+}
+
+function requireQueryRetrievalSlice(
+  scope: ClinicalFhirRetrievalWork,
+): HostedClinicalRecordsRetrievalSlice {
+  if (!("queryScopeId" in scope)) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_QUERY_SCOPE_MISSING",
+      "Hosted clinical records query-aware retrieval identity is unavailable.",
+    );
+  }
+  return scope;
+}
+
+function retrievalIdentityFields(
+  scope: ClinicalFhirRetrievalWork,
+): { queryScopeId: string; sliceId: string } | Record<string, never> {
+  return "queryScopeId" in scope
+    ? { queryScopeId: scope.queryScopeId, sliceId: scope.sliceId }
+    : {};
 }
 
 function unavailableClinicalRecordsSync(): HostedClinicalRecordsSyncMetrics {
@@ -633,7 +722,7 @@ class HostedClinicalRecordsRunNoLongerCurrentError extends Error {
 }
 
 function assertRunMatchesWake(
-  run: HostedClinicalRecordsRunDescriptor,
+  run: HostedClinicalRecordsAnyRunDescriptor,
   wake: HostedExecutionClinicalRecordsSyncRequestedWake,
 ): void {
   if (run.runId !== wake.runId || run.generation !== wake.generation) {
