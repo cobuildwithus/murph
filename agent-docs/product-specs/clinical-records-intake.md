@@ -256,9 +256,10 @@ assistant-started links, one legacy run, and one new query-aware run.
 
 Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
-[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, USCDI v3,
-use the Murph product name without adding `Epic` to the app name, and register
-the following exact 38 names from Epic's current
+[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
+Murph product name without adding `Epic` to the app name, set Automatic
+Client Distribution to `None`, and register the following exact 38 names from
+Epic's current
 [FHIR catalog](https://open.epic.com/Interface/FHIR):
 
 ```text
@@ -306,7 +307,14 @@ Registration covers both the 24 active primary queries and supporting dependency
 reads. Runtime requests only the 17 unique primary resource permissions and does
 not execute dependency traversal. Resource families without a canonical mapper
 are retained as patient-bound raw evidence with an explicit review decision; no
-family is silently dropped. Do not request refresh tokens or `offline_access`.
+family is silently dropped. The exact full-coverage registration cannot use
+USCDI-v3 automatic distribution: `FamilyMemberHistory.Search (R4)`,
+`Procedure.Search (Patient-Reported Surgical History) (R4)`, and
+`Questionnaire.Read (Patient-Entered Questionnaires) (R4)` are absent from
+Epic's automatic-distribution appendix. Do not substitute Outside Record or
+SDOH APIs, because they expose different data surfaces. Each target Epic
+customer must instead download/request this client ID. Do not request refresh
+tokens or `offline_access`.
 Epic recommends a separate localhost-only
 test app that is never activated. Register the callback with the actual local
 port, for example
@@ -316,11 +324,12 @@ curated sandbox FHIR base is
 `https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4`.
 
 Before production authorization, add the exact HTTPS callback
-`https://<production-host>/api/clinical-records/oauth/callback`, enable
-Auto-download, complete Epic's Data Use Questionnaire, mark the app ready for
-production, and set `EPIC_SMART_CLIENT_ID` to Epic's production client id.
-Preview hosts need their own registered callback and the non-production client
-id. A missing exact client id fails closed before redirect.
+`https://<production-host>/api/clinical-records/oauth/callback`, keep Automatic
+Client Distribution set to `None`, complete Epic's Data Use Questionnaire,
+mark the app ready for production, coordinate each customer download, and set
+`EPIC_SMART_CLIENT_ID` to Epic's production client id. Preview hosts need their
+own registered callback and the non-production client id. A missing exact
+client id fails closed before redirect.
 
 ## Deliberately deferred
 
@@ -329,11 +338,10 @@ id. A missing exact client id fails closed before redirect.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Background scheduled refresh and provider-directory network refresh jobs.
-- Vital-sign Observations. The query/slice acquisition identity now supports a
-  second Observation query, but enabling it still requires the follow-up Epic
-  scope policy, canonical mapping, and production wire cutover.
-- Retry, reconnect, and reauthorization after the initial retrieval; these
-  require a bounded raw-evidence retention lifecycle before they can create
-  another retrieval job.
+- Retry, reconnect, and reauthorization after the initial retrieval. Active,
+  disconnected, and `needs_reauth` member/provider rows all remain ineligible
+  for another OAuth start in this beta. Supporting another generation requires
+  a bounded raw-evidence retention lifecycle that preserves every canonical
+  raw reference.
 - Claims-based matching or promises that the result is a complete legal
   medical record.
