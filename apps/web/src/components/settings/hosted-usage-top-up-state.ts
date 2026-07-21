@@ -40,6 +40,7 @@ interface HostedUsageTopUpPurchaseScreen {
   retryOfferCode: string | null;
   retryRequestKey: string | null;
   status: HostedUsageTopUpPurchaseStatus | null;
+  targetConflict: boolean;
 }
 
 type HostedUsageTopUpScreen =
@@ -384,6 +385,7 @@ function screenFromResponse(
     retryOfferCode,
     retryRequestKey: retryOfferCode ? retryRequestKey : null,
     status: response.status,
+    targetConflict: response.targetConflict || previous?.targetConflict === true,
   };
 }
 
@@ -405,6 +407,7 @@ function createPurchaseScreen(
     retryOfferCode: null,
     retryRequestKey: null,
     status: null,
+    targetConflict: false,
   };
 }
 

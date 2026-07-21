@@ -293,6 +293,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         emailIngressPresent
         && request.action !== "read_current"
+        && request.action !== "read_usage"
         && request.action !== "read_shared"
         && request.action !== "revoke_own_email_share"
       ) {
@@ -346,7 +347,13 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
-    { action: "read_current" | "read_shared" | "revoke_own_email_share" }
+    {
+      action:
+        | "read_current"
+        | "read_shared"
+        | "read_usage"
+        | "revoke_own_email_share";
+    }
   >,
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";

@@ -571,9 +571,17 @@ purchase-derived idempotency key, permits identical creation retries for a
 derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. The financial movements described above use only signed
 `refund_adjustment` and `dispute_adjustment` ledger entries; there are no
-separate reversal or restoration kinds. Separate payer and beneficiary
-identifiers are only a composition seam: group authorization, lifecycle,
-deletion, and key semantics remain unimplemented.
+separate reversal or restoration kinds. Personal and hosted-group funding use
+the same purchase lifecycle. Group funding resolves the existing opaque join
+code to the group's synthetic `HostedMember`, which remains the beneficiary;
+it adds no group wallet, usage account, or separate funding code. The
+authenticated contributor remains the payer. A deleted payer can detach only
+from a terminal cross-owner purchase after the existing reconciliation-version
+fence advances and encrypted provider references are cleared. That advance
+makes payer-era preparation retry against the detached row, while retained
+blind lookup keys keep later refund and dispute reconciliation possible.
+Beneficiary deletion still removes its credit and purchase history in ownership
+order.
 
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
 

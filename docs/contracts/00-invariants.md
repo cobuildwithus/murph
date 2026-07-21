@@ -382,6 +382,12 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Safety, reliability, privacy, authentication, and review fixes preserve the
   authorized success path for existing critical flows. Disabling, silently
   dropping, or degrading the flow is a product decision, not a technical fix.
+- Purchased hosted usage credit belongs to its beneficiary, not its payer. A
+  payer deletion must first resolve nonterminal payment state and must not
+  delete fulfilled credit owned by a surviving beneficiary. Terminal
+  cross-owner purchases may detach the payer only while invalidating in-flight
+  payer-era reconciliation, clearing payer-bound ciphertext, and retaining the
+  non-secret lookup evidence required to reconcile later refunds or disputes.
 - Identity, authentication, consent, privacy, recipient, and irreversible-effect
   authority fail closed. An advisory dependency may degrade only into an
   already-authorized narrower path and never silently suppress an accepted

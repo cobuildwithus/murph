@@ -419,6 +419,7 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   attemptedAt: Date;
   linqChatId?: string | null;
   memberId: string;
+  noticeCode?: string;
   periodStart: Date;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
@@ -501,6 +502,7 @@ async function runHostedLinqDeliveryTransaction<T>(
 
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   memberId: string;
+  noticeCode?: string;
   periodStart: Date | string;
   usageCreditLedgerVersion: bigint;
 }): string {
@@ -520,6 +522,9 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
         periodStart: periodStart.toISOString(),
         usageCreditLedgerVersion: input.usageCreditLedgerVersion.toString(),
       };
+  if (input.noticeCode === "thread_usage_low") {
+    Object.assign(capacityEpoch, { noticeCode: input.noticeCode });
+  }
   return `ai-usage-gate:${sha256Hex(JSON.stringify(capacityEpoch)).slice(0, 32)}`;
 }
 

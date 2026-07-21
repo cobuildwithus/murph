@@ -269,6 +269,7 @@ function buildHostedWebhookLinqMessageEffectId(
   if (input.template === "ai_usage_quota" && input.claimToken) {
     return buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: input.memberId,
+      noticeCode: input.noticeCode,
       periodStart: input.claimToken.periodStart,
       usageCreditLedgerVersion: parseHostedAiUsageCreditLedgerVersion(
         input.claimToken.usageCreditLedgerVersion,
@@ -507,6 +508,7 @@ async function sendHostedLinqSideEffect(
         },
         attemptedAt,
         memberId: usageLimitPayload.memberId,
+        noticeCode: usageLimitPayload.noticeCode,
         noticeDeliveryTarget: {
           channel: "linq",
           replyToMessageId: usageLimitPayload.replyToMessageId,

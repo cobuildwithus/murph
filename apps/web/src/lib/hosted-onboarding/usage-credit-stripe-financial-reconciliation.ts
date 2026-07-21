@@ -15,6 +15,7 @@ import { normalizeNullableString } from "./shared";
 import {
   decryptHostedUsageCreditPurchaseStripeField,
   HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS,
+  requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import {
   assertHostedStripeLookupMatches,
@@ -307,11 +308,14 @@ async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
 }): Promise<HostedUsageCreditPreparedPaidCheckout> {
   let sessionId: string | null = null;
   if (input.purchase.stripeCheckoutSessionIdEncrypted) {
+    const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+      input.purchase,
+    );
     sessionId = await runHostedUsageCreditKmsOperation({
       run: () => decryptHostedUsageCreditPurchaseStripeField({
         field:
           HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
-        payerMemberId: input.purchase.payerMemberId,
+        payerMemberId,
         prisma: input.prisma,
         signal: takeHostedUsageCreditKmsSignal(input.context),
         value: input.purchase.stripeCheckoutSessionIdEncrypted,

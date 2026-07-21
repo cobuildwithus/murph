@@ -632,6 +632,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_123",
       payerMemberId: "member_123",
       prisma: mocks.prisma,
     });

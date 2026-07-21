@@ -1245,7 +1245,7 @@ model HostedStripeEvent {
 
 model HostedUsageCreditPurchase {
   id                                String                               @id
-  payerMemberId                     String                               @map("payer_member_id")
+  payerMemberId                     String?                              @map("payer_member_id")
   beneficiaryMemberId               String                               @map("beneficiary_member_id")
   offerCode                         String                               @map("offer_code")
   cashCurrency                      String                               @map("cash_currency")
@@ -1257,9 +1257,9 @@ model HostedUsageCreditPurchase {
   status                            HostedUsageCreditPurchaseStatus       @default(created)
   stripeLiveMode                    Boolean                              @map("stripe_live_mode")
   stripePriceLookupKey              String                               @map("stripe_price_lookup_key")
-  stripePriceIdEncrypted            String                               @map("stripe_price_id_encrypted")
+  stripePriceIdEncrypted            String?                              @map("stripe_price_id_encrypted")
   stripeCustomerLookupKey           String                               @map("stripe_customer_lookup_key")
-  stripeCustomerIdEncrypted         String                               @map("stripe_customer_id_encrypted")
+  stripeCustomerIdEncrypted         String?                              @map("stripe_customer_id_encrypted")
   stripeCheckoutSessionLookupKey    String?                              @unique(map: "hosted_usage_credit_purchase_session_lookup_key") @map("stripe_checkout_session_lookup_key")
   stripeCheckoutSessionIdEncrypted  String?                              @map("stripe_checkout_session_id_encrypted")
   stripeCheckoutUrlEncrypted        String?                              @map("stripe_checkout_url_encrypted")
@@ -1276,7 +1276,7 @@ model HostedUsageCreditPurchase {
   reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
   createdAt                         DateTime                             @default(now()) @map("created_at")
   updatedAt                         DateTime                             @updatedAt @map("updated_at")
-  payer                             HostedMember                         @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
+  payer                             HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
   beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
   entries                           HostedUsageCreditEntry[]
 
