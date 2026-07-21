@@ -14,7 +14,6 @@ import type {
   TrendData,
 } from "@/src/types/experiments";
 import { Button } from "@/src/components/ui/button";
-import { ConclusionCard } from "@/src/components/conclusion-card";
 import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
 import { ResultsSummary, ResultsSummarySkeleton } from "./results-summary";
 import { StartExperimentButton } from "./start-experiment-button";
@@ -26,6 +25,7 @@ interface ResultsTabProps {
   onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
+  showHeader?: boolean;
   startAction?: ReactNode;
 }
 
@@ -37,6 +37,7 @@ export interface ResultsTabExperiment {
   day?: number;
   durationDays?: number;
   nextStep?: ExperimentRunProjection["nextStep"];
+  outcomeConfidence?: ExperimentRunProjection["outcomeConfidence"];
   privateRun?: ExperimentRunProjection;
   schedule?: ExperimentScheduleModel;
   sessionContext?: ExperimentRunContextEntry[];
@@ -56,6 +57,7 @@ export function ResultsTab({
   onPrivateRunRetry,
   privateRunError,
   privateRunStatus,
+  showHeader = true,
   startAction,
 }: ResultsTabProps) {
   const isActive = experiment.status === "active";
@@ -69,17 +71,19 @@ export function ResultsTab({
 
   return (
     <div className="flex flex-col gap-10">
-      <header className="flex max-w-3xl flex-col gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Private experiment
-        </span>
-        <h2 className="font-serif text-2xl/8 font-semibold text-foreground">
-          Your results
-        </h2>
-        <p className="text-sm/6 text-muted-foreground sm:text-base/7">
-          Your progress, measurements, and conclusions for this experiment stay private in your vault.
-        </p>
-      </header>
+      {showHeader ? (
+        <header className="flex max-w-3xl flex-col gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Private experiment
+          </span>
+          <h2 className="font-serif text-2xl/8 font-semibold text-foreground">
+            Your results
+          </h2>
+          <p className="text-sm/6 text-muted-foreground sm:text-base/7">
+            Your progress, measurements, and conclusions for this experiment stay private in your vault.
+          </p>
+        </header>
+      ) : null}
 
       {!hasPrivateRun && privateRunStatus === "loading" && (
         <div
@@ -172,14 +176,11 @@ export function ResultsTab({
       )}
 
       {isFinished && experiment.summary && (
-        <div className="rounded-xl border border-border bg-card p-6">
-          <h3 className="font-serif text-xl font-semibold text-foreground">
-            {experiment.summary}
-          </h3>
-          <p className="mt-2 text-sm leading-5 text-muted-foreground">
-            {experiment.summaryDetail}
-          </p>
-        </div>
+        <FinishedOutcomeSummary
+          confidence={experiment.outcomeConfidence}
+          detail={experiment.summaryDetail}
+          summary={experiment.summary}
+        />
       )}
 
       {hasPrivateRun && isRunnable ? (
@@ -191,10 +192,6 @@ export function ResultsTab({
         trends={experiment.trends}
         schedule={experiment.schedule}
       />
-
-      {hasPrivateRun && experiment.sessionContext && experiment.sessionContext.length > 0 && (
-        <RunContextPanel entries={experiment.sessionContext} />
-      )}
 
       {isRunnable && (
         <div className="flex flex-col gap-2">
@@ -230,21 +227,96 @@ export function ResultsTab({
       )}
 
       {isFinished && experiment.conclusions && (
-        <div className="flex flex-col gap-3">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Conclusions
-          </span>
-          {experiment.conclusions.map((section) => (
-            <ConclusionCard
-              key={section.title}
-              title={section.title}
-              variant={section.variant}
-              items={section.items}
-            />
-          ))}
-        </div>
+        <ConclusionsPanel sections={experiment.conclusions} />
+      )}
+
+      {hasPrivateRun && experiment.sessionContext && experiment.sessionContext.length > 0 && (
+        <RunContextPanel entries={experiment.sessionContext} />
       )}
     </div>
+  );
+}
+
+function FinishedOutcomeSummary({
+  confidence,
+  detail,
+  summary,
+}: {
+  confidence: ExperimentRunProjection["outcomeConfidence"];
+  detail?: string;
+  summary: string;
+}) {
+  return (
+    <section className="grid gap-5 border-y border-border py-7 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-8">
+      <div className="flex max-w-3xl flex-col gap-3">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-primary">
+          Saved result
+        </span>
+        <h3 className="font-serif text-2xl/8 font-semibold tracking-tight text-foreground sm:text-3xl/9">
+          {summary}
+        </h3>
+        {detail ? (
+          <p className="max-w-[70ch] text-sm/6 text-muted-foreground sm:text-base/7">
+            {detail}
+          </p>
+        ) : null}
+      </div>
+      {confidence ? (
+        <span className="w-fit rounded-full border border-border bg-muted/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-foreground/70">
+          {confidence} confidence
+        </span>
+      ) : null}
+    </section>
+  );
+}
+
+function ConclusionsPanel({
+  sections,
+}: {
+  sections: ExperimentConclusionSection[];
+}) {
+  return (
+    <section className="flex flex-col gap-5 border-t border-border pt-8">
+      <div className="flex max-w-2xl flex-col gap-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Interpretation
+        </span>
+        <h3 className="font-serif text-xl font-semibold text-foreground sm:text-2xl">
+          How to read this result
+        </h3>
+      </div>
+      <div className="divide-y divide-border/70 border-y border-border/70">
+        {sections.map((section) => (
+          <div
+            key={section.title}
+            className="grid gap-4 py-5 md:grid-cols-[minmax(180px,0.35fr)_minmax(0,1fr)] md:gap-8"
+          >
+            <h4 className="font-mono text-[10px]/4 uppercase tracking-widest text-foreground/60">
+              {section.title}
+            </h4>
+            <div className="flex flex-col gap-3">
+              {section.items.map((item, index) => (
+                <div key={`${section.title}:${index}`} className="flex gap-3">
+                  <span
+                    aria-hidden="true"
+                    className={`mt-px shrink-0 text-sm ${
+                      section.variant === "positive" || section.variant === "recommendation"
+                        ? "text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {item.icon}
+                  </span>
+                  <p className="max-w-[75ch] text-sm/6 text-foreground/85">
+                    {item.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -253,7 +325,7 @@ function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) 
   const extraCount = entries.length - visibleEntries.length;
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-6">
+    <section className="flex flex-col gap-4 border-t border-border pt-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -268,7 +340,7 @@ function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) 
         </span>
       </div>
 
-      <div className="flex flex-col divide-y divide-border/50">
+      <div className="flex flex-col divide-y divide-border/70 border-y border-border/70">
         {visibleEntries.map((entry) => (
           <RunContextRow key={entry.id} entry={entry} />
         ))}
@@ -288,7 +360,7 @@ function RunContextRow({ entry }: { entry: ExperimentRunContextEntry }) {
   const title = entry.kind === "session" ? "Session log" : "Context note";
 
   return (
-    <div className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[92px_1fr]">
+    <div className="grid gap-3 py-4 sm:grid-cols-[92px_1fr]">
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         {formatIsoDate(entry.date, { day: "numeric", month: "short" })}
       </div>

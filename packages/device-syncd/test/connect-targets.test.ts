@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
@@ -93,6 +94,48 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
   );
 });
 
+test("Strava remains configured for status and self-hosted routing while its offer gate is disabled", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "strava",
+    JUNCTION_REGION: "us",
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+  });
+
+  assert.ok(configs.strava);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
+  assert.deepEqual(listConfiguredDeviceSyncConnectTargets(configs), [{
+    connectSourceId: "strava",
+    connectTarget: "strava",
+    label: "Strava",
+    provider: "strava",
+  }]);
+  assert.deepEqual(listConfiguredDeviceSyncReconnectTargets(configs), [
+    {
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      label: "Strava",
+      provider: "strava",
+    },
+    {
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      label: "Strava",
+      provider: "junction",
+      sourceProviderSlug: "strava",
+    },
+  ]);
+  assert.deepEqual(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "strava"), {
+    connectSourceId: "strava",
+    connectTarget: "strava",
+    label: "Strava",
+    provider: "strava",
+  });
+});
+
 test("WHOOP stays direct when the Junction provider filter excludes WHOOP", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
@@ -169,7 +212,7 @@ test("connect target source-id lookups resolve direct and Junction sources", () 
   });
 });
 
-test("connect targets keep Oura and Strava direct with the default Junction source list", () => {
+test("connect targets keep Oura and WHOOP available with the default Junction source list", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",

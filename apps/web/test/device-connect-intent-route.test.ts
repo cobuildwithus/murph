@@ -140,7 +140,7 @@ describe("hosted device connect intent route", () => {
     });
   });
 
-  it("starts source-specific Junction reconnect intents when a direct target has the same public source", async () => {
+  it("rejects existing Strava intents while direct and Junction provider support remain configured", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "");
     vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
@@ -168,18 +168,13 @@ describe("hosted device connect intent route", () => {
       createRouteContext({ claim: "dc_opaque" }),
     );
 
-    expect(response.status).toBe(303);
-    expect(mocks.startHostedDeviceSyncConnection).toHaveBeenCalledWith({
-      defaultReturnTo:
-        "/device-sync/connect/complete?source=assistant&connectSource=strava&connectTarget=strava",
-      request: expect.any(Request),
-      target: expect.objectContaining({
-        connectSourceId: "strava",
-        connectTarget: "strava",
-        provider: "junction",
-        sourceProviderSlug: "strava",
-      }),
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("This device connection is not available right now.");
+    expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
+      claim: "dc_opaque",
+      memberId: "member_123",
     });
+    expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
   });
 
   it("returns JSON for app-page intent starts", async () => {

@@ -19,6 +19,7 @@ type HostedDeviceSyncRuntimeConnectionSourceSnapshot = NonNullable<
 >[number];
 
 export interface HostedDeviceSyncStatusPromptReconnectTarget {
+  connectionAvailable?: boolean | null;
   connectTarget: string;
   connectTargetAmbiguous?: boolean | null;
   connectTargetCommandSafe?: boolean | null;
@@ -338,7 +339,9 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
   const sourceProviderSlug = normalizeHostedDeviceSyncKey(input.source.sourceProviderSlug);
 
   return {
-    commandConnectTarget: reconnectTarget?.connectTarget ?? null,
+    commandConnectTarget: reconnectTarget?.connectionAvailable === false
+      ? null
+      : reconnectTarget?.connectTarget ?? null,
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label
@@ -372,7 +375,9 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
   ) ?? "REAUTHORIZATION_REQUIRED";
 
   return {
-    commandConnectTarget: reconnectTarget?.connectTarget ?? null,
+    commandConnectTarget: reconnectTarget?.connectionAvailable === false
+      ? null
+      : reconnectTarget?.connectTarget ?? null,
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label

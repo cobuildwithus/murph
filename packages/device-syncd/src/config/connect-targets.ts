@@ -25,6 +25,9 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
 };
 
 const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
+// Keep provider ingestion configured for existing accounts while this product
+// gate controls whether a fresh user-facing connection can be started.
+const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava"]);
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
@@ -34,6 +37,13 @@ export function normalizeDeviceSyncConnectTargetKey(value: string): string | nul
     .replace(/^_+|_+$/gu, "");
 
   return normalized || null;
+}
+
+export function isDeviceConnectSourceAvailableForConnection(
+  connectSourceId: string,
+): boolean {
+  const normalized = normalizeDeviceConnectSourceId(connectSourceId);
+  return Boolean(normalized && !DISABLED_DEVICE_CONNECT_SOURCE_IDS.has(normalized));
 }
 
 export function listConfiguredDeviceSyncConnectTargets(

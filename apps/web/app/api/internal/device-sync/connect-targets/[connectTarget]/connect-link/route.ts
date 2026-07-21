@@ -1,6 +1,7 @@
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   configuredDeviceSyncProviderKeys,
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
@@ -173,7 +174,10 @@ function resolveHostedDeviceConnectTarget(connectTarget: string) {
     remapHostedDeviceConnectBackendSetupError(error, "connect_target_setup");
   }
 
-  if (!target) {
+  if (
+    !target
+    || !isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+  ) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
       httpStatus: 404,
