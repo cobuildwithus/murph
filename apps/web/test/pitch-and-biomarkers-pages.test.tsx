@@ -148,22 +148,24 @@ test("BiomarkersPage shows a loading skeleton while the private vault opens", as
 
   assert.match(markup, /Loading your saved biomarker results/);
   assert.match(markup, /rounded-full/);
-  assert.match(markup, /xl:grid-cols-3/);
+  assert.doesNotMatch(markup, /(?:md|xl):grid-cols-/);
   const responsiveCellClasses = [...markup.matchAll(
     /<div class="([^"]*\bmin-h-24\b[^"]*)">/gu,
   )].map((match) => (
     match[1]?.split(/\s+/u).filter((className) => (
-      className.startsWith("md:") || className.startsWith("xl:")
+      className.startsWith("sm:")
+      || className.startsWith("md:")
+      || className.startsWith("xl:")
     )) ?? []
   ));
 
   assert.deepEqual(responsiveCellClasses, [
-    ["md:border-r", "xl:border-r"],
-    ["xl:border-r"],
-    ["md:col-span-2", "xl:col-span-1", "xl:border-r-0"],
-    ["md:border-r", "xl:border-r"],
-    ["xl:border-r"],
-    ["md:col-span-2", "xl:col-span-1", "xl:border-r-0"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
+    ["sm:min-h-24", "sm:flex-row", "sm:items-center", "sm:justify-between", "sm:gap-6", "sm:px-5"],
   ]);
 });
 

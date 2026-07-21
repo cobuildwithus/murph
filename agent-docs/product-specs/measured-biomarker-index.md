@@ -42,9 +42,10 @@ member-facing biomarker.
    order.
 4. Keep every lab area expanded by default using a native disclosure. Its
    summary shows only the area label and disclosure chevron.
-5. Use the measured-biomarker notebook index as one partitioned surface: one
-   column on narrow screens, two from tablet widths, and three on wide screens.
-6. Each full-cell link shows only the stable display name, source status, and
+5. Use the measured-biomarker notebook index as one partitioned surface with
+   one full-width biomarker row at every viewport. Stack name and result on
+   phones; align name left and status/value right from small screens upward.
+6. Each full-row link shows only the stable display name, source status, and
    latest value. Sort flagged results before in-range and unflagged results
    within each health area.
 7. Never render a catch-all `Other` area on this page. If saved lab rows exist
@@ -81,6 +82,6 @@ commentary, and unknown custom fields.
 - Query tests prove excluded rows remain in the private projection and direct
   detail selection while staying out of the measured index.
 - UI tests cover device-first ordering, initially expanded disclosures, search,
-  status filters, flagged-first ordering, one/two/three-column notebook shape,
-  full-cell links, the absence of `Other`, and the saved-but-unclassified empty
+  status filters, flagged-first ordering, the one-row notebook shape,
+  full-row links, the absence of `Other`, and the saved-but-unclassified empty
   state.

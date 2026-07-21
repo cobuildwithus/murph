@@ -4,7 +4,6 @@ import {
   normalizeMetricValue,
   normalizeUnit,
   resolveIndexedLabHealthArea,
-  resolveLabHealthArea,
   resolveLabResultMetricDefinition,
   unitsEquivalent,
   type LabHealthArea,
@@ -57,11 +56,8 @@ export interface BrowserVaultLabBiomarkerDetail {
   comparableUnit: string | null;
   displayName: string;
   hasIncompatibleHistory: boolean;
-  healthArea: LabHealthArea;
   latest: BrowserVaultPresentedLabResultRow;
-  latestComparable: BrowserVaultPresentedLabResultRow | null;
   metricKey: string;
-  previousComparable: BrowserVaultPresentedLabResultRow | null;
   rows: BrowserVaultPresentedLabResultRow[];
 }
 
@@ -208,8 +204,6 @@ function buildLabBiomarkerDetail(
         normalizedUnit: string;
         normalizedValue: number;
       } => isComparableNumericRow(row) && row.normalizedUnit === comparableUnit);
-  const latestComparable = comparableRows.at(-1) ?? null;
-  const previousComparable = comparableRows.at(-2) ?? null;
   const chartSeries = comparableRows.map((row) => ({
     date: row.date,
     observedAt: row.observedAt,
@@ -230,11 +224,8 @@ function buildLabBiomarkerDetail(
     hasIncompatibleHistory: numericNonComparatorRows.some((row) =>
       !isComparableNumericRow(row) || row.normalizedUnit !== comparableUnit
     ),
-    healthArea: resolveLabHealthArea(metricKey),
     latest,
-    latestComparable,
     metricKey: latest.metricKey,
-    previousComparable,
     rows,
   };
 }

@@ -179,8 +179,6 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.ok(detail);
   assert.equal(detail.comparableUnit, "percent");
   assert.equal(detail.latest.value, 38);
-  assert.equal(detail.latestComparable?.value, 5.6);
-  assert.equal(detail.previousComparable?.value, 5.4);
   assert.equal(detail.hasIncompatibleHistory, true);
   assert.deepEqual(detail.chartSeries.map((point) => point.value), [5.4, 5.6]);
 
@@ -311,8 +309,6 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(unitlessBun.normalizedValue, null);
   assert.equal(unitlessBun.unit, null);
   assert.equal(unitlessBun.value, 7);
-  assert.equal(bun.latestComparable?.analyte, "Urea Nitrogen");
-  assert.equal(bun.previousComparable?.analyte, "Blood Urea Nitrogen");
   assert.equal(bun.hasIncompatibleHistory, true);
 
   const tsh = selectBrowserVaultLabBiomarkerDetail(client, "TSH");
@@ -332,7 +328,6 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(unitlessTsh.normalizedUnit, null);
   assert.equal(unitlessTsh.normalizedValue, null);
   assert.equal(unitlessTsh.unit, null);
-  assert.equal(tsh.latestComparable?.analyte, "Thyroid Stimulating Hormone");
 
   const mch = selectBrowserVaultLabBiomarkerDetail(client, "MCH");
   assert.ok(mch);
@@ -514,8 +509,6 @@ test("unitless lab values remain raw and are excluded from normalized presentati
   assert.equal(detail.latest.normalizedUnit, null);
   assert.equal(detail.latest.normalizedReferenceRange, null);
   assert.deepEqual(detail.latest.referenceRange, { high: 6, text: "<6 mmol/L" });
-  assert.equal(detail.latestComparable?.date, "2025-01-01");
-  assert.equal(detail.previousComparable?.date, "2024-01-01");
   assert.deepEqual(
     detail.chartSeries.map(({ unit, value }) => ({ unit, value })),
     [
@@ -708,7 +701,6 @@ test("calculation methods remain separate longitudinal identities", async () => 
   const ckdEpi = selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR CKD-EPI");
   assert.equal(ckdEpi?.rows.length, 2);
   assert.equal(ckdEpi?.chartSeries.length, 2);
-  assert.equal(ckdEpi?.latestComparable?.normalizedValue, 89);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Cholesterol")?.rows.length, 2);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Calculated")?.rows.length, 1);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL CHOL CALC (NIH)")?.rows.length, 1);

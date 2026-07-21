@@ -43,16 +43,19 @@ vi.mock("@/src/components/biomarkers/lab-biomarker-history-chart", async () => {
 
   return {
     LabBiomarkerHistoryChart({
+      ariaDescribedBy,
       displayName,
       points,
       referenceRange,
     }: {
+      ariaDescribedBy?: string;
       displayName: string;
       points: readonly unknown[];
       referenceRange: { high: number | null; low: number | null };
       unit: string | null;
     }): ReactNode {
       return React.createElement("div", {
+        "aria-describedby": ariaDescribedBy,
         "aria-label": `${displayName} results over time`,
         "data-high": referenceRange.high,
         "data-low": referenceRange.low,
@@ -112,6 +115,9 @@ test("biomarker index study keeps status filters and native area disclosures exp
   expect(markup).not.toContain("Jan 1, 2026");
   expect(markup).toContain('href="/biomarkers/results/hemoglobin"');
   expect(markup).toContain('href="/biomarkers/results/mean-corpuscular-hemoglobin"');
+  expect(markup).toContain("sm:flex-row");
+  expect(markup).toContain("sm:max-w-[50%]");
+  expect(markup).not.toContain("md:grid-cols-2");
   expect(markup.indexOf("Hemoglobin")).toBeLessThan(markup.indexOf("Mean corpuscular hemoglobin"));
   expect(markup.match(/<details/g)).toHaveLength(3);
   expect(markup.match(/<details[^>]*open=""/g) ?? []).toHaveLength(3);
@@ -144,7 +150,7 @@ test("biomarker detail study keeps the result and history concise", () => {
 
   expect(markup).toContain('data-design-study="biomarker-detail"');
   expect(markup).toContain("Hemoglobin");
-  expect(markup).toContain("18.0");
+  expect(markup).toContain(">18<");
   expect(markup).toContain("Above range");
   expect(markup).not.toContain("Below range");
   expect(markup).toContain("Jan 1, 2026");
@@ -152,6 +158,8 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain("Collected");
   expect(markup).not.toContain("Why it matters");
   expect(markup).not.toContain("Home");
+  expect(markup).toContain("4 results plotted in g/dL · Shaded lab range: 13 to 17 g/dL");
+  expect(markup).toContain('aria-describedby="illustrative-biomarker-chart-caption"');
   expect(markup).toContain('aria-label="Illustrative hemoglobin results over time"');
   expect(markup).toContain('data-point-count="4"');
   expect(markup).toContain('data-low="13"');
