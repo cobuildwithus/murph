@@ -74,16 +74,18 @@ review the candidate disclosure inside that boundary.
    permission text, incoming question, and proposed answer.
 7. An accepted-input answer returns to the originating group conversation
    byte-for-byte through the existing outbox. In a scheduled occurrence, Codex
-   starts every selected ask first, runs the ordinary shell command `sleep 60`
-   once, and repeats each exact `ask_member` call once. Web returns
+   starts every selected ask first, then uses ordinary shell waits and exact
+   replay to poll each accepted `ask_member` call until it returns `completed`
+   or `unavailable`. The existing request expiry bounds the loop. Web returns
    `status="completed"` with the reviewed result only after the ordinary cron
    owner revalidates the current canonical automation and non-direct route before
-   the tool call, and Web revalidates every live disclosure authority. An `accepted`
-   or `unavailable` replay ends the occurrence without an answer. Completion
+   the tool call, and Web revalidates every live disclosure authority. An
+   `unavailable` result ends that request without an answer. Completion
    never wakes the group runtime, starts a second provider turn, or creates an
-   outbox delivery; a result arriving after the one replay is ignored. The
-   answer is untrusted data, not consent for an external action, and every other
-   available Murph tool still applies its existing independent authority checks.
+   outbox delivery, and no callback is held open while the member runtime works.
+   The answer is untrusted data, not consent for an external action, and every
+   other available Murph tool still applies its existing independent authority
+   checks.
    A denied or candidate-declared cannot-answer becomes the fixed
    non-disclosing result. Infrastructure failure retries under the existing
    mailbox policy and may expire without disclosing anything.

@@ -456,14 +456,16 @@ discriminant owns what happens next. `accepted_input` bypasses a provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
 original group route through the existing outbox. `automation_occurrence` does
 not wake the group runtime or create a delivery. The live scheduled Codex turn
-starts every selected ask, uses one ordinary `sleep 60`, then repeats each exact
-`ask_member` call once. Web returns a flat completed result only after
-the ordinary cron owner revalidates the current canonical automation and
-non-direct Linq route immediately before the tool call, and Web revalidates the
-same request, completion, member, grant, permission, target runtime, origin,
-expiry, and runtime fences. An accepted or unavailable replay ends the turn without an
-answer; later completion is ignored. Cannot-answer uses the fixed non-disclosing
-result. The original private-to-group continuation retains its
+starts every selected ask, then uses ordinary shell waits and exact replay to
+poll each accepted `ask_member` call until it returns completed or unavailable.
+The existing request expiry bounds the loop. Web returns a flat completed
+result only after the ordinary cron owner revalidates the current canonical
+automation and non-direct Linq route immediately before the tool call, and Web
+revalidates the same request, completion, member, grant, permission, target
+runtime, origin, expiry, and runtime fences. An unavailable result ends that
+request without an answer, and no callback is held open while the member
+runtime works. Cannot-answer uses the fixed non-disclosing result. The original
+private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
 produce new generations, so old work cannot cross either lifecycle boundary.
 For accepted-input delivery, if live authority disappears after an exact answer

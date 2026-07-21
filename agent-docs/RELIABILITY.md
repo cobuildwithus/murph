@@ -59,11 +59,13 @@ Last verified: 2026-07-21
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
-  start the selected requests, sleep once for 60 seconds, then replay each exact
-  request once. The cron owner revalidates current automation and route authority
-  before every Murph tool call, and Web revalidates disclosure authority before
-  returning a stored result. Missing or late results do not wake the runtime, start another
-  provider turn, create an outbox delivery, or introduce another retry owner.
+  start the selected requests, then use ordinary shell waits and exact replay to
+  poll every accepted request until it returns completed or unavailable. The
+  existing ten-minute request expiry bounds the loop. The cron owner revalidates
+  current automation and route authority before every Murph tool call, and Web
+  revalidates disclosure authority before returning a stored result. Waiting
+  does not hold a callback open, wake the runtime, start another provider turn,
+  create an outbox delivery, or introduce another retry owner.
 - A target runtime may run at most one `executeReadOnlyAssistantAsk` child beside
   its resident foreground turn. The child is a separate one-shot process and
   cannot write or send, so its startup, provider latency, failure, or retry must

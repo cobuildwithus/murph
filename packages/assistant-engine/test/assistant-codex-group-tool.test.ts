@@ -159,11 +159,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
-    expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell sleep once");
+    expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell waits and exact replay");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("repeat each exact same ask_member call once");
+      .toContain("poll every accepted ask_member call until it returns completed or unavailable");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("without an answer or follow-up turn");
+      .toContain("existing server request expiry bounds the polling loop");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("sleep 60");
     expect(MURPH_GROUP_TOOL.description).not.toContain("resumes the automation");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('In a connected group-chat turn, if read_current returns status="none"');

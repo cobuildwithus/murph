@@ -134,8 +134,9 @@ producer gate is distinct from the original private-to-group Ask gate.
 2. Deploy Cloudflare/runner consumers for the `consented_member` request target,
    trusted accepted-input and scheduled-automation origins, disclosure-context
    preparation, the private candidate plus fresh outgoing reviewer, reviewed
-   exact accepted-input group delivery, and one same-turn scheduled sleep/replay with
-   `container_rollout=immediate`. Keep the Web producer gate off.
+   exact accepted-input group delivery, and same-turn scheduled polling through
+   ordinary shell waits plus exact replay with `container_rollout=immediate`.
+   Keep the Web producer gate off.
 3. Require managed-container smoke to report the new runner-bundle fingerprint
    and preserve the existing `murph-group-read` confinement proof. Verify the
    outgoing reviewer starts with an empty runtime root and no personal
