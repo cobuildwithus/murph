@@ -819,6 +819,21 @@ coalescing decision that no currently available input provides; this is
 intentionally deferred rather than solved with a registry, sidecar, scan-based
 recovery, or reconciliation loop.
 
+Once a vault-file outbox intent is approved, it remains the delivery owner across
+later conversation turns. A locally approved `pending`, `sending`, or
+`retryable` intent blocks a different generated ref for the same persisted
+provider target. While the local intent still says `awaiting_approval`, the send
+tool reads the exact existing approval action: an observed approved result also
+blocks the replacement, closing the decision-to-local-reconciliation gap. A
+still-pending, denied, expired, or superseded approval does not block a distinct
+new file request. The check happens before touching the new staging file or
+requesting approval. This prevents a confirmation turn from replacing the
+approved file identity or starting a second approval cycle while preserving
+pre-decision revisions, same-turn multi-file preparation, exact-ref retries,
+and different-target sends. The model contract also forbids later confirmation
+turns from inspecting, replacing, or deleting the runtime-owned bytes for the
+same pending send.
+
 Idle snapshot publication already waits for foreground and background assistant
 work to become quiescent. At that boundary, cleanup validates the complete direct
 staging inventory and outbox state before deleting anything. Exact files remain
