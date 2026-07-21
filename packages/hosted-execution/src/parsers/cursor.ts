@@ -1,3 +1,4 @@
+import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
   parseHostedDataKeyEnvelope,
   parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef,
@@ -204,8 +205,8 @@ export function parseHostedBrowserVaultReplicaRef(
   if (schema !== HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA) {
     throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
   }
-  if (replicaSchema !== "murph.browser-vault-replica") {
-    throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.`);
+  if (replicaSchema !== BROWSER_VAULT_REPLICA_SCHEMA) {
+    throw new TypeError(`${label}.replicaSchema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
   const dataKeyEnvelope = record.dataKeyEnvelope === undefined
     ? undefined
@@ -219,6 +220,9 @@ export function parseHostedBrowserVaultReplicaRef(
     ...(dataKeyEnvelope === undefined ? {} : { dataKeyEnvelope }),
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
     generatedAt: requireIsoTimestampString(record.generatedAt, `${label}.generatedAt`),
+    ...(record.generation === undefined
+      ? {}
+      : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
     keyId: requireString(record.keyId, `${label}.keyId`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     replicaSchema,
@@ -226,6 +230,14 @@ export function parseHostedBrowserVaultReplicaRef(
     runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   } satisfies HostedBrowserVaultReplicaRef;
+}
+
+function requirePositiveSafeInteger(value: unknown, label: string): number {
+  const parsed = requireNumber(value, label);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError(`${label} must be a positive safe integer.`);
+  }
+  return parsed;
 }
 
 function requireIsoTimestampString(value: unknown, label: string): string {

@@ -67,6 +67,13 @@ test("browser vault replica ref matching is exact across immutable object fields
   assert.equal(
     browserVaultReplicaRefsMatch(ref, {
       ...ref,
+      generation: ref.generation + 1,
+    }),
+    false,
+  );
+  assert.equal(
+    browserVaultReplicaRefsMatch(ref, {
+      ...ref,
       dataKeyEnvelope: {
         ...ref.dataKeyEnvelope,
         dataKeyId: "hdk:browser-vault-replica:other",
@@ -241,6 +248,7 @@ function createReplicaRef() {
     },
     dataVersion: "d".repeat(64),
     generatedAt: "2026-04-20T08:00:00.000Z",
+    generation: 1,
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica" as const,

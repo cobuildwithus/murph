@@ -11,6 +11,7 @@ export function browserVaultReplicaRefsMatch(
   return left.byteLength === right.byteLength
     && left.dataVersion === right.dataVersion
     && left.generatedAt === right.generatedAt
+    && left.generation === right.generation
     && left.keyId === right.keyId
     && left.objectKey === right.objectKey
     && left.replicaSchema === right.replicaSchema

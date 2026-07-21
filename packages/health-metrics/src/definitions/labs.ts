@@ -25,6 +25,11 @@ export const LAB_RESULT_METRICS = [
   },
   {
     aliases: ["bun", "serum-urea-nitrogen", "urea-nitrogen"],
+    biomarkerAliases: [
+      "biomarker:bun",
+      "biomarker:serum-urea-nitrogen",
+      "biomarker:urea-nitrogen",
+    ],
     biomarkerKey: "biomarker:blood-urea-nitrogen",
     canonicalUnit: "mg/dL",
     category: "lab",
@@ -257,6 +262,7 @@ export const LAB_RESULT_METRICS = [
   },
   {
     aliases: ["mch", "mean-cell-haemoglobin", "mean-corpuscular-haemoglobin"],
+    biomarkerAliases: ["biomarker:mch"],
     biomarkerKey: "biomarker:mean-corpuscular-hemoglobin",
     canonicalUnit: "pg",
     category: "lab",
@@ -272,6 +278,7 @@ export const LAB_RESULT_METRICS = [
       "mean-corpuscular-hb-concentration",
       "mean-corpuscular-haemoglobin-concentration",
     ],
+    biomarkerAliases: ["biomarker:mchc"],
     biomarkerKey: "biomarker:mean-corpuscular-hemoglobin-concentration",
     canonicalUnit: "g/dL",
     category: "lab",
@@ -316,6 +323,7 @@ export const LAB_RESULT_METRICS = [
   },
   {
     aliases: ["thyrotropin", "tsh"],
+    biomarkerAliases: ["biomarker:thyrotropin", "biomarker:tsh"],
     biomarkerKey: "biomarker:thyroid-stimulating-hormone",
     canonicalUnit: "mIU/L",
     category: "lab",
@@ -643,6 +651,7 @@ export const LAB_RESULT_METRICS = [
  */
 const GLOBAL_LAB_ALIASES_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   albumin: ["serum-albumin", "serum_albumin"],
+  "blood-urea-nitrogen": ["bun", "serum-urea-nitrogen", "urea-nitrogen"],
   creatinine: ["serum-creatinine", "serum_creatinine"],
   egfr: [
     "estimated-glomerular-filtration-rate",
@@ -681,6 +690,8 @@ const GLOBAL_LAB_ALIASES_BY_KEY: Readonly<Record<string, readonly string[]>> = {
     "lymphocytes-pct",
     "lymphocytes",
   ],
+  "mean-corpuscular-hemoglobin": ["mch"],
+  "mean-corpuscular-hemoglobin-concentration": ["mchc"],
   "mean-corpuscular-volume": ["mcv", "mean-corpuscular-volume"],
   "red-cell-distribution-width": [
     "rdw",
@@ -689,6 +700,7 @@ const GLOBAL_LAB_ALIASES_BY_KEY: Readonly<Record<string, readonly string[]>> = {
     "red-cell-distribution-width-rdw",
     "red_cell_distribution_width",
   ],
+  "thyroid-stimulating-hormone": ["thyrotropin", "tsh"],
   ferritin: [],
 };
 

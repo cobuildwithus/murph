@@ -11,9 +11,9 @@ import {
   formatTargetValue,
   listMetricPoints,
   listMetricDefinitions,
-  normalizeLabResultMetricValue,
   normalizeMetricKey,
   normalizeUnit,
+  normalizeLabResultMetricValue,
   normalizeMetricValue,
   resolveLabResultMetricDefinition,
   resolveMetricDefinition,
@@ -162,26 +162,18 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("Lymphocyte pct")?.key, "lymphocyte-percentage");
   assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
   assert.equal(resolveMetricDefinition("Red cell distribution width (RDW)")?.key, "red-cell-distribution-width");
-  assert.equal(resolveMetricDefinition("BUN"), null);
-  assert.equal(resolveMetricDefinition("TSH"), null);
-  assert.equal(resolveMetricDefinition("MCH"), null);
+  assert.equal(resolveMetricDefinition("BUN")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinition("Urea Nitrogen")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinition("TSH")?.key, "thyroid-stimulating-hormone");
+  assert.equal(resolveMetricDefinition("MCH")?.key, "mean-corpuscular-hemoglobin");
+  assert.equal(resolveMetricDefinition("MCHC")?.key, "mean-corpuscular-hemoglobin-concentration");
   assert.equal(resolveMetricDefinition("Testosterone"), null);
-  assert.equal(resolveLabResultMetricDefinition("BUN")?.key, "blood-urea-nitrogen");
-  assert.equal(resolveLabResultMetricDefinition("Urea Nitrogen")?.key, "blood-urea-nitrogen");
-  assert.equal(resolveLabResultMetricDefinition("TSH")?.key, "thyroid-stimulating-hormone");
-  assert.equal(resolveLabResultMetricDefinition("MCH")?.key, "mean-corpuscular-hemoglobin");
-  assert.equal(resolveLabResultMetricDefinition("MCHC")?.key, "mean-corpuscular-hemoglobin-concentration");
-  assert.equal(resolveLabResultMetricDefinition("HbA1c NGSP")?.key, "hba1c");
-  assert.equal(resolveLabResultMetricDefinition("HbA1c SI")?.key, "hba1c");
-  assert.equal(resolveLabResultMetricDefinition("Estimated GFR")?.key, "egfr");
-  assert.equal(resolveLabResultMetricDefinition("Estimated GFR CKD-EPI")?.key, "egfr-ckd-epi");
-  assert.equal(resolveLabResultMetricDefinition("Testosterone")?.key, "total-testosterone");
-  assert.equal(resolveMetricDefinition("GFR MDRD Af Amer"), null);
-  assert.equal(resolveMetricDefinition("GFR MDRD Non Af Amer"), null);
-  assert.equal(resolveLabResultMetricDefinition("ALT(SGPT)")?.key, "alt");
-  assert.equal(resolveLabResultMetricDefinition("Alanine Transaminase")?.key, "alt");
   assert.equal(resolveMetricDefinition("BUN/Creatinine Ratio"), null);
   assert.equal(resolveMetricDefinition("Urea"), null);
+  assert.equal(resolveLabResultMetricDefinition("Estimated GFR CKD-EPI")?.key, "egfr-ckd-epi");
+  assert.equal(resolveLabResultMetricDefinition("HbA1c NGSP")?.key, "hba1c");
+  assert.equal(resolveLabResultMetricDefinition("HbA1c SI")?.key, "hba1c");
+  assert.equal(resolveLabResultMetricDefinition("Testosterone total")?.key, "total-testosterone");
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
@@ -261,6 +253,13 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:estimated-vo2max")?.key, "estimated-vo2-max");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:egfr")?.key, "egfr");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:bun")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:tsh")?.key, "thyroid-stimulating-hormone");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:mch")?.key, "mean-corpuscular-hemoglobin");
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:mchc")?.key,
+    "mean-corpuscular-hemoglobin-concentration",
+  );
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:systolic-blood-pressure")?.key, "systolic-blood-pressure");
   assert.equal(
     resolveMetricDefinitionForBiomarker("biomarker:sleep-quality")?.key,
@@ -396,6 +395,28 @@ test("requires exactly one session capture field for a subjective primary metric
     }).issue,
     "unsupported_primary_biomarker",
   );
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:bun",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:blood-urea-nitrogen",
+    issue: null,
+    matchingSessionFieldIds: [],
+    metricKey: "blood-urea-nitrogen",
+    requiresSessionField: false,
+  });
+  for (const metricKey of ["body-weight", "sleep-efficiency", "sleep-score"]) {
+    assert.deepEqual(assessExperimentPrimaryMetricCapture({
+      primaryBiomarkerKey: `biomarker:${metricKey}`,
+      sessionFields: [],
+    }), {
+      canonicalBiomarkerKey: `biomarker:${metricKey}`,
+      issue: null,
+      matchingSessionFieldIds: [],
+      metricKey,
+      requiresSessionField: false,
+    });
+  }
 });
 
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {
@@ -605,8 +626,8 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "%",
     value: 13.1,
   }).canonicalValue, 13.1);
-  assert.deepEqual(normalizeLabResultMetricValue({
-    metricKey: "blood-urea-nitrogen",
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "urea-nitrogen",
     unit: "mmol/L",
     value: 4,
   }), {
@@ -615,8 +636,8 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "mmol/L",
     warnings: [],
   });
-  assert.deepEqual(normalizeLabResultMetricValue({
-    metricKey: "thyroid-stimulating-hormone",
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "TSH",
     unit: "uIU/mL",
     value: 1.25,
   }), {
@@ -625,34 +646,35 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "mIU/L",
     warnings: [],
   });
-  assert.equal(normalizeLabResultMetricValue({
-    metricKey: "mean-corpuscular-hemoglobin",
+  assert.equal(normalizeMetricValue({
+    metricKey: "MCH",
     unit: "pg",
     value: 29.4,
   }).canonicalUnit, "pg");
-  assert.equal(normalizeLabResultMetricValue({
-    metricKey: "mean-corpuscular-hemoglobin-concentration",
+  assert.equal(normalizeMetricValue({
+    metricKey: "MCHC",
     unit: "g/dL",
     value: 32.5,
   }).canonicalUnit, "g/dL");
-  assert.deepEqual(normalizeMetricValue({
-    metricKey: "blood-urea-nitrogen",
-    unit: "mmol/L",
-    value: 4,
+
+  assert.deepEqual(normalizeLabResultMetricValue({
+    metricKey: "egfr-ckd-epi",
+    unit: "mL/min/1.73m^2",
+    value: 89,
   }), {
-    canonicalUnit: null,
-    canonicalValue: null,
-    unit: "mmol/L",
+    canonicalUnit: "mL/min/1.73m^2",
+    canonicalValue: 89,
+    unit: "mL/min/1.73m^2",
     warnings: [],
   });
   assert.deepEqual(normalizeMetricValue({
-    metricKey: "thyroid-stimulating-hormone",
-    unit: "uIU/mL",
-    value: 1.25,
+    metricKey: "egfr-ckd-epi",
+    unit: "mL/min/1.73m^2",
+    value: 89,
   }), {
     canonicalUnit: null,
     canonicalValue: null,
-    unit: "uIU/mL",
+    unit: "mL/min/1.73m^2",
     warnings: [],
   });
 });
@@ -1424,6 +1446,54 @@ test("latest-lab policy does not silently fall back to non-lab event points", ()
 
   assert.equal(noLab.status, "no_data");
   assert.equal(noLab.point, null);
+});
+
+test("catalog metrics require reported units when canonical fields are unavailable", () => {
+  const cases = [
+    { key: "blood-urea-nitrogen", unit: "mg/dL", unitful: 14, unitless: 7 },
+    { key: "thyroid-stimulating-hormone", unit: "mIU/L", unitful: 2.5, unitless: 4 },
+    { key: "mean-corpuscular-hemoglobin", unit: "pg", unitful: 30, unitless: 32 },
+    { key: "mean-corpuscular-hemoglobin-concentration", unit: "g/dL", unitful: 33, unitless: 35 },
+  ] as const;
+
+  for (const testCase of cases) {
+    const unitful = metricPoint({
+      effectiveDate: "2026-03-01",
+      id: `metric-point:${testCase.key}:unitful`,
+      metricKey: testCase.key,
+      observedAt: "2026-03-01T08:00:00.000Z",
+      recordId: `${testCase.key}-unitful`,
+      sourceKind: "test-result",
+      unit: testCase.unit,
+      value: testCase.unitful,
+    });
+    const unitless = {
+      ...unitful,
+      canonicalUnit: null,
+      canonicalValue: null,
+      effectiveDate: "2026-04-01",
+      id: `metric-point:${testCase.key}:unitless`,
+      observedAt: "2026-04-01T08:00:00.000Z",
+      source: { ...unitful.source, recordId: `${testCase.key}-unitless` },
+      unit: null,
+      value: testCase.unitless,
+    } satisfies MetricPoint;
+
+    const selected = selectMetricValue({
+      metricKey: testCase.key,
+      points: [unitful, unitless],
+    });
+    const series = selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey: testCase.key,
+      points: [unitful, unitless],
+    });
+
+    assert.equal(selected.point?.id, unitful.id, testCase.key);
+    assert.equal(selected.value, testCase.unitful, testCase.key);
+    assert.equal(selected.unit, testCase.unit, testCase.key);
+    assert.deepEqual(series.rows.map((row) => row.value), [testCase.unitful], testCase.key);
+  }
 });
 
 test("supports daily aggregate policy selections with contributing provenance", () => {

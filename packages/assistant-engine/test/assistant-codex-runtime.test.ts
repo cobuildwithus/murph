@@ -16841,6 +16841,89 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('waits for and scans three concurrent children from the same root', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-three-child-boundary-work-')
+      const codexHome = await createTempDir('assistant-codex-three-child-boundary-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const completeFirstChild = createDeferred<void>()
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_868, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-three-child-parent',
+          'turn-three-child-parent',
+        )
+
+        for (const suffix of ['a', 'b', 'c']) {
+          writeSubAgentActivity(
+            child,
+            'thread-three-child-parent',
+            `thread-three-child-${suffix}`,
+          )
+          writeStartedTurn(
+            child,
+            `thread-three-child-${suffix}`,
+            `turn-three-child-${suffix}`,
+          )
+        }
+
+        writeCompletedTurn(
+          child,
+          'thread-three-child-b',
+          'turn-three-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-three-child-c',
+          'turn-three-child-c',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-three-child-parent',
+          'turn-three-child-parent',
+        )
+
+        const terminalResponses = (async () => {
+          for (let requestCount = 1; requestCount <= 4; requestCount += 1) {
+            const request = await respondToBackgroundTerminals(child, requestCount)
+            scannedThreadIds.push(String(asRecord(request.params).threadId))
+          }
+        })()
+
+        await completeFirstChild.promise
+        writeCompletedTurn(
+          child,
+          'thread-three-child-a',
+          'turn-three-child-a',
+        )
+        await terminalResponses
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'delegate three independent onboarding persistence tasks',
+      )
+
+      const publishCheckpoint = vi.fn()
+      const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+      expect(scannedThreadIds).toEqual([])
+
+      completeFirstChild.resolve(undefined)
+      await expect(boundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(scannedThreadIds).toEqual([
+        'thread-three-child-parent',
+        'thread-three-child-a',
+        'thread-three-child-b',
+        'thread-three-child-c',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
     it('treats a failed optional child as quiescent without stopping the warm process', async () => {
       const workingDirectory = await createTempDir('assistant-codex-failed-child-work-')
       const codexHome = await createTempDir('assistant-codex-failed-child-home-')
@@ -16887,7 +16970,7 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('tracks the latest sequential child resident at the boundary', async () => {
+    it('tracks every sequential child admitted before the boundary', async () => {
       const workingDirectory = await createTempDir('assistant-codex-sequential-child-work-')
       const codexHome = await createTempDir('assistant-codex-sequential-child-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -16936,7 +17019,7 @@ describe('assistant codex event shaping', () => {
           'turn-sequential-parent',
         )
 
-        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+        for (let requestCount = 1; requestCount <= 3; requestCount += 1) {
           const request = await respondToBackgroundTerminals(child, requestCount)
           scannedThreadIds.push(String(asRecord(request.params).threadId))
         }
@@ -16951,6 +17034,7 @@ describe('assistant codex event shaping', () => {
 
       expect(scannedThreadIds).toEqual([
         'thread-sequential-parent',
+        'thread-sequential-child-a',
         'thread-sequential-child-b',
       ])
       expect(spawnedChildren).toHaveLength(1)

@@ -151,6 +151,13 @@ Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
 provider egress per run, 500 Bundle entries per page, and three Epic beta
 resource families. The shared FHIR schema retains its broader 14-family
 superset for future integrations; the Epic directory does not request it.
+New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
+deterministic slice ids. That plan can represent multiple queries for one FHIR
+resource type and ordered, non-overlapping bounded windows without treating
+either id as canonical clinical identity. This foundation does not expand the
+Epic beta request scopes: Web still emits the current resource-family runtime
+descriptor and rejects query-aware page traffic until compatible readers have
+deployed.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual bytes after a valid response. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
@@ -240,10 +247,9 @@ id. A missing exact client id fails closed before redirect.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Background scheduled refresh and provider-directory network refresh jobs.
-- Vital-sign Observations. The raw manifest and resumable checkpoint currently
-  preserve one scope identity per resource type, so the beta uses the single
-  laboratory query. Adding a second Observation query requires a deliberate
-  scope-key contract evolution rather than overloading the existing checkpoint.
+- Vital-sign Observations. The query/slice acquisition identity now supports a
+  second Observation query, but enabling it still requires the follow-up Epic
+  scope policy, canonical mapping, and production wire cutover.
 - Retry, reconnect, and reauthorization after the initial retrieval; these
   require a bounded raw-evidence retention lifecycle before they can create
   another retrieval job.

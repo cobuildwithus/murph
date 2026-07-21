@@ -29,7 +29,7 @@ describe('assistant progress prompt contract', () => {
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
     )
     expect(prompt).toContain(
-      'Background work does not delay the reply or trigger progress by itself',
+      'Background work does not trigger progress by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns',
     )
     expect(prompt).toContain(
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
@@ -77,7 +77,7 @@ describe('assistant progress prompt contract', () => {
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Background work does not delay the reply or trigger an update by itself',
+      'Background work does not trigger an update by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',

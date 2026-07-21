@@ -1,0 +1,10 @@
+profile: murph-verification
+provider: blacksmith-testbox
+
+blacksmith:
+  org: cobuildwithus
+  workflow: .github/workflows/crabbox.yml
+  job: hydrate
+  ref: main
+  idleTimeout: 90m
+  debug: false

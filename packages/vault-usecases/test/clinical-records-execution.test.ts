@@ -105,6 +105,15 @@ describe("importClinicalFhirSnapshot", () => {
     );
     expect(persistedCheckpoint).not.toContain(FHIR_BASE_URL);
     expect(persistedCheckpoint).not.toContain(PATIENT_ID);
+    const persistedCheckpointValue = JSON.parse(persistedCheckpoint);
+    expect(persistedCheckpointValue.schema)
+      .toBe("murph.clinical-retrieval-checkpoint.v1");
+    expect(persistedCheckpointValue.identity).not.toHaveProperty("retrievalProtocol");
+    expect(persistedCheckpointValue.identity).not.toHaveProperty("retrievalSlices");
+    await expect(readClinicalFhirRetrievalCheckpoint({
+      identity,
+      vaultRoot: input.vaultRoot,
+    })).resolves.toEqual(checkpoint);
 
     await expect(readClinicalFhirRetrievalCheckpoint({
       identity: { ...identity, connectionId: "different-clinical-connection" },
@@ -165,6 +174,47 @@ describe("importClinicalFhirSnapshot", () => {
       resourceId: "heart-rate-1",
     });
     expect(event?.kind).toBe("measurement");
+  });
+
+  it("persists repeated resource types beneath query-aware raw evidence paths", async () => {
+    const base = await createSnapshotInput({
+      pages: [],
+      resourceTypes: ["Observation"],
+    });
+    const retrievalSlices = ["observation-labs", "observation-vitals"].map(
+      (queryScopeId, index) => ({
+        coverage: "whole-family" as const,
+        queryFingerprint: String(index + 1).repeat(64),
+        queryScopeId,
+        resourceType: "Observation" as const,
+        sliceId: "whole",
+      }),
+    );
+    const input: ClinicalFhirSnapshotImportInput = {
+      ...base,
+      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: retrievalSlices.map(({ queryScopeId, sliceId }) => ({
+        queryScopeId,
+        sliceId,
+      })),
+      pages: retrievalSlices.map(({ queryScopeId, resourceType, sliceId }) => ({
+        content: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        queryScopeId,
+        resourceType,
+        sliceId,
+      })),
+      retrievalProtocol: "query-slices-v2",
+      retrievalScopes: retrievalSlices.map(({ queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope }) => scope),
+      retrievalSlices,
+    };
+
+    const result = await importClinicalFhirSnapshot(input);
+    const manifest = await readFile(path.join(input.vaultRoot, result.manifestPath), "utf8");
+
+    expect(result.rawFileCount).toBe(3);
+    expect(manifest).toContain('"schemaVersion": "murph.clinical-raw-manifest.v3"');
+    expect(manifest).toContain('"relativePath": "observation-labs/whole/Observation/page-0001.json"');
+    expect(manifest).toContain('"relativePath": "observation-vitals/whole/Observation/page-0001.json"');
   });
 
   it("yields to cancellation before persisting a planned snapshot", async () => {

@@ -22,10 +22,12 @@ member-facing biomarker.
   medical matching. Related but distinct results, including ratios, absolute
   cell counts, percentages, nearby indices, and named calculation methods keep
   separate identities.
-- Resolve the expanded alias catalog and its lab-only unit semantics only for
-  test results. A lab label must not change the identity, displayed value or
-  unit, selection authority, goal behavior, or experiment support of a
-  same-named manual measurement or metric sample.
+- Preserve the general metric catalog's cross-source identities and conversions,
+  including the existing BUN, TSH, MCH, and MCHC semantics. Resolve additional
+  identities from the expanded lab catalog only for test results. Those added
+  lab labels must not change the identity, displayed value or unit, selection
+  authority, goal behavior, or experiment support of a same-named manual
+  measurement or metric sample.
 - Normalize numeric units only when the conversion is owner-verified. Otherwise
   preserve the original unit and compare only like-for-like histories.
 - Do not infer health meaning, severity, or a reference range from index

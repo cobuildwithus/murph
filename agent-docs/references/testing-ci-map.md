@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-19
+Last verified: 2026-07-20
 
 ## Current Repo Checks
 
@@ -22,6 +22,13 @@ Last verified: 2026-07-19
 | `MURPH_SAFE_E2E_PRODUCT_REF=... MURPH_SAFE_E2E_PRODUCT_NAME=... MURPH_SAFE_E2E_QUERY=... MURPH_SAFE_E2E_EXPECTED_TEST_ID=... pnpm --dir apps/web exec playwright test e2e/murph-safe-production-seam.spec.ts` | Opt-in rendered production-seam proof against an explicitly seeded local labels database. It uses the real POST search route, validates the public detail contract and exact selected-record test id, renders the server detail at phone and desktop widths, and checks detail overflow. `MURPH_SAFE_E2E_EXCLUDED_TEST_ID` can prove that a same-canonical sibling observation is absent. | Murph Safe public search route, shared service, labels SQL, contract, and server-rendered detail page |
 | `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL proof for bounded Messages credential rotation and enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Repeated enrollment rotates one Messages-owned row while invalidating prior bearers and preserving ordinary sessions, including stale-generation self-revocation, re-enrollment after revocation and expiry, plus both deletion-first and enrollment-first serialization orders with final absence of the member and its device-agent session |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
+
+For local Codex parents, the canonical root `pnpm test:diff` and
+`pnpm verify:acceptance` commands may execute this same coverage surface through
+Crabbox's direct Blacksmith Testbox provider. The command semantics in this map
+remain authoritative; only the finite executor changes. Ordinary GitHub Actions
+and already-remote invocations stay on their existing runner-local path. See
+`agent-docs/operations/verification-and-runtime.md`.
 
 Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or
@@ -198,7 +205,11 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   retain everything. Active runtime files enter encrypted checkpoints,
   `.runtime/**` stays out of portable ZIPs, and portable-eligible ordinary
   `exports/assistant-deliveries/**` files remain ordinary vault data. Archive
-  exclusions stay global rather than granting that generic path ownership. The
+  exclusions stay global rather than granting that generic path ownership.
+  Assistant-engine coverage also proves that a later turn cannot replace an
+  approved same-target generated vault-file ref or request a second approval
+  during the approval-observation gap, while a distinct pre-decision request,
+  exact-ref retry, and distinct same-turn send remain available. The
   hosted approval-resume E2E creates and requests the runtime file in one provider
   turn, checkpoints it, destroys the container, approves, restores, and proves
   one attachment delivery with no duplicate or mailbox lag. The phase-one
