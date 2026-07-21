@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-18
+Last verified: 2026-07-20
 
 ## Product outcome
 
@@ -90,8 +90,11 @@ and cancels its active run while retaining a minimal row for status/history.
 
 ## Provider directory
 
-`provider-directory.v1.json` is a committed, versioned build artifact generated
-offline from Epic's recommended R4 User-access Brands Bundle. The official
+`provider-directory.v2.json` is a committed, versioned build artifact generated
+offline from Epic's recommended R4 User-access Brands Bundle. It records the
+SHA-256 of the exact source bytes, contains one checked-in Epic acquisition
+policy, and lets each provider entry reference that policy instead of repeating
+the same SMART scopes and resource list. The official
 source page is `https://open.epic.com/MyApps/Endpoints`; its machine-readable
 download is `https://open.epic.com/Endpoints/Brands`. Epic explicitly advises
 applications to download and re-host this data instead of querying it at
@@ -105,22 +108,41 @@ Refresh the artifact from the repository root with:
 
 ```bash
 curl --fail --location --silent --show-error \
-  https://open.epic.com/Endpoints/Brands \
-  --output /tmp/epic-user-access-brands.json
-pnpm --dir apps/web clinical-records:providers:import -- \
-  --input /tmp/epic-user-access-brands.json
+  https://open.epic.com/Endpoints/Brands |
+  pnpm --dir apps/web clinical-records:providers:import -- --input -
 ```
 
 Review the official source provenance and generated diff, then rerun the
-provider-directory tests. The importer is deterministic for a fixed source
-bundle. The parser rejects duplicate ids, unsupported resource families,
-non-HTTPS URLs, credentials/query/fragment components, and private, loopback,
-link-local, or mapped-private IP literals.
+provider-directory tests. The importer is byte-deterministic for fixed source
+bytes and canonicalizes provider and facility order; the source hash remains
+an exact-byte hash, so a reordered source bundle correctly receives a different
+hash. The v2 parser rejects duplicate or unsorted ids, unknown policy/query
+references, malformed capability evidence, non-HTTPS URLs,
+credentials/query/fragment components, and private, loopback, link-local, or
+mapped-private IP literals. The v1 parser remains available for one
+compatibility window.
 
 The artifact also carries one curated `Epic Sandbox (test data only)` entry for
 Epic's official R4 sandbox. It uses only
 `EPIC_SMART_NON_PRODUCTION_CLIENT_ID`; production brands use only
 `EPIC_SMART_CLIENT_ID`. There is no fallback between those credentials.
+
+## Epic acquisition policy
+
+`epic-policy.ts` is the single source of truth for Epic SMART base scopes,
+query-scope definitions, required FHIR operations, deterministic query
+templates, slicing rules, bounded dependency traversal, and the Epic API keys
+that must be registered. The longitudinal catalog is configuration only: all
+queries beyond `patient-demographics`, `laboratory-observations`, and
+`diagnostic-reports` are explicitly disabled. Provider endpoint presence does
+not imply support for a disabled query; any provider-specific claim requires a
+sorted capability override with an evidence version.
+
+Dependency policies are purpose-bound, restricted to the selected provider's
+FHIR base, capped at traversal depth two, and charged against the parent slice
+limits. They are not a generic reference crawler. Activating a query or adding
+a SMART operation is a separate behavior change and is outside this directory
+schema migration.
 
 ## Retrieval contract and limits
 

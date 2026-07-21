@@ -228,7 +228,9 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   Cloudflare, a live model provider, and the user messaging channel.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
-  directory (including Atlanta/Piedmont search and public-endpoint rejection),
+  directory v2 and acquisition policy (including exact source hashing,
+  deterministic import, v1 compatibility, disabled query enforcement,
+  Atlanta/Piedmont search, and public-endpoint rejection),
   SMART scope negotiation and bounded streams, callback redaction, runtime
   write fences, two-page raw Bundle pagination, exact-family cursor pinning,
   401/403 behavior, stale-claim and token-rotation CAS races, preemption,
