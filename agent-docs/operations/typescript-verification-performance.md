@@ -1,6 +1,6 @@
 # TypeScript Verification Performance
 
-Last verified: 2026-07-19
+Last verified: 2026-07-20
 
 ## Purpose
 
@@ -11,8 +11,9 @@ method.
 The design stays deliberately small:
 
 - Normal verification keeps TypeScript's worker defaults.
-- Codex verification automatically uses a conservative shared-host profile;
-  other local callers can opt in explicitly.
+- Configured local Codex `test:diff` and acceptance commands can run through
+  Crabbox on Blacksmith Testboxes;
+  local fallback automatically uses a conservative shared-host profile.
 - One root runner selects the canonical TypeScript 7 compiler and adds only the
   lane's configured worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
@@ -38,8 +39,12 @@ check. Next's TypeScript 5 contract check is never skipped by this reuse.
 
 ## Shared-Host Profile
 
-Canonical verification and build entrypoints automatically use the profile
-when `CODEX_THREAD_ID` is present outside CI. Other local callers can opt in:
+The canonical `pnpm test:diff` and `pnpm verify:acceptance` entrypoints first
+select their executor. Configured local Codex runs use isolated Blacksmith
+Testboxes through Crabbox and explicitly disable shared-host throttling there.
+When dispatch stays local, canonical verification and build entrypoints automatically use the
+profile when `CODEX_THREAD_ID` is present outside CI. Other local callers can opt
+in:
 
 ```bash
 MURPH_VERIFY_SHARED_HOST=1 pnpm verify:acceptance
@@ -50,8 +55,9 @@ automatic Codex detection, so `MURPH_VERIFY_SHARED_HOST=0` is the local escape
 hatch. CI retains its existing explicit budgets and never inherits Codex-local
 defaults.
 
-The profile has one exclusive heavyweight lane. Full workspace verification,
-app verification, builds, and benchmarks claim it. `test:diff` does not: it
+The local profile has one exclusive heavyweight lane. Full workspace
+verification, app verification, builds, and benchmarks claim it. `test:diff`
+does not: it
 keeps its per-worktree artifact lock while limiting workspace fan-out and
 Vitest to one worker. If a diff requires app verification, that app phase
 claims the heavyweight lane itself.

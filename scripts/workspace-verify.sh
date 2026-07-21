@@ -705,6 +705,15 @@ run_workspace_package_coverage() {
     return $?
   fi
 
+  if [[ "$package_dir" == "packages/assistant-engine" ]]; then
+    run_timed_step \
+      "$label" \
+      env NODE_OPTIONS=--max-old-space-size=6144 \
+        MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
+        pnpm --dir "$package_dir" test:coverage
+    return $?
+  fi
+
   run_timed_step \
     "$label" \
     env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm --dir "$package_dir" test:coverage

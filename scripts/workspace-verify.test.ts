@@ -309,6 +309,45 @@ run_app_verify_command_with_retry apps/cloudflare 0 0 0
     expect(standaloneCloudflare).not.toContain("VERIFY_SKIP_TYPECHECK");
   });
 
+  it("gives only Assistant Engine package coverage the repository-owned heap", () => {
+    const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
+      "run_workspace_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+unset NODE_OPTIONS
+package_coverage_vitest_max_workers=2
+
+run_timed_step() {
+  shift
+  [[ "$1" == "env" ]]
+  shift
+  local heap=unset
+  local workers=unset
+  while [[ "$1" == *=* ]]; do
+    case "$1" in
+      NODE_OPTIONS=*) heap="\${1#NODE_OPTIONS=}" ;;
+      MURPH_VITEST_MAX_WORKERS=*) workers="\${1#MURPH_VITEST_MAX_WORKERS=}" ;;
+    esac
+    shift
+  done
+  printf 'heap=%s workers=%s command=%s\n' "$heap" "$workers" "$*"
+}
+
+${runWorkspacePackageCoverage}
+
+run_workspace_package_coverage packages/assistant-engine 'Assistant Engine coverage'
+run_workspace_package_coverage packages/core 'Core coverage'
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "heap=--max-old-space-size=6144 workers=2 command=pnpm --dir packages/assistant-engine test:coverage\n" +
+        "heap=unset workers=2 command=pnpm --dir packages/core test:coverage\n",
+    );
+  });
+
   it("prepares shared app inputs once before overlapping both app verifications", () => {
     const harnessDir = mkdtempSync(
       path.join(os.tmpdir(), "murph-workspace-verify-apps-"),
