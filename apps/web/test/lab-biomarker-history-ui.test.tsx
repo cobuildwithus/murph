@@ -204,6 +204,66 @@ test("a numeric result with source text remains plotted without a qualitative om
   }
 });
 
+test("albumin uses one normalized unit across the overview, summary, ranges, and history", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Albumin",
+      biomarkerKey: "biomarker:albumin",
+      date: "2026-02-17",
+      id: "albumin-gdl",
+      metricKey: "albumin",
+      normalizedUnit: "g/dL",
+      normalizedValue: 5.1,
+      unit: "g/dL",
+      value: 5.1,
+    }),
+    labRow({
+      analyte: "Albumin",
+      biomarkerKey: "biomarker:albumin",
+      date: "2026-04-23",
+      id: "albumin-gl",
+      metricKey: "albumin",
+      normalizedUnit: "g/dL",
+      normalizedValue: 4.9,
+      referenceRange: { text: "34 - 50" },
+      unit: "g/L",
+      value: 49,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const overview = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+  try {
+    const albuminLink = overview.container.querySelector(
+      'a[href="/biomarkers/results/albumin"]',
+    );
+    expect(albuminLink?.textContent).toContain("4.9 g/dL");
+    expect(albuminLink?.textContent).not.toContain("49 g/L");
+  } finally {
+    await overview.cleanup();
+  }
+
+  const detail = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="albumin" />,
+    { requireButton: false },
+  );
+  try {
+    const text = detail.container.textContent ?? "";
+    expect(text).toContain("2 comparable numeric results in g/dL");
+    expect(text).toContain("4.9 g/dL");
+    expect(text).toContain("5.1 g/dL");
+    expect(text).toContain("3.4 to 5 g/dL");
+    expect(text).toContain("Down 0.2 g/dL since Feb 17, 2026");
+    expect(text).not.toContain("49 g/L");
+    expect(text).not.toContain("34 - 50");
+  } finally {
+    await detail.cleanup();
+  }
+});
+
 test("tiny nonzero lab values and ranges retain meaningful precision", () => {
   expect(formatLabNumber(0.0004)).toBe("0.0004");
   expect(formatLabNumber(0.0014)).toBe("0.0014");
@@ -216,6 +276,8 @@ test("tiny nonzero lab values and ranges retain meaningful precision", () => {
   })).toBe("0.0004 mg/L");
   expect(formatLabReferenceRange({ high: 0.0009, low: 0.0001 }, "mg/L"))
     .toBe("0.0001 to 0.0009 mg/L");
+  expect(formatLabReferenceRange({ high: 5, highComparator: "<=" }, "g/dL"))
+    .toBe("<=5 g/dL");
 });
 
 test("signed-out empty state offers sign-in instead of lab sync", async () => {
@@ -646,6 +708,37 @@ test("a shared lab-reported range yields a chart band, range tile, and change no
     expect(text).not.toContain("Saved history");
     expect(text).toContain("Up 0.2% since Jun 3, 2025");
     expect(text).toContain("Range 4 to 5.6%");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("an exact one-sided range stays in history without becoming an ambiguous chart line", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      date: "2025-06-03",
+      id: "hba1c-2025",
+      referenceRange: { text: "<5.6" },
+      value: 5.4,
+    }),
+    labRow({
+      date: "2026-06-14",
+      id: "hba1c-2026",
+      referenceRange: { text: "<5.6" },
+      value: 5.5,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("<5.6%");
+    expect(text).not.toContain("dashed line marks");
   } finally {
     await rendered.cleanup();
   }

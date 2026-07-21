@@ -98,6 +98,7 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "albumin-creatinine-ratio",
     "urine-albumin-creatinine-ratio",
     "urine-protein",
+    "uric-acid",
   ],
   liver: [
     "albumin",

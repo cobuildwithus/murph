@@ -450,6 +450,61 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     value: 1.3,
   }).canonicalValue, 115.141);
   assert.equal(normalizeMetricValue({
+    metricKey: "calcium",
+    unit: "mmol/L",
+    value: 2.5,
+  }).canonicalValue, 10);
+  assert.equal(normalizeMetricValue({
+    metricKey: "cholesterol-total",
+    unit: "mmol/L",
+    value: 5,
+  }).canonicalValue, 193.35);
+  assert.equal(normalizeMetricValue({
+    metricKey: "uric-acid",
+    unit: "mmol/L",
+    value: 0.3,
+  }).canonicalValue, 5.0436);
+  assert.equal(normalizeMetricValue({
+    metricKey: "bilirubin-total",
+    unit: "umol/L",
+    value: 17.1,
+  }).canonicalValue, 1);
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "total-protein",
+    unit: "g/L",
+    value: 70,
+  }), {
+    canonicalUnit: "g/dL",
+    canonicalValue: 7,
+    unit: "g/L",
+    warnings: [],
+  });
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "absolute-neutrophils",
+    unit: "cells/uL",
+    value: 4_000,
+  }), {
+    canonicalUnit: "10^3/uL",
+    canonicalValue: 4,
+    unit: "cells/uL",
+    warnings: [],
+  });
+  assert.equal(normalizeMetricValue({
+    metricKey: "white-blood-cell-count",
+    unit: "cells/µL",
+    value: 7_200,
+  }).canonicalValue, 7.2);
+  assert.equal(normalizeUnit("x10E3/uL"), "10^3/uL");
+  assert.equal(normalizeUnit("10*3/µL"), "10^3/uL");
+  assert.equal(normalizeUnit("x10^9/L"), "10^3/uL");
+  assert.equal(normalizeUnit("Thousand/uL"), "10^3/uL");
+  assert.equal(normalizeUnit("x10E6/uL"), "10^6/uL");
+  assert.equal(normalizeUnit("10^12/L"), "10^6/uL");
+  assert.equal(normalizeUnit("cells/µL"), "cells/uL");
+  assert.equal(normalizeUnit("µmol/L"), "umol/L");
+  assert.equal(normalizeUnit("calc"), "ratio");
+  assert.equal(normalizeUnit("mL/min/1.73sq m"), "mL/min/1.73m^2");
+  assert.equal(normalizeMetricValue({
     metricKey: "body-fat-percentage",
     unit: "%",
     value: 18.4,
