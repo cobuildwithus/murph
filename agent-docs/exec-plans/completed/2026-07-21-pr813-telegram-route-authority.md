@@ -1,6 +1,6 @@
 # PR 813 Telegram route authority remediation
 
-Status: active
+Status: completed
 Created: 2026-07-21
 Updated: 2026-07-21
 
@@ -128,3 +128,4 @@ Updated: 2026-07-21
   `main`. ReviewGPT round 1 passed with no finding. Round 2 found only the
   accepted missing deploy-surface disclosure above; the PR body was corrected
   without a production-code change before the external merge was discovered.
+Completed: 2026-07-21
