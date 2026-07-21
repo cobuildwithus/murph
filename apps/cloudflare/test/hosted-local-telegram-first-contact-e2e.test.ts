@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
+  createHostedAssistantConversationIdentifierBlind,
   createHostedMailboxAssistantInputId,
+  hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 
 import {
@@ -73,7 +76,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
-    await requireScenario().runWake(buildActivationWake(userId), userId);
+    await requireScenario().runWake(buildSignupWelcomeActivationWake(userId), userId);
 
     await requireScenario().waitForHostedCompletion(userId);
     await requireTelegramStub().waitForRequestsToSettle({
@@ -84,6 +87,8 @@ describe("hosted local Telegram auto-reply e2e", () => {
     requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
       matchInputContains: defaultTelegramInboundText,
     });
+    const assistantProviderRequestCountBeforeInbound =
+      requireScenario().assistantProviderRequests.length;
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
     await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
 
@@ -101,7 +106,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
     const sendRequest = await requireTelegramStub().waitForRequest({
       expectedPath: `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
-      matchRequest: requireTelegramStub().createSendMessageMatcher(userId),
+      matchRequest: (request) =>
+        requireTelegramStub().createSendMessageMatcher(userId)(request)
+        && requireTelegramStub().parseObservedJson(request.body)?.text ===
+          HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
       scenario: requireScenario(),
       userId,
     });
@@ -130,6 +138,26 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
     expect(requireTelegramStub().parseObservedJson(sendRequest.body))
       .not.toHaveProperty("reply_to_message_id");
+    const signupWelcomeRequests = requireTelegramStub().observedRequests.filter((request) =>
+      request.url === `/bot${hostedLocalTelegramRequestToken}/sendMessage`
+      && requireTelegramStub().createSendMessageMatcher(userId)(request)
+      && requireTelegramStub().parseObservedJson(request.body)?.text ===
+        MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
+    );
+    expect(signupWelcomeRequests).toHaveLength(1);
+
+    const firstInboundProviderRequest = requireScenario().assistantProviderRequests
+      .slice(assistantProviderRequestCountBeforeInbound)
+      .find((request) =>
+        request.url === "/v1/responses"
+        && readAssistantProviderRequestText(request).includes(defaultTelegramInboundText)
+      );
+    if (!firstInboundProviderRequest) {
+      throw new Error("Expected the first inbound Telegram provider request.");
+    }
+    expect(readAssistantProviderRequestText(firstInboundProviderRequest)).toContain(
+      MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    );
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -402,6 +430,45 @@ function buildActivationWake(userId: string) {
   });
 }
 
+function buildSignupWelcomeActivationWake(userId: string) {
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: buildTelegramThreadId(userId),
+    userId,
+  });
+  const threadId = buildTelegramThreadId(userId);
+
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:local:${userId}:evt_telegram_signup_welcome`,
+    memberId: userId,
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: true,
+    },
+    occurredAt: new Date().toISOString(),
+    signupWelcome: {
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: {
+          kind: "thread",
+          target: threadId,
+        },
+        identityId: hashHostedAssistantConversationIdentifier(
+          identifierBlind,
+          "telegram:bot",
+        ),
+        threadId: hashHostedAssistantConversationIdentifier(
+          identifierBlind,
+          threadId,
+        ),
+        threadIsDirect: true,
+      },
+      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    },
+  });
+}
+
 function buildInboundTelegramWake(
   userId: string,
   overrides: {
@@ -433,6 +500,27 @@ function buildAcceptedTelegramMessageRef(userId: string, eventId: string): strin
     secret: buildTelegramThreadId(userId),
     userId,
   });
+}
+
+function readAssistantProviderRequestText(request: { body: string }): string {
+  const body = JSON.parse(request.body) as Record<string, unknown>;
+  return collectJsonStrings(body.input).join("\n\n");
+}
+
+function collectJsonStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  return [];
 }
 
 function requireScenario(): HostedLocalFullStackScenario {
