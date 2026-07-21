@@ -9,6 +9,7 @@ import {
 import {
   assistantPersonalitySettingIds,
   isAssistantPersonalityScore,
+  isAssistantPersonaId,
   isAssistantPersonalitySettingId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
@@ -1452,6 +1453,12 @@ function parseHostedExecutionMemberPreferences(
   label: string,
 ): HostedExecutionMemberPreferences {
   const record = requireObject(value, label);
+  const persona = record.persona === undefined
+    ? undefined
+    : parseHostedExecutionAssistantPersonaPreference(
+        record.persona,
+        `${label}.persona`,
+      );
   const tone = record.tone === undefined
     ? undefined
     : parseHostedExecutionAssistantTonePreference(record.tone, `${label}.tone`);
@@ -1465,11 +1472,17 @@ function parseHostedExecutionMemberPreferences(
         `${label}.personality`,
       );
 
-  if (tone === undefined && voice === undefined && personality === undefined) {
-    throw new TypeError(`${label} must include tone, voice, or personality.`);
+  if (
+    persona === undefined
+    && tone === undefined
+    && voice === undefined
+    && personality === undefined
+  ) {
+    throw new TypeError(`${label} must include persona, tone, voice, or personality.`);
   }
 
   return {
+    ...(persona === undefined ? {} : { persona }),
     ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
@@ -1504,6 +1517,17 @@ function parseHostedExecutionMemberPersonalityPreferences(
   }
 
   return personality;
+}
+
+function parseHostedExecutionAssistantPersonaPreference(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberPreferences["persona"] {
+  const persona = requireString(value, label);
+  if (!isAssistantPersonaId(persona)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return persona;
 }
 
 function parseHostedExecutionAssistantTonePreference(
@@ -1567,7 +1591,9 @@ function parsePreferenceRequestedFields(
   }
   if (
     !Array.isArray(value)
-    || value.some((field) => field !== "tone" && field !== "voice")
+    || value.some(
+      (field) => field !== "persona" && field !== "tone" && field !== "voice",
+    )
     || new Set(value).size !== value.length
   ) {
     throw new TypeError("Hosted preference requestedFields is invalid.");

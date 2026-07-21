@@ -1,10 +1,11 @@
 # Product Specs Index
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
+| `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary. | Active |

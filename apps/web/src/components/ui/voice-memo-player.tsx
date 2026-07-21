@@ -45,6 +45,7 @@ export interface VoiceMemoPlayerHandle {
 
 interface VoiceMemoPlayerProps {
   src: string;
+  fallbackSrc?: string;
   caption?: string;
   accentClassName?: string;
   fillClassName?: string;
@@ -65,6 +66,7 @@ export const VoiceMemoPlayer = forwardRef<
 >(function VoiceMemoPlayer(
   {
     src,
+    fallbackSrc,
     caption,
     accentClassName = "bg-[#5e5530]",
     fillClassName = "bg-[#5e5530]",
@@ -83,6 +85,12 @@ export const VoiceMemoPlayer = forwardRef<
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [unavailable, setUnavailable] = useState(false);
+  const [resolvedSrc, setResolvedSrc] = useState(src);
+
+  useEffect(() => {
+    setResolvedSrc(src);
+    setUnavailable(false);
+  }, [fallbackSrc, src]);
 
   useEffect(() => {
     const a = audioRef.current;
@@ -130,6 +138,12 @@ export const VoiceMemoPlayer = forwardRef<
       setPlaying(false);
     };
     const onError = () => {
+      if (fallbackSrc && resolvedSrc !== fallbackSrc) {
+        setResolvedSrc(fallbackSrc);
+        setUnavailable(false);
+        setPlaying(false);
+        return;
+      }
       setUnavailable(true);
       setPlaying(false);
     };
@@ -155,7 +169,7 @@ export const VoiceMemoPlayer = forwardRef<
       a.removeEventListener("pause", onPause);
       a.removeEventListener("error", onError);
     };
-  }, [exclusiveGroupId, src]);
+  }, [exclusiveGroupId, fallbackSrc, resolvedSrc]);
 
   const start = useCallback(() => {
     const a = audioRef.current;
@@ -251,7 +265,7 @@ export const VoiceMemoPlayer = forwardRef<
 
       <audio
         ref={audioRef}
-        src={src}
+        src={resolvedSrc}
         preload={preload}
         className="hidden"
         data-voice-memo-group={exclusiveGroupId}

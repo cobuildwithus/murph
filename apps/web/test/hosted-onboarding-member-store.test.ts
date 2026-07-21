@@ -4080,6 +4080,8 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantPersona: null,
+    assistantPersonaCausalSeq: null,
     assistantDetail: null,
     assistantDetailCausalSeq: null,
     assistantHumor: null,

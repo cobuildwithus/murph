@@ -9,6 +9,7 @@ import {
 } from "../assistant-skill-assets.js";
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   defaultAssistantTonePreference,
   toLocalDayKey,
@@ -20,6 +21,7 @@ import {
 } from "@murphai/hosted-execution/env";
 import type { AssistantTurnTrigger } from "@murphai/operator-config/assistant-cli-contracts";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
+import { buildAssistantPersonaPrompt } from "./persona-prompts.js";
 import {
   buildAssistantExecutionBehaviorText,
   type AssistantModelBehaviorProfile,
@@ -46,6 +48,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedLabsAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantPersona?: AssistantPersonaId | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
   assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
@@ -596,6 +599,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
+    conversationScope === "direct" && input.assistantPersona
+      ? buildAssistantPersonaPrompt(input.assistantPersona)
+      : null,
     assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
       : null,

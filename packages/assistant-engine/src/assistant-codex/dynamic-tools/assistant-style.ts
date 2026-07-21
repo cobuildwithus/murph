@@ -4,7 +4,6 @@ import {
   assistantPersonalitySettingIds,
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingSchema,
-  defaultAssistantPersonalityScores,
   type AssistantPersonalitySettingId,
 } from '@murphai/contracts'
 import {
@@ -253,7 +252,7 @@ function validateRequestedPersonalitySettings(input: {
     const actual = input.settings[setting]
     if (
       requested === null
-        ? !isDefaultPersonalitySetting(setting, actual)
+        ? !isDefaultPersonalitySetting(actual)
         : actual.source !== 'custom' || actual.value !== requested
     ) {
       throw new TypeError(
@@ -283,11 +282,9 @@ function hasSavedEffectivePersonalityChange(input: {
 }
 
 function isDefaultPersonalitySetting(
-  setting: AssistantPersonalitySettingId,
   snapshot: HostedRuntimeAssistantPersonalitySettingSnapshot,
 ): boolean {
-  return snapshot.source === 'default' &&
-    snapshot.value === defaultAssistantPersonalityScores[setting]
+  return snapshot.source === 'default'
 }
 
 function haveSameKeys(
