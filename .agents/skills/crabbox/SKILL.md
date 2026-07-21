@@ -24,6 +24,40 @@ ordinary commands and smaller hosts keep their conservative shared-host caps.
 `MURPH_VERIFY_EXECUTOR=crabbox` explicitly requests a fresh one-shot Testbox
 without another target variable.
 
+## Warm one task lease by default
+
+When a task is likely to need CPU-heavy remote verification and Blacksmith is
+already authenticated, start the task's Testbox warmup as soon as the scope is
+known so provisioning and hydration can overlap local editing and review:
+
+```bash
+crabbox warmup --profile murph-verification --provider blacksmith-testbox
+```
+
+Keep the printed Testbox ID or Crabbox slug in the current task context, then
+reuse that exact lease for every canonical remote check the task needs:
+
+```bash
+MURPH_CRABBOX_LEASE_ID=<testbox-id-or-slug> pnpm test:diff <paths>
+MURPH_CRABBOX_LEASE_ID=<testbox-id-or-slug> pnpm verify:acceptance
+```
+
+Use one lease per agent/worktree. Never share a lease concurrently across
+worktrees because Blacksmith sync mirrors the invoking checkout and can replace
+another task's files. Reuse the task lease through final verification, then stop
+the exact lease created by this task even if no remote command ultimately ran:
+
+```bash
+crabbox stop --provider blacksmith-testbox <testbox-id-or-slug>
+```
+
+Only stop a lease whose ownership by the current task is proven. The profile's
+idle timeout is fallback cleanup, not the normal task-completion path. Use a
+fresh one-shot run only when the user requests independent clean-machine proof,
+the existing lease is unusable, or the task has no owned warm lease. Warmup is
+lifecycle setup only; verification still runs through the canonical `pnpm`
+commands above, never an ad-hoc remote command.
+
 ## Environment and sync boundary
 
 - Authenticate once with `blacksmith auth login`. This direct provider does not
