@@ -189,13 +189,19 @@ export function findSensitiveBlacksmithSyncPaths(paths) {
 }
 
 export function assertSafeBlacksmithSync(repoRoot) {
-  const untrackedPaths = listGitPaths(
-    repoRoot,
-    ["ls-files", "--others", "--exclude-standard", "-z"],
+  const unsafeStates = findUnsafeBlacksmithWorktreeStates(
+    readGitWorktreeStates(repoRoot),
   );
-  if (untrackedPaths.length > 0) {
+  if (unsafeStates.length > 0) {
+    const counts = new Map();
+    for (const reason of unsafeStates) {
+      counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    const summary = [...counts.entries()]
+      .map(([reason, count]) => `${reason}=${count}`)
+      .join(", ");
     throw new Error(
-      `Blacksmith Testbox sync refused ${untrackedPaths.length} untracked non-ignored path${untrackedPaths.length === 1 ? "" : "s"}. Stage intended source files or ignore local-only files before remote verification.`,
+      `Blacksmith Testbox sync refused ${unsafeStates.length} unauthorized Git state${unsafeStates.length === 1 ? "" : "s"} (${summary}). Fully stage intentional new source or resolve the working-tree state before remote verification.`,
     );
   }
 
@@ -213,6 +219,77 @@ export function assertSafeBlacksmithSync(repoRoot) {
       `Blacksmith Testbox sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
     );
   }
+}
+
+export function findUnsafeBlacksmithWorktreeStates(entries) {
+  const unmergedStates = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+  const validIndexStatuses = new Set([" ", "M", "A", "D", "R", "C", "T"]);
+  const validWorktreeStatuses = new Set([" ", "M", "D", "T"]);
+
+  return entries.flatMap(({ indexStatus, worktreeStatus }) => {
+    const state = `${indexStatus}${worktreeStatus}`;
+    if (state === "??") {
+      return ["untracked"];
+    }
+    if (unmergedStates.has(state)) {
+      return ["unmerged"];
+    }
+    if (indexStatus === " " && worktreeStatus === "A") {
+      return ["intent-to-add"];
+    }
+    if (indexStatus === "A" && worktreeStatus !== " ") {
+      return ["staged-addition-changed"];
+    }
+    if (
+      !validIndexStatuses.has(indexStatus) ||
+      !validWorktreeStatuses.has(worktreeStatus)
+    ) {
+      return ["unsupported"];
+    }
+    return [];
+  });
+}
+
+export function parseGitStatusPorcelainV1Z(output) {
+  const entries = [];
+  let offset = 0;
+  while (offset < output.length) {
+    if (offset + 3 > output.length || output[offset + 2] !== " ") {
+      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+    }
+    const indexStatus = output[offset];
+    const worktreeStatus = output[offset + 1];
+    const pathEnd = output.indexOf("\0", offset + 3);
+    if (pathEnd === -1) {
+      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+    }
+    offset = pathEnd + 1;
+    if (indexStatus === "R" || indexStatus === "C") {
+      const originalPathEnd = output.indexOf("\0", offset);
+      if (originalPathEnd === -1) {
+        throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+      }
+      offset = originalPathEnd + 1;
+    }
+    entries.push({ indexStatus, worktreeStatus });
+  }
+  return entries;
+}
+
+function readGitWorktreeStates(repoRoot) {
+  const result = spawnSync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git status.");
+  }
+  return parseGitStatusPorcelainV1Z(result.stdout);
 }
 
 function listGitPaths(repoRoot, args) {

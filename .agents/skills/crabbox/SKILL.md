@@ -32,13 +32,15 @@ fresh one-shot Testbox without another target variable.
   Vercel tokens, provider tokens, model keys, or product credentials. Blacksmith
   Testbox deliberately rejects Crabbox environment forwarding.
 - Blacksmith can sync Git-tracked and untracked non-ignored paths. The dispatcher
-  refuses every untracked non-ignored path before delegation; stage intentional
-  new source or ignore local-only files first. It then rejects known credential,
-  vault, runtime-state, private-document, and local-artifact paths from the
+  admits only modified tracked files, tracked renames/deletions, ignored files,
+  and new files whose current contents are fully staged. Ordinary untracked,
+  intent-to-add, staged-then-changed additions, unmerged, and unsupported Git
+  states fail before delegation. It then rejects known credential, vault,
+  runtime-state, private-document, and local-artifact paths from the
   cached/tracked set. Matching local paths are also ignored in `.gitignore`.
-- Staged new source and modified tracked content leave the host so the Testbox
-  verifies the exact candidate change. Never stage private data to bypass the
-  untracked-file refusal.
+- Fully staged new source and modified tracked content leave the host so the
+  Testbox verifies the exact candidate change. Never stage private data to bypass
+  the Git-state refusal.
 - The remote bootstrap independently discards its process environment before
   reconstructing deterministic test-only values for pnpm and the verifier.
 - Canonical completion verification does not need Vercel development variables.

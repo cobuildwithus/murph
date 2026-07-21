@@ -217,7 +217,17 @@ describe("verification dispatcher", () => {
     ]);
   });
 
-  it("refuses any untracked non-ignored path before Crabbox delegation", () => {
+  it("parses porcelain -z rename records without treating the original path as another state", () => {
+    expect(callDispatcherExport(
+      "parseGitStatusPorcelainV1Z",
+      "R  renamed file.ts\0original file.ts\0 M tracked file.ts\0",
+    )).toEqual([
+      { indexStatus: "R", worktreeStatus: " " },
+      { indexStatus: " ", worktreeStatus: "M" },
+    ]);
+  });
+
+  it("refuses every unauthorized Git state before Crabbox delegation", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const delegationMarkerPath = path.join(tempRoot, "delegated");
@@ -235,14 +245,51 @@ describe("verification dispatcher", () => {
       path.join(binDir, "git"),
       [
         "#!/bin/sh",
-        "case \"$*\" in",
-        "  *\"--others\"*) printf '%b' 'notes.txt\\000' ;;",
-        "  *\"--cached\"*) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
+        "case \"${1:-}\" in",
+        "  status) printf '%b' \"$MURPH_TEST_GIT_STATUS\" ;;",
+        "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
         "esac",
       ].join("\n"),
     );
 
-    const result = spawnSync(
+    for (const [status, reason] of [
+      ["?? notes.txt\\000", "untracked"],
+      [" A intent.txt\\000", "intent-to-add"],
+      ["AM staged.txt\\000", "staged-addition-changed"],
+      ["AD staged-then-deleted.txt\\000", "staged-addition-changed"],
+      ["DD conflict.txt\\000", "unmerged"],
+      ["AU conflict.txt\\000", "unmerged"],
+      ["UD conflict.txt\\000", "unmerged"],
+      ["UA conflict.txt\\000", "unmerged"],
+      ["DU conflict.txt\\000", "unmerged"],
+      ["AA conflict.txt\\000", "unmerged"],
+      ["UU conflict.txt\\000", "unmerged"],
+      [" Z unsupported.txt\\000", "unsupported"],
+    ] as const) {
+      rmSync(delegationMarkerPath, { force: true });
+      const result = spawnSync(
+        process.execPath,
+        [dispatcherPath, "verify:acceptance"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...withoutVerificationRoutingEnvironment(process.env),
+            MURPH_TEST_GIT_STATUS: status,
+            MURPH_VERIFY_EXECUTOR: "crabbox",
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`unauthorized Git state (${reason}=1)`);
+      expect(result.stderr).not.toContain(status.slice(3, -4));
+      expect(existsSync(delegationMarkerPath)).toBe(false);
+    }
+
+    rmSync(delegationMarkerPath, { force: true });
+    const malformedRenameResult = spawnSync(
       process.execPath,
       [dispatcherPath, "verify:acceptance"],
       {
@@ -250,15 +297,16 @@ describe("verification dispatcher", () => {
         encoding: "utf8",
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
+          MURPH_TEST_GIT_STATUS: "R  renamed-without-original.ts\\000",
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       },
     );
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("sync refused 1 untracked non-ignored path");
-    expect(result.stderr).not.toContain("notes.txt");
+    expect(malformedRenameResult.status).toBe(1);
+    expect(malformedRenameResult.stderr).toContain(
+      "Unable to parse the Blacksmith Testbox Git status boundary",
+    );
     expect(existsSync(delegationMarkerPath)).toBe(false);
   });
 
@@ -280,9 +328,9 @@ describe("verification dispatcher", () => {
       path.join(binDir, "git"),
       [
         "#!/bin/sh",
-        "case \"$*\" in",
-        "  *\"--others\"*) exit 0 ;;",
-        "  *\"--cached\"*) printf '%b' '.env.production\\000scripts/verification-dispatch.mjs\\000' ;;",
+        "case \"${1:-}\" in",
+        "  status) exit 0 ;;",
+        "  ls-files) printf '%b' '.env.production\\000scripts/verification-dispatch.mjs\\000' ;;",
         "esac",
       ].join("\n"),
     );
@@ -307,27 +355,74 @@ describe("verification dispatcher", () => {
     expect(existsSync(delegationMarkerPath)).toBe(false);
   });
 
-  it("allows ignored files, staged source, and modified tracked source", () => {
+  it("enforces the complete Git-state authorization boundary in a real repository", () => {
     const tempRoot = makeTempRoot();
     const repoDir = path.join(tempRoot, "repo");
     mkdirSync(repoDir, { recursive: true });
     runGit(repoDir, ["init", "--quiet"]);
     writeFileSync(path.join(repoDir, ".gitignore"), "ignored-private.txt\n", "utf8");
     writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 1;\n", "utf8");
-    runGit(repoDir, ["add", ".gitignore", "tracked.ts"]);
+    writeFileSync(path.join(repoDir, "rename-me.ts"), "export const renamed = 1;\n", "utf8");
+    writeFileSync(path.join(repoDir, "delete-me.ts"), "export const deleted = 1;\n", "utf8");
+    writeFileSync(path.join(repoDir, "staged-delete.ts"), "export const stagedDelete = 1;\n", "utf8");
+    runGit(repoDir, [
+      "add",
+      ".gitignore",
+      "tracked.ts",
+      "rename-me.ts",
+      "delete-me.ts",
+      "staged-delete.ts",
+    ]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
 
     for (const fileName of ["notes.txt", "credentials.json", ".netrc", "private.key"]) {
       writeFileSync(path.join(repoDir, fileName), "private\n", "utf8");
       expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
-        .toContain("untracked non-ignored path");
+        .toContain("unauthorized Git state (untracked=1)");
       rmSync(path.join(repoDir, fileName));
     }
 
     writeFileSync(path.join(repoDir, "ignored-private.txt"), "private\n", "utf8");
+    writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 2;\n", "utf8");
     writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = true;\n", "utf8");
     runGit(repoDir, ["add", "staged.ts"]);
-    writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 2;\n", "utf8");
+    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
 
+    writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = 'changed';\n", "utf8");
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("staged-addition-changed=1");
+    runGit(repoDir, ["add", "staged.ts"]);
+
+    writeFileSync(
+      path.join(repoDir, "staged-then-deleted.ts"),
+      "export const removed = true;\n",
+      "utf8",
+    );
+    runGit(repoDir, ["add", "staged-then-deleted.ts"]);
+    rmSync(path.join(repoDir, "staged-then-deleted.ts"));
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("staged-addition-changed=1");
+    runGit(repoDir, ["reset", "--quiet", "--", "staged-then-deleted.ts"]);
+
+    writeFileSync(path.join(repoDir, "intent.ts"), "export const intent = true;\n", "utf8");
+    runGit(repoDir, ["add", "--intent-to-add", "intent.ts"]);
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("intent-to-add=1");
+    runGit(repoDir, ["add", "intent.ts"]);
+
+    runGit(repoDir, ["mv", "rename-me.ts", "renamed.ts"]);
+    writeFileSync(path.join(repoDir, "renamed.ts"), "export const renamed = 2;\n", "utf8");
+    rmSync(path.join(repoDir, "delete-me.ts"));
+    runGit(repoDir, ["rm", "--quiet", "staged-delete.ts"]);
     expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
 
     writeFileSync(path.join(repoDir, ".env.production"), "synthetic-test-value\n", "utf8");

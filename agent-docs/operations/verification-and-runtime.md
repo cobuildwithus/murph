@@ -40,13 +40,17 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   removes any inherited `CRABBOX_ENV_ALLOW` before invoking the direct provider.
   Do not add `--allow-env`, `--env-from-profile`, or workflow secrets to this lane.
 - Blacksmith owns sync and can transfer Git-tracked plus untracked non-ignored
-  paths. Before delegation, the dispatcher refuses every untracked non-ignored
-  path; stage intentional new source or ignore local-only files first. It then
-  checks the cached/tracked set for known credential, vault, runtime-state,
-  local-artifact, and private-document paths. The staged and modified tracked
-  working-tree content must leave the host so the Testbox verifies the exact
-  candidate change rather than only the pushed commit. `.gitignore` carries the
-  matching normal exclusions, including local Crabbox run artifacts.
+  paths. Before delegation, the dispatcher derives authorization from one
+  `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
+  modified tracked files, tracked renames/deletions, ignored files, and new files
+  whose current contents are fully staged. It refuses ordinary untracked files,
+  intent-to-add, staged-then-modified/deleted additions, unmerged states, and
+  unsupported status before Crabbox starts. It then checks the cached/tracked set
+  for known credential, vault, runtime-state, local-artifact, and private-document
+  paths. Authorized staged and modified tracked working-tree content must leave
+  the host so the Testbox verifies the exact candidate change rather than only
+  the pushed commit. `.gitignore` carries the matching normal exclusions,
+  including local Crabbox run artifacts.
 - `scripts/crabbox/run-verification.mjs` discards the received process environment,
   preserves only basic host paths, and supplies deterministic CI-style placeholder
   values required by hosted-web build and smoke checks. Blacksmith authentication
