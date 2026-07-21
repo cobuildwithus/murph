@@ -139,10 +139,9 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(labGroups.every((group) => group.hasAttribute("open"))).toBe(true);
     const firstSummary = labGroups[0]?.querySelector("summary");
     expect(firstSummary?.textContent).toContain("Blood sugar");
-    const firstGrid = firstSummary?.nextElementSibling;
-    expect(firstGrid?.className).not.toMatch(/(?:^|\s)grid-cols-/u);
-    expect(firstGrid?.className).toContain("md:grid-cols-2");
-    expect(firstGrid?.className).toContain("xl:grid-cols-3");
+    const firstList = firstSummary?.nextElementSibling;
+    expect(firstList?.className).toContain("flex-col");
+    expect(firstList?.className).not.toContain("grid-cols-");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );
@@ -152,8 +151,14 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(hba1cLink?.textContent).toContain("5.8%");
     expect(hba1cLink?.textContent).toContain("Above range");
     expect(hba1cLink?.getAttribute("role")).toBeNull();
-    expect(hba1cLink?.parentElement).toBe(firstGrid);
+    expect(hba1cLink?.parentElement).toBe(firstList);
     expect(hba1cLink?.className).toContain("cursor-pointer");
+    expect(hba1cLink?.className).toContain("sm:flex-row");
+    const hba1cResult = hba1cLink?.querySelector("p");
+    expect(hba1cResult?.className).toContain("min-w-0");
+    expect(hba1cResult?.className).toContain("break-words");
+    expect(hba1cResult?.className).toContain("sm:max-w-[50%]");
+    expect(hba1cResult?.className).not.toContain("shrink-0");
     const resultLinkProps = linkPropsMock.value.filter(({ href }) =>
       href.startsWith("/biomarkers/results/")
     );
@@ -163,8 +168,8 @@ test("measured biomarkers are grouped by health area and link to private histori
       'a[href="/biomarkers/results/glucose"]',
     );
     expect(glucoseLink?.textContent).toContain("In range");
-    expect((firstGrid?.textContent ?? "").indexOf("HbA1c")).toBeLessThan(
-      (firstGrid?.textContent ?? "").indexOf("Glucose"),
+    expect((firstList?.textContent ?? "").indexOf("HbA1c")).toBeLessThan(
+      (firstList?.textContent ?? "").indexOf("Glucose"),
     );
     expect(rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]')).toBeNull();
     expect(text).not.toContain("Novel Marker With A Deliberately Long Custom Display Name");
@@ -370,7 +375,10 @@ test("a numeric result with source text remains plotted without a qualitative om
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("2 comparable numeric results in %");
+    expect(text).toContain("Reported");
+    expect(text).toContain("5.6%");
+    expect(text).not.toContain("comparable numeric results");
+    expect(text).toContain("2 results plotted in %");
     expect(text).not.toContain("qualitative result");
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
@@ -428,11 +436,10 @@ test("albumin uses one normalized unit across the overview, summary, ranges, and
   );
   try {
     const text = detail.container.textContent ?? "";
-    expect(text).toContain("2 comparable numeric results in g/dL");
+    expect(text).toContain("2 results plotted in g/dL");
     expect(text).toContain("4.9 g/dL");
     expect(text).toContain("5.1 g/dL");
     expect(text).toContain("3.4 to 5 g/dL");
-    expect(text).toContain("Down 0.2 g/dL since Feb 17, 2026");
     expect(text).not.toContain("49 g/L");
     expect(text).not.toContain("34 - 50");
   } finally {
@@ -488,7 +495,7 @@ test("a unitless latest result stays raw and is not compared as a canonical valu
   );
   try {
     const text = detail.container.textContent ?? "";
-    expect(text).toContain("1 comparable numeric result in mg/dL");
+    expect(text).toContain("1 result plotted in mg/dL");
     expect(text).toContain("<6 mmol/L");
     expect(text).not.toContain("5.2 mg/dL");
     expect(text).not.toContain("since Feb 17, 2025");
@@ -582,13 +589,15 @@ test("detail charts comparable results across years and keeps excluded values in
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("HbA1c");
-    expect(text).toContain("Change over time");
-    expect(text).toContain("2 comparable numeric results in %");
+    expect(text).not.toContain("Change over time");
+    expect(text).not.toContain("comparable numeric results");
+    expect(text).toContain("2 results plotted in %");
+    expect(text).not.toContain("5 results plotted");
     expect(text).toContain("1 result was reported as a limit");
     expect(text).toContain("Less than 5.4%");
     expect(text).toContain("1 qualitative result is shown in history");
     expect(text).toContain("units that could not be compared");
-    expect(text).toContain("Latest comparable");
+    expect(text).not.toContain("Latest comparable");
     expect(text).toContain("38 mmol/mol");
     expect(text).toContain("5.8%");
     expect(text).toContain("<5.4%");
@@ -648,7 +657,9 @@ test("qualitative and comparator-only histories use a non-numeric fallback", asy
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("Custom Screen");
     expect(text).toContain("No comparable numeric trend");
-    expect(text).toContain("A numeric trend is not available");
+    expect(text).toContain(
+      "Qualitative results, boundary values, and units that cannot be compared remain in the history below.",
+    );
     expect(text).toContain(">2 index");
     expect(text).toContain("Negative");
     expect(rendered.container.querySelector('[role="img"]')).toBeNull();
@@ -657,9 +668,48 @@ test("qualitative and comparator-only histories use a non-numeric fallback", asy
   }
 });
 
+test("a latest comparator result keeps its visible and spoken boundary", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      comparator: ">=",
+      flag: "low",
+      id: "hba1c-latest-boundary",
+      normalizedUnit: "percent",
+      normalizedValue: 5.4,
+      value: 5.4,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    const hero = rendered.container.querySelector<HTMLElement>(
+      "#biomarker-latest-result-heading",
+    )?.parentElement;
+    expect(hero?.textContent).toContain("Below range");
+    expect(hero?.textContent).toContain("5.4%");
+    expect(
+      [...(hero?.querySelectorAll('span[aria-hidden="true"]') ?? [])]
+        .find((span) => span.textContent === ">=5.4%"),
+    ).toBeDefined();
+    expect(
+      [...(hero?.querySelectorAll("span.sr-only") ?? [])]
+        .find((span) => span.textContent?.trim() === "Greater than or equal to 5.4%"),
+    ).toBeDefined();
+    expect(hero?.querySelector('[role="img"]')).toBeNull();
+    expect(hero?.textContent).toContain("No comparable numeric trend");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("a single numeric result stays visible without implying a trend", async () => {
   browserVaultMock.value.client = clientWithRows([
-    labRow({ date: "2026-06-14", id: "hba1c-only", value: 5.6 }),
+    labRow({ date: "2026-06-14", flag: "normal", id: "hba1c-only", value: 5.6 }),
   ]);
   browserVaultMock.value.status = "ready";
 
@@ -670,8 +720,21 @@ test("a single numeric result stays visible without implying a trend", async () 
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("1 comparable numeric result in %");
+    expect(text).toContain("In range");
+    expect(text).not.toContain("comparable numeric result in %");
     expect(text).toContain("A second comparable numeric result will show a change over time");
+    expect(
+      rendered.container.querySelector("#biomarker-latest-result-heading")?.className,
+    ).toContain("text-primary");
+    const hero = rendered.container.querySelector("#biomarker-latest-result-heading")
+      ?.parentElement;
+    const heroValue = [...(hero?.querySelectorAll("span") ?? [])]
+      .find((span) => span.textContent === "5.6");
+    const heroUnit = [...(hero?.querySelectorAll("span") ?? [])]
+      .find((span) => span.textContent === "%");
+    expect(heroValue?.className).toContain("text-4xl");
+    expect(heroUnit?.className).toContain("text-lg");
+    expect(heroUnit?.className).toContain("text-muted-foreground");
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
     ).not.toBeNull();
@@ -843,6 +906,10 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   );
   try {
     expect(loading.container.textContent).toContain("Loading this biomarker's saved results");
+    const skeleton = loading.container.querySelector('[aria-label="Loading biomarker history"]');
+    expect(skeleton?.querySelectorAll("section")).toHaveLength(2);
+    expect(skeleton?.querySelector(".h-72.sm\\:h-80")).not.toBeNull();
+    expect(skeleton?.innerHTML).not.toContain("sm:grid-cols-3");
     expectPageIdentity(loading.container);
   } finally {
     await loading.cleanup();
@@ -904,7 +971,7 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   }
 });
 
-test("a shared lab-reported range yields a chart band, range tile, and change note", async () => {
+test("a shared lab-reported range yields a chart band without summary tiles", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
@@ -929,15 +996,49 @@ test("a shared lab-reported range yields a chart band, range tile, and change no
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain(
-      "The shaded area marks the reference range your labs reported, 4 to 5.6%.",
-    );
-    expect(text).toContain("Reference range");
-    expect(text).toContain("With your latest result");
+    expect(text).toContain("Above range");
+    expect(text).not.toContain("Latest result");
+    expect(text).not.toContain("With your latest result");
     expect(text).toContain("Example Lab");
     expect(text).not.toContain("Saved history");
-    expect(text).toContain("Up 0.2% since Jun 3, 2025");
+    expect(text).not.toContain("Up 0.2% since Jun 3, 2025");
     expect(text).toContain("Range 4 to 5.6%");
+    expect(text).toContain("2 results plotted in % · Shaded lab range: 4 to 5.6%");
+    expect(
+      rendered.container.querySelector('[aria-label="HbA1c results over time"]')
+        ?.getAttribute("aria-describedby"),
+    ).toBe("biomarker-chart-caption");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a one-sided lab range explains the chart limit", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      date: "2025-06-03",
+      id: "hba1c-2025",
+      referenceRange: { high: 5.6 },
+      value: 5.4,
+    }),
+    labRow({
+      date: "2026-06-14",
+      id: "hba1c-2026",
+      referenceRange: { high: 5.6 },
+      value: 5.8,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).toContain(
+      "2 results plotted in % · Dashed lab limit: Up to 5.6%",
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -968,7 +1069,8 @@ test("an exact one-sided range stays in history without becoming an ambiguous ch
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("<5.6%");
-    expect(text).not.toContain("dashed line marks");
+    expect(text).toContain("2 results plotted in %");
+    expect(text).not.toContain("Dashed lab limit");
   } finally {
     await rendered.cleanup();
   }
@@ -1008,7 +1110,7 @@ test("qualified structured ranges keep their exact text and never become a chart
   }
 });
 
-test("disagreeing or missing ranges withhold the band and keep the history tile", async () => {
+test("disagreeing or missing ranges withhold the band without adding summary tiles", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
@@ -1032,9 +1134,11 @@ test("disagreeing or missing ranges withhold the band and keep the history tile"
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).not.toContain("shaded area");
-    expect(text).toContain("Saved history");
-    expect(text).toContain("Down 0.2% since Jun 3, 2025");
+    expect(text).toContain("2 results plotted in %");
+    expect(text).not.toContain("Shaded lab range");
+    expect(text).not.toContain("Dashed lab limit");
+    expect(text).not.toContain("Saved history");
+    expect(text).not.toContain("Down 0.2% since Jun 3, 2025");
   } finally {
     await rendered.cleanup();
   }
