@@ -62,6 +62,24 @@ describe("hosted Linq observability stores", () => {
     expect(buildCurrentAiUsageNoticeKey(2n)).toBe(replenishedKey);
   });
 
+  it("keeps low and exhausted notices distinct without changing legacy limit keys", () => {
+    const limitKey = buildCurrentAiUsageNoticeKey();
+    const lowKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      noticeCode: "thread_usage_low",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    expect(lowKey).not.toBe(limitKey);
+    expect(buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: AI_USAGE_NOTICE_MEMBER_ID,
+      noticeCode: "thread_usage_limit_reached",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      usageCreditLedgerVersion: 0n,
+    })).toBe(limitKey);
+  });
+
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
@@ -2372,12 +2390,12 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("records hosted runtime accepted Linq sends as delivery rows and line outbound totals", async () => {
+  it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
-      "assistant-outbox:intent_123",
+      "linq-voice-memo-transcript:assistant-outbox:intent_123",
     );
     fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
       phoneNumberHint: "+0000",
@@ -2388,7 +2406,7 @@ describe("hosted Linq observability stores", () => {
       acceptedAt,
       answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       attemptedAt,
-      idempotencyKey: "assistant-outbox:intent_123",
+      idempotencyKey: "linq-voice-memo-transcript:assistant-outbox:intent_123",
       linqChatId: "linq_chat_123",
       messageId: "provider_message_123",
       phoneNumber: "+15550000000",

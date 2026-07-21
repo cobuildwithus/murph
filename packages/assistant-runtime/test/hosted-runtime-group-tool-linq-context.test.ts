@@ -147,6 +147,9 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
 
+    await groupTool.request({ action: "read_usage" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_usage" });
+
     await groupTool.request({
       action: "read_shared",
       linqSenderHandles: ["forged@example.test"],

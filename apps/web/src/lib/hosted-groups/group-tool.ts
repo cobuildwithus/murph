@@ -80,6 +80,7 @@ import {
   recordHostedGroupDisclosurePermissionTx,
   revokeHostedGroupDisclosureGrantForMemberTx,
 } from "./group-disclosure-store";
+import { readHostedGroupUsageStatus } from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -150,6 +151,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   revoke_disclosure_grant: "personal_active",
+  read_usage: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
@@ -300,6 +302,22 @@ export async function handleHostedRuntimeGroupTool(input: {
         },
       };
     }
+  }
+
+  if (input.request.action === "read_usage") {
+    const usage = await readHostedGroupUsageStatus({
+      runtimeMemberId: input.memberId,
+    });
+    return {
+      action: "read_usage",
+      result: usage
+        ? { status: "ok", usage }
+        : {
+            status: "unavailable",
+            unavailableReason: "group_usage_unavailable",
+            usage: null,
+          },
+    };
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {

@@ -114,28 +114,27 @@ failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
-root reply, the parent writes the smallest truthful canonical fact or preserves
-the durable raw source and captures the exact record ids or source references.
-The child may perform only optional, idempotent enrichment against that durable
-base. Its terminal lifecycle receipt is advisory; canonical readback is the
-completion proof. If the member was promised the result and no separate durable
-owner exists, the root turn retains the work and uses normal progress updates
-instead of detaching it.
+root reply, Murph retains a durable accepted input, canonical fact, or raw
+source and gives each child its exact source words, ids, or refs. A loaded skill
+may assign one independent canonical record family per child, with every write
+idempotently attributable to that source. A terminal lifecycle receipt remains
+advisory; canonical readback is completion proof. If the member needs the result
+in the current reply, the root keeps the work and uses normal progress updates.
 
-Each root session may admit at most one detached child under Codex's native
-root-plus-one residency cap. Independent roots may retain children concurrently
-inside the same resident App Server. Every child must be a one-shot leaf: no
-root/child interaction, child reuse, nested child, same-root parallel child, or
-background terminal is supported. At the workspace snapshot boundary, the
-runtime waits for every exact resident child and checks every touched root and
-resident child for background terminals before archive construction may
-proceed. Codex admission of a per-session successor is the native fence that
-its completed predecessor was flushed and unloaded, leaving the successor as
-that root's resident child. A routine checkpoint wake cancels only that wait
-and keeps the process plus all resident lifecycle evidence warm for the later
-boundary. A timeout or unsupported lifecycle stops the exact process and fails
-the boundary closed. Explicit invocation abort/preemption cancels the wait and
-enters the synchronous exact-process stop path above.
+Hosted configuration admits one root plus at most three concurrent children
+per session. Independent roots may retain their own children inside the same
+resident App Server. Every child must be a one-shot leaf with one bounded
+family: no root/child interaction, child reuse, nested child, or background
+terminal is supported. At the workspace snapshot boundary, the runtime waits
+for every exact resident child and checks every touched root and child for
+background terminals before archive construction may proceed. The lifecycle
+owner retains the complete child set for each root until that boundary clears,
+so one sibling's completion cannot evict another. A routine checkpoint wake
+cancels only that wait and keeps the process plus all resident lifecycle
+evidence warm for the later boundary. A timeout or unsupported lifecycle stops
+the exact process and fails the boundary closed. Explicit invocation
+abort/preemption cancels the wait and enters the synchronous exact-process stop
+path above.
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
@@ -912,6 +911,21 @@ coalescing decision that no currently available input provides; this is
 intentionally deferred rather than solved with a registry, sidecar, scan-based
 recovery, or reconciliation loop.
 
+Once a vault-file outbox intent is approved, it remains the delivery owner across
+later conversation turns. A locally approved `pending`, `sending`, or
+`retryable` intent blocks a different generated ref for the same persisted
+provider target. While the local intent still says `awaiting_approval`, the send
+tool reads the exact existing approval action: an observed approved result also
+blocks the replacement, closing the decision-to-local-reconciliation gap. A
+still-pending, denied, expired, or superseded approval does not block a distinct
+new file request. The check happens before touching the new staging file or
+requesting approval. This prevents a confirmation turn from replacing the
+approved file identity or starting a second approval cycle while preserving
+pre-decision revisions, same-turn multi-file preparation, exact-ref retries,
+and different-target sends. The model contract also forbids later confirmation
+turns from inspecting, replacing, or deleting the runtime-owned bytes for the
+same pending send.
+
 Idle snapshot publication already waits for foreground and background assistant
 work to become quiescent. At that boundary, cleanup validates the complete direct
 staging inventory and outbox state before deleting anything. Exact files remain
@@ -1453,10 +1467,17 @@ misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses browser-session backstops from the latest replica
-ref, client-known ref identity, and a bounded max-age policy; ref presence alone
-is never freshness. Workspace checkpoint timestamps are not content-version
-signals for replica freshness. Stale session reads may still serve a usable
-replica, but they must mark it stale and request refresh after the HTTP response.
+ref, the shared current projection generation, client-known ref identity, and a
+bounded max-age policy; ref presence alone is never freshness. Every newly built
+replica and published ref carries the shared generation marker. A missing or
+mismatched marker remains readable for deploy compatibility but is always stale,
+so opening any browser-vault-backed surface requests the existing refresh path.
+Projection-shape or projection-interpretation changes that make older sidecars
+incomplete must bump that one shared generation; feature routes must not add
+their own replica-version checks. Workspace checkpoint timestamps are not
+content-version signals for replica freshness. Stale session reads may still
+serve a usable replica, but they must mark it stale and request refresh after the
+HTTP response.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
@@ -1465,7 +1486,14 @@ write only the workspace snapshot ref; they do not publish browser-vault
 replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
-version.
+version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
+legacy readable replica while refresh retries, but the Worker and warm containers
+should converge immediately after a generation bump so refreshes produce the
+current marker instead of repeatedly publishing legacy refs. During rollback,
+an older Web or Worker parser may omit the additive marker while echoing an
+otherwise identical ref. The browser loader may restore only that omission from
+its exact known ref or the authenticated replica payload; present mismatches and
+all other immutable-field mismatches still fail closed.
 
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content

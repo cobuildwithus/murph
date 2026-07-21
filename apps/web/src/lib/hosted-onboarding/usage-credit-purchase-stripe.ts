@@ -146,16 +146,19 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
     throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
   }
 
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
   const [priceId, stripeCustomerId] = await Promise.all([
     decryptHostedUsageCreditPurchaseStripeField({
       field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.priceId,
-      payerMemberId: input.purchase.payerMemberId,
+      payerMemberId,
       prisma: input.prisma,
       value: input.purchase.stripePriceIdEncrypted,
     }),
     decryptHostedUsageCreditPurchaseStripeField({
       field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.customerId,
-      payerMemberId: input.purchase.payerMemberId,
+      payerMemberId,
       prisma: input.prisma,
       value: input.purchase.stripeCustomerIdEncrypted,
     }),
@@ -179,6 +182,15 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
     purchaseId: input.purchase.id,
     stripeCustomerId,
   });
+}
+
+export function requireHostedUsageCreditPurchasePayerMemberId(
+  purchase: Pick<HostedUsageCreditPurchase, "payerMemberId">,
+): string {
+  if (!purchase.payerMemberId) {
+    throw buildHostedUsageCreditInvariantError("purchase_payer_missing");
+  }
+  return purchase.payerMemberId;
 }
 
 function buildHostedUsageCreditStripeCheckoutRequest(input: {

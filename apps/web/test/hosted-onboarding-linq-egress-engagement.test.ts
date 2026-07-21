@@ -884,7 +884,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
-  it("holds member-home authority before the chat and provider dispatch fence", async () => {
+  it("accepts a voice transcript fallback identity after route authority", async () => {
     const observedOrder: string[] = [];
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
@@ -905,7 +905,8 @@ describe("hosted Linq egress authority", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           authorityCheckOnly: false,
-          idempotencyKey: "assistant-outbox:intent-home",
+          idempotencyKey:
+            "linq-voice-memo-transcript:assistant-outbox:intent-home",
           target: "chat-home",
           targetKind: "thread",
         }),
@@ -930,10 +931,10 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({
         idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
-          "assistant-outbox:intent-home",
+          "linq-voice-memo-transcript:assistant-outbox:intent-home",
         ),
         sourceRef: createHostedLinqDeliverySourceRefLookupKey(
-          "assistant-outbox:intent-home",
+          "linq-voice-memo-transcript:assistant-outbox:intent-home",
         ),
         status: "provider_dispatch_started",
       })],

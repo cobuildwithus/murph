@@ -130,6 +130,21 @@ wait_for_background_jobs() {
   [[ "$failed" -eq 0 ]]
 }
 
+wait_for_acceptance_cli_coverage() {
+  local ready_file="${MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE:-}"
+  local started_at="$SECONDS"
+
+  if [[ -z "$ready_file" ]]; then
+    return
+  fi
+
+  echo "[apps/cloudflare verify] wait for CLI coverage before app tests" >&2
+  while [[ ! -f "$ready_file" ]]; do
+    sleep 1
+  done
+  echo "[apps/cloudflare verify] CLI coverage complete; app tests released ($((SECONDS - started_at))s wait)" >&2
+}
+
 if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
   echo "[apps/cloudflare verify] skipping health commons generated protocol artifacts; already prepared." >&2
 else
@@ -143,6 +158,8 @@ if [[ "$skip_typecheck" == "1" ]]; then
 else
   pnpm typecheck
 fi
+
+wait_for_acceptance_cli_coverage
 
 if [[ "$verify_step_parallel" != "1" ]]; then
   pnpm test:node

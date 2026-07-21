@@ -1,15 +1,17 @@
 # Product Specs Index
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
+| `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary. | Active |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned included-usage projection and enforced combined-capacity blocking, including forecast, server-selected actions, group privacy boundaries, and the eligible personal `add_usage` handoff. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
+| `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 Stripe Checkout packs and a Murph-owned webhook-fulfilled usage-credit ledger for direct paid Pulse/Edge members, with group funding kept as future scope. | Active |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |

@@ -1,4 +1,5 @@
 import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
 import {
@@ -180,6 +181,58 @@ describe("hosted clinical records runtime port", () => {
       },
     ]);
     expect(JSON.stringify(received)).not.toContain("member_1");
+  });
+
+  it("transports a maximum-shape query descriptor inside the metadata envelope", async () => {
+    const maxIdentifier = "i".repeat(120);
+    const maxScope = "s".repeat(200);
+    const responseBody = JSON.stringify({
+      run: {
+        connectionId: maxIdentifier,
+        fetchedAt: "2026-07-10T12:00:00.000Z",
+        fhirBaseUrlHash: HASH,
+        generation: Number.MAX_SAFE_INTEGER,
+        grantedScopes: Array.from({ length: 50 }, () => maxScope),
+        patientIdHash: HASH,
+        providerDirectoryEntryId: maxIdentifier,
+        requestedScopes: Array.from({ length: 50 }, () => maxScope),
+        retrievalJobId: maxIdentifier,
+        retrievalProtocol: "query-slices-v2",
+        retrievalSlices: Array.from(
+          { length: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES },
+          (_, index) => ({
+            coverage: "whole-family",
+            queryFingerprint: HASH,
+            queryScopeId: `${"q".repeat(118)}${String(index).padStart(2, "0")}`,
+            resourceType: "DiagnosticReport",
+            sliceId: "s".repeat(120),
+          }),
+        ),
+        runId: maxIdentifier,
+        sourceSystem: "epic-fhir",
+      },
+      status: "ready",
+    });
+    expect(new TextEncoder().encode(responseBody).byteLength)
+      .toBeLessThanOrEqual(64 * 1024);
+    const fetchMock = vi.fn(async () => new Response(responseBody, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    const response = await port.readRun({ generation: 1, runId: "run_1" });
+    expect(response).toMatchObject({ status: "ready" });
+    if (response.status !== "ready" || !("retrievalProtocol" in response.run)) {
+      throw new TypeError("Expected a query-aware Clinical Records run.");
+    }
+    expect(response.run.retrievalSlices)
+      .toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES);
   });
 
   it("rejects a direct-transport connect link on another origin", async () => {

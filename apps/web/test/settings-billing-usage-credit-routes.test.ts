@@ -5,6 +5,7 @@ import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  createHostedGroupUsageCreditCheckout: vi.fn(),
   createHostedUsageCreditCheckout: vi.fn(),
   expireHostedUsageCreditCheckout: vi.fn(),
   getPrisma: vi.fn(),
@@ -30,6 +31,8 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", async (impo
   >();
   return {
     ...original,
+    createHostedGroupUsageCreditCheckout:
+      mocks.createHostedGroupUsageCreditCheckout,
     createHostedUsageCreditCheckout: mocks.createHostedUsageCreditCheckout,
     expireHostedUsageCreditCheckout: mocks.expireHostedUsageCreditCheckout,
     readHostedUsageCreditPurchaseStatus: mocks.readHostedUsageCreditPurchaseStatus,
@@ -38,6 +41,9 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", async (impo
 
 type CheckoutRoute = typeof import(
   "../app/api/settings/billing/usage-credit/checkout/route"
+);
+type GroupCheckoutRoute = typeof import(
+  "../app/api/groups/fund/[joinCode]/usage-credit/checkout/route"
 );
 type StatusRoute = typeof import(
   "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/route"
@@ -48,6 +54,7 @@ type ExpireRoute = typeof import(
 
 let checkoutRoute: CheckoutRoute;
 let expireRoute: ExpireRoute;
+let groupCheckoutRoute: GroupCheckoutRoute;
 let statusRoute: StatusRoute;
 
 beforeEach(async () => {
@@ -65,6 +72,11 @@ beforeEach(async () => {
     purchaseId: "hucp_abcdefghijklmnop",
     status: "checkout_open",
     url: "https://checkout.stripe.test/session",
+  });
+  mocks.createHostedGroupUsageCreditCheckout.mockResolvedValue({
+    purchaseId: "hucp_abcdefghijklmnop",
+    status: "checkout_open",
+    url: "https://checkout.stripe.test/group-session",
   });
   mocks.expireHostedUsageCreditCheckout.mockResolvedValue({
     checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
@@ -85,12 +97,41 @@ beforeEach(async () => {
   expireRoute = await import(
     "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/expire/route"
   );
+  groupCheckoutRoute = await import(
+    "../app/api/groups/fund/[joinCode]/usage-credit/checkout/route"
+  );
   statusRoute = await import(
     "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/route"
   );
 });
 
 describe("usage-credit checkout route", () => {
+  it("resolves the group and payer only on the server", async () => {
+    const request = createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+    }, "https://join.example.test/api/groups/fund/group_join_code_1234/usage-credit/checkout");
+    const response = await groupCheckoutRoute.POST(
+      request,
+      createRouteContext({ joinCode: "group_join_code_1234" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/group-session",
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.createHostedGroupUsageCreditCheckout).toHaveBeenCalledWith({
+      clientRequestKey: "request_key_123456",
+      joinCode: "group_join_code_1234",
+      offerCode: "usage_10_usd",
+      payerMemberId: "hbm_member123",
+      prisma: { label: "test-prisma" },
+    });
+  });
+
   it("creates an exact server-authorized checkout for the signed-in member", async () => {
     const request = createCheckoutRequest({
       clientRequestKey: "request_key_123456",
@@ -321,9 +362,12 @@ describe("usage-credit purchase expiration route", () => {
   });
 });
 
-function createCheckoutRequest(body: Record<string, unknown>): Request {
+function createCheckoutRequest(
+  body: Record<string, unknown>,
+  url = "https://join.example.test/api/settings/billing/usage-credit/checkout",
+): Request {
   return new Request(
-    "https://join.example.test/api/settings/billing/usage-credit/checkout",
+    url,
     {
       body: JSON.stringify(body),
       headers: {

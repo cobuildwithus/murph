@@ -19,9 +19,9 @@ import {
 import {
   assistantPersonalitySettingIds,
   assistantPersonalityCausalWritesEnabled,
-  defaultAssistantPersonalityScores,
-  defaultAssistantTonePreference,
-  defaultAssistantVoiceOptionId,
+  resolveAssistantEffectiveStyle,
+  type AssistantPersonaId,
+  type AssistantPersonalityPreferences,
   type AssistantPreferenceFieldId,
 } from "@murphai/contracts";
 
@@ -134,6 +134,8 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
       });
     const preferences = styleResult
       ? {
+          persona: styleResult.assistantPersona,
+          personality: styleResult.assistantPersonality,
           tone: styleResult.assistantTone,
           voice: styleResult.assistantVoice,
         }
@@ -141,8 +143,9 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           memberId: input.memberId,
           prisma: tx,
         });
-    const effectiveTone = preferences.tone ?? defaultAssistantTonePreference;
-    const effectiveVoice = preferences.voice ?? defaultAssistantVoiceOptionId;
+    const effectiveStyle = resolveHostedAssistantEffectiveStyle(preferences);
+    const effectiveTone = effectiveStyle.tone;
+    const effectiveVoice = effectiveStyle.voice;
     const styleUpdated = styleResult?.updated ?? false;
 
     return {
@@ -212,9 +215,10 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
         action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
         result: {
           outcomes,
-          settings: buildHostedAssistantPersonalitySettings(
-            styleResult.assistantPersonality,
-          ),
+          settings: buildHostedAssistantPersonalitySettings({
+            persona: styleResult.assistantPersona,
+            personality: styleResult.assistantPersonality,
+          }),
         },
       },
     } satisfies HostedRuntimeAssistantPersonalityTransactionResult;
@@ -250,23 +254,46 @@ function buildHostedAssistantPersonalityUpdateOutcomes(input: {
   return outcomes;
 }
 
-function buildHostedAssistantPersonalitySettings(
-  personality: HostedMemberAssistantPersonalitySnapshot,
-): HostedRuntimeAssistantPersonalitySettings {
+function buildHostedAssistantPersonalitySettings(input: {
+  persona: AssistantPersonaId | null;
+  personality: HostedMemberAssistantPersonalitySnapshot;
+}): HostedRuntimeAssistantPersonalitySettings {
+  const effective = resolveHostedAssistantEffectiveStyle(input).personality;
   return {
     detail: buildHostedAssistantPersonalitySetting({
-      defaultValue: defaultAssistantPersonalityScores.detail,
-      value: personality.detail,
+      defaultValue: effective.detail,
+      value: input.personality.detail,
     }),
     humor: buildHostedAssistantPersonalitySetting({
-      defaultValue: defaultAssistantPersonalityScores.humor,
-      value: personality.humor,
+      defaultValue: effective.humor,
+      value: input.personality.humor,
     }),
     push: buildHostedAssistantPersonalitySetting({
-      defaultValue: defaultAssistantPersonalityScores.push,
-      value: personality.push,
+      defaultValue: effective.push,
+      value: input.personality.push,
     }),
   };
+}
+
+function resolveHostedAssistantEffectiveStyle(input: {
+  persona?: AssistantPersonaId | null;
+  personality?: HostedMemberAssistantPersonalitySnapshot;
+  tone?: string | null;
+  voice?: string | null;
+}) {
+  const personality: AssistantPersonalityPreferences = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    const value = input.personality?.[settingId];
+    if (value !== null && value !== undefined) personality[settingId] = value;
+  }
+  return resolveAssistantEffectiveStyle({
+    ...(input.persona ? { persona: input.persona } : {}),
+    ...(input.tone === "formal" || input.tone === "casual"
+      ? { tone: input.tone }
+      : {}),
+    ...(input.voice ? { voice: input.voice } : {}),
+    personality,
+  });
 }
 
 function buildHostedAssistantPersonalitySetting(input: {
@@ -371,10 +398,11 @@ async function readHostedAssistantPersonalization(
     readHostedMemberAssistantModelPreference({ memberId, prisma }),
   ]);
 
+  const effective = resolveHostedAssistantEffectiveStyle(preferences);
   return {
     model: model.model,
     solAvailable: model.solAvailable,
-    tone: preferences.tone ?? defaultAssistantTonePreference,
-    voice: preferences.voice ?? defaultAssistantVoiceOptionId,
+    tone: effective.tone,
+    voice: effective.voice,
   };
 }

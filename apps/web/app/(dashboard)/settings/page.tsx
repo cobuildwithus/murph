@@ -369,6 +369,7 @@ async function readSettingsPageData(input: {
     prisma,
   }).catch(() => []);
   const usageTopUpActivePurchase = await readHostedActiveUsageCreditPurchaseForPayer({
+    beneficiaryMemberId: memberId,
     payerMemberId: memberId,
     prisma,
   }).catch(() => null);

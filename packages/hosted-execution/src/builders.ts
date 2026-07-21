@@ -581,7 +581,7 @@ export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
   occurredAt: string;
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
-  requestedFields?: Array<"tone" | "voice">;
+  requestedFields?: Array<"persona" | "tone" | "voice">;
 }): HostedExecutionMemberPreferencesUpdatedWake {
   return {
     ...buildHostedExecutionMemberOwnedWakeBase({

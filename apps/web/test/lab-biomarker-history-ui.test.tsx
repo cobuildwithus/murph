@@ -105,17 +105,19 @@ test("measured biomarkers are grouped by health area and link to private histori
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("Your biomarkers");
-    expect(text).toContain("3 biomarkers");
+    expect(text).toContain("2 biomarkers");
     expect(text).toContain("Blood sugar");
     expect(text).toContain("Heart & lipids");
-    expect(text).toContain("Other");
     expect(text).toContain("2019 to 2026");
-    expect(text).toContain("Detected");
-    expect(text).toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).toContain("High");
     expect(text).not.toContain("No lab flag");
     expect(text.indexOf("Blood sugar")).toBeLessThan(text.indexOf("Heart & lipids"));
-    expect(text.indexOf("Heart & lipids")).toBeLessThan(text.indexOf("Other"));
+    const labGroups = [...rendered.container.querySelectorAll("details")];
+    expect(labGroups).toHaveLength(2);
+    expect(labGroups.every((group) => !group.hasAttribute("open"))).toBe(true);
+    const firstSummary = labGroups[0]?.querySelector("summary");
+    expect(firstSummary?.textContent).toContain("Blood sugar");
+    expect(firstSummary?.parentElement?.querySelector("ul")?.className).toContain("md:grid-cols-2");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );
@@ -129,39 +131,116 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(latestDate?.textContent).toContain("2026");
     expect(hba1cLink?.textContent).toContain("High");
     expect(hba1cLink?.closest("li")?.parentElement?.tagName).toBe("UL");
-    expect(
-      rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]'),
-    ).not.toBeNull();
-    const customHeading = [...rendered.container.querySelectorAll("h3")]
-      .find((heading) => heading.textContent?.includes("Deliberately Long"));
-    expect(customHeading?.className).toContain("break-words");
-    expect(customHeading?.className).not.toContain("truncate");
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]')).toBeNull();
+    expect(text).not.toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).not.toContain("Library");
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("the measured list keeps stale data visible and never exposes raw load errors", async () => {
+test("unclassified saved lab rows stay out of the index without pretending the record is empty", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).toContain("saved lab records remain available");
+    expect(text).not.toContain("Report sequence");
+    expect(text).not.toContain("Other");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("stale unclassified lab rows stay available without a refresh banner", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.freshness = "stale";
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("Your lab history may be out of date");
+    expect(text).not.toContain("Refresh to check for newer data");
+    expect(text).not.toContain("No lab results are available in this saved view");
+    expect(text).not.toContain("Report sequence");
+    expect(rendered.container.querySelector('[aria-live="polite"]')).toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("the measured list keeps stale data visible without a refresh banner and never exposes raw load errors", async () => {
   browserVaultMock.value.client = clientWithRows([labRow()]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
-  const refresh = browserVaultMock.value.refresh;
 
   const stale = await renderClientComponent(
     <BiomarkersPageClient authenticated />,
     { requireButton: false },
   );
   try {
-    expect(stale.container.textContent).toContain("Your lab history may be out of date");
     expect(stale.container.textContent).toContain("HbA1c");
-    await clickButton(stale.container, stale.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(stale.container.textContent).not.toContain("Your lab history may be out of date");
+    expect(stale.container.textContent).not.toContain("Refreshing your lab history");
+    expect(stale.container.textContent).not.toContain("Refresh");
+    expect(stale.container.querySelector('[aria-live="polite"]')).toBeNull();
   } finally {
     await stale.cleanup();
   }
 
+  browserVaultMock.value.refreshPending = true;
+  const refreshing = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+  try {
+    expect(refreshing.container.textContent).toContain("HbA1c");
+    expect(refreshing.container.textContent).not.toContain("Refreshing your lab history");
+    expect(refreshing.container.textContent).not.toContain("Refresh");
+    expect(refreshing.container.querySelector('[aria-live="polite"]')).toBeNull();
+  } finally {
+    await refreshing.cleanup();
+  }
+
   browserVaultMock.value.client = null;
+  browserVaultMock.value.refreshPending = false;
   browserVaultMock.value.error = "private transport detail that must not render";
   browserVaultMock.value.status = "error";
   const failed = await renderClientComponent(
@@ -501,7 +580,7 @@ test("a pending refresh keeps ready empty replicas in the preparing state", asyn
   }
 });
 
-test("stale empty list and detail states offer a refresh action", async () => {
+test("stale empty list stays quiet while detail states retain a refresh action", async () => {
   browserVaultMock.value.client = clientWithRows([]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
@@ -512,17 +591,14 @@ test("stale empty list and detail states offer a refresh action", async () => {
     { requireButton: false },
   );
   try {
-    expect(list.container.textContent).toContain("Your lab history may be out of date");
-    expect(list.container.textContent).toContain(
-      "No lab results are available in this saved view. Refresh to check for newer data.",
-    );
     expect(list.container.textContent).toContain("No saved lab results in this view");
     expect(list.container.textContent).toContain(
-      "Refresh to check for newer data, or send Murph a lab report.",
+      "Murph checks for newer data in the background. You can also send Murph a lab report.",
     );
     expect(list.container.textContent).not.toContain("No lab results yet");
-    await clickButton(list.container, list.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(list.container.textContent).not.toContain("Your lab history may be out of date");
+    expect(list.container.textContent).not.toContain("Refresh");
+    expect(refresh).not.toHaveBeenCalled();
   } finally {
     await list.cleanup();
   }
@@ -537,7 +613,7 @@ test("stale empty list and detail states offer a refresh action", async () => {
       "This saved view may not include newer lab data. Refresh to check again.",
     );
     await clickButton(detail.container, detail.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await detail.cleanup();
   }

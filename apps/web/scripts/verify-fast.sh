@@ -236,13 +236,14 @@ terminate_owned_background_job() {
 }
 
 cleanup_background_jobs() {
-  local background_pids=("${owned_background_job_pids[@]}")
+  local background_pids=()
   local pid
 
-  if [[ ${#background_pids[@]} -eq 0 ]]; then
+  if [[ ${#owned_background_job_pids[@]} -eq 0 ]]; then
     return
   fi
 
+  background_pids=("${owned_background_job_pids[@]}")
   owned_background_job_pids=()
   for pid in "${background_pids[@]}"; do
     terminate_owned_background_job "$pid"
@@ -294,6 +295,8 @@ run_next_build() {
   local build_privy_app_id
   local next_build_command=(next build)
 
+  wait_for_acceptance_cli_coverage
+
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
   build_app_session_hmac_key="$(compose_hosted_app_session_hmac_key_for_build)"
@@ -317,6 +320,21 @@ run_next_build() {
     VERCEL=1 \
     VERCEL_ENV=preview \
     "${next_build_command[@]}"
+}
+
+wait_for_acceptance_cli_coverage() {
+  local ready_file="${MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE:-}"
+  local started_at="$SECONDS"
+
+  if [[ -z "$ready_file" ]]; then
+    return
+  fi
+
+  verify_log "wait for CLI coverage before next build"
+  while [[ ! -f "$ready_file" ]]; do
+    sleep 0.2
+  done
+  verify_log "CLI coverage complete; next build released ($((SECONDS - started_at))s wait)"
 }
 
 run_timed_step "legal pdf" pnpm legal:pdf

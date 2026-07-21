@@ -7444,6 +7444,22 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('bounds fake-time process-kill polling at two virtual seconds', async () => {
+    vi.useFakeTimers()
+    const startedAt = Date.now()
+
+    try {
+      await expect(
+        waitForProcessKillWithFakeTimers(-25_550, 'SIGTERM'),
+      ).rejects.toThrow(
+        'Expected process.kill(-25550, SIGTERM) to be called.',
+      )
+      expect(Date.now() - startedAt).toBe(2_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for the exact failed process teardown before replacement', async () => {
     const workingDirectory = await createTempDir('assistant-codex-teardown-race-work-')
     const codexHome = await createTempDir('assistant-codex-teardown-race-home-')
@@ -16841,6 +16857,89 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('waits for and scans three concurrent children from the same root', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-three-child-boundary-work-')
+      const codexHome = await createTempDir('assistant-codex-three-child-boundary-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const completeFirstChild = createDeferred<void>()
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_868, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-three-child-parent',
+          'turn-three-child-parent',
+        )
+
+        for (const suffix of ['a', 'b', 'c']) {
+          writeSubAgentActivity(
+            child,
+            'thread-three-child-parent',
+            `thread-three-child-${suffix}`,
+          )
+          writeStartedTurn(
+            child,
+            `thread-three-child-${suffix}`,
+            `turn-three-child-${suffix}`,
+          )
+        }
+
+        writeCompletedTurn(
+          child,
+          'thread-three-child-b',
+          'turn-three-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-three-child-c',
+          'turn-three-child-c',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-three-child-parent',
+          'turn-three-child-parent',
+        )
+
+        const terminalResponses = (async () => {
+          for (let requestCount = 1; requestCount <= 4; requestCount += 1) {
+            const request = await respondToBackgroundTerminals(child, requestCount)
+            scannedThreadIds.push(String(asRecord(request.params).threadId))
+          }
+        })()
+
+        await completeFirstChild.promise
+        writeCompletedTurn(
+          child,
+          'thread-three-child-a',
+          'turn-three-child-a',
+        )
+        await terminalResponses
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'delegate three independent onboarding persistence tasks',
+      )
+
+      const publishCheckpoint = vi.fn()
+      const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+      expect(scannedThreadIds).toEqual([])
+
+      completeFirstChild.resolve(undefined)
+      await expect(boundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(scannedThreadIds).toEqual([
+        'thread-three-child-parent',
+        'thread-three-child-a',
+        'thread-three-child-b',
+        'thread-three-child-c',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
     it('treats a failed optional child as quiescent without stopping the warm process', async () => {
       const workingDirectory = await createTempDir('assistant-codex-failed-child-work-')
       const codexHome = await createTempDir('assistant-codex-failed-child-home-')
@@ -16887,7 +16986,7 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('tracks the latest sequential child resident at the boundary', async () => {
+    it('tracks every sequential child admitted before the boundary', async () => {
       const workingDirectory = await createTempDir('assistant-codex-sequential-child-work-')
       const codexHome = await createTempDir('assistant-codex-sequential-child-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -16936,7 +17035,7 @@ describe('assistant codex event shaping', () => {
           'turn-sequential-parent',
         )
 
-        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+        for (let requestCount = 1; requestCount <= 3; requestCount += 1) {
           const request = await respondToBackgroundTerminals(child, requestCount)
           scannedThreadIds.push(String(asRecord(request.params).threadId))
         }
@@ -16951,6 +17050,7 @@ describe('assistant codex event shaping', () => {
 
       expect(scannedThreadIds).toEqual([
         'thread-sequential-parent',
+        'thread-sequential-child-a',
         'thread-sequential-child-b',
       ])
       expect(spawnedChildren).toHaveLength(1)
@@ -18833,7 +18933,11 @@ async function waitForProcessKillWithFakeTimers(
   pid: number,
   signal: NodeJS.Signals,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // A replacement can be queued behind the failed-stop lock's promise cleanup.
+  // Full-workspace coverage load can require more than 200 microtask turns even
+  // though no wall-clock delay is involved, so keep this fake-time wait bounded
+  // to two virtual seconds rather than a scheduler-sensitive iteration count.
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
     if (
       vi.mocked(process.kill).mock.calls.some(
         (call) => call[0] === pid && call[1] === signal,

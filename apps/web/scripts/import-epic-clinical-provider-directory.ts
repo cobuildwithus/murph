@@ -1,7 +1,13 @@
+import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-import { EPIC_BETA_RESOURCE_TYPES } from "../src/lib/clinical-records/epic-beta-policy";
+import {
+  EPIC_ACQUISITION_POLICY,
+  EPIC_ACQUISITION_POLICY_ID,
+  type EpicAcquisitionPolicy,
+} from "../src/lib/clinical-records/epic-policy";
 import {
   CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
   buildEpicProviderDirectoryEntryId,
@@ -11,12 +17,7 @@ import {
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
 const BRAND_IDENTIFIER_SYSTEM = "https://open.epic.com/brand-identifier";
 const FHIR_VERSION_EXTENSION = "http://hl7.org/fhir/StructureDefinition/endpoint-fhir-version";
-const DEFAULT_OUTPUT = "apps/web/src/lib/clinical-records/provider-directory.v1.json";
-const REQUESTED_BASE_SCOPES = [
-  "openid",
-  "fhirUser",
-  "launch/patient",
-] as const;
+const DEFAULT_OUTPUT = "apps/web/src/lib/clinical-records/provider-directory.v2.json";
 const EPIC_SANDBOX_ENTRY = {
   aliases: ["Epic on FHIR Sandbox"],
   brandName: "Epic Sandbox (test data only)",
@@ -24,25 +25,80 @@ const EPIC_SANDBOX_ENTRY = {
   fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
   id: "epic-sandbox",
   locations: [],
-  requestedBaseScopes: [...REQUESTED_BASE_SCOPES],
-  resourceTypes: [...EPIC_BETA_RESOURCE_TYPES],
-  sourceSystem: "epic-fhir" as const,
+  policyId: EPIC_ACQUISITION_POLICY_ID,
 };
 
 type JsonRecord = Record<string, unknown>;
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Epic provider directory import failed.");
-  process.exitCode = 1;
-});
+interface EpicProviderDirectoryArtifactV2 {
+  entries: Array<{
+    aliases: string[];
+    brandName: string;
+    clientIdEnvironmentKey:
+      | "EPIC_SMART_CLIENT_ID"
+      | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
+    fhirBaseUrl: string;
+    id: string;
+    locations: Array<[string | null, string | null, string | null, string | null]>;
+    policyId: string;
+  }>;
+  generatedAt: string;
+  policies: readonly EpicAcquisitionPolicy[];
+  schema: typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA;
+  sourceBundleSha256: string;
+  version: string;
+}
+
+const entrypointPath = process.argv[1];
+if (entrypointPath && import.meta.url === pathToFileURL(path.resolve(entrypointPath)).href) {
+  void main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "Epic provider directory import failed.");
+    process.exitCode = 1;
+  });
+}
 
 async function main(): Promise<void> {
   const { inputPath, outputPath } = parseArguments(process.argv.slice(2));
-  const inputStats = await stat(inputPath);
-  if (!inputStats.isFile() || inputStats.size <= 0 || inputStats.size > MAX_INPUT_BYTES) {
+  if (inputPath !== "-") {
+    const inputStats = await stat(inputPath);
+    if (!inputStats.isFile() || inputStats.size <= 0 || inputStats.size > MAX_INPUT_BYTES) {
+      throw new RangeError("Epic User-access Brands bundle is missing or exceeds the 256 MiB import bound.");
+    }
+  }
+  const sourceBytes = inputPath === "-"
+    ? await readBoundedStdin()
+    : await readFile(inputPath);
+  const artifact = buildEpicProviderDirectoryArtifact(sourceBytes);
+  await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
+  process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+}
+
+async function readBoundedStdin(): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let byteLength = 0;
+  for await (const chunk of process.stdin) {
+    if (typeof chunk !== "string" && !(chunk instanceof Uint8Array)) {
+      throw new TypeError("Epic User-access Brands stdin must contain bytes.");
+    }
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
+    byteLength += bytes.byteLength;
+    if (byteLength > MAX_INPUT_BYTES) {
+      throw new RangeError("Epic User-access Brands bundle exceeds the 256 MiB import bound.");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, byteLength);
+}
+
+export function buildEpicProviderDirectoryArtifact(
+  source: string | Uint8Array,
+): EpicProviderDirectoryArtifactV2 {
+  const sourceBytes = typeof source === "string" ? Buffer.from(source, "utf8") : source;
+  if (sourceBytes.byteLength <= 0 || sourceBytes.byteLength > MAX_INPUT_BYTES) {
     throw new RangeError("Epic User-access Brands bundle is missing or exceeds the 256 MiB import bound.");
   }
-  const bundle = requireRecord(JSON.parse(await readFile(inputPath, "utf8")), "Epic Brands bundle");
+  const sourceText = new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
+  const bundle = requireRecord(JSON.parse(sourceText), "Epic Brands bundle");
   if (bundle.resourceType !== "Bundle" || bundle.type !== "collection") {
     throw new TypeError("Epic User-access Brands input must be a FHIR collection Bundle.");
   }
@@ -55,6 +111,10 @@ async function main(): Promise<void> {
       resource: requireRecord(entryRecord.resource, `Epic Brands bundle entry ${index} resource`),
     };
   });
+  const fullUrls = resources.map((entry) => entry.fullUrl);
+  if (new Set(fullUrls).size !== fullUrls.length) {
+    throw new TypeError("Epic Brands bundle contains duplicate entry fullUrls.");
+  }
 
   const endpointByReference = new Map<string, string>();
   for (const entry of resources) {
@@ -110,30 +170,31 @@ async function main(): Promise<void> {
         aliases: [...new Set(brand.aliases)].sort((left, right) => left.localeCompare(right)),
         brandName: brand.brandName,
         clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as const,
-        locations: deduplicateFacilities(brand.facilities).map((facility) => [
-          facility.name,
-          facility.city,
-          facility.state,
-          facility.postalCode,
-        ]),
+        locations: deduplicateFacilities(brand.facilities).map((facility) =>
+          [
+            facility.name,
+            facility.city,
+            facility.state,
+            facility.postalCode,
+          ] satisfies [string | null, string | null, string | null, string | null]
+        ),
         fhirBaseUrl: brand.endpoint,
         id: buildEpicProviderDirectoryEntryId(brand.brandIdentifier),
-        requestedBaseScopes: [...REQUESTED_BASE_SCOPES],
-        resourceTypes: [...EPIC_BETA_RESOURCE_TYPES],
-        sourceSystem: "epic-fhir" as const,
+        policyId: EPIC_ACQUISITION_POLICY_ID,
       })),
   ]
-    .sort((left, right) => left.brandName.localeCompare(right.brandName) || left.id.localeCompare(right.id));
+    .sort((left, right) => left.id.localeCompare(right.id));
 
-  const artifact = {
+  const artifact: EpicProviderDirectoryArtifactV2 = {
     entries,
     generatedAt,
+    policies: [EPIC_ACQUISITION_POLICY],
     schema: CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
-    version: `${generatedAt.slice(0, 10)}.epic-brands-r4-beta-v1`,
-  } as const;
+    sourceBundleSha256: createHash("sha256").update(sourceBytes).digest("hex"),
+    version: `${generatedAt.slice(0, 10)}.epic-brands-r4-policy-v2`,
+  };
   parseClinicalProviderDirectory(artifact);
-  await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
-  process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+  return artifact;
 }
 
 function parseArguments(args: string[]): { inputPath: string; outputPath: string } {
@@ -146,7 +207,10 @@ function parseArguments(args: string[]): { inputPath: string; outputPath: string
     if (argument === "--input" || argument === "--output") index += 1;
   }
   if (!input) throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>]");
-  return { inputPath: path.resolve(input), outputPath: path.resolve(output) };
+  return {
+    inputPath: input === "-" ? input : path.resolve(input),
+    outputPath: path.resolve(output),
+  };
 }
 
 function readFirstEndpoint(value: unknown, endpoints: ReadonlyMap<string, string>): string | null {
@@ -194,13 +258,25 @@ function deduplicateFacilities(
     const key = [facility.name, facility.city, facility.state, facility.postalCode]
       .map((value) => value?.toLocaleLowerCase("en-US") ?? "")
       .join("|");
-    if (!unique.has(key)) unique.set(key, facility);
+    const existing = unique.get(key);
+    if (!existing || compareExactFacility(facility, existing) < 0) {
+      unique.set(key, facility);
+    }
   }
   return [...unique.values()].sort((left, right) =>
     (left.state ?? "").localeCompare(right.state ?? "")
     || (left.city ?? "").localeCompare(right.city ?? "")
     || (left.name ?? "").localeCompare(right.name ?? "")
   );
+}
+
+function compareExactFacility(
+  left: { city: string | null; name: string | null; postalCode: string | null; state: string | null },
+  right: { city: string | null; name: string | null; postalCode: string | null; state: string | null },
+): number {
+  const leftKey = JSON.stringify([left.name, left.city, left.state, left.postalCode]);
+  const rightKey = JSON.stringify([right.name, right.city, right.state, right.postalCode]);
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
 
 function normalizePublicHttpsUrl(value: unknown): string | null {

@@ -114,7 +114,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
   assert.equal(biomarkersMetadata.title, "Your biomarkers — Murph");
   assert.equal(
     biomarkersMetadata.description,
-    "See every biomarker in your lab history and follow how each result changes over time.",
+    "See recognized biomarkers from your devices and saved lab results, organized for private longitudinal review.",
   );
   assert.deepEqual(biomarkersMetadata.twitter?.images, [
     {
@@ -128,7 +128,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Lab history/);
+  assert.match(markup, /Health data/);
   assert.match(markup, /Your biomarkers/);
   assert.match(markup, /No lab results yet/);
   assert.doesNotMatch(markup, /Library/);
@@ -148,6 +148,8 @@ test("BiomarkersPage shows a loading skeleton while the private vault opens", as
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, /Loading your saved biomarker results/);
+  assert.match(markup, /min-h-16/);
+  assert.doesNotMatch(markup, /min-h-24/);
 });
 
 test("BiomarkersPage shows preparation copy while its replica refresh is pending", async () => {

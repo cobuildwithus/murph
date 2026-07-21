@@ -7,6 +7,7 @@ import {
   LAB_HEALTH_AREA_IDS,
   listLabHealthAreas,
   listMetricDefinitions,
+  resolveIndexedLabHealthArea,
   resolveLabHealthArea,
 } from "../src/index.ts";
 
@@ -20,9 +21,12 @@ test("keeps a stable calm member-facing area order", () => {
     "Thyroid",
     "Blood",
     "Hormones",
-    "Nutrients",
-    "Inflammation",
+    "Nutrients & fatty acids",
+    "Inflammation & immune",
     "Electrolytes",
+    "Muscle & tissue",
+    "Environmental exposure",
+    "Prostate health",
     "Other",
   ]);
 });
@@ -43,7 +47,10 @@ test("assigns every cataloged lab metric to a curated area", () => {
 test("recognizes common normalized lab analyte keys without interpreting values", () => {
   assert.equal(resolveLabHealthArea("fasting_insulin").id, "blood-sugar");
   assert.equal(resolveLabHealthArea("total_cholesterol").id, "heart-lipids");
+  assert.equal(resolveLabHealthArea("POC Troponin I").id, "heart-lipids");
   assert.equal(resolveLabHealthArea("blood urea nitrogen").id, "kidneys");
+  assert.equal(resolveLabHealthArea("GFR MDRD Af Amer").id, "kidneys");
+  assert.equal(resolveLabHealthArea("GFR MDRD Non Af Amer").id, "kidneys");
   assert.equal(resolveLabHealthArea("total bilirubin").id, "liver");
   assert.equal(resolveLabHealthArea("thyroid stimulating hormone").id, "thyroid");
   assert.equal(resolveLabHealthArea("platelet count").id, "blood");
@@ -51,9 +58,20 @@ test("recognizes common normalized lab analyte keys without interpreting values"
   assert.equal(resolveLabHealthArea("vitamin d 25 hydroxy").id, "nutrients");
   assert.equal(resolveLabHealthArea("erythrocyte sedimentation rate").id, "inflammation");
   assert.equal(resolveLabHealthArea("sodium").id, "electrolytes");
+  assert.equal(resolveLabHealthArea("OmegaCheck total").id, "nutrients");
+  assert.equal(resolveLabHealthArea("Creatine Kinase").id, "muscle-tissue");
+  assert.equal(resolveLabHealthArea("Mercury").id, "environmental");
+  assert.equal(resolveLabHealthArea("PSA percent free").id, "prostate");
 });
 
-test("preserves unknown analytes in Other", () => {
+test("admits only explicitly classified analytes to the Biomarkers index", () => {
+  assert.equal(resolveIndexedLabHealthArea("HbA1c")?.id, "blood-sugar");
+  assert.equal(resolveIndexedLabHealthArea("new experimental analyte"), null);
+  assert.equal(resolveIndexedLabHealthArea("ECG impression"), null);
+  assert.equal(resolveIndexedLabHealthArea("Urine color"), null);
+  assert.equal(resolveIndexedLabHealthArea("Screening result"), null);
+  assert.equal(resolveIndexedLabHealthArea("Report sequence"), null);
+
   assert.deepEqual(resolveLabHealthArea("new experimental analyte"), {
     id: "other",
     label: "Other",

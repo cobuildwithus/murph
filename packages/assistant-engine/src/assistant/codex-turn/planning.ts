@@ -1,6 +1,8 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   normalizeIanaTimeZone,
@@ -267,6 +269,7 @@ export interface AssistantCodexAttemptPlan {
 }
 
 export interface AssistantTurnPreferenceContext {
+  assistantPersona?: AssistantPersonaId | null
   assistantPersonality: AssistantPersonalityPreferences | null
   assistantTone: AssistantTonePreference | null
   assistantVoice: string | null
@@ -478,6 +481,31 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
+  const explicitAssistantPersona = privateInteractiveProviderTurn
+    && input.input.scheduledOccurrenceAt == null
+    ? preferenceContext.assistantPersona ?? null
+    : null
+  const effectiveAssistantStyle = explicitAssistantPersona
+    ? resolveAssistantEffectiveStyle({
+        persona: explicitAssistantPersona,
+        ...(preferenceContext.assistantTone
+          ? { tone: preferenceContext.assistantTone }
+          : {}),
+        ...(preferenceContext.assistantVoice
+          ? { voice: preferenceContext.assistantVoice }
+          : {}),
+        ...(preferenceContext.assistantPersonality
+          ? { personality: preferenceContext.assistantPersonality }
+          : {}),
+      })
+    : null
+  const assistantTone = effectiveAssistantStyle?.tone
+    ?? preferenceContext.assistantTone
+  const assistantPersonality = effectiveAssistantStyle?.personality
+    ?? preferenceContext.assistantPersonality
+  const assistantVoice = preferenceContext.assistantVoice
+    ?? effectiveAssistantStyle?.voice
+    ?? null
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -587,12 +615,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantToolNameAliases,
+      assistantPersona: explicitAssistantPersona,
       assistantPersonality:
-        assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
-          ? preferenceContext.assistantPersonality
+        privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
+          ? assistantPersonality
           : null,
       assistantStyleSettingsAvailable,
-      assistantTone: preferenceContext.assistantTone,
+      assistantTone,
       cliAccess: input.sharedPlan.cliAccess,
       channel: resolvedChannel,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -844,9 +873,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
-        ? resolveAssistantVoiceOptionElevenLabsVoiceId(
-            preferenceContext.assistantVoice,
-          )
+        ? resolveAssistantVoiceOptionElevenLabsVoiceId(assistantVoice)
         : null,
     voiceMemoDeliveryChannel,
     workingDirectory,
@@ -1117,6 +1144,9 @@ export async function resolveAssistantTurnPreferenceContext(
   try {
     const preferences = await readPreferencesDocument(vaultRoot)
     return {
+      ...(preferences.assistant?.persona
+        ? { assistantPersona: preferences.assistant.persona }
+        : {}),
       assistantPersonality: preferences.assistant?.personality ?? null,
       assistantTone: preferences.assistant?.tone ?? null,
       assistantVoice: preferences.assistant?.voice ?? null,

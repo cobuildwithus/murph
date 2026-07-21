@@ -1,7 +1,9 @@
 import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   clinicalFacetSlug,
   clinicalFhirManifestPathSchema,
+  clinicalFhirRetrievalPlanSchema,
   clinicalImportDecisionSchema,
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
@@ -49,6 +51,134 @@ const planSource = {
 } as const;
 
 describe("clinical records contracts", () => {
+  it("keys retrieval by query and deterministic slice instead of resource type", () => {
+    const plan = clinicalFhirRetrievalPlanSchema.parse({
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices: [
+        {
+          coverage: "whole-family",
+          queryFingerprint: "1".repeat(64),
+          queryScopeId: "observation-labs",
+          resourceType: "Observation",
+          sliceId: "whole",
+        },
+        {
+          coverage: "whole-family",
+          queryFingerprint: "2".repeat(64),
+          queryScopeId: "observation-vitals",
+          resourceType: "Observation",
+          sliceId: "whole",
+        },
+      ],
+    });
+
+    expect(plan.slices.map((slice) => slice.queryScopeId)).toEqual([
+      "observation-labs",
+      "observation-vitals",
+    ]);
+    expect(() => clinicalFhirRetrievalPlanSchema.parse({
+      ...plan,
+      slices: [plan.slices[0], plan.slices[0]],
+    })).toThrow("identity to be unique");
+  });
+
+  it("keeps retrieval plans within the composed execution envelope", () => {
+    const slices = Array.from(
+      { length: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES },
+      (_, index) => ({
+        coverage: "whole-family" as const,
+        queryFingerprint: SHA256,
+        queryScopeId: `observation-query-${index}`,
+        resourceType: "Observation" as const,
+        sliceId: "whole",
+      }),
+    );
+
+    expect(clinicalFhirRetrievalPlanSchema.parse({
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices,
+    }).slices).toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES);
+    expect(() => clinicalFhirRetrievalPlanSchema.parse({
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices: [
+        ...slices,
+        {
+          ...slices[0],
+          queryScopeId: "one-query-beyond-the-execution-envelope",
+        },
+      ],
+    })).toThrow();
+  });
+
+  it("requires bounded slices to be contiguous, ordered, and non-overlapping", () => {
+    const slice = {
+      coverage: "bounded-window" as const,
+      from: "2025-01-01T00:00:00.000Z",
+      queryFingerprint: SHA256,
+      queryScopeId: "encounter-history",
+      resourceType: "Encounter",
+      sliceId: "2025-h1",
+      to: "2025-07-01T00:00:00.000Z",
+    };
+    const plan = {
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices: [
+        slice,
+        {
+          ...slice,
+          from: slice.to,
+          sliceId: "2025-h2",
+          to: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+    expect(clinicalFhirRetrievalPlanSchema.parse(plan).slices).toHaveLength(2);
+    expect(() => clinicalFhirRetrievalPlanSchema.parse({
+      ...plan,
+      slices: [plan.slices[0], { ...plan.slices[1], from: "2025-06-01T00:00:00.000Z" }],
+    })).toThrow("ordered and non-overlapping");
+  });
+
+  it("validates query-aware raw evidence for repeated resource types", () => {
+    const manifest = clinicalRawManifestSchema.parse({
+      schemaVersion: "murph.clinical-raw-manifest.v3",
+      kind: "clinical_fhir_retrieval",
+      connectionId: "clinical-connection-1",
+      retrievalJobId: "retrieval-job-1",
+      sourceSystem: "epic-fhir",
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: ["observation-labs", "observation-vitals"].map((queryScopeId) => ({
+        queryScopeId,
+        sliceId: "whole",
+        resourceType: "Observation",
+        relativePath: `${queryScopeId}/whole/Observation/page-0001.json`,
+        count: 1,
+        sha256: SHA256,
+      })),
+      retrievalSlices: ["observation-labs", "observation-vitals"].map((queryScopeId, index) => ({
+        coverage: "whole-family",
+        queryFingerprint: String(index + 1).repeat(64),
+        queryScopeId,
+        resourceType: "Observation",
+        sliceId: "whole",
+      })),
+      completedRetrievalSlices: ["observation-labs", "observation-vitals"].map((queryScopeId) => ({
+        queryScopeId,
+        sliceId: "whole",
+      })),
+      requestedScopes: ["patient/Observation.read"],
+      grantedScopes: ["patient/Observation.read"],
+    });
+
+    expect(manifest.resourceFiles).toHaveLength(2);
+    expect(rawRefForClinicalManifestFile({
+      manifestPath: planSource.rawManifestPath,
+      resourceFile: manifest.resourceFiles[1]!,
+    })).toContain("observation-vitals/whole/Observation/page-0001.json");
+  });
+
   it("validates raw manifests and derives raw FHIR refs", () => {
     const resourceFile = {
       resourceType: "Observation" as const,

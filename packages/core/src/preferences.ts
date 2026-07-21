@@ -1,4 +1,5 @@
 import {
+  assistantPersonaIdSchema,
   assistantPersonalityScoreSchema,
   assistantPersonalitySettingIds,
   assistantPreferenceCausalSeqSchema,
@@ -15,6 +16,7 @@ import {
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
   type AssistantPersonalitySettingId,
@@ -42,6 +44,7 @@ import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { isPlainRecord } from "./types.ts";
 
 export type {
+  AssistantPersonaId,
   AssistantPersonalityPreferences,
   AssistantPersonalityScores,
   AssistantPersonalitySettingId,
@@ -58,6 +61,7 @@ export type AssistantPersonalityPreferencesUpdate = {
 };
 
 export interface AssistantPreferencesUpdate {
+  persona?: AssistantPersonaId;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
   personality?: AssistantPersonalityPreferencesUpdate;
@@ -101,13 +105,21 @@ function normalizeAssistantPreferencesForWrite(
     throw new TypeError("Assistant preferences must be an object.");
   }
   for (const key of Object.keys(preferences)) {
-    if (key !== "tone" && key !== "voice" && key !== "personality") {
+    if (
+      key !== "persona"
+      && key !== "tone"
+      && key !== "voice"
+      && key !== "personality"
+    ) {
       throw new TypeError(`Unknown assistant preference: ${key}.`);
     }
   }
 
   const nextPreferences: AssistantPreferencesUpdate = {};
 
+  if (preferences.persona !== undefined) {
+    nextPreferences.persona = assistantPersonaIdSchema.parse(preferences.persona);
+  }
   if (preferences.tone !== undefined) {
     nextPreferences.tone = assistantTonePreferenceSchema.parse(preferences.tone);
   }
@@ -146,6 +158,9 @@ function mergeAssistantPreferences(
     ...(current ?? {}),
   };
 
+  if (preferences.persona !== undefined) {
+    nextPreferences.persona = preferences.persona;
+  }
   if (preferences.tone !== undefined) {
     nextPreferences.tone = preferences.tone;
   }
@@ -182,6 +197,9 @@ function resolveAssistantPreferenceFieldIds(
   preferences: AssistantPreferencesUpdate,
 ): AssistantPreferenceFieldId[] {
   const fields: AssistantPreferenceFieldId[] = [];
+  if (preferences.persona !== undefined) {
+    fields.push("persona");
+  }
   if (preferences.tone !== undefined) {
     fields.push("tone");
   }
@@ -231,6 +249,9 @@ function filterAssistantPreferencesByFields(
     }
   }
   return {
+    ...(allowed.has("persona") && preferences.persona !== undefined
+      ? { persona: preferences.persona }
+      : {}),
     ...(allowed.has("tone") && preferences.tone !== undefined
       ? { tone: preferences.tone }
       : {}),

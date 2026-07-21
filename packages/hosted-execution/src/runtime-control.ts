@@ -939,6 +939,17 @@ export interface HostedRuntimeGroupSummary {
   status: string;
 }
 
+export type HostedRuntimeGroupUsageCapacityState =
+  | "healthy"
+  | "low"
+  | "exhausted";
+
+export interface HostedRuntimeGroupUsageStatus {
+  capacityState: HostedRuntimeGroupUsageCapacityState;
+  fundingUrl: string | null;
+  periodEnd: string;
+}
+
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 
 export interface HostedRuntimeGroupMembershipSummary {
@@ -1087,6 +1098,7 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "read_usage" }
   | ({
       action: "read_shared";
       /** Current-turn Linq sender evidence injected by the hosted runtime. */
@@ -1157,6 +1169,12 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_usage";
+      result:
+        | { status: "ok"; usage: HostedRuntimeGroupUsageStatus }
+        | { status: "unavailable"; unavailableReason: string; usage: null };
     }
   | {
       action: "read_shared";

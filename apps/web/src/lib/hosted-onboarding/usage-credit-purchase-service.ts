@@ -12,8 +12,12 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
-import { readHostedPersonalUsageCreditOfferCodes } from "./personal-usage-credit-eligibility";
+import {
+  readHostedConfiguredUsageCreditOfferCodes,
+  readHostedPersonalUsageCreditOfferCodes,
+} from "./personal-usage-credit-eligibility";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApiMode,
@@ -48,7 +52,14 @@ import {
   reconstructHostedUsageCreditStripeCheckoutRequest,
   requireHostedUsageCreditEncryptedValue,
   requireHostedUsageCreditLookupKey,
+  requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
+import {
+  buildHostedGroupUsageFundingPath,
+  normalizeHostedGroupUsageJoinCode,
+  readHostedGroupUsageFundingTargetByJoinCode,
+} from "../hosted-groups/group-usage-funding";
+import { hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -91,6 +102,19 @@ export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedUsageCreditOfferCode;
 }
+
+type HostedUsageCreditCheckoutTarget =
+  | {
+      beneficiaryMemberId: string;
+      kind: "personal";
+      payerMemberId: string;
+    }
+  | {
+      beneficiaryMemberId: string;
+      joinCode: string;
+      kind: "group";
+      payerMemberId: string;
+    };
 
 export function parseHostedUsageCreditCheckoutRequest(
   value: Record<string, unknown>,
@@ -142,72 +166,175 @@ export async function createHostedUsageCreditCheckout(input: {
   offerCode: HostedUsageCreditOfferCode;
   prisma?: PrismaClient;
 }): Promise<HostedUsageCreditCheckoutResult> {
+  return createHostedUsageCreditCheckoutForTarget({
+    clientRequestKey: input.clientRequestKey,
+    now: input.now,
+    offerCode: input.offerCode,
+    prisma: input.prisma,
+    target: {
+      beneficiaryMemberId: input.memberId,
+      kind: "personal",
+      payerMemberId: input.memberId,
+    },
+  });
+}
+
+export async function createHostedGroupUsageCreditCheckout(input: {
+  clientRequestKey: string;
+  joinCode: string;
+  now?: Date;
+  offerCode: HostedUsageCreditOfferCode;
+  payerMemberId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedUsageCreditCheckoutResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const joinCode = normalizeHostedGroupUsageJoinCode(input.joinCode);
+  const fundingTarget = joinCode
+    ? await readHostedGroupUsageFundingTargetByJoinCode({ joinCode, prisma })
+    : null;
+  if (!fundingTarget) {
+    throw buildHostedUsageCreditNotEligibleError("group");
+  }
+  const stripeCustomerId = await ensureHostedMemberStripeCustomer({
+    memberId: input.payerMemberId,
+    prisma,
+  });
+
+  return createHostedUsageCreditCheckoutForTarget({
+    clientRequestKey: input.clientRequestKey,
+    groupStripeCustomerId: stripeCustomerId,
+    now: input.now,
+    offerCode: input.offerCode,
+    prisma,
+    target: {
+      beneficiaryMemberId: fundingTarget.runtimeMemberId,
+      joinCode: fundingTarget.joinCode,
+      kind: "group",
+      payerMemberId: input.payerMemberId,
+    },
+  });
+}
+
+async function createHostedUsageCreditCheckoutForTarget(input: {
+  clientRequestKey: string;
+  groupStripeCustomerId?: string;
+  now?: Date;
+  offerCode: HostedUsageCreditOfferCode;
+  prisma?: PrismaClient;
+  target: HostedUsageCreditCheckoutTarget;
+}): Promise<HostedUsageCreditCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
+    await lockHostedMemberRow(tx, input.target.payerMemberId);
+    const payer = await tx.hostedMember.findUnique({
+      select: {
+        suspendedAt: true,
+        threadContainer: { select: { memberId: true } },
+      },
+      where: { id: input.target.payerMemberId },
+    });
+    if (!payer || payer.suspendedAt || payer.threadContainer) {
+      throw buildHostedUsageCreditNotEligibleError(input.target.kind);
+    }
 
     const racedExisting = await tx.hostedUsageCreditPurchase.findUnique({
       where: {
         payerMemberId_clientRequestKey: {
           clientRequestKey: input.clientRequestKey,
-          payerMemberId: input.memberId,
+          payerMemberId: input.target.payerMemberId,
         },
       },
     });
     if (racedExisting) {
       assertHostedUsageCreditRequestMatches({
-        memberId: input.memberId,
         offerCode: input.offerCode,
         purchase: racedExisting,
+        target: input.target,
       });
       return {
         purchase: racedExisting,
         recovered: false,
+        targetConflict: false,
       };
     }
 
     await closeExpiredUnattachedHostedUsageCreditPurchasesTx({
       now,
-      payerMemberId: input.memberId,
+      payerMemberId: input.target.payerMemberId,
       tx,
     });
 
     const existingActive = await tx.hostedUsageCreditPurchase.findFirst({
       where: {
-        payerMemberId: input.memberId,
+        payerMemberId: input.target.payerMemberId,
         status: {
           in: [...HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES],
         },
       },
     });
     if (existingActive) {
+      if (hostedUsageCreditTargetMatches({
+        purchase: existingActive,
+        target: input.target,
+      })) {
+        return {
+          purchase: existingActive,
+          recovered: true,
+          targetConflict: false,
+        };
+      }
       return {
         purchase: existingActive,
         recovered: true,
+        targetConflict: true,
       };
     }
 
-    const authorizedOfferCodes =
-      await readHostedPersonalUsageCreditOfferCodes({
-        memberId: input.memberId,
+    let authorizedOfferCodes: HostedUsageCreditOfferCode[];
+    let stripeCustomerId: string;
+    if (input.target.kind === "personal") {
+      authorizedOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
+        memberId: input.target.payerMemberId,
         prisma: tx,
       });
-    if (!authorizedOfferCodes.includes(input.offerCode)) {
-      throw buildHostedUsageCreditNotEligibleError();
-    }
-
-    const billingRef = await readHostedMemberStripeBillingRef({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    const stripeCustomerId = billingRef?.stripeCustomerId;
-    if (!stripeCustomerId || !billingRef?.stripeSubscriptionId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_USAGE_CREDIT_BILLING_NOT_READY",
-        httpStatus: 409,
-        message: "Your subscription is not ready for usage-credit checkout yet.",
+      const billingRef = await readHostedMemberStripeBillingRef({
+        memberId: input.target.payerMemberId,
+        prisma: tx,
       });
+      if (!billingRef?.stripeCustomerId || !billingRef.stripeSubscriptionId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_BILLING_NOT_READY",
+          httpStatus: 409,
+          message: "Your subscription is not ready for usage-credit checkout yet.",
+        });
+      }
+      stripeCustomerId = billingRef.stripeCustomerId;
+    } else {
+      const fundingTargets = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "group"."id"
+        FROM "hosted_group" AS "group"
+        INNER JOIN "hosted_thread_container" AS "container"
+          ON "container"."member_id" = "group"."runtime_member_id"
+        WHERE "group"."join_code" = ${input.target.joinCode}
+          AND "group"."runtime_member_id" = ${input.target.beneficiaryMemberId}
+        FOR SHARE OF "group", "container"
+      `;
+      if (
+        fundingTargets.length !== 1
+        || !(await hasHostedRuntimeActiveAccessForUpdateTx(
+          input.target.beneficiaryMemberId,
+          { prisma: tx },
+        ))
+        || !input.groupStripeCustomerId
+      ) {
+        throw buildHostedUsageCreditNotEligibleError("group");
+      }
+      authorizedOfferCodes = readHostedConfiguredUsageCreditOfferCodes();
+      stripeCustomerId = input.groupStripeCustomerId;
+    }
+    if (!authorizedOfferCodes.includes(input.offerCode)) {
+      throw buildHostedUsageCreditNotEligibleError(input.target.kind);
     }
 
     const checkoutConfig = requireHostedStripeUsageCreditCheckoutConfig({
@@ -223,22 +350,24 @@ export async function createHostedUsageCreditCheckout(input: {
       outcome: "success",
       publicBaseUrl,
       purchaseId,
+      target: input.target,
     });
     const checkoutCancelUrl = buildHostedUsageCreditCheckoutReturnUrl({
       outcome: "cancel",
       publicBaseUrl,
       purchaseId,
+      target: input.target,
     });
     const [stripePriceIdEncrypted, stripeCustomerIdEncrypted] = await Promise.all([
       encryptHostedUsageCreditPurchaseStripeField({
         field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.priceId,
-        payerMemberId: input.memberId,
+        payerMemberId: input.target.payerMemberId,
         prisma: tx,
         value: checkoutConfig.priceId,
       }),
       encryptHostedUsageCreditPurchaseStripeField({
         field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.customerId,
-        payerMemberId: input.memberId,
+        payerMemberId: input.target.payerMemberId,
         prisma: tx,
         value: stripeCustomerId,
       }),
@@ -254,7 +383,7 @@ export async function createHostedUsageCreditCheckout(input: {
 
     const created = await tx.hostedUsageCreditPurchase.create({
       data: {
-        beneficiaryMemberId: input.memberId,
+        beneficiaryMemberId: input.target.beneficiaryMemberId,
         cashAmountMinor: offer.cashAmountMinor,
         cashCurrency: offer.cashCurrency,
         checkoutCancelUrl,
@@ -265,7 +394,7 @@ export async function createHostedUsageCreditCheckout(input: {
         grantUsdMicros: offer.grantUsdMicros,
         id: purchaseId,
         offerCode: offer.code,
-        payerMemberId: input.memberId,
+        payerMemberId: input.target.payerMemberId,
         status: HostedUsageCreditPurchaseStatus.created,
         stripeCustomerIdEncrypted: requireHostedUsageCreditEncryptedValue(
           stripeCustomerIdEncrypted,
@@ -285,6 +414,7 @@ export async function createHostedUsageCreditCheckout(input: {
     return {
       purchase: created,
       recovered: false,
+      targetConflict: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -294,9 +424,11 @@ export async function createHostedUsageCreditCheckout(input: {
       prisma,
       purchase: resolution.purchase,
     });
-    return resolution.recovered
-      ? { ...checkout, recovered: true }
-      : checkout;
+    return {
+      ...checkout,
+      ...(resolution.recovered ? { recovered: true as const } : {}),
+      ...(resolution.targetConflict ? { targetConflict: true as const } : {}),
+    };
   } catch (error) {
     if (
       resolution.recovered &&
@@ -315,6 +447,7 @@ export async function createHostedUsageCreditCheckout(input: {
       return {
         ...checkout,
         recovered: true,
+        ...(resolution.targetConflict ? { targetConflict: true as const } : {}),
         ...(canRetryHostedUsageCreditCheckoutCreate({ now, purchase })
           ? { retryAllowed: true as const }
           : {}),
@@ -392,7 +525,7 @@ async function continueHostedUsageCreditCheckout(input: {
     session,
   });
   await assertHostedUsageCreditCheckoutCanBeReturned({
-    memberId: purchase.payerMemberId,
+    memberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
     prisma: input.prisma,
   });
 
@@ -407,12 +540,20 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
 }): Promise<HostedUsageCreditPurchase> {
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.purchase.payerMemberId);
+    await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== input.purchase.payerMemberId) {
+    if (
+      !current
+      || current.payerMemberId !== payerMemberId
+      || current.offerCode !== input.purchase.offerCode
+      || current.beneficiaryMemberId !== input.purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
     const member = await tx.hostedMember.findUnique({
@@ -422,11 +563,9 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
     if (!member || member.suspendedAt) {
       throw buildHostedUsageCreditNotEligibleError();
     }
-    assertHostedUsageCreditRequestMatches({
-      memberId: input.purchase.payerMemberId,
-      offerCode: parseHostedUsageCreditOfferCode(input.purchase.offerCode),
-      purchase: current,
-    });
+    if (!parseHostedUsageCreditOfferCode(input.purchase.offerCode)) {
+      throw buildHostedUsageCreditPurchaseNotFoundError();
+    }
 
     if (
       current.status === HostedUsageCreditPurchaseStatus.created &&
@@ -483,24 +622,27 @@ async function bindHostedUsageCreditCheckoutSession(input: {
   purchase: HostedUsageCreditPurchase;
   session: Stripe.Checkout.Session;
 }): Promise<HostedUsageCreditPurchase> {
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
   const sessionLookupKey = requireHostedUsageCreditLookupKey(
     createHostedStripeCheckoutSessionLookupKey(input.session.id),
     "checkout_session",
   );
 
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.purchase.payerMemberId);
+    await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== input.purchase.payerMemberId) {
+    if (!current || current.payerMemberId !== payerMemberId) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
 
     if (current.stripeCheckoutSessionLookupKey) {
       const currentSessionId = await decryptHostedUsageCreditPurchaseStripeField({
         field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
-        payerMemberId: current.payerMemberId,
+        payerMemberId,
         prisma: tx,
         value: current.stripeCheckoutSessionIdEncrypted,
       });
@@ -518,13 +660,13 @@ async function bindHostedUsageCreditCheckoutSession(input: {
       await Promise.all([
         encryptHostedUsageCreditPurchaseStripeField({
           field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
-          payerMemberId: current.payerMemberId,
+          payerMemberId,
           prisma: tx,
           value: input.session.id,
         }),
         encryptHostedUsageCreditPurchaseStripeField({
           field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutUrl,
-          payerMemberId: current.payerMemberId,
+          payerMemberId,
           prisma: tx,
           value: input.session.url,
         }),
@@ -569,28 +711,31 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   outcome: "cancel" | "success";
   publicBaseUrl: string;
   purchaseId: string;
+  target: HostedUsageCreditCheckoutTarget;
 }): string {
-  const url = new URL("/settings", input.publicBaseUrl);
+  const url = new URL(
+    input.target.kind === "personal"
+      ? "/settings"
+      : buildHostedGroupUsageFundingPath(input.target.joinCode),
+    input.publicBaseUrl,
+  );
   url.searchParams.set("usageCheckout", input.outcome);
   url.searchParams.set("usagePurchase", input.purchaseId);
-  url.hash = "subscription";
+  if (input.target.kind === "personal") {
+    url.hash = "subscription";
+  }
   return url.toString();
 }
 
 function assertHostedUsageCreditRequestMatches(input: {
-  memberId: string;
   offerCode: HostedUsageCreditOfferCode | null;
   purchase: Pick<
     HostedUsageCreditPurchase,
     "beneficiaryMemberId" | "offerCode" | "payerMemberId"
   >;
+  target: HostedUsageCreditCheckoutTarget;
 }): void {
-  if (
-    !input.offerCode ||
-    input.purchase.offerCode !== input.offerCode ||
-    input.purchase.payerMemberId !== input.memberId ||
-    input.purchase.beneficiaryMemberId !== input.memberId
-  ) {
+  if (!hostedUsageCreditRequestMatches(input)) {
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
       httpStatus: 409,
@@ -599,10 +744,40 @@ function assertHostedUsageCreditRequestMatches(input: {
   }
 }
 
-function buildHostedUsageCreditNotEligibleError() {
+function hostedUsageCreditTargetMatches(input: {
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    "beneficiaryMemberId" | "payerMemberId"
+  >;
+  target: HostedUsageCreditCheckoutTarget;
+}): boolean {
+  return input.purchase.payerMemberId === input.target.payerMemberId
+    && input.purchase.beneficiaryMemberId === input.target.beneficiaryMemberId;
+}
+
+function hostedUsageCreditRequestMatches(input: {
+  offerCode: HostedUsageCreditOfferCode | null;
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    "beneficiaryMemberId" | "offerCode" | "payerMemberId"
+  >;
+  target: HostedUsageCreditCheckoutTarget;
+}): boolean {
+  return Boolean(
+    input.offerCode
+    && input.purchase.offerCode === input.offerCode
+    && hostedUsageCreditTargetMatches(input)
+  );
+}
+
+function buildHostedUsageCreditNotEligibleError(
+  kind: HostedUsageCreditCheckoutTarget["kind"] = "personal",
+) {
   return hostedOnboardingError({
     code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
     httpStatus: 403,
-    message: "Usage credit is available for active paid Pulse or Edge plans.",
+    message: kind === "group"
+      ? "Usage credit is not available for this group."
+      : "Usage credit is available for active paid Pulse or Edge plans.",
   });
 }

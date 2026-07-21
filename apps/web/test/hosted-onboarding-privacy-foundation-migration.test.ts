@@ -54,6 +54,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantPersona String? @map("assistant_persona")',
+    'assistantPersonaCausalSeq BigInt? @map("assistant_persona_causal_seq")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
     'assistantDetail Int? @map("assistant_detail")',
     'assistantDetailCausalSeq BigInt? @map("assistant_detail_causal_seq")',
@@ -629,6 +631,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAssistantPersonaMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260720173000_hosted_assistant_persona/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxSubscriptionActionClaimMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260715230000_hosted_mailbox_subscription_action_claim/migration.sql",
@@ -869,6 +878,9 @@ describe("hosted Prisma baseline migration", () => {
       "20260716190000_linq_signup_welcome_reservation",
       "20260716220000_hosted_growth_snapshot_message_counts",
       "20260718090000_hosted_vault_share_projection_snapshot",
+      "20260720150000_clinical_retrieval_plan",
+      "20260720173000_hosted_assistant_persona",
+      "20260720230000_hosted_group_usage_funding",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
@@ -1000,6 +1012,13 @@ describe("hosted Prisma baseline migration", () => {
       );
     }
     expect(hostedAssistantPersonalityProjectionWatermarkMigrationSql).not.toContain("UPDATE");
+    expect(hostedAssistantPersonaMigrationSql).toContain(
+      'ADD COLUMN "assistant_persona" TEXT',
+    );
+    expect(hostedAssistantPersonaMigrationSql).toContain(
+      'ADD COLUMN "assistant_persona_causal_seq" BIGINT',
+    );
+    expect(hostedAssistantPersonaMigrationSql).not.toContain("UPDATE");
     expect(hostedAssistantPersonalityProjectionWatermarkContractMigrationSql).toContain(
       'FROM "hosted_mailbox_lane_counter" AS causal_counter',
     );

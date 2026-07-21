@@ -2,24 +2,34 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
+  CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
   buildEpicProviderDirectoryEntryId,
   parseClinicalProviderDirectory,
   searchClinicalProviderDirectorySnapshot,
 } from "@/src/lib/clinical-records/provider-directory";
-import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-beta-policy";
+import {
+  EPIC_ACQUISITION_POLICY,
+  EPIC_ACQUISITION_POLICY_ID,
+  EPIC_BETA_RESOURCE_TYPES,
+  buildEpicBetaRetrievalPlan,
+} from "@/src/lib/clinical-records/epic-policy";
+import { selectSmartRequestedScopes } from "@/src/lib/clinical-records/smart";
 
 const generatedAt = "2026-07-10T00:00:00.000Z";
 
 describe("Clinical Records provider directory", () => {
   it("loads the current self-hosted Epic brand registry with stable unique ids", () => {
     const directory = parseClinicalProviderDirectory(JSON.parse(readFileSync(
-      new URL("../src/lib/clinical-records/provider-directory.v1.json", import.meta.url),
+      new URL("../src/lib/clinical-records/provider-directory.v2.json", import.meta.url),
       "utf8",
     )));
 
     expect(directory.entries).toHaveLength(1_246);
-    expect(directory.version).toMatch(/^2026-07-18\.epic-brands-r4-beta-v1$/u);
+    expect(directory.version).toMatch(/^2026-07-20\.epic-brands-r4-policy-v2$/u);
+    expect(directory.schema).toBe(CLINICAL_PROVIDER_DIRECTORY_SCHEMA);
+    expect(directory.sourceBundleSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
+    expect(directory.entries.every((entry) => entry.policyId === EPIC_ACQUISITION_POLICY_ID)).toBe(true);
     expect(directory.entries.every((entry) =>
       JSON.stringify(entry.resourceTypes) === JSON.stringify(EPIC_BETA_RESOURCE_TYPES)
     )).toBe(true);
@@ -28,6 +38,37 @@ describe("Clinical Records provider directory", () => {
       clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
       fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
     });
+  });
+
+  it("drives the existing SMART and retrieval contract from a committed v2 entry", () => {
+    const entry = readCommittedDirectory().entries.find((candidate) =>
+      candidate.id === "epic-sandbox"
+    );
+    if (!entry) throw new TypeError("Committed Epic sandbox entry is missing.");
+
+    expect(selectSmartRequestedScopes({
+      capabilities: ["permission-v2", "context-standalone-patient"],
+      requestedBaseScopes: entry.requestedBaseScopes,
+      resourceTypes: entry.resourceTypes,
+    })).toEqual({
+      resourceTypes: ["Patient", "Observation", "DiagnosticReport"],
+      scopes: [
+        "openid",
+        "fhirUser",
+        "launch/patient",
+        "patient/Patient.r",
+        "patient/Observation.s",
+        "patient/DiagnosticReport.s",
+      ],
+    });
+    expect(buildEpicBetaRetrievalPlan({
+      pageCount: "100",
+      resourceTypes: entry.resourceTypes,
+    }).slices.map((slice) => slice.queryScopeId)).toEqual([
+      "patient-demographics",
+      "laboratory-observations",
+      "diagnostic-reports",
+    ]);
   });
 
   it("matches compound organization and location searches across fields", () => {
@@ -148,13 +189,133 @@ describe("Clinical Records provider directory", () => {
       resourceTypes: ["Patient", "Observation", "DiagnosticReport", "DocumentReference"],
     }))).toThrow(/does not match the Epic beta FHIR policy/u);
   });
+
+  it("reads v1 for one compatibility window and rejects unknown v2 policy references", () => {
+    const v1 = parseClinicalProviderDirectory(makeDirectory({}));
+    expect(v1.schema).toBe("murph.clinical-provider-directory.v1");
+    expect(v1.sourceBundleSha256).toBeNull();
+    expect(v1.entries[0]).toMatchObject({ policyId: EPIC_ACQUISITION_POLICY_ID });
+
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policyId: "unknown-policy",
+    }))).toThrow(/unknown policy/u);
+  });
+
+  it("rejects unsorted v2 entries and invalid capability overrides", () => {
+    const first = makeDirectoryV2({ id: "epic-z-brand" });
+    const secondEntry = makeDirectoryV2({ id: "epic-a-brand" }).entries[0];
+    expect(() => parseClinicalProviderDirectory({
+      ...first,
+      entries: [first.entries[0], secondEntry],
+    })).toThrow(/strictly sorted/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      capabilityOverrides: [{
+        evidenceVersion: "test-evidence-v1",
+        queryScopeId: "unknown-query",
+        support: "verified",
+      }],
+    }))).toThrow(/unknown query scope/u);
+  });
+
+  it("requires the exact owned policy and rejects malformed hashes and capability evidence", () => {
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policies: [
+        { ...EPIC_ACQUISITION_POLICY, id: "z-policy" },
+        { ...EPIC_ACQUISITION_POLICY, id: "a-policy" },
+      ],
+      policyId: "z-policy",
+    }))).toThrow(/exactly one owned policy/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policies: [{
+        ...EPIC_ACQUISITION_POLICY,
+        registrationApis: [
+          EPIC_ACQUISITION_POLICY.registrationApis[0],
+          EPIC_ACQUISITION_POLICY.registrationApis[0],
+          ...EPIC_ACQUISITION_POLICY.registrationApis.slice(2),
+        ],
+      }],
+    }))).toThrow(/exactly match the owned Epic policy/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policies: [{
+        ...EPIC_ACQUISITION_POLICY,
+        registrationApis: EPIC_ACQUISITION_POLICY.registrationApis.slice(1),
+      }],
+    }))).toThrow(/exactly match the owned Epic policy/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      sourceBundleSha256: "not-a-sha256",
+    }))).toThrow(/source bundle hash/u);
+
+    const verified = (queryScopeId: string) => ({
+      evidenceVersion: "test-evidence-v1",
+      queryScopeId,
+      support: "verified",
+    });
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      capabilityOverrides: [
+        verified("patient-demographics"),
+        verified("diagnostic-reports"),
+      ],
+    }))).toThrow(/capability overrides must be strictly sorted/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      capabilityOverrides: [
+        verified("diagnostic-reports"),
+        verified("diagnostic-reports"),
+      ],
+    }))).toThrow(/capability overrides must be strictly sorted/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      capabilityOverrides: [{
+        evidenceVersion: "test-evidence-v1",
+        queryScopeId: "diagnostic-reports",
+        support: "maybe",
+      }],
+    }))).toThrow(/support is invalid/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      capabilityOverrides: [{
+        evidenceVersion: "",
+        queryScopeId: "diagnostic-reports",
+        support: "verified",
+      }],
+    }))).toThrow(/evidence version is out of bounds/u);
+  });
 });
 
 function readCommittedDirectory() {
   return parseClinicalProviderDirectory(JSON.parse(readFileSync(
-    new URL("../src/lib/clinical-records/provider-directory.v1.json", import.meta.url),
+    new URL("../src/lib/clinical-records/provider-directory.v2.json", import.meta.url),
     "utf8",
   )));
+}
+
+function makeDirectoryV2(overrides: {
+  capabilityOverrides?: Array<{
+    evidenceVersion: string;
+    queryScopeId: string;
+    support: string;
+  }>;
+  id?: string;
+  policies?: unknown[];
+  policyId?: string;
+  sourceBundleSha256?: string;
+}) {
+  return {
+    entries: [{
+      aliases: ["Test Health"],
+      brandName: "Test Health System",
+      ...(overrides.capabilityOverrides
+        ? { capabilityOverrides: overrides.capabilityOverrides }
+        : {}),
+      clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID",
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      id: overrides.id ?? "epic-test-brand",
+      locations: [],
+      policyId: overrides.policyId ?? EPIC_ACQUISITION_POLICY_ID,
+    }],
+    generatedAt,
+    policies: overrides.policies ?? [EPIC_ACQUISITION_POLICY],
+    schema: "murph.clinical-provider-directory.v2",
+    sourceBundleSha256: overrides.sourceBundleSha256 ?? "0".repeat(64),
+    version: "test-v2",
+  };
 }
 
 function makeDirectory(overrides: {

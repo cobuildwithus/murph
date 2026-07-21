@@ -454,17 +454,13 @@ describe("deleteHostedAccountData", () => {
           OR: [
             { beneficiaryMemberId: "member_123" },
             { purchase: { beneficiaryMemberId: "member_123" } },
-            { purchase: { payerMemberId: "member_123" } },
           ],
         },
       },
       {
         model: "hostedUsageCreditPurchase",
         where: {
-          OR: [
-            { beneficiaryMemberId: "member_123" },
-            { payerMemberId: "member_123" },
-          ],
+          beneficiaryMemberId: "member_123",
         },
       },
     ]));

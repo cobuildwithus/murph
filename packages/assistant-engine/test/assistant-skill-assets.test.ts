@@ -1859,31 +1859,40 @@ describe('assistant skill assets', () => {
       'This skill explicitly invokes the global `Non-blocking delegation` contract; the user does not need to ask for a subagent separately.',
     )
     expect(compact).toContain(
-      'Follow that contract for eligibility, durable parent ownership, tool boundaries, confirmation, and fallback.',
+      'The accepted current message, supplied voice transcript, and durable attachment refs are already a durable source.',
     )
     expect(compact).toContain(
-      'Before any child starts, the parent must save the smallest truthful canonical fact or raw source and verify the receipt.',
+      'For the dense foundation memo below, this skill explicitly assigns canonical persistence from the exact accepted words to bounded children',
     )
     expect(compact).toContain(
-      'A child may enrich only the exact durable record ids or source refs returned by that save; it never owns a promised save or parse.',
+      'Hosted onboarding must have capacity for at least three concurrent children.',
     )
     expect(compact).toContain(
-      'The medical-and-safety checkpoint is the one deliberate exception to this parent-first save rule: there the child owns the entire medical save, and the parent must not persist a medical answer in the foreground when a child can be spawned.',
+      'When the memo contains all three independent work families below, spawn three immediately—movement/protocol context, supplements, and medical/safety—and do not merge them into fewer children.',
     )
     expect(compact).toContain(
-      'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
+      'Give each fresh child `fork_turns: "none"`, a self-contained task with the exact relevant source words, its canonical owner or skill, an idempotent dedupe rule, and explicit exclusions for the other two families.',
     )
     expect(compact).toContain(
-      "I've got my best man researching the exact ingredients.",
+      "I've got my best people on it—they're sorting, saving, and checking what you just shared.",
     )
     expect(compact).toContain(
-      'Its spawn is not durable operation state: do not promise it will finish, and on later turns do not say enrichment is pending, processing, or in progress.',
+      'Immediately call `murph.send_progress_update` once',
+    )
+    expect(compact).toContain(
+      'This final response is voice-only',
+    )
+    expect(compact).toContain(
+      'Do not repeat this acknowledgement in the final reply',
+    )
+    expect(compact).toContain(
+      'Do not claim the records are already saved.',
     )
     expect(compact).toContain(
       'never expose internal subagent terminology, record ids, or save-status bookkeeping',
     )
     expect(compact).toContain(
-      'Claim exact-label or structured child enrichment only after canonical readback confirms it.',
+      'Claim saved or enriched details only after canonical readback confirms them.',
     )
     expect(compact).not.toContain('A spawn means the save is pending')
     expect(compact).not.toContain('describe the parse as in progress')
@@ -1979,13 +1988,25 @@ describe('assistant skill assets', () => {
     )
     expect(compact).toContain('Can you send me a voice memo covering a few things?')
     expect(compact).toContain(
-      'spawn a separate background child for each: the medical-persistence child owns the entire medical save, and the supplement child owns label enrichment',
+      'Immediately split a supplied memo into these independent child tasks:',
     )
     expect(compact).toContain(
-      'Up to three may be active at once, as an explicit exception to the global one-at-a-time default',
+      'Movement and current protocols:',
     )
     expect(compact).toContain(
-      "ok, one last question and then I'll leave you alone, promise",
+      'When all three families are present, start all three before the visible reply.',
+    )
+    expect(compact).toContain(
+      'murph.generate_voice_memo',
+    )
+    expect(compact).toContain(
+      'This specific closer is voice-welcome and privacy-safe.',
+    )
+    expect(compact).toContain(
+      "Okay, one last question and then I'll leave you alone, promise: have you had any blood tests or lab panels in the past year or two?",
+    )
+    expect(compact).toContain(
+      'This final response is voice-only: do not duplicate that question',
     )
     expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
@@ -1995,28 +2016,28 @@ describe('assistant skill assets', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
     )
     expect(compact).toContain(
-      'First use one compact parent batch to save each user-reported product identity, brand when supplied, and active status, and capture the returned canonical ids.',
+      'It owns both the minimum canonical identities and useful exact-label enrichment',
     )
     expect(compact).toContain(
-      'This intentionally minimal record is durable reported context, not a claim that the exact label or ingredient panel is known.',
+      'The parent does not run foreground supplement schema or save calls when that child starts.',
     )
     expect(compact).toContain(
       'never recite bookkeeping such as "user-reported product names," "verified ingredient panel," or record status to the user',
     )
     expect(compact).toContain(
-      'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
+      'use one batch label lookup when exact details can improve later help',
     )
     expect(compact).toContain(
-      'Never persist the answer in the parent foreground.',
+      'always start the medical-and-safety child immediately from the user\'s exact words',
     )
     expect(compact).toContain(
-      'always spawn a child from the user\'s exact words to own the entire medical persistence: every supported fact and negative clinical assertion across the named medical owners, schema-correct record shape, detail fields, and cross-owner consistency',
+      'It owns every supported fact and negative clinical assertion across the named medical owners, schema-correct record shape, detail fields, and cross-owner consistency.',
     )
     expect(compact).toContain(
       'This applies to every medical answer, including an all-negative one such as "no meds, no conditions."',
     )
     expect(compact).toContain(
-      'Do not hold the visible reply for any medical saving or structuring; send the next checkpoint immediately after the spawn.',
+      'The parent does not inspect schemas or persist this answer in the foreground when the child starts.',
     )
     expect(raw).not.toContain(
       'one compact parent batch across the named medical owners',
@@ -2032,10 +2053,10 @@ describe('assistant skill assets', () => {
       'Naming the provider without supplying results does not start a parse child; wait for an actual PDF, paste, or other durable evidence.',
     )
     expect(compact).toContain(
-      'the parent must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
+      'the root must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
     )
     expect(compact).toContain(
-      'always spawn one from that exact source unless the source is already structured',
+      'If the three memo children still occupy the session capacity, keep the durable source and leave optional extraction for a later need',
     )
     expect(compact).toContain(
       'Send the next visible onboarding step after the durable-source receipt instead of waiting for extraction.',

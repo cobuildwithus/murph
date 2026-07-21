@@ -94,6 +94,7 @@ describe("murph.group dynamic tool", () => {
       "revoke_disclosure_grant",
       "read_shared",
       "read_current",
+      "read_usage",
       "list_memberships",
       "leave_membership",
       "update_display_name",
@@ -235,6 +236,13 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_usage" },
+    });
+
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_chat_participants",
     }))).toEqual({

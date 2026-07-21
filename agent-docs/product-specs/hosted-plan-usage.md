@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 Status: Implemented current-state contract
 
 ## Goal
@@ -11,7 +11,7 @@ and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
 the same web-owned projection. Stripe and the existing web billing services
 remain the payment system; Murph owns allowance and purchased usage capacity.
-The personal top-up implementation contract lives in
+The personal and group top-up implementation contract lives in
 `agent-docs/product-specs/hosted-usage-topups.md`.
 
 ## Ownership
@@ -202,11 +202,13 @@ expired trial entitlement, and existing abuse controls remain separate
 fail-closed reasons. The read-only plan-usage projection remains an
 included-period view and must not be treated as the gate result.
 
-Usage accounting may create a period-scoped notice candidate when the
-operation consumes the last effective capacity. A message-triggered record
-carries its originating Linq or Telegram target through the current invocation
-and signed usage-record seam. Every rendered limit notice states the included
-allowance as 100% used before the channel-specific follow-up copy.
+Usage accounting may create a period-scoped notice candidate when remaining
+effective capacity crosses the 20% low threshold or reaches zero. A
+message-triggered record carries its originating Linq or Telegram target
+through the current invocation and signed usage-record seam. Every rendered
+personal limit notice states the included allowance as 100% used before the
+channel-specific follow-up copy.
+
 Before claiming delivery, web re-authorizes a personal target against current
 member routing or an external Linq target against persisted thread authority.
 An omitted target means no accepted conversation and permits the legacy
@@ -240,23 +242,32 @@ balance, or use guilt, urgency, or scarcity language.
 ## Group Usage
 
 Classify a group-thread allowance from its source, never by comparing its
-numeric cap with a trial cap. `murph.plan_usage` returns
-`group_not_supported`, and any group-thread usage notice stays neutral: no
-account link, personal plan, model choice, upgrade, top-up, or payer identity.
-The notice may use only the exact originating external-thread target
-after web re-authorizes its persisted thread authority; no personal-home
-fallback is valid for an accepted group conversation.
+numeric cap with a trial cap. `murph.plan_usage` still returns
+`group_not_supported`; group capacity is not projected as a personal plan or a
+synthetic personal allowance. The existing `murph.group` tool's `read_usage`
+action reports only `healthy`, `low`, or `exhausted` plus the current period and
+first-party funding URL. It never exposes internal USD-micro accounting,
+contributors, receipts, or payer identity.
+
+A group low-usage or exhaustion notice may use only the exact originating
+external-thread target after web re-authorizes its persisted thread authority;
+no personal-home fallback is valid for an accepted group conversation. At
+delivery time Web rechecks the expected coarse state and may append the
+group's `/groups/fund/[joinCode]` link. The notice stays reply-oriented and does
+not name a payer, claim that payment occurred, or add a separate scheduler or
+money-prompt lifecycle.
 
 ## Non-Goals
 
 The subscription-action surface adds one nullable action claim to the existing
 mailbox row. The composed usage system adds no second admission gate, persisted
 forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
-balance, automatic model switch, custom card form, App Clip, or mini app. It
-does not add a general Stripe API tool: the subscription action contract
+wallet or usage account, automatic model switch, custom card form, App Clip,
+or mini app. It does not add a general Stripe API tool: the subscription action contract
 exposes only the three current web-owned operations above, and personal usage
-top-ups remain an authenticated Stripe-hosted Settings handoff. Group and
-Family funding remain unimplemented.
+top-ups remain an authenticated Stripe-hosted Settings handoff. Group funding
+uses the existing join code and synthetic member through an authenticated
+fixed-pack page; anonymous and Family funding remain unimplemented.
 
 ## Deployment
 
