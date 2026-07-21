@@ -25,6 +25,7 @@ interface ResultsTabProps {
   onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
+  showFinishedOutcomeSummary?: boolean;
   showHeader?: boolean;
   startAction?: ReactNode;
 }
@@ -57,6 +58,7 @@ export function ResultsTab({
   onPrivateRunRetry,
   privateRunError,
   privateRunStatus,
+  showFinishedOutcomeSummary = true,
   showHeader = true,
   startAction,
 }: ResultsTabProps) {
@@ -158,7 +160,7 @@ export function ResultsTab({
               : savedOutcomeStatus === "unavailable"
                 ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
                 : savedOutcomeStatus === "available"
-                  ? "Your canonical saved analysis is shown below, but it did not include comparable metric windows to chart."
+                  ? "Your run is saved privately in your vault, but it does not include comparable metric windows to chart."
                   : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
             : isPaused
               ? "Your run is saved privately in your vault. Resume it to keep following the protocol and see outcomes here later."
@@ -175,7 +177,7 @@ export function ResultsTab({
         />
       )}
 
-      {isFinished && experiment.summary && (
+      {showFinishedOutcomeSummary && isFinished && experiment.summary && (
         <FinishedOutcomeSummary
           confidence={experiment.outcomeConfidence}
           detail={experiment.summaryDetail}
@@ -188,6 +190,9 @@ export function ResultsTab({
       ) : null}
 
       <ResultsSummary
+        outcomeConfidence={!showFinishedOutcomeSummary && isFinished
+          ? experiment.outcomeConfidence
+          : undefined}
         signals={experiment.signals}
         trends={experiment.trends}
         schedule={experiment.schedule}
