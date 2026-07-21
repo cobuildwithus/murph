@@ -288,6 +288,60 @@ describe('notification audience authority integration', () => {
     expect(boundaries.deliverMessage).not.toHaveBeenCalled()
   })
 
+  it('keeps exact text without first-contact policy on a detached session', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'linq-exact-detached-session-',
+    )
+    cleanupPaths.push(parentRoot)
+    const locator = {
+      actorId: 'h1_777777777777777777777777',
+      channel: 'linq',
+      identityId: 'h1_888888888888888888888888',
+      threadId: 'h1_999999999999999999999999',
+      threadIsDirect: true,
+    } as const
+    const executionContext = {
+      hosted: {
+        defaultTarget: modelTarget,
+        memberId: 'member-exact-detached',
+        userEnvKeys: [],
+      },
+    } as const
+
+    const notification = await sendAssistantNotificationLocal({
+      ...locator,
+      bindingDeliveryTarget: locator.threadId,
+      deliveryIdempotencyKey: 'group-join:member-exact-detached',
+      deliveryKind: 'thread',
+      deliveryTarget: locator.threadId,
+      executionContext,
+      instructions: 'Send the exact group confirmation.',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: 'You joined the group.',
+      },
+      vault: vaultRoot,
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(notification.session.providerOptions.sandbox).toBe('read-only')
+
+    const attended = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: modelTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext,
+        prompt: 'What did I miss?',
+        vault: vaultRoot,
+      },
+    })
+
+    expect(attended.created).toBe(true)
+    expect(attended.session.sessionId).not.toBe(notification.session.sessionId)
+    expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
+  })
+
   it('keeps an exact Telegram welcome on the attended conversation session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'telegram-exact-welcome-continuity-',
