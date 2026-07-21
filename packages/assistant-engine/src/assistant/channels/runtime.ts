@@ -24,6 +24,7 @@ import {
   type ElevenLabsFetch,
 } from '@murphai/operator-config/elevenlabs-runtime'
 import {
+  assertTelegramAuthorityBoundTarget,
   deleteTelegramMessages,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
@@ -247,6 +248,7 @@ export async function sendTelegramImageMessage(
     const image = media[index]!
     try {
       const delivered = await sendTelegramPhoto({
+        authorityBoundTarget: dependencies.authorityBoundTarget,
         baseUrl,
         caption: index === 0 ? caption : null,
         fetchImplementation,
@@ -418,7 +420,10 @@ export async function sendPreparedTelegramVoiceMemoMessage(
     replyToMessageId?: string | null
     targetOverride?: string | null
   },
-  dependencies: Pick<TelegramRuntimeDependencies, 'signal'> = {},
+  dependencies: Pick<
+    TelegramRuntimeDependencies,
+    'authorityBoundTarget' | 'signal'
+  > = {},
 ): Promise<{
   cleanupTargetAliases?: string[]
   providerMessageId: string | null
@@ -432,6 +437,7 @@ export async function sendPreparedTelegramVoiceMemoMessage(
     : input.targetLabel
 
   return await sendTelegramVoiceMemo({
+    authorityBoundTarget: dependencies.authorityBoundTarget,
     baseUrl: input.baseUrl,
     bytes: input.bytes,
     contentType: input.contentType,
@@ -1122,6 +1128,7 @@ async function sendTelegramMessageDetailed(
   for (const chunk of chunks) {
     try {
       const delivered = await sendTelegramTextChunk({
+        authorityBoundTarget: dependencies.authorityBoundTarget,
         baseUrl,
         entities: buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
@@ -1323,6 +1330,7 @@ function resolveAgentmailThreadReplyMessageId(input: {
 }
 
 async function sendTelegramTextChunk(input: {
+  authorityBoundTarget?: string | null
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
@@ -1343,6 +1351,11 @@ async function sendTelegramTextChunk(input: {
   let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
+
+  assertTelegramAuthorityBoundTarget({
+    authorityBoundTarget: input.authorityBoundTarget,
+    target: targetLabel,
+  })
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
@@ -1376,6 +1389,10 @@ async function sendTelegramTextChunk(input: {
     }
 
     if (outcome.kind === 'migrated') {
+      assertTelegramAuthorityBoundTarget({
+        authorityBoundTarget: input.authorityBoundTarget,
+        target: outcome.targetLabel,
+      })
       cleanupTargetAliases.add(targetLabel)
       target = outcome.target
       targetLabel = outcome.targetLabel
@@ -1402,6 +1419,7 @@ async function sendTelegramTextChunk(input: {
 }
 
 async function sendTelegramPhoto(input: {
+  authorityBoundTarget?: string | null
   baseUrl: string
   caption: DecoratedTelegramPhotoCaption | null
   fetchImplementation: TelegramFetchImplementation
@@ -1421,6 +1439,11 @@ async function sendTelegramPhoto(input: {
   let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
+
+  assertTelegramAuthorityBoundTarget({
+    authorityBoundTarget: input.authorityBoundTarget,
+    target: targetLabel,
+  })
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
@@ -1454,6 +1477,10 @@ async function sendTelegramPhoto(input: {
     }
 
     if (outcome.kind === 'migrated') {
+      assertTelegramAuthorityBoundTarget({
+        authorityBoundTarget: input.authorityBoundTarget,
+        target: outcome.targetLabel,
+      })
       cleanupTargetAliases.add(targetLabel)
       target = outcome.target
       targetLabel = outcome.targetLabel
@@ -1480,6 +1507,7 @@ async function sendTelegramPhoto(input: {
 }
 
 async function sendTelegramVoiceMemo(input: {
+  authorityBoundTarget?: string | null
   baseUrl: string
   bytes: Uint8Array
   contentType: 'audio/mpeg'
@@ -1499,6 +1527,11 @@ async function sendTelegramVoiceMemo(input: {
   let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
+
+  assertTelegramAuthorityBoundTarget({
+    authorityBoundTarget: input.authorityBoundTarget,
+    target: targetLabel,
+  })
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
@@ -1532,6 +1565,10 @@ async function sendTelegramVoiceMemo(input: {
     }
 
     if (outcome.kind === 'migrated') {
+      assertTelegramAuthorityBoundTarget({
+        authorityBoundTarget: input.authorityBoundTarget,
+        target: outcome.targetLabel,
+      })
       cleanupTargetAliases.add(targetLabel)
       target = outcome.target
       targetLabel = outcome.targetLabel

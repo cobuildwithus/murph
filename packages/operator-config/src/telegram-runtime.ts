@@ -47,6 +47,27 @@ export type TelegramMessageReactionDelivery = {
   targetMessageId: string
 }
 
+export function assertTelegramAuthorityBoundTarget(input: {
+  authorityBoundTarget?: string | null
+  target: string
+}): void {
+  const authorityBoundTarget = normalizeNullableString(input.authorityBoundTarget)
+  if (!authorityBoundTarget || authorityBoundTarget === input.target) {
+    return
+  }
+
+  throw Object.assign(
+    new VaultCliError(
+      'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+      'Telegram delivery target no longer matches its authorized external thread route.',
+    ),
+    {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    },
+  )
+}
+
 export function resolveTelegramBotToken(
   env: NodeJS.ProcessEnv,
 ): string | null {
@@ -81,6 +102,7 @@ export async function setTelegramMessageReaction(
     targetMessageId: string
   },
   dependencies: {
+    authorityBoundTarget?: string | null
     env?: NodeJS.ProcessEnv
     fetchImplementation?: TelegramFetchImplementation
     signal?: AbortSignal
@@ -109,6 +131,10 @@ export async function setTelegramMessageReaction(
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
   assertTelegramReactionTargetSupported(target)
+  assertTelegramAuthorityBoundTarget({
+    authorityBoundTarget: dependencies.authorityBoundTarget,
+    target: serializeTelegramThreadTarget(target),
+  })
   const targetMessageId = normalizeTelegramReactionMessageId(input.targetMessageId)
   const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
     /\/$/u,
@@ -163,10 +189,15 @@ export async function setTelegramMessageReaction(
     errorContext.migrateToChatId &&
     errorContext.migrateToChatId !== target.chatId
   ) {
-    target = {
+    const migratedTarget = {
       ...target,
       chatId: errorContext.migrateToChatId,
     }
+    assertTelegramAuthorityBoundTarget({
+      authorityBoundTarget: dependencies.authorityBoundTarget,
+      target: serializeTelegramThreadTarget(migratedTarget),
+    })
+    target = migratedTarget
     response = await sendReaction()
     payload = await readTelegramResponsePayload(response)
     if (response.ok && isTelegramSuccessResponse(payload)) {

@@ -684,6 +684,49 @@ test('setTelegramMessageReaction retries once with a migrated chat id', async ()
   })
 })
 
+test('setTelegramMessageReaction blocks an authority-bound migrated retry', async () => {
+  const fetchImplementation = vi
+    .fn()
+    .mockResolvedValueOnce(createTelegramResponse({
+      ok: false,
+      description: 'chat migrated',
+      error_code: 400,
+      parameters: {
+        migrate_to_chat_id: 456,
+      },
+    }, 400))
+    .mockResolvedValueOnce(createTelegramResponse({ ok: true, result: true }))
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'heart',
+          target: '123:topic:42',
+          targetMessageId: '77',
+        },
+        {
+          authorityBoundTarget: '123:topic:42',
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error: unknown) => {
+      expect(error).toMatchObject({
+        code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+        deliveryMayHaveSucceeded: false,
+        retryable: false,
+      })
+      return true
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('setTelegramMessageReaction surfaces retryable rate limits without local retry delay', async () => {
   const fetchImplementation = vi.fn(async () =>
     createTelegramResponse({

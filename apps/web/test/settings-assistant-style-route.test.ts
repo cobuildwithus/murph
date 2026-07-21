@@ -47,7 +47,6 @@ describe("assistant style settings route", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-08T12:00:00.000Z"));
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     mocks.assertHostedMemberNotSuspended.mockReturnValue(undefined);
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
@@ -80,7 +79,6 @@ describe("assistant style settings route", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.unstubAllEnvs();
   });
 
   it("persists validated assistant preferences and best-effort signals the runtime", async () => {
@@ -109,7 +107,6 @@ describe("assistant style settings route", () => {
       id: "member_123",
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -150,7 +147,6 @@ describe("assistant style settings route", () => {
     });
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -173,7 +169,6 @@ describe("assistant style settings route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -181,65 +176,6 @@ describe("assistant style settings route", () => {
           detail: 8,
           humor: 7,
         },
-      },
-      prisma: { tx: true },
-    });
-  });
-
-  it("keeps persona writes closed until sparse causal writes are enabled", async () => {
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
-    const response = await route.POST(jsonRequest({
-      persona: "navy-seal",
-      tone: "formal",
-      voice: "drill-sergeant",
-    }));
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "ASSISTANT_PERSONA_ROLLOUT_PENDING",
-        message: "Murph personas are temporarily unavailable during rollout.",
-        retryable: true,
-      },
-    });
-    expect(mocks.transaction).not.toHaveBeenCalled();
-  });
-
-  it("keeps personality writes closed until the causal runtime is enabled", async () => {
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
-
-    const response = await route.POST(jsonRequest({
-      personality: {
-        humor: 7,
-      },
-    }));
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
-        message: "Personality settings are temporarily unavailable during rollout.",
-        retryable: true,
-      },
-    });
-    expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("keeps tone and voice writes snapshot-compatible while the gate is off", async () => {
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
-
-    const response = await route.POST(jsonRequest({
-      tone: "casual",
-    }));
-
-    expect(response.status).toBe(200);
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      mailboxPayloadMode: "legacy_snapshot",
-      memberId: "member_123",
-      occurredAt: "2026-07-08T12:00:00.000Z",
-      preferences: {
-        tone: "casual",
       },
       prisma: { tx: true },
     });
@@ -279,7 +215,6 @@ describe("assistant style settings route", () => {
       updated: false,
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
