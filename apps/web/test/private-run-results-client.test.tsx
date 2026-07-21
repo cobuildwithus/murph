@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   ),
   resultsTab: vi.fn((props: {
     experiment: ResultsTabExperiment;
+    showFinishedOutcomeSummary?: boolean;
     showHeader?: boolean;
   }) =>
     createElement("div", { "data-results-title": props.experiment.title })
@@ -86,9 +87,15 @@ test("resolves the route by exact private experiment id and renders its result p
   assert.equal(experiment?.baselineDays, 3);
   assert.equal(experiment?.durationDays, 14);
   assert.equal(experiment?.outcomeConfidence, "low");
+  assert.equal(
+    mocks.resultsTab.mock.calls[0]?.[0]?.showFinishedOutcomeSummary,
+    false,
+  );
   assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.showHeader, false);
   assert.match(markup, /Private run title/u);
   assert.match(markup, /Completed.*Started Jul 1, 2026.*Saved privately in your vault/u);
+  assert.doesNotMatch(markup, /max-w-6xl/u);
+  assert.doesNotMatch(markup, /mx-auto/u);
 });
 
 test("keeps an unknown private duration absent from the results view", () => {
