@@ -53,12 +53,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunks, so path comments, content hashes, and platform-specific emit jitter
 // have more surface.
 //
-// The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
-// ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
-// dynamic (non-boot) chunk jitter should not force a baseline bump. Ratchet it
-// too if total creep becomes the concern. Investigate the listed largest
-// inputs before raising either.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
+// The total ceiling remains a fixed backstop. #397 shrank the bundle and set
+// the prior 9,300,000B ceiling. PR #750's reviewed consented group-to-member
+// ask path measured 9,339,125B on CI Linux, 49,868B above its exact-base
+// measurement of 9,289,257B. Advance to a round 9,350,000B ceiling, preserving
+// 10,875B of headroom without widening the boot-path budgets below. Investigate
+// the listed largest inputs before raising it again.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_350_000;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
