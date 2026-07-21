@@ -530,7 +530,13 @@ function BiomarkerListSkeleton() {
           <div className="grid md:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((item) => (
               <div
-                className="flex min-h-24 flex-col justify-center gap-2 border-t border-border/70 px-4 py-4 sm:px-5"
+                className={cn(
+                  "flex min-h-24 flex-col justify-center gap-2 border-t border-border/70 px-4 py-4 sm:px-5",
+                  item === 2 && "md:col-span-2 xl:col-span-1",
+                  item === 0 && "md:border-r",
+                  "xl:border-r-0",
+                  item < 2 && "xl:border-r",
+                )}
                 key={item}
               >
                 <Skeleton className="h-5 w-3/4 motion-reduce:animate-none" />
