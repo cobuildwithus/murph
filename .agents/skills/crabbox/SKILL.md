@@ -67,5 +67,12 @@ Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,
 command transport, and idle expiry. Crabbox owns provider selection, the local
 claim, command invocation, timing, and cleanup. Preserve the printed Testbox ID,
 Crabbox timing summary, and linked Actions run in verification evidence.
+On the standard 16-vCPU Testbox, `verify:acceptance` automatically selects the
+same bounded composed-parallel profile as a capable local host; confirm the
+printed `resources` line rather than adding provider-specific worker overrides.
+The protected CLI phase uses four CLI workers with one two-worker package peer;
+CLI completion releases the two heavy app steps and lets package coverage refill
+to five two-worker processes. The scheduled Vitest total stays below the host's
+CPU count.
 Audits, parent final review, plan/ledger closure, commits, pushes, and PR work
 remain local.

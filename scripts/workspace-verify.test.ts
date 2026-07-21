@@ -49,6 +49,38 @@ function runShellHarness(source: string) {
 }
 
 describe("workspace verification orchestration", () => {
+  it("enables composed acceptance parallelism only on capable non-CI hosts", () => {
+    const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
+      "resolve_composed_acceptance_parallel_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+detected_cpus=16
+detect_logical_cpu_count() { printf '%s\\n' "$detected_cpus"; }
+
+${resolveComposedAcceptanceDefault}
+
+CI=
+verification_command=verify:acceptance
+resolve_composed_acceptance_parallel_default
+
+detected_cpus=11
+resolve_composed_acceptance_parallel_default
+
+detected_cpus=16
+verification_command=test:coverage
+resolve_composed_acceptance_parallel_default
+
+CI=1
+verification_command=verify:acceptance
+resolve_composed_acceptance_parallel_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("1\n0\n0\n0\n");
+  });
+
   it("resolves package coverage concurrency to one value in every environment", () => {
     const resolveConcurrencyDefault = extractWorkspaceVerifyFunction(
       "resolve_package_coverage_concurrency_default",
@@ -57,13 +89,14 @@ describe("workspace verification orchestration", () => {
 set -euo pipefail
 
 local_concurrency_default() {
-  printf '6\\n'
+  printf '%s\\n' "$1"
 }
 
 ${resolveConcurrencyDefault}
 
 CI=1
 shared_host_mode=0
+composed_acceptance_parallel=0
 resolve_package_coverage_concurrency_default
 
 CI=
@@ -72,10 +105,156 @@ resolve_package_coverage_concurrency_default
 
 shared_host_mode=0
 resolve_package_coverage_concurrency_default
+
+composed_acceptance_parallel=1
+resolve_package_coverage_concurrency_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("1\n2\n6\n");
+    expect(result.stdout).toBe("1\n2\n6\n5\n");
+  });
+
+  it("leaves subprocess headroom while CLI coverage is active", () => {
+    const resolveCliActiveConcurrency = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_cli_active_concurrency_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${resolveCliActiveConcurrency}
+
+CI=1
+shared_host_mode=0
+composed_acceptance_parallel=0
+resolve_package_coverage_cli_active_concurrency_default
+
+CI=
+shared_host_mode=1
+resolve_package_coverage_cli_active_concurrency_default
+
+shared_host_mode=0
+resolve_package_coverage_cli_active_concurrency_default
+
+composed_acceptance_parallel=1
+resolve_package_coverage_cli_active_concurrency_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("1\n1\n4\n2\n");
+  });
+
+  it("reserves capable-host CPU headroom for overlapping app work", () => {
+    const resolvePackageWorkers = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_vitest_max_workers_default",
+    );
+    const resolveAppWorkers = extractWorkspaceVerifyFunction(
+      "resolve_acceptance_app_vitest_max_workers_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+detected_cpus=16
+detect_logical_cpu_count() { printf '%s\\n' "$detected_cpus"; }
+normalize_positive_integer() {
+  if [[ "$1" =~ ^[1-9][0-9]*$ ]]; then printf '%s\\n' "$1"; else printf '%s\\n' "$2"; fi
+}
+local_worker_budget_default() { printf 'unexpected\\n'; }
+
+${resolvePackageWorkers}
+${resolveAppWorkers}
+
+CI=
+composed_acceptance_parallel=1
+package_coverage_concurrency_limit=5
+resolve_package_coverage_vitest_max_workers_default
+resolve_acceptance_app_vitest_max_workers_default
+
+detected_cpus=12
+resolve_package_coverage_vitest_max_workers_default
+resolve_acceptance_app_vitest_max_workers_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("2\n2\n1\n1\n");
+  });
+
+  it("gives the protected CLI phase a bounded quarter-host worker pool", () => {
+    const resolveCliWorkers = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_cli_vitest_max_workers_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+detected_cpus=16
+detect_logical_cpu_count() { printf '%s\\n' "$detected_cpus"; }
+normalize_positive_integer() {
+  if [[ "$1" =~ ^[1-9][0-9]*$ ]]; then printf '%s\\n' "$1"; else printf '%s\\n' "$2"; fi
+}
+
+${resolveCliWorkers}
+
+unset MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS
+composed_acceptance_parallel=1
+package_coverage_vitest_max_workers=2
+resolve_package_coverage_cli_vitest_max_workers_default
+
+detected_cpus=12
+resolve_package_coverage_cli_vitest_max_workers_default
+
+composed_acceptance_parallel=0
+resolve_package_coverage_cli_vitest_max_workers_default
+
+composed_acceptance_parallel=1
+MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS=4
+package_coverage_vitest_max_workers=4
+resolve_package_coverage_cli_vitest_max_workers_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("4\n3\n2\n4\n");
+  });
+
+  it("keeps ordinary shared-host and CI lanes conservative", () => {
+    const resolveLocalParallelDefault = extractWorkspaceVerifyFunction(
+      "resolve_local_parallel_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${resolveLocalParallelDefault}
+
+CI=
+shared_host_mode=1
+composed_acceptance_parallel=0
+resolve_local_parallel_default
+
+composed_acceptance_parallel=1
+resolve_local_parallel_default
+
+shared_host_mode=0
+resolve_local_parallel_default
+
+CI=1
+resolve_local_parallel_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("0\n1\n1\n0\n");
+  });
+
+  it("overlaps independent capable-host acceptance preparation", () => {
+    const runTestCoverage = extractWorkspaceVerifyFunction("run_test_coverage");
+
+    expect(runTestCoverage).toContain(
+      'run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues &',
+    );
+    expect(runTestCoverage).toContain(
+      'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked" &',
+    );
+    expect(runTestCoverage).toContain(
+      'wait_for_background_jobs "$doc_gardening_pid" "$runtime_artifacts_pid"',
+    );
+    expect(runTestCoverage).toContain("prepared_runtime_artifacts=1");
   });
 
   it("holds the parent artifact lock for commands that write or concurrently consume shared outputs", () => {
@@ -291,6 +470,9 @@ run_command_with_retry() {
 
 ${runAppVerify}
 
+composed_acceptance_parallel=0
+acceptance_app_vitest_max_workers=2
+acceptance_cli_coverage_ready_file=
 run_app_verify_command_with_retry apps/web 1 1 1
 run_app_verify_command_with_retry apps/cloudflare 1 1 1
 run_app_verify_command_with_retry apps/web 0 0 0
@@ -307,6 +489,218 @@ run_app_verify_command_with_retry apps/cloudflare 0 0 0
     expect(preparedCloudflare).not.toContain("MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK");
     expect(standaloneWeb).not.toContain("VERIFY_SKIP_TYPECHECK");
     expect(standaloneCloudflare).not.toContain("VERIFY_SKIP_TYPECHECK");
+  });
+
+  it("passes one bounded app worker budget while keeping Cloudflare steps serial", () => {
+    const runAppVerify = extractWorkspaceVerifyFunction(
+      "run_app_verify_command_with_retry",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -uo pipefail
+
+unset MURPH_APP_VITEST_MAX_WORKERS MURPH_VERIFY_STEP_PARALLEL
+composed_acceptance_parallel=1
+acceptance_app_vitest_max_workers=2
+acceptance_cli_coverage_ready_file=/tmp/murph-cli-ready-test
+
+run_command_with_retry() {
+  shift
+  printf '%s\\n' "$*"
+}
+
+${runAppVerify}
+
+run_app_verify_command_with_retry apps/web 1 1 1
+run_app_verify_command_with_retry apps/cloudflare 1 1 1
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    const [web, cloudflare] = result.stdout.trim().split("\n");
+
+    expect(web).toContain("MURPH_APP_VITEST_MAX_WORKERS=2");
+    expect(web).toContain("MURPH_VERIFY_STEP_PARALLEL=1");
+    expect(web).toContain("MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE=/tmp/murph-cli-ready-test");
+    expect(cloudflare).toContain("MURPH_APP_VITEST_MAX_WORKERS=2");
+    expect(cloudflare).toContain("MURPH_VERIFY_STEP_PARALLEL=0");
+    expect(cloudflare).toContain("MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE=/tmp/murph-cli-ready-test");
+  });
+
+  it("holds Cloudflare tests, but not setup, until CLI coverage completes", () => {
+    const cloudflareVerify = readFileSync(
+      path.join(repoRoot, "apps", "cloudflare", "scripts", "verify-fast.sh"),
+      "utf8",
+    );
+
+    const waitIndex = cloudflareVerify.indexOf("wait_for_acceptance_cli_coverage\n");
+    expect(waitIndex).toBeGreaterThan(
+      cloudflareVerify.indexOf('if [[ "$skip_typecheck" == "1" ]]'),
+    );
+    expect(waitIndex).toBeLessThan(
+      cloudflareVerify.indexOf('if [[ "$verify_step_parallel" != "1" ]]'),
+    );
+  });
+
+  it("publishes the CLI coverage readiness marker only when configured", () => {
+    const markCliCoverageComplete = extractWorkspaceVerifyFunction(
+      "mark_acceptance_cli_coverage_complete",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${markCliCoverageComplete}
+
+ready_dir="$(mktemp -d)"
+acceptance_cli_coverage_ready_file=
+mark_acceptance_cli_coverage_complete
+
+acceptance_cli_coverage_ready_file="$ready_dir/ready"
+mark_acceptance_cli_coverage_complete
+[[ -f "$acceptance_cli_coverage_ready_file" ]]
+printf 'ready\\n'
+rm -rf -- "$ready_dir"
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("ready\n");
+  });
+
+  it("keeps app tests blocked through CLI completion and releases them on success or failure", () => {
+    const markCliCoverageComplete = extractWorkspaceVerifyFunction(
+      "mark_acceptance_cli_coverage_complete",
+    );
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const cloudflareVerify = readFileSync(
+      path.join(repoRoot, "apps", "cloudflare", "scripts", "verify-fast.sh"),
+      "utf8",
+    );
+    const waitForAcceptanceCliCoverage = cloudflareVerify.match(
+      /^wait_for_acceptance_cli_coverage\(\) \{[\s\S]*?^\}/m,
+    )?.[0];
+
+    expect(waitForAcceptanceCliCoverage).toBeTruthy();
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${markCliCoverageComplete}
+
+${runAllPackageCoverage}
+
+${waitForAcceptanceCliCoverage}
+
+register_background_pid() { return 0; }
+unregister_background_pid() { return 0; }
+verify_log() { return 0; }
+
+run_workspace_package_coverage() {
+  local package_dir="$1"
+
+  if [[ "$package_dir" != "packages/cli" ]]; then
+    return 0
+  fi
+
+  : >"$cli_started_file"
+  while [[ ! -f "$cli_release_file" ]]; do
+    command sleep 0.01
+  done
+
+  [[ "$cli_should_fail" != "1" ]]
+}
+
+exercise_interlock() {
+  local case_name="$1"
+  local cli_should_fail="$2"
+  local expected_status="$3"
+  local case_dir="$sandbox/$case_name"
+  local scheduler_status=0
+  local observed_status
+  mkdir -p "$case_dir"
+
+  cli_started_file="$case_dir/cli-started"
+  cli_release_file="$case_dir/release-cli"
+  acceptance_cli_coverage_ready_file="$case_dir/cli-ready"
+  export MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE="$acceptance_cli_coverage_ready_file"
+
+  (
+    wait_for_acceptance_cli_coverage
+    : >"$case_dir/app-released"
+  ) 2>"$case_dir/app-wait.log" &
+  local app_pid="$!"
+
+  (
+    run_all_package_coverage 1 || scheduler_status="$?"
+    printf '%s\n' "$scheduler_status" >"$case_dir/scheduler-status"
+  ) &
+  local scheduler_pid="$!"
+
+  for _ in {1..200}; do
+    if [[ -f "$cli_started_file" ]] && grep -q "wait for CLI coverage" "$case_dir/app-wait.log"; then
+      break
+    fi
+    command sleep 0.01
+  done
+
+  [[ -f "$cli_started_file" ]]
+  grep -q "wait for CLI coverage" "$case_dir/app-wait.log"
+  command sleep 0.05
+  [[ ! -f "$case_dir/app-released" ]]
+  [[ ! -f "$acceptance_cli_coverage_ready_file" ]]
+
+  : >"$cli_release_file"
+  wait "$scheduler_pid"
+  wait "$app_pid"
+
+  [[ -f "$case_dir/app-released" ]]
+  [[ -f "$acceptance_cli_coverage_ready_file" ]]
+  observed_status="$(<"$case_dir/scheduler-status")"
+  [[ "$observed_status" == "$expected_status" ]]
+}
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$sandbox"' EXIT
+package_coverage_concurrency_limit=2
+package_coverage_cli_active_concurrency_limit=2
+
+exercise_interlock success 0 0
+exercise_interlock failure 1 1
+printf 'interlock-covered\n'
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("interlock-covered\n");
+  });
+
+  it("keeps hosted-web parallel cleanup safe after every child is reaped", () => {
+    const webVerify = readFileSync(
+      path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
+      "utf8",
+    );
+    const cleanupBackgroundJobs = webVerify.match(
+      /^cleanup_background_jobs\(\) \{[\s\S]*?^\}/m,
+    )?.[0];
+    const runNextBuild = webVerify.match(
+      /^run_next_build\(\) \{[\s\S]*?^\}/m,
+    )?.[0];
+
+    expect(cleanupBackgroundJobs).toBeTruthy();
+    expect(runNextBuild).toBeTruthy();
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+owned_background_job_pids=()
+terminate_owned_background_job() { return 99; }
+
+${cleanupBackgroundJobs}
+
+cleanup_background_jobs
+printf 'clean\\n'
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("clean\n");
+    expect(runNextBuild!.indexOf("wait_for_acceptance_cli_coverage"))
+      .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
   });
 
   it("gives only Assistant Engine package coverage the repository-owned heap", () => {
@@ -506,6 +900,43 @@ run_test_diff_package_tests packages/core
     expect(result.stdout).not.toContain("boundary-called");
   });
 
+  it("gives affected Assistant Engine tests the proven heap ceiling", () => {
+    const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
+      "run_test_diff_package_tests",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -uo pipefail
+
+test_diff_workspace_concurrency=1
+test_diff_vitest_max_workers=1
+
+run_command_with_retry() {
+  printf '%s | %s\\n' "$1" "\${*:2}"
+  return 0
+}
+
+run_diff_contracts_test_with_workspace_artifact_lock() {
+  return 0
+}
+
+run_diff_package_boundary_verification() {
+  return 0
+}
+
+${runTestDiffPackageTests}
+
+run_test_diff_package_tests packages/assistant-engine packages/core
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      "Affected package test for packages/assistant-engine | env NODE_OPTIONS=--max-old-space-size=6144 MURPH_VITEST_MAX_WORKERS=1 pnpm --dir packages/assistant-engine test\n",
+    );
+    expect(result.stdout).toContain(
+      "Affected package tests | env MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=1 --filter ./packages/core test\n",
+    );
+  });
+
   it("propagates both-app verification failures", () => {
     const runTestDiffAppVerification = extractWorkspaceVerifyFunction(
       "run_test_diff_app_verification",
@@ -562,7 +993,7 @@ run_test_diff_app_verification apps/web apps/cloudflare
     );
   });
 
-  it("applies one worker budget and preserves safe root CLI grouping", () => {
+  it("applies bounded worker budgets and preserves safe root CLI grouping", () => {
     const rootVitestConfig = readFileSync(path.join(repoRoot, "vitest.config.ts"), "utf8");
 
     expect(rootVitestConfig).toContain("maxWorkers: rootRepoVitestMaxWorkers");
@@ -575,9 +1006,8 @@ run_test_diff_app_verification apps/web apps/cloudflare
       expect(rootVitestConfig).toContain(`"${projectName}"`);
     }
     expect(rootVitestConfig).toContain("ROOT_PARALLEL_CLI_PROJECTS.has");
-    expect(workspaceVerify).toContain(
-      'local_worker_budget_default "$package_coverage_concurrency_limit" 1',
-    );
+    expect(workspaceVerify).toContain("worker_budget=$((cpu_count / 8))");
+    expect(workspaceVerify).toContain("worker_budget=$((cpu_count / 4))");
   });
 
   it("keeps the root tools incremental cache disposable", () => {

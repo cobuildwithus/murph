@@ -18916,7 +18916,11 @@ async function waitForProcessKillWithFakeTimers(
   pid: number,
   signal: NodeJS.Signals,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // A replacement can be queued behind the failed-stop lock's promise cleanup.
+  // Full-workspace coverage load can require more than 200 microtask turns even
+  // though no wall-clock delay is involved, so keep this fake-time wait bounded
+  // to two virtual seconds rather than a scheduler-sensitive iteration count.
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
     if (
       vi.mocked(process.kill).mock.calls.some(
         (call) => call[0] === pid && call[1] === signal,
