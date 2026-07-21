@@ -398,6 +398,16 @@ test("requires exactly one session capture field for a subjective primary metric
     metricKey: "blood-urea-nitrogen",
     requiresSessionField: false,
   });
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:sleep-efficiency",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:sleep-efficiency",
+    issue: null,
+    matchingSessionFieldIds: [],
+    metricKey: "sleep-efficiency",
+    requiresSessionField: false,
+  });
 });
 
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {
