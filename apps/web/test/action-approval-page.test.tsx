@@ -156,11 +156,11 @@ describe("action approval page", () => {
       markup,
       /Return to the Murph conversation where this request started\./,
     );
-    assert.equal(markup.includes("I approved the request."), false);
+    assert.equal(markup.includes("I approved the secure request."), false);
     assert.equal(markup.includes('href="'), false);
   });
 
-  it("redirects an automatically resumed approval through a bare conversation link", async () => {
+  it("redirects an approved revisit with the confirmation prefilled", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -173,7 +173,7 @@ describe("action approval page", () => {
     });
     mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
       {
-        href: "sms:+15550100001",
+        href: "sms:+15550100001?body=I%20approved%20the%20secure%20request.",
         kind: "text",
         label: "Messages",
       },
@@ -186,9 +186,45 @@ describe("action approval page", () => {
     await stream.allReady;
 
     expect(mocks.resolveHostedMurphContactOptions).toHaveBeenCalledWith({
+      message: {
+        body: "I approved the secure request.",
+      },
       preferredKind: "text",
     });
-    expect(mocks.redirect).toHaveBeenCalledWith("sms:+15550100001");
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "sms:+15550100001?body=I%20approved%20the%20secure%20request.",
+    );
+  });
+
+  it("shows the approval confirmation when contact resolution is unavailable", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Share the requested file.",
+        title: "Share this file?",
+      },
+      returnContactKind: "text",
+      status: "approved",
+    });
+    mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+      new Error("Contact resolution unavailable"),
+    );
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    assert.match(
+      markup,
+      /Return to the Murph conversation where this request started and send:/,
+    );
+    assert.match(markup, /I approved the secure request\./);
+    assert.equal(markup.includes('href="'), false);
   });
 
   it("does not request a confirmation when contact resolution fails", async () => {

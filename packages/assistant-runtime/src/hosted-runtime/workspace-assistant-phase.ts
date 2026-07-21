@@ -146,7 +146,6 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
-  retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
@@ -3048,6 +3047,19 @@ function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
     && systemMailboxPreparation.item.wake.kind === "runtime.manual-requested";
 }
 
+function isCausalPendingEffectsReconciliation(
+  systemMailboxPreparation: HostedSystemMailboxPreparation,
+): boolean {
+  // This wake names one already-persisted approval effect. Finishing that exact
+  // continuation is part of the member's foreground action, not a background
+  // scan that should yield to a later chat message.
+  return "item" in systemMailboxPreparation
+    && systemMailboxPreparation.status === "processed"
+    && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
+    && systemMailboxPreparation.item.wake.kind
+      === "runtime.pending-effects-reconcile-requested";
+}
+
 type HostedAssistantDeliveryEffects = Awaited<
   ReturnType<typeof collectHostedAssistantDeliverySideEffects>
 >;
@@ -4031,17 +4043,12 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
-  if (
+  const causalPendingEffectsReconciliationOwnsThisPass =
+    systemMailboxPreparation !== null
+    && isCausalPendingEffectsReconciliation(systemMailboxPreparation);
+  const backgroundMaintenanceYielded =
     shouldYieldAfterSystemMailboxPreparation
-    && systemMailboxPreparation?.status === "processed"
-    && systemMailboxPreparation.item.wake.kind
-      === "runtime.pending-effects-reconcile-requested"
-  ) {
-    await retainHostedSystemMailboxItemAfterForegroundPreemption({
-      item: systemMailboxPreparation.item,
-      vaultRoot: phaseInput.restored.vaultRoot,
-    });
-  }
+    && !causalPendingEffectsReconciliationOwnsThisPass;
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
@@ -4072,7 +4079,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   if (!systemMailboxPreparation) {
     if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
       return {
-        backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
+        backgroundMaintenanceYielded,
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
@@ -4093,7 +4100,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         pendingAssistantInputWakeAt,
       });
       return {
-        backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
+        backgroundMaintenanceYielded,
         continueAssistantLane: dirtyAssistantCronWakeState.dueNow,
         deviceSyncMaintenanceRan: !dirtyDeviceSyncMetrics.deviceSyncSkipped,
         initialProviderCleanupCheckpoint,
@@ -4126,7 +4133,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         pendingAssistantInputWakeAt,
       });
       return {
-        backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
+        backgroundMaintenanceYielded,
         continueAssistantLane: false,
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
@@ -4141,7 +4148,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
 
     return {
-      backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
+      backgroundMaintenanceYielded,
       continueAssistantLane: false,
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
@@ -4284,11 +4291,14 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
 
   return {
-    backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
+    backgroundMaintenanceYielded,
     continueAssistantLane:
-      systemAssistantCronWakeState.dueNow
-      || shouldYieldAfterSystemMailboxPreparation
-      || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
+      !causalPendingEffectsReconciliationOwnsThisPass
+      && (
+        systemAssistantCronWakeState.dueNow
+        || backgroundMaintenanceYielded
+        || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation)
+      ),
     initialProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
     result: mergeMemberPreferencesPrePlanningResult({
@@ -4546,7 +4556,11 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           hostedSystemMailboxRecordFailed: statusCallback.failed,
           hostedSystemMailboxRecorded: statusCallback.recorded,
         },
-        shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
+        shouldYieldBackgroundDrain: isCausalPendingEffectsReconciliation(
+          input.systemMailboxPreparation,
+        )
+          ? null
+          : input.input.shouldYieldBackgroundMaintenance ?? null,
         wake: input.systemMailboxPreparation.item.wake,
       });
     }
@@ -7361,9 +7375,12 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   preparation: HostedSystemMailboxCheckpointPreparation;
   shouldYieldAfterSystemMailboxPreparation: boolean;
 }): boolean {
+  if (input.preparation.status !== "processed") {
+    return false;
+  }
   if (
     input.shouldYieldAfterSystemMailboxPreparation
-    || input.preparation.status !== "processed"
+    && !isCausalPendingEffectsReconciliation(input.preparation)
   ) {
     return false;
   }

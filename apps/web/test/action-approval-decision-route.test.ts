@@ -133,7 +133,12 @@ describe("hosted action approval decision route", () => {
     vi.useRealTimers();
   });
 
-  it("commits approval work before signaling its mailbox pointer and returns a bare conversation link", async () => {
+  it("commits approval work before signaling its mailbox pointer and prefills the confirmation", async () => {
+    mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+      href: "sms:+15550000000?body=I%20approved%20the%20secure%20request.",
+      kind: "text",
+      label: "Text Murph",
+    });
     const response = await route.POST(
       jsonRequest({
         authorization: {
@@ -150,7 +155,7 @@ describe("hosted action approval decision route", () => {
       approvalId: APPROVAL_ID,
       expiresAt: "2026-07-10T18:15:00.000Z",
       presentation: PENDING_APPROVAL.presentation,
-      redirectTo: "sms:+15550000000",
+      redirectTo: "sms:+15550000000?body=I%20approved%20the%20secure%20request.",
       returnContactKind: "text",
       status: "approved",
     });
@@ -175,6 +180,9 @@ describe("hosted action approval decision route", () => {
       mailboxItemId: "mailbox_approval_outcome",
     });
     expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
+      message: {
+        body: "I approved the secure request.",
+      },
       preferredKind: "text",
     });
     expect(

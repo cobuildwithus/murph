@@ -69,7 +69,6 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
-  retainHostedSystemMailboxItemAfterForegroundPreemption: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
@@ -192,8 +191,6 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
-  retainHostedSystemMailboxItemAfterForegroundPreemption:
-    mocks.retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeCandidate:
     mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -11645,9 +11642,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("retains a causal approval wake when foreground input preempts reconciliation", async () => {
+  it("drains a causal approval wake before simultaneously pending foreground input", async () => {
     let shouldYield = false;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deliveryEffect = createDeliveryEffect();
     const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
     const preparation = {
       item: pendingEffectsItem,
@@ -11660,29 +11658,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed" as const,
     };
-    mocks.prepareHostedSystemMailboxItemForCheckpoint
-      .mockImplementationOnce(async () => {
-        shouldYield = true;
-        return preparation;
-      })
-      .mockResolvedValueOnce(preparation);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return preparation;
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
 
-    const preempted = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
-      shouldYieldBackgroundMaintenance,
-    }));
-
-    expect(mocks.retainHostedSystemMailboxItemAfterForegroundPreemption)
-      .toHaveBeenCalledWith({
-        item: pendingEffectsItem,
-        vaultRoot: "/tmp/murph-vault",
-      });
-    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    await preempted.afterCheckpoint?.();
-
-    shouldYield = false;
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       shouldYieldBackgroundMaintenance,
     }));
@@ -11696,6 +11679,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        shouldYieldBackgroundDelivery: null,
+        vaultRoot: "/tmp/murph-vault",
+        wake: pendingEffectsItem.wake,
+      }),
+    );
   });
 
   it("defers Codex auth terminal receipts until after the durable checkpoint", async () => {
