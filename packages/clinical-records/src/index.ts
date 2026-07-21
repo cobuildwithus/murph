@@ -9,6 +9,14 @@ import {
 } from "@murphai/contracts";
 import { z } from "zod";
 
+import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
+} from "./retrieval-limits.ts";
+
+export {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
+} from "./retrieval-limits.ts";
+
 export const CLINICAL_SOURCE_SYSTEMS = Object.freeze([
   "epic-fhir",
   "cerner-fhir",
@@ -38,7 +46,6 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
 ] as const);
 
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
-export const CLINICAL_FHIR_MAX_RETRIEVAL_SLICES = 80;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
 export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
 export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS =

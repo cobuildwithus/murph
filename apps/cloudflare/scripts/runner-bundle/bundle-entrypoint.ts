@@ -53,12 +53,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunks, so path comments, content hashes, and platform-specific emit jitter
 // have more surface.
 //
-// The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
-// ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
-// dynamic (non-boot) chunk jitter should not force a baseline bump. Ratchet it
-// too if total creep becomes the concern. Investigate the listed largest
-// inputs before raising either.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
+// The total ceiling stayed fixed at 9,300,000B after #397 shrank the bundle.
+// PR #824 intentionally adds the complete 24-query Epic retrieval plan and its
+// raw-admission support behind the existing turn-scoped lazy boundary. The
+// exact PR head measured 9,327,862B on local macOS while the entry and static
+// boot-closure budgets remained within their existing caps, so advance only by
+// that measured total overage. Investigate the listed largest inputs before
+// raising this budget again.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_327_862;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
@@ -122,6 +124,10 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/health-metrics/dist/murph-age-source-routes.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+] as const;
+
+const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
+  "/clinical-records/dist/retrieval-limits.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -306,6 +312,9 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
       const normalizedInputPath = normalizeMetafilePath(inputPath);
       if (
         RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS.some((marker) =>
+          normalizedInputPath.includes(marker)
+        )
+        && !RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS.some((marker) =>
           normalizedInputPath.includes(marker)
         )
       ) {

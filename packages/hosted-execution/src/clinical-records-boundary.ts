@@ -1,6 +1,6 @@
 import {
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
-} from "@murphai/clinical-records";
+} from "@murphai/clinical-records/retrieval-limits";
 
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
 // A JSON string can expand one UTF-16 code unit to six ASCII bytes (`\uXXXX`).
