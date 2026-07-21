@@ -1,6 +1,71 @@
 # Verification And Runtime
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
+
+## Verification Execution Location
+
+The verification matrix chooses the command and coverage surface; it does not
+require that finite CPU-heavy work execute on the developer laptop. The canonical
+root commands `pnpm test:diff <path ...>` and `pnpm verify:acceptance` pass
+through `scripts/verification-dispatch.mjs`:
+
+- CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
+- A local Codex parent in `auto` mode uses Crabbox's direct
+  `blacksmith-testbox` provider only when both CLIs are available and either
+  `MURPH_CRABBOX_BLACKSMITH=1` or `MURPH_CRABBOX_LEASE_ID` is set.
+- Other callers and unconfigured or unavailable CLIs retain the existing local
+  shared-host admission and worker budgets. Blacksmith capacity or auth failure
+  after an explicitly configured remote attempt fails that attempt instead of
+  silently duplicating it locally.
+- `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
+  Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
+  unavailable. The `:local` package aliases exist for executor diagnosis, not as
+  a normal way to skip remote proof.
+- The Testbox hydration workflow must exist on the repository default branch
+  before GitHub accepts a delegated `workflow_dispatch`. The change that first
+  introduces `.github/workflows/crabbox.yml` therefore uses local verification
+  and PR gates; after that bootstrap lands, canonical commands can create or
+  reuse Testboxes from feature branches normally.
+
+Remote execution preserves the exact underlying `workspace-verify.sh` command,
+including diff scope, reverse dependents, coverage thresholds, app verification,
+and acceptance semantics. The remote bootstrap reconciles the synced lockfile
+with `pnpm install --frozen-lockfile --prefer-offline` before verification.
+
+### Environment and Vercel boundary
+
+The default Crabbox/Blacksmith lane is synthetic and secret-free:
+
+- Blacksmith Testbox rejects Crabbox environment forwarding, and the dispatcher
+  removes any inherited `CRABBOX_ENV_ALLOW` before invoking the direct provider.
+  Do not add `--allow-env`, `--env-from-profile`, or workflow secrets to this lane.
+- Blacksmith owns sync and can transfer Git-tracked plus untracked non-ignored
+  paths. Before delegation, the dispatcher derives authorization from one
+  `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
+  modified tracked files, tracked renames/deletions, ignored files, and new files
+  whose current contents are fully staged. It refuses ordinary untracked files,
+  intent-to-add, staged-then-modified/deleted additions, unmerged states, and
+  unsupported status before Crabbox starts. It then checks the cached/tracked set
+  for known credential, vault, runtime-state, local-artifact, and private-document
+  paths. Authorized staged and modified tracked working-tree content must leave
+  the host so the Testbox verifies the exact candidate change rather than only
+  the pushed commit. `.gitignore` carries the matching normal exclusions,
+  including local Crabbox run artifacts.
+- `scripts/crabbox/run-verification.mjs` discards the received process environment,
+  preserves only basic host paths, and supplies deterministic CI-style placeholder
+  values required by hosted-web build and smoke checks. Blacksmith authentication
+  remains in the local Blacksmith CLI and never enters the test process.
+- The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
+  `.vercel`, provider, model, billing, messaging, or production credentials.
+- Canonical completion tests are expected to pass under this synthetic contract.
+  A separate direct scenario that genuinely requires Vercel development state
+  must set `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1`, remain local on an authorized
+  host, and be reported separately. Do not weaken the default Crabbox boundary;
+  a future remote live-env lane requires its own reviewed Testbox workflow with
+  repository-managed, step-scoped secrets.
+
+When Crabbox runs, record the command, result, Testbox ID, timing summary, and
+linked GitHub Actions run in the completion evidence.
 
 ## Verification Matrix
 
@@ -173,7 +238,7 @@ the advisory budget.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
 - `pnpm test:apps`: holds one parent artifact lock, prepares Health Commons output and the hosted-web Prisma client once, then executes `apps/web verify` and `apps/cloudflare verify` concurrently by default locally (serially in CI unless overridden). Both children consume the prepared inputs instead of racing their own generation and therefore realize the intended parallel app lane. Their existing internal parallelism, app-local worker caps, and acceptance skip flags remain unchanged.
 - `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. Local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. CI remains one outer process with a 50% inner cap. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, and `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS` remain explicit overrides. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
-- `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. Local acceptance may overlap apps after `MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS`, while CI overlap remains opt-in. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available, and source-artifact hygiene continues to reject private env files and generated residue.
+- `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The Assistant Engine coverage owner receives the repository-pinned `NODE_OPTIONS=--max-old-space-size=6144` already proven by release CI, while other package coverage commands retain their existing environment. Local acceptance may overlap apps after `MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS`, while CI overlap remains opt-in. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available, and source-artifact hygiene continues to reject private env files and generated residue.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. Standalone `pnpm test:coverage` remains self-contained and still runs its own guards/builds.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
@@ -212,7 +277,7 @@ the advisory budget.
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `hosted-execution` and `runtime-state` packages, and build the CLI package through the same TypeScript workspace toolchain used for local development.
 - Existing supplement-label databases receive the payload constraint as `NOT VALID`, which enforces new writes without blocking the retained pre-repair corpus. The exact guarded July 2026 repair validates it after correcting the known legacy rows; fresh tables create it as valid. `apps/web/README.md` owns the restore sequence and importer rollback floor.
 - Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam plus phone-call start contracts between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.
-- Generated-delivery ref changes cross `runtime-state`, `operator-config`, `hosted-execution`, `assistant-engine`, `assistant-runtime`, and CLI packaging. Focused verification must cover the shared exact-flat-ref predicate and portability descriptor, both persisted codecs, initial and retry reads with assistant-runtime permission adoption and identity revalidation, fail-closed quiescent cleanup across every active outbox state, encrypted checkpoint inclusion, and portable-package exclusion with generic `exports/**` retention. Producer activation additionally requires reader-compatible protected-main deployment gates and exact runner-fingerprint convergence before the writer release, followed by a hosted approval/checkpoint/destroy/restore delivery scenario and the ordinary protected-main deploy gates.
+- Generated-delivery ref changes cross `runtime-state`, `operator-config`, `hosted-execution`, `assistant-engine`, `assistant-runtime`, and CLI packaging. Focused verification must cover the shared exact-flat-ref predicate and portability descriptor, both persisted codecs, initial and retry reads with assistant-runtime permission adoption and identity revalidation, same-target post-approval cross-turn replacement rejection with pre-decision distinct-request and exact-ref retry preservation, fail-closed quiescent cleanup across every active outbox state, encrypted checkpoint inclusion, and portable-package exclusion with generic `exports/**` retention. Producer activation additionally requires reader-compatible protected-main deployment gates and exact runner-fingerprint convergence before the writer release, followed by a hosted approval/checkpoint/destroy/restore delivery scenario and the ordinary protected-main deploy gates.
 - Query-owned strict reads and lexical search now share `.runtime/projections/query.sqlite`; inbox-owned local runtime is split between `.runtime/projections/inboxd.sqlite` and `.runtime/operations/inbox/*.json`.
 - Device sync state lives only at `.runtime/operations/device-sync/state.sqlite`; Murph's CLI-managed daemon launcher state, logs, and a separate `0600` local control-token file live under `.runtime/operations/device-sync/`, with the bearer kept out of ordinary `launcher.json`; provider OAuth sessions and encrypted tokens remain outside the canonical vault.
 - `vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state under `vault/.runtime/operations/assistant/**`, including explicit conversation bindings, timestamps/turn counts, provider session references, local transcript files, inbox-routing and channel auto-reply cursors, enabled auto-reply channels, coarse turn receipts, replay-safe outbound intents, diagnostics events plus snapshots, and persisted assistant status snapshots. Hosted provider usage is not assistant runtime state; hosted runs record it directly into the web-owned usage ledger through the injected runtime platform. Durable user-facing memory now lives canonically in `bank/memory.md`, and durable scheduled assistant prompts live canonically in `bank/automations/*.md` through the top-level `memory` and `automation` command surfaces. If a datum is user-facing, queryable, or something future product features will build on, it must not start in assistant runtime first; it needs a canonical vault home or an explicit derived materialization from the start. Assistant runtime receipt/outbox/diagnostics/status mutations stay serialized under one shared assistant-runtime write lock. Scheduled newsletter parent intents may additionally carry the generated HTML and an address-free authorization proof; recipient addresses never enter this state, and the existing outbox child states remain the retry/terminal evidence. Provider-native transcript history plus channel-native send history may still stay external when adapters support them. Current outbound channel support covers Telegram, Linq, and AgentMail-backed email. Email setup can still reuse a discovered or explicit existing inbox when the API key cannot create new inboxes.

@@ -75,6 +75,28 @@ export function resolveMetricDefinitionForBiomarker(biomarkerKey: string): Metri
   return PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
 }
 
+function resolveBiomarkerMetricInput(value: string): {
+  candidateBiomarkerKey: string;
+  definition: MetricDefinition | null;
+} {
+  const normalized = value.trim().toLowerCase();
+  const slug = normalized.split(":").at(-1) ?? normalized;
+  const candidateBiomarkerKey = normalized.startsWith("biomarker:")
+    ? normalized
+    : `biomarker:${slug}`;
+  return {
+    candidateBiomarkerKey,
+    definition:
+      resolveMetricDefinitionForBiomarker(candidateBiomarkerKey) ??
+      resolveMetricDefinition(slug),
+  };
+}
+
+export function resolveCanonicalBiomarkerKey(value: string): string {
+  const { candidateBiomarkerKey, definition } = resolveBiomarkerMetricInput(value);
+  return definition?.biomarkerKey ?? candidateBiomarkerKey;
+}
+
 export type ExperimentPrimaryMetricCaptureIssue =
   | "missing_primary_biomarker"
   | "unsupported_primary_biomarker"
@@ -109,13 +131,7 @@ export function assessExperimentPrimaryMetricCapture(input: {
     };
   }
 
-  const slug = normalizedBiomarkerKey.split(":").at(-1) ?? normalizedBiomarkerKey;
-  const candidateBiomarkerKey = normalizedBiomarkerKey.startsWith("biomarker:")
-    ? normalizedBiomarkerKey
-    : `biomarker:${slug}`;
-  const definition =
-    resolveMetricDefinitionForBiomarker(candidateBiomarkerKey) ??
-    resolveMetricDefinition(slug);
+  const { candidateBiomarkerKey, definition } = resolveBiomarkerMetricInput(normalizedBiomarkerKey);
   if (!definition) {
     return {
       canonicalBiomarkerKey: candidateBiomarkerKey,

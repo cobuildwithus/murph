@@ -7,6 +7,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
+  selectBrowserVaultExperimentResults,
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
 } from "../src/browser.ts";
@@ -202,6 +203,154 @@ test("lab result selectors group measured biomarkers and chart only comparable e
     ["2020-02-01", "2023-03-01", "2025-04-01", "2026-06-01"],
   );
   assert.deepEqual(client.labResults.list({ biomarkerKey: "biomarker:missing" }), []);
+});
+
+test("lab aliases project into one comparable longitudinal biomarker", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_aliases_2024", "2024-03-01T08:00:00.000Z", [
+        { analyte: "BUN", unit: "mg/dL", value: 14 },
+        { analyte: "TSH", unit: "uIU/mL", value: 2.5 },
+        { analyte: "MCH", unit: "pg", value: 30 },
+        { analyte: "MCHC", unit: "g/dL", value: 33 },
+        { analyte: "BUN/Creatinine Ratio", value: 12 },
+      ]),
+      createLabTest("evt_aliases_2025", "2025-09-01T08:00:00.000Z", [
+        { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 16 },
+        { analyte: "Thyroid Stimulating Hormone", unit: "mIU/L", value: 3.1 },
+        { analyte: "Mean Corpuscular Hemoglobin", unit: "pg", value: 31 },
+        { analyte: "Mean Corpuscular Hemoglobin Concentration", unit: "g/dL", value: 34 },
+      ]),
+      createLabTest("evt_urea_2026", "2026-03-01T08:00:00.000Z", [
+        { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
+        { analyte: "Urea", unit: "mmol/L", value: 5 },
+      ]),
+      createLabTest("evt_unitless_aliases_2026", "2026-04-01T08:00:00.000Z", [
+        { analyte: "BUN", value: 7 },
+        { analyte: "TSH", value: 4 },
+        { analyte: "MCH", value: 32 },
+        { analyte: "MCHC", value: 35 },
+      ]),
+      createExperiment("exp_bun_alias", "bun-alias", {
+        primaryBiomarkerKey: "biomarker:bun",
+        desiredDirection: "decrease",
+        measurementAnchors: [
+          {
+            role: "baseline",
+            kind: "lab_panel",
+            recordId: "evt_aliases_2024",
+            biomarkerKeys: ["biomarker:bun"],
+          },
+          {
+            role: "followup",
+            kind: "lab_panel",
+            recordId: "evt_aliases_2025",
+            biomarkerKeys: ["biomarker:bun"],
+          },
+        ],
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const measured = selectBrowserVaultMeasuredBiomarkers(client);
+
+  assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
+    "blood-urea-nitrogen",
+    "bun-creatinine-ratio",
+    "mean-corpuscular-hemoglobin",
+    "mean-corpuscular-hemoglobin-concentration",
+    "thyroid-stimulating-hormone",
+    "urea",
+  ]);
+  for (const [metricKey, value, unit, series] of [
+    ["BUN", 14.0056, "mg/dL", [14, 16, 14.0056]],
+    ["TSH", 3.1, "mIU/L", [3.1]],
+    ["MCH", 31, "pg", [31]],
+    ["MCHC", 34, "g/dL", [34]],
+  ] as const) {
+    const selection = client.metricSelections.get(metricKey);
+    assert.equal(selection?.value, value, metricKey);
+    assert.equal(selection?.unit, unit, metricKey);
+    assert.deepEqual(client.metrics.series({ metricKey }).map((row) => row.value), series, metricKey);
+  }
+
+  const experiment = selectBrowserVaultExperimentResults(client, "bun-alias");
+  assert.ok(experiment);
+  assert.deepEqual(experiment.progress?.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(experiment.biomarkers[0]?.baseline.mean, 14);
+  assert.equal(experiment.biomarkers[0]?.intervention.mean, 16);
+  assert.equal(experiment.biomarkers[0]?.deltaAbs, 2);
+
+  const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
+  assert.ok(bun);
+  assert.equal(bun.displayName, "Blood urea nitrogen");
+  assert.equal(bun.rows.length, 4);
+  assert.equal(bun.comparableUnit, "mg/dL");
+  assert.deepEqual(bun.chartSeries.map((point) => point.value), [14, 16, 14.0056]);
+  const normalizedBun = bun.rows.find((row) => row.analyte === "Urea Nitrogen");
+  assert.ok(normalizedBun);
+  assert.equal(normalizedBun.analyte, "Urea Nitrogen");
+  assert.equal(normalizedBun.normalizedUnit, "mg/dL");
+  assert.equal(normalizedBun.normalizedValue, 14.0056);
+  assert.equal(normalizedBun.unit, "mmol/L");
+  assert.equal(normalizedBun.value, 5);
+  const unitlessBun = bun.rows.at(-1);
+  assert.ok(unitlessBun);
+  assert.equal(unitlessBun.analyte, "BUN");
+  assert.equal(unitlessBun.normalizedUnit, null);
+  assert.equal(unitlessBun.normalizedValue, null);
+  assert.equal(unitlessBun.unit, null);
+  assert.equal(unitlessBun.value, 7);
+  assert.equal(bun.latestComparable?.analyte, "Urea Nitrogen");
+  assert.equal(bun.previousComparable?.analyte, "Blood Urea Nitrogen");
+  assert.equal(bun.hasIncompatibleHistory, true);
+
+  const tsh = selectBrowserVaultLabBiomarkerDetail(client, "TSH");
+  assert.ok(tsh);
+  assert.equal(tsh.rows.length, 3);
+  assert.equal(tsh.comparableUnit, "mIU/L");
+  assert.deepEqual(tsh.chartSeries.map((point) => point.value), [2.5, 3.1]);
+  const normalizedTsh = tsh.rows[0];
+  assert.ok(normalizedTsh);
+  assert.equal(normalizedTsh.normalizedUnit, "mIU/L");
+  assert.equal(normalizedTsh.normalizedValue, 2.5);
+  assert.equal(normalizedTsh.unit, "uIU/mL");
+  assert.equal(normalizedTsh.value, 2.5);
+  const unitlessTsh = tsh.rows.at(-1);
+  assert.ok(unitlessTsh);
+  assert.equal(unitlessTsh.analyte, "TSH");
+  assert.equal(unitlessTsh.normalizedUnit, null);
+  assert.equal(unitlessTsh.normalizedValue, null);
+  assert.equal(unitlessTsh.unit, null);
+  assert.equal(tsh.latestComparable?.analyte, "Thyroid Stimulating Hormone");
+
+  const mch = selectBrowserVaultLabBiomarkerDetail(client, "MCH");
+  assert.ok(mch);
+  assert.equal(mch.rows.length, 3);
+  assert.equal(mch.chartSeries.length, 2);
+  assert.equal(mch.rows.at(-1)?.normalizedValue, null);
+  const mchc = selectBrowserVaultLabBiomarkerDetail(client, "MCHC");
+  assert.ok(mchc);
+  assert.equal(mchc.rows.length, 3);
+  assert.equal(mchc.chartSeries.length, 2);
+  assert.equal(mchc.rows.at(-1)?.normalizedValue, null);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows.length, 1);
+  const urea = selectBrowserVaultLabBiomarkerDetail(client, "Urea");
+  assert.ok(urea);
+  assert.equal(urea.biomarkerKey, null);
+  assert.equal(urea.rows.length, 1);
+  assert.deepEqual(urea.chartSeries.map((point) => point.value), [5]);
 });
 
 test("lab detail normalizes result values and text-only numeric ranges without mutating source rows", async () => {
@@ -806,6 +955,34 @@ function createLabTest(
     testCategory: "blood",
     testName: "blood_panel",
   });
+}
+
+function createExperiment(
+  entityId: string,
+  experimentSlug: string,
+  analysisPlan: Record<string, unknown>,
+): CanonicalEntity {
+  return {
+    attributes: {},
+    body: null,
+    date: "2026-01-01",
+    entityId,
+    experimentSlug,
+    family: "experiment",
+    frontmatter: { analysisPlan, status: "active" },
+    kind: "experiment",
+    links: [],
+    lookupIds: [entityId, experimentSlug],
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    path: `bank/experiments/${experimentSlug}.md`,
+    primaryLookupId: entityId,
+    recordClass: "bank",
+    relatedIds: [],
+    status: "active",
+    stream: null,
+    tags: [],
+    title: "BUN alias experiment",
+  } satisfies CanonicalEntity;
 }
 
 function createEvent(

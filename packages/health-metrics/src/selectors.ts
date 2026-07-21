@@ -8,7 +8,7 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue } from "./format.ts";
-import { unitsEquivalent } from "./normalize.ts";
+import { resolveComparableMetricPointValue, unitsEquivalent } from "./normalize.ts";
 import { metricPointRecordIds } from "./record-ids.ts";
 import type {
   MetricConfidence,
@@ -67,7 +67,7 @@ export function selectMetricValue(input: {
     ...(policySelection.warnings ?? []),
     ...collectSelectionWarnings({ definition, now: input.now, points, policy, selected }),
   ];
-  const comparable = metricPointComparableValue(selected, definition);
+  const comparable = resolveComparableMetricPointValue(selected, definition);
   if (!comparable) {
     return emptySelection(definition, requestedBiomarkerKey, "no_data", warnings);
   }
@@ -133,7 +133,7 @@ function selectPointByPolicy(
   policy: MetricSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const comparablePoints = points.filter((point) => metricPointComparableValue(point, definition) !== null);
+  const comparablePoints = points.filter((point) => resolveComparableMetricPointValue(point, definition) !== null);
   let selection: MetricPolicySelectionResult;
   switch (policy.kind) {
     case "qualified-latest":
@@ -169,46 +169,6 @@ function selectPointByPolicy(
     : { ...selection, warnings: [...(selection.warnings ?? []), ...unitWarnings] };
 }
 
-export function metricPointComparableValue(
-  point: MetricPoint,
-  definition: MetricDefinition,
-): { unit: string | null; value: number } | null {
-  if (definition.canonicalUnit !== null) {
-    const hasCanonicalEvidence = point.canonicalUnit !== null || point.canonicalValue !== null;
-    if (hasCanonicalEvidence) {
-      if (
-        point.canonicalUnit === null
-        || !unitsEquivalent(point.canonicalUnit, definition.canonicalUnit)
-        || point.canonicalValue === null
-        || !Number.isFinite(point.canonicalValue)
-      ) {
-        return null;
-      }
-      return { unit: definition.canonicalUnit, value: point.canonicalValue };
-    }
-
-    if (
-      point.value !== null
-      && Number.isFinite(point.value)
-      && point.unit !== null
-      && unitsEquivalent(point.unit, definition.canonicalUnit)
-    ) {
-      return { unit: definition.canonicalUnit, value: point.value };
-    }
-
-    // Derived summaries are schema-typed by their producer even when legacy
-    // points predate duplicated canonical fields. Raw evidence is not.
-    if (point.source.family !== "derived") return null;
-  }
-
-  const value = point.canonicalValue ?? point.value;
-  if (value === null || !Number.isFinite(value)) return null;
-  return {
-    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
-    value,
-  };
-}
-
 function collectIncomparableUnitWarnings(
   points: readonly MetricPoint[],
   definition: MetricDefinition,
@@ -218,7 +178,7 @@ function collectIncomparableUnitWarnings(
     || !points.some((point) =>
       point.value !== null
       && Number.isFinite(point.value)
-      && metricPointComparableValue(point, definition) === null
+      && resolveComparableMetricPointValue(point, definition) === null
     )
   ) {
     return [];
@@ -245,12 +205,8 @@ function selectDailyAggregatePoint(
   const candidates = points.filter((point) => point.effectiveDate >= windowStart && point.effectiveDate <= anchorDate);
   const minimumPoints = policy.minimumPoints ?? 0;
 
-  const useCanonicalValues = policy.statistic !== "count" && definition.canonicalUnit !== null;
   const values = candidates
-    .map((point) => useCanonicalValues
-      ? metricPointComparableValue(point, definition)?.value ?? null
-      : pointNumericValue(point)
-    )
+    .map((point) => resolveComparableMetricPointValue(point, definition)?.value ?? null)
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const warnings: MetricSelectionWarning[] = [];
 
@@ -284,10 +240,13 @@ function selectDailyAggregatePoint(
   const recordIds = uniqueStrings(candidates.flatMap(metricPointRecordIds));
   const unit = policy.statistic === "count"
     ? "count"
-    : useCanonicalValues
+    : definition.canonicalUnit !== null
       ? definition.canonicalUnit
       : latest.canonicalUnit ?? latest.unit ?? definition.displayUnit;
-  const aggregateIsCanonical = policy.statistic === "count" || useCanonicalValues || latest.canonicalUnit !== null || !definition.canonicalUnit;
+  const aggregateIsCanonical = policy.statistic === "count"
+    || definition.canonicalUnit !== null
+    || latest.canonicalUnit !== null
+    || !definition.canonicalUnit;
 
   return {
     point: {
@@ -385,10 +344,6 @@ function qualifiersMatch(point: MetricPoint, required: Record<string, string | n
   return Object.entries(required).every(([key, value]) => qualifiers[key] === value);
 }
 
-function pointNumericValue(point: MetricPoint): number | null {
-  return point.canonicalValue ?? point.value;
-}
-
 function aggregateMetricValues(values: readonly number[], statistic: DailyAggregateSelectionPolicy["statistic"]): number {
   switch (statistic) {
     case "count":
@@ -442,7 +397,7 @@ function collectSelectionWarnings(input: {
   if (input.selected.comparator) {
     warnings.push({ code: "COMPARATOR_VALUE", message: "Selected value includes a lab comparator." });
   }
-  const comparable = metricPointComparableValue(input.selected, input.definition);
+  const comparable = resolveComparableMetricPointValue(input.selected, input.definition);
   if (
     input.definition.canonicalUnit
     && (!comparable || !unitsEquivalent(comparable.unit, input.definition.canonicalUnit))

@@ -65,6 +65,8 @@ export {
   metricPointRecordIds,
   normalizeMetricKey,
   normalizeMetricValue,
+  resolveCanonicalBiomarkerKey,
+  resolveComparableMetricPointValue,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
@@ -74,6 +76,7 @@ export {
   selectMetricTrend,
   selectMetricWindowComparison,
   selectMetricValue,
+  unitsEquivalent,
   validateExperimentSessionMetricValue,
 } from "@murphai/health-metrics";
 
@@ -500,7 +503,7 @@ function scalarMetricPoint(input: {
   const metricKey = resolveNonEmptyMetricKey(input.metric);
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
   const normalized = input.sourceKind === "test-result" && input.unit === null
-    ? { canonicalUnit: null, canonicalValue: null }
+    ? null
     : normalizeMetricValue({
         metricKey: definition.key,
         unit: input.unit ?? definition.displayUnit,
@@ -512,8 +515,8 @@ function scalarMetricPoint(input: {
 
   return createMetricPoint({
     biomarkerKey: definition.biomarkerKey,
-    canonicalUnit: normalized.canonicalUnit,
-    canonicalValue: normalized.canonicalValue,
+    canonicalUnit: normalized?.canonicalUnit ?? null,
+    canonicalValue: normalized?.canonicalValue ?? null,
     comparator: input.comparator ?? null,
     confidence: input.confidence,
     context: compactContext(input.context),

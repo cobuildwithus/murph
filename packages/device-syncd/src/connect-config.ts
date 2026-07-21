@@ -20,6 +20,7 @@ import {
 import { assertValidJunctionClientConfig } from "./config/junction-client-config.ts";
 
 export {
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceSyncConnectTargetKey,

@@ -298,7 +298,7 @@ function makeProjectedMetricPoint(input: {
   sourceKind: MetricPoint["source"]["kind"];
   sourceLabel: string;
   sourceRecordId: string;
-  unit: string;
+  unit: string | null;
   value: number;
 }): MetricPoint {
   return {
@@ -2468,6 +2468,76 @@ test("experiment analysis skips uncanonicalized anchored metric fallback values"
 
   assert.equal(outcome.metricResults[0]?.baselineMean, 100);
   assert.equal(outcome.metricResults[0]?.interventionMean, null);
+  assert.equal(outcome.metricResults[0]?.deltaAbs, null);
+});
+
+test("experiment analysis rejects unitless test-result anchors with stale canonical values", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGW",
+    slug: "glucose-uncanonicalized-anchors",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-01",
+      interventionStart: "2026-06-02",
+      interventionEnd: "2026-06-02",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-glucose",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "lab_panel",
+          recordId: "evt_glucose_unitless_stale_baseline",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-01",
+        },
+        {
+          role: "followup",
+          kind: "lab_panel",
+          recordId: "evt_glucose_unitful_followup",
+          biomarkerKeys: ["biomarker:blood-glucose"],
+          observedOn: "2026-06-02",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-unitless-stale-anchors",
+    metadata: null,
+    entities: [experiment],
+  });
+
+  const outcome = analyzeExperimentOutcome(vault, "glucose-uncanonicalized-anchors", {
+    asOf: "2026-06-02",
+    metricPoints: [
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        canonicalUnit: "mg/dL",
+        canonicalValue: 100,
+        date: "2026-06-01",
+        metricKey: "glucose",
+        sourceKind: "test-result",
+        sourceLabel: "Lab",
+        sourceRecordId: "evt_glucose_unitless_stale_baseline",
+        unit: null,
+        value: 100,
+      }),
+      makeProjectedMetricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        date: "2026-06-02",
+        metricKey: "glucose",
+        sourceKind: "test-result",
+        sourceLabel: "Lab",
+        sourceRecordId: "evt_glucose_unitful_followup",
+        unit: "mg/dL",
+        value: 90,
+      }),
+    ],
+  });
+
+  assert.equal(outcome.metricResults[0]?.baselineMean, null);
+  assert.equal(outcome.metricResults[0]?.interventionMean, 90);
   assert.equal(outcome.metricResults[0]?.deltaAbs, null);
 });
 

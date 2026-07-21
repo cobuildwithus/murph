@@ -116,6 +116,11 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(text).not.toContain("No lab flag");
     expect(text.indexOf("Blood sugar")).toBeLessThan(text.indexOf("Heart & lipids"));
     expect(text.indexOf("Heart & lipids")).toBeLessThan(text.indexOf("Other"));
+    const labGroups = [...rendered.container.querySelectorAll("details")];
+    expect(labGroups).toHaveLength(3);
+    expect(labGroups.every((group) => !group.hasAttribute("open"))).toBe(true);
+    const firstSummary = labGroups[0]?.querySelector("summary");
+    expect(firstSummary?.textContent).toContain("Blood sugar");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );

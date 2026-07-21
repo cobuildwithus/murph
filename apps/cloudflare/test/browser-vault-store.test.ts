@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+
 import {
   createBrowserVaultReplica,
   createVaultReadModel,
@@ -87,6 +89,7 @@ describe("hosted browser vault replica store", () => {
       byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
       dataVersion: replica.source.dataVersion,
       generatedAt: replica.generatedAt,
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
       objectKey: storedKey,
       replicaSchema: replica.schema,
       runtimeRootKeyId: rootKeyId,
@@ -179,6 +182,37 @@ describe("hosted browser vault replica store", () => {
       userId: "user_123",
     })).rejects.toThrow("Browser vault replica generatedAt must be a valid ISO-8601 timestamp.");
     expect(bucket.objects.size).toBe(0);
+  });
+
+  it("keeps legacy generations readable and rejects invalid generation metadata", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: createTestRootKey(41),
+      rootKeyId: "runtime-root-current",
+      userId: "user_123",
+    });
+    const replica = await createBrowserVaultReplica({
+      metricPoints: [],
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+    const legacyReplica: Record<string, unknown> = { ...replica };
+    delete legacyReplica.generation;
+
+    await expect(store.writeBrowserVaultReplica({
+      replica: legacyReplica,
+      userId: "user_123",
+    })).resolves.not.toHaveProperty("generation");
+    await expect(store.writeBrowserVaultReplica({
+      replica: { ...replica, generation: 0 },
+      userId: "user_123",
+    })).rejects.toThrow("Browser vault replica generation must be a positive safe integer.");
   });
 
   it("derives browser-vault replica keys from the ref runtime root id across rotation", async () => {

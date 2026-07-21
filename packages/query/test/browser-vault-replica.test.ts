@@ -9,10 +9,12 @@ import { test } from "vitest";
 
 import type { MetricPoint } from "../src/metrics/index.ts";
 import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
+  hashBrowserVaultReplicaData,
   parseBrowserVaultReplica,
   selectBrowserVaultExperimentResults,
   selectBrowserVaultHistory,
@@ -82,6 +84,7 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   });
 
   assert.equal(replica.schema, BROWSER_VAULT_REPLICA_SCHEMA);
+  assert.equal(replica.generation, BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
   assert.equal(replica.source.sourceBundleHash, "a".repeat(64));
   assert.match(replica.source.dataVersion, /^[0-9a-f]{64}$/u);
 
@@ -272,6 +275,37 @@ test("browser vault replica dataVersion changes when only sourceBundleHash chang
   });
 
   assert.notEqual(first.source.dataVersion, second.source.dataVersion);
+});
+
+test("browser vault replica generation is content-addressed and legacy-readable", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "g".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const legacyReplica: Record<string, unknown> = { ...replica };
+  delete legacyReplica.generation;
+
+  assert.equal(parseBrowserVaultReplica(legacyReplica).generation, undefined);
+  assert.notEqual(
+    await hashBrowserVaultReplicaData(replica),
+    await hashBrowserVaultReplicaData({
+      ...replica,
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION + 1,
+    }),
+  );
+  assert.throws(
+    () => parseBrowserVaultReplica({ ...replica, generation: 0 }),
+    /generation must be a positive safe integer/u,
+  );
+  assert.throws(
+    () => parseBrowserVaultReplica({ ...replica, generation: Number.MAX_SAFE_INTEGER + 1 }),
+    /generation must be a positive safe integer/u,
+  );
 });
 
 test("browser vault query client freezes the exposed replica graph", async () => {

@@ -141,17 +141,23 @@ export async function loadBrowserVaultReplica({
   }
 
   if (session.state === "not_modified") {
-    assertBrowserVaultReplicaRefsMatch({
-      actual: session.replicaRef,
-      expected: knownReplicaRef,
-      label: "Browser vault unchanged session",
-    });
+    if (!knownReplicaRef) {
+      throw new Error("Browser vault unchanged session response did not have a known replica ref.");
+    }
+
+    const responseReplicaRef = session.replicaRef.generation === undefined
+      && knownReplicaRef.generation !== undefined
+      ? { ...session.replicaRef, generation: knownReplicaRef.generation }
+      : session.replicaRef;
+    if (!browserVaultReplicaRefsMatch(responseReplicaRef, knownReplicaRef)) {
+      throw new Error("Browser vault unchanged session ref did not match the known ref.");
+    }
 
     return {
       deviceSyncImportPending: session.deviceSyncImportPending,
       freshness: session.freshness,
       memberId: session.memberId,
-      replicaRef: session.replicaRef,
+      replicaRef: knownReplicaRef,
       refreshPending: session.refreshPending,
       state: "not_modified",
       workspaceVersion: session.workspaceVersion,
@@ -196,6 +202,15 @@ export async function loadBrowserVaultReplica({
     throw new Error("Browser vault replica dataVersion did not match its session ref.");
   }
 
+  const replicaRef = session.replicaRef.generation === undefined
+    && replica.generation !== undefined
+    ? { ...session.replicaRef, generation: replica.generation }
+    : session.replicaRef;
+
+  if (replica.generation !== replicaRef.generation) {
+    throw new Error("Browser vault replica generation did not match its session ref.");
+  }
+
   if (replica.source.sourceBundleHash !== session.replicaRef.sourceBundleHash) {
     throw new Error("Browser vault replica sourceBundleHash did not match its session ref.");
   }
@@ -205,7 +220,7 @@ export async function loadBrowserVaultReplica({
     deviceSyncImportPending: session.deviceSyncImportPending,
     freshness: session.freshness,
     memberId: session.replicaAad.userId,
-    replicaRef: session.replicaRef,
+    replicaRef,
     refreshPending: session.refreshPending,
     state: "ready",
     workspaceVersion: session.workspaceVersion,
@@ -411,20 +426,6 @@ function assertBrowserVaultReplicaAadMatchesRef(input: {
 
   if (input.aad.dataKeyRootKeyId !== dataKeyEnvelope.rootKeyId) {
     throw new Error("Browser vault replica AAD dataKeyRootKeyId did not match its session ref.");
-  }
-}
-
-function assertBrowserVaultReplicaRefsMatch(input: {
-  actual: HostedBrowserVaultReplicaRef;
-  expected: HostedBrowserVaultReplicaRef | null;
-  label: string;
-}): void {
-  if (!input.expected) {
-    throw new Error(`${input.label} response did not have a known replica ref.`);
-  }
-
-  if (!browserVaultReplicaRefsMatch(input.actual, input.expected)) {
-    throw new Error(`${input.label} ref did not match the known ref.`);
   }
 }
 

@@ -93,6 +93,58 @@ describe("Clinical Records retrieval control plane", () => {
         resourceType: "DiagnosticReport",
       },
     ]);
+    expect("retrievalProtocol" in result.run).toBe(false);
+  });
+
+  it("fails closed when a frozen plan disagrees with the legacy Epic reader", async () => {
+    const harness = createHarness(["Observation"]);
+    harness.state.run.retrievalPlanJson = {
+      schemaVersion: "murph.clinical-retrieval-plan.v1",
+      slices: [{
+        coverage: "whole-family",
+        queryFingerprint: "b".repeat(64),
+        queryScopeId: "laboratory-observations",
+        resourceType: "Observation",
+        sliceId: "whole",
+      }],
+    };
+
+    const result = await readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    });
+
+    expect(result).toEqual({
+      errorCode: "run-configuration-invalid",
+      retryable: false,
+      status: "unavailable",
+    });
+  });
+
+  it("rejects query-aware page traffic until the compatible readers deploy", async () => {
+    const harness = createHarness(["Observation"]);
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn(),
+      memberId: MEMBER_ID,
+      request: {
+        cursor: null,
+        generation: 1,
+        queryScopeId: "laboratory-observations",
+        requestId: "request_query_protocol",
+        resourceType: "Observation",
+        retrievalProtocol: "query-slices-v2",
+        runId: RUN_ID,
+        sliceId: "whole",
+      },
+    });
+
+    expect(result).toEqual({
+      errorCode: "retrieval-protocol-not-enabled",
+      retryable: false,
+      status: "unavailable",
+    });
+    expect(harness.state.run.providerRequestCount).toBe(0);
   });
 
   it("lets transient patient-context decryption failures remain retryable", async () => {
@@ -1188,6 +1240,7 @@ function buildRun(resourceTypes: string[]) {
     outcomeCountsJson: null as Record<string, unknown> | null,
     pageCount: 0,
     providerRequestCount: 0,
+    retrievalPlanJson: null as Record<string, unknown> | null,
     resourceTypesJson: resourceTypes,
     reviewCount: 0,
     status: "queued",

@@ -37,6 +37,7 @@ export {
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
   hasConfiguredDeviceSyncProviderConfigs,
+  isDeviceConnectSourceAvailableForConnection,
   listDefaultJunctionLinkProviderSlugs,
   listConfiguredDeviceSyncConnectTargets,
   listDirectDeviceConnectRouteEntries,

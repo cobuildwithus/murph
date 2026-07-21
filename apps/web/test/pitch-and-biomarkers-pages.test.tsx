@@ -128,7 +128,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Lab history/);
+  assert.match(markup, /Health data/);
   assert.match(markup, /Your biomarkers/);
   assert.match(markup, /No lab results yet/);
   assert.doesNotMatch(markup, /Library/);

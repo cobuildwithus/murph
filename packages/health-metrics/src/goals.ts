@@ -1,8 +1,8 @@
 import { createCustomMetricDefinition, resolveMetricDefinition, resolveMetricInputKey } from "./catalog.ts";
 import { formatNumber, formatTargetValue } from "./format.ts";
-import { normalizeMetricValue } from "./normalize.ts";
+import { normalizeMetricValue, resolveComparableMetricPointValue } from "./normalize.ts";
 import { listMetricPoints } from "./series.ts";
-import { metricPointComparableValue, selectMetricValue } from "./selectors.ts";
+import { selectMetricValue } from "./selectors.ts";
 import type {
   GoalMetricTarget,
   MetricDefinition,
@@ -202,7 +202,7 @@ function selectRollingWindowGoalMetricValue(input: {
     points: input.points,
   });
   const candidates = listedPoints.filter((point) => {
-    if (!metricPointComparableValue(point, input.definition)) return false;
+    if (!resolveComparableMetricPointValue(point, input.definition)) return false;
     if (input.target.startAt && point.effectiveDate < input.target.startAt) return false;
     if (input.target.targetAt && point.effectiveDate > input.target.targetAt) return false;
     return true;
@@ -229,7 +229,7 @@ function selectRollingWindowGoalMetricValue(input: {
     point.effectiveDate <= anchorDate
   );
   const unnormalizedWindowPoints = requiresCanonicalUnit
-    ? rawWindowPoints.filter((point) => metricPointComparableValue(point, input.definition) === null)
+    ? rawWindowPoints.filter((point) => resolveComparableMetricPointValue(point, input.definition) === null)
     : [];
   if (windowPoints.length === 0) {
     if (unnormalizedWindowPoints.length > 0) {
@@ -249,7 +249,7 @@ function selectRollingWindowGoalMetricValue(input: {
   }
 
   const values = windowPoints.flatMap((point) => {
-    const comparable = metricPointComparableValue(point, input.definition);
+    const comparable = resolveComparableMetricPointValue(point, input.definition);
     return comparable ? [comparable.value] : [];
   });
   const value = evaluation.statistic === "median" ? median(values) : mean(values);

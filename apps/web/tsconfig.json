@@ -33,6 +33,9 @@
       "@murphai/contracts": [
         "../../packages/contracts/src/index.ts"
       ],
+      "@murphai/contracts/browser-vault": [
+        "../../packages/contracts/src/browser-vault.ts"
+      ],
       "@murphai/contracts/generated/*": [
         "../../packages/contracts/generated/*"
       ],

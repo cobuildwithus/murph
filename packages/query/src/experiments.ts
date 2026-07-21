@@ -46,9 +46,11 @@ import {
   resolveExperimentSessionMetricSpec,
   validateExperimentSessionMetricValue,
   normalizeMetricKey,
+  resolveComparableMetricPointValue,
   selectMetricSeries,
   selectMetricValue,
   selectMetricWindowComparison,
+  unitsEquivalent,
   type MetricPoint,
   type MetricWindowSummary,
 } from "./metrics/index.ts";
@@ -1928,6 +1930,7 @@ function collectAnchoredMetricWindow(
   }
 
   const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
+  const definition = metricKey ? resolveMetricDefinition(metricKey) : null;
   const values: number[] = [];
   let unit: string | null = null;
   for (const anchor of anchors) {
@@ -1942,19 +1945,24 @@ function collectAnchoredMetricWindow(
       now: context.asOf,
       points: anchoredPoints,
     });
-    const fallbackPoint = anchoredPoints.find((point) =>
-      typeof point.canonicalValue === "number" &&
-      Number.isFinite(point.canonicalValue) &&
-      typeof point.canonicalUnit === "string" &&
-      point.canonicalUnit.length > 0
-    );
-    const value = typeof selection.value === "number" ? selection.value : fallbackPoint?.canonicalValue ?? null;
+    const fallback = definition
+      ? anchoredPoints
+          .map((point) => resolveComparableMetricPointValue(point, definition))
+          .find((candidate) =>
+            candidate !== null
+            && (
+              definition.canonicalUnit === null
+              || unitsEquivalent(candidate.unit, definition.canonicalUnit)
+            )
+          ) ?? null
+      : null;
+    const value = typeof selection.value === "number" ? selection.value : fallback?.value ?? null;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       continue;
     }
 
     values.push(value);
-    unit ??= typeof selection.value === "number" ? selection.unit : fallbackPoint?.canonicalUnit ?? null;
+    unit ??= typeof selection.value === "number" ? selection.unit : fallback?.unit ?? null;
   }
 
   return metricWindowSelectionFromValues(values, anchors.length, unit);

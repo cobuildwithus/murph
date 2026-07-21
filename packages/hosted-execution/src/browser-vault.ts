@@ -1,3 +1,6 @@
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+} from "@murphai/contracts/browser-vault";
 import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
@@ -19,6 +22,7 @@ export type BrowserVaultReplicaFreshness = "fresh" | "stale";
 export type BrowserVaultReplicaFreshnessReason =
   | "current"
   | "missing"
+  | "generation_mismatch"
   | "source_mismatch"
   | "max_age_exceeded"
   | "invalid_generated_at"
@@ -58,6 +62,10 @@ export function assessBrowserVaultReplicaFreshness(
 
   if (!input.replicaRef) {
     return stale("missing");
+  }
+
+  if (input.replicaRef.generation !== BROWSER_VAULT_REPLICA_CURRENT_GENERATION) {
+    return stale("generation_mismatch");
   }
 
   const generatedAtMs = parseFreshnessTimestampMs(input.replicaRef.generatedAt);

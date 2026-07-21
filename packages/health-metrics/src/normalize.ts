@@ -1,5 +1,10 @@
 import { createCustomMetricDefinition, normalizeMetricKey, resolveMetricDefinition } from "./catalog.ts";
-import type { MetricSelectionWarning, MetricValueNormalization } from "./types.ts";
+import type {
+  MetricDefinition,
+  MetricPoint,
+  MetricSelectionWarning,
+  MetricValueNormalization,
+} from "./types.ts";
 
 const HOUR_INTENT_DURATION_ALIASES = new Set([
   "sleep-duration-hours",
@@ -36,6 +41,8 @@ export function normalizeMetricValue(input: {
       return normalizePercent(input.value, unit, definition.displayName);
     case "creatinine":
       return normalizeCreatinine(input.value, unit);
+    case "blood-urea-nitrogen":
+      return normalizeBloodUreaNitrogen(input.value, unit);
     case "egfr":
       return normalizeExactUnit(input.value, unit, "mL/min/1.73m^2", definition.displayName);
     case "glucose":
@@ -67,8 +74,14 @@ export function normalizeMetricValue(input: {
       return normalizeExactUnit(input.value, unit, "mg/L", definition.displayName);
     case "ferritin":
       return normalizeExactUnit(input.value, unit, "ng/mL", definition.displayName);
+    case "mean-corpuscular-hemoglobin":
+      return normalizeExactUnit(input.value, unit, "pg", definition.displayName);
+    case "mean-corpuscular-hemoglobin-concentration":
+      return normalizeExactUnit(input.value, unit, "g/dL", definition.displayName);
     case "mean-corpuscular-volume":
       return normalizeExactUnit(input.value, unit, "fL", definition.displayName);
+    case "thyroid-stimulating-hormone":
+      return normalizeExactUnit(input.value, unit, "mIU/L", definition.displayName);
     case "white-blood-cell-count":
       return normalizeCellCount(input.value, unit, definition.displayName);
     case "alkaline-phosphatase":
@@ -100,6 +113,50 @@ export function normalizeMetricValue(input: {
       };
     }
   }
+}
+
+export function resolveComparableMetricPointValue(
+  point: MetricPoint,
+  definition: MetricDefinition,
+): { unit: string | null; value: number } | null {
+  if (point.source.kind === "test-result" && point.unit === null) {
+    return null;
+  }
+
+  if (definition.canonicalUnit !== null) {
+    const hasCanonicalEvidence = point.canonicalUnit !== null || point.canonicalValue !== null;
+    if (hasCanonicalEvidence) {
+      if (
+        point.canonicalUnit === null
+        || !unitsEquivalent(point.canonicalUnit, definition.canonicalUnit)
+        || point.canonicalValue === null
+        || !Number.isFinite(point.canonicalValue)
+      ) {
+        return null;
+      }
+      return { unit: definition.canonicalUnit, value: point.canonicalValue };
+    }
+
+    if (point.value !== null && Number.isFinite(point.value) && point.unit !== null) {
+      if (unitsEquivalent(point.unit, definition.canonicalUnit)) {
+        return { unit: definition.canonicalUnit, value: point.value };
+      }
+      return point.source.family === "derived"
+        ? { unit: point.unit, value: point.value }
+        : null;
+    }
+
+    // Derived summaries are schema-typed by their producer even when legacy
+    // points predate duplicated canonical fields. Raw evidence is not.
+    if (point.source.family !== "derived") return null;
+  }
+
+  const value = point.canonicalValue ?? point.value;
+  if (value === null || !Number.isFinite(value)) return null;
+  return {
+    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
+    value,
+  };
 }
 
 function inferUnitFromMetricAlias(metricKey: string): string | null {
@@ -173,6 +230,8 @@ export function normalizeUnit(value: string | null): string | null {
     minutes: "minutes",
     mmol_l: "mmol/L",
     "mmol/l": "mmol/L",
+    miu_l: "mIU/L",
+    "miu/l": "mIU/L",
     ms: "ms",
     ng_ml: "ng/mL",
     "ng/ml": "ng/mL",
@@ -203,6 +262,10 @@ export function normalizeUnit(value: string | null): string | null {
     "cells/ul": "cells/uL",
     umol_l: "umol/L",
     "umol/l": "umol/L",
+    uiu_ml: "mIU/L",
+    "uiu/ml": "mIU/L",
+    "µiu/ml": "mIU/L",
+    "μiu/ml": "mIU/L",
   };
   const alias = Object.prototype.hasOwnProperty.call(aliases, lower)
     ? aliases[lower]
@@ -329,6 +392,21 @@ function normalizeCreatinine(value: number, unit: string | null): MetricValueNor
     return { canonicalUnit: "mg/dL", canonicalValue: Number((value / 88.42).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Creatinine", unit, "mg/dL")] };
+}
+
+function normalizeBloodUreaNitrogen(value: number, unit: string | null): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "mg/dL")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: value, unit: unit ?? "mg/dL", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "mmol/L")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: Number((value / 0.357).toFixed(4)), unit, warnings: [] };
+  }
+  return {
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit,
+    warnings: [unitWarning("Blood urea nitrogen", unit, "mg/dL")],
+  };
 }
 
 function normalizeMassConcentration(

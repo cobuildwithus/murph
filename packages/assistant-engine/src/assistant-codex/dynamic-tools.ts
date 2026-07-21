@@ -76,6 +76,7 @@ import {
   type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   buildSharedGroupWeeklyMembers,
@@ -209,7 +210,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation when genuinely reply-critical work would otherwise leave the user waiting. Use it before long tasks with multiple substantive tool steps, research, long vault scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not delay the reply or trigger an update by itself. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation when genuinely reply-critical work would otherwise leave the user waiting. Use it before long tasks with multiple substantive tool steps, research, long vault scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not trigger an update by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2619,7 +2620,20 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'expired':
             return toolTextResult(false, 'vault-file delivery approval expired')
         }
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof VaultCliError
+          && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
+        ) {
+          return toolTextResult(
+            true,
+            JSON.stringify({
+              note:
+                'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+              status: 'already_in_progress',
+            }),
+          )
+        }
         return toolTextResult(false, 'secure vault-file approval could not be prepared')
       }
     }
