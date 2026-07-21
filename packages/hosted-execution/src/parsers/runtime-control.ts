@@ -1003,6 +1003,7 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (
     action === "read_current"
+    || action === "read_usage"
     || action === "list_memberships"
   ) {
     assertAllowedObjectKeys(
@@ -1859,6 +1860,96 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "read_usage") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool read_usage response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_usage response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "usage"]),
+        "Hosted runtime group tool read_usage ok response result",
+      );
+      const usage = requireObject(
+        result.usage,
+        "Hosted runtime group tool read_usage usage",
+      );
+      assertAllowedObjectKeys(
+        usage,
+        new Set(["capacityState", "fundingUrl", "periodEnd"]),
+        "Hosted runtime group tool read_usage usage",
+      );
+      const capacityState = requireString(
+        usage.capacityState,
+        "Hosted runtime group tool read_usage capacityState",
+      );
+      if (
+        capacityState !== "healthy"
+        && capacityState !== "low"
+        && capacityState !== "exhausted"
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage capacityState is invalid.",
+        );
+      }
+      const periodEnd = requireString(
+        usage.periodEnd,
+        "Hosted runtime group tool read_usage periodEnd",
+      );
+      const periodEndDate = new Date(periodEnd);
+      if (
+        !Number.isFinite(periodEndDate.getTime())
+        || periodEndDate.toISOString() !== periodEnd
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
+        );
+      }
+      return {
+        action,
+        result: {
+          status,
+          usage: {
+            capacityState,
+            fundingUrl: readNullableString(
+              usage.fundingUrl,
+              "Hosted runtime group tool read_usage fundingUrl",
+            ),
+            periodEnd,
+          },
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason", "usage"]),
+        "Hosted runtime group tool read_usage unavailable response result",
+      );
+      if (result.usage !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage unavailable usage must be null.",
+        );
+      }
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool read_usage unavailableReason",
+          ),
+          usage: null,
         },
       };
     }

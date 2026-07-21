@@ -30,9 +30,11 @@ interface HostedUsageTopUpReturn {
 
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
+  checkoutUrl?: string;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  scope?: "group" | "personal";
 }
 
 interface HostedUsageTopUpPurchaseResponse {
@@ -41,6 +43,7 @@ interface HostedUsageTopUpPurchaseResponse {
   restartAt: string | null;
   retryAllowed: boolean;
   status: HostedUsageTopUpPurchaseStatus;
+  targetConflict: boolean;
   url: string | null;
 }
 
@@ -56,6 +59,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
       (value.status !== "reconciling" ||
         !isCanonicalIsoTimestamp(value.restartAt))) ||
     (value.retryAllowed !== undefined && value.retryAllowed !== true) ||
+    (value.targetConflict !== undefined && value.targetConflict !== true) ||
     (value.url !== undefined &&
       value.url !== null &&
       typeof value.url !== "string")
@@ -69,6 +73,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
     retryAllowed: value.retryAllowed === true,
     status: value.status,
+    targetConflict: value.targetConflict === true,
     url:
       typeof value.url === "string" && value.url.length > 0 ? value.url : null,
   };
@@ -111,8 +116,60 @@ function readStatusContent(input: {
   canRetryCheckout: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
+  scope?: "group" | "personal";
   status: HostedUsageTopUpPurchaseStatus | null;
+  targetConflict?: boolean;
 }): { message: string; title: string } {
+  if (input.targetConflict) {
+    if (input.pollKind === "failed") {
+      return content(
+        "Couldn't check the other checkout",
+        "We couldn't check the unfinished checkout right now. Try again.",
+      );
+    }
+    if (input.status === "checkout_open") {
+      return content(
+        "Another checkout is already open",
+        input.canResumeCheckout
+          ? "Resume or cancel the unfinished checkout for the other usage destination before starting this one."
+          : "Cancel the unfinished checkout for the other usage destination before starting this one.",
+      );
+    }
+    if (
+      input.pollKind === "exhausted"
+      && (!input.status || shouldPollPurchaseStatus(input.status))
+    ) {
+      return content(
+        "Other checkout still processing",
+        "The unfinished checkout for the other usage destination is still being confirmed.",
+      );
+    }
+    switch (input.status) {
+      case "fulfilled":
+        return content(
+          "Other checkout completed",
+          "The other usage destination received its credit. Close this dialog and try again.",
+        );
+      case "expired":
+        return content(
+          "Other checkout canceled",
+          "The unfinished checkout was canceled. Close this dialog and try again.",
+        );
+      case "payment_failed":
+        return content(
+          "Other payment not completed",
+          "The other payment did not complete. Close this dialog and try again.",
+        );
+      case "payment_pending":
+      case "reconciling":
+      case null:
+        return content(
+          "Checking another checkout",
+          "Murph is checking the unfinished checkout for the other usage destination.",
+        );
+    }
+  }
+
   if (input.pollKind === "failed") {
     return content(
       "Couldn't check payment",
@@ -155,7 +212,12 @@ function readStatusContent(input: {
 
   switch (input.status) {
     case "fulfilled":
-      return content("Usage added", "Your available usage has been updated.");
+      return content(
+        "Usage added",
+        input.scope === "group"
+          ? "This group's available usage has been updated."
+          : "Your available usage has been updated.",
+      );
     case "expired":
       return content("Checkout canceled", "Checkout canceled. No usage was added.");
     case "payment_failed":

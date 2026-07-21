@@ -743,6 +743,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       message: deniedDecision.userNotice.message,
+      noticeCode: deniedDecision.userNotice.code,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
   });
@@ -780,6 +781,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       message: deniedDecision.userNotice.message,
+      noticeCode: deniedDecision.userNotice.code,
       periodStart: deniedDecision.periodStart,
       prisma: expect.objectContaining({ kind: "prisma" }),
       replyToMessageId: "7000",

@@ -26,9 +26,13 @@ const mocks = vi.hoisted(() => ({
   encryptHostedWebNullableString: vi.fn(async (input: { value?: string | null }) =>
     input.value ? `encrypted:${input.value}` : null
   ),
+  ensureHostedMemberStripeCustomer: vi.fn(),
   getPrisma: vi.fn(),
+  hasHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   lockHostedMemberRow: vi.fn(async () => {}),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
+  readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
+  readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://join.example.test"),
   requireHostedStripeApiMode: vi.fn(),
@@ -60,8 +64,28 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedConfiguredUsageCreditOfferCodes:
+    mocks.readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes:
     mocks.readHostedPersonalUsageCreditOfferCodes,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", () => ({
+  ensureHostedMemberStripeCustomer: mocks.ensureHostedMemberStripeCustomer,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  buildHostedGroupUsageFundingPath: (joinCode: string) =>
+    `/groups/fund/${encodeURIComponent(joinCode)}`,
+  normalizeHostedGroupUsageJoinCode: (value: unknown) =>
+    typeof value === "string" && value.length >= 16 ? value : null,
+  readHostedGroupUsageFundingTargetByJoinCode:
+    mocks.readHostedGroupUsageFundingTargetByJoinCode,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  hasHostedRuntimeActiveAccessForUpdateTx:
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -86,6 +110,7 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
+  createHostedGroupUsageCreditCheckout,
   createHostedUsageCreditCheckout,
   expireHostedUsageCreditCheckout,
   parseHostedUsageCreditCheckoutRequest,
@@ -121,6 +146,20 @@ beforeEach(() => {
     "usage_10_usd",
     "usage_25_usd",
   ]);
+  mocks.readHostedConfiguredUsageCreditOfferCodes.mockReturnValue([
+    "usage_5_usd",
+    "usage_10_usd",
+    "usage_25_usd",
+  ]);
+  mocks.ensureHostedMemberStripeCustomer.mockResolvedValue("cus_group_payer");
+  mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(true);
+  mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
+    displayName: "Sunday sleep crew",
+    fundingPath: "/groups/fund/group_join_code_1234",
+    joinCode: "group_join_code_1234",
+    kind: "friends",
+    runtimeMemberId: "member_group_runtime",
+  });
   mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(
     ({ offerCode }: { offerCode: string }) => ({
       offerCode,
@@ -181,6 +220,166 @@ describe("parseHostedUsageCreditCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it("funds the server-resolved group beneficiary without requiring a paid plan", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const checkout = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(checkout).toMatchObject({
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      beneficiaryMemberId: "member_group_runtime",
+      checkoutCancelUrl: expect.stringContaining(
+        "/groups/fund/group_join_code_1234?usageCheckout=cancel",
+      ),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+    });
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberStripeCustomer).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: fake.prisma,
+    });
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ purchaseId: checkout.purchaseId });
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      beneficiaryMemberId: "member_other_group_runtime",
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toBeNull();
+  });
+
+  it("rechecks the exact group thread-container target inside checkout", async () => {
+    const fake = createFakePrisma({ groupFundingTargetLocked: false });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      httpStatus: 403,
+    });
+    const [[queryParts, joinCode, runtimeMemberId]] =
+      fake.prisma.$queryRaw.mock.calls;
+    const queryText = Array.from(queryParts).join("");
+    expect(queryText).toContain('INNER JOIN "hosted_thread_container" AS "container"');
+    expect(queryText).toContain(
+      '"container"."member_id" = "group"."runtime_member_id"',
+    );
+    expect(queryText).toContain('"group"."join_code" = ');
+    expect(queryText).toContain('"group"."runtime_member_id" = ');
+    expect([joinCode, runtimeMemberId]).toEqual([
+      "group_join_code_1234",
+      "member_group_runtime",
+    ]);
+    expect(fake.purchases.size).toBe(0);
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("recovers only the active checkout for the same funding target", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "fresh_group_key_1234",
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ recovered: true });
+
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
+      displayName: null,
+      fundingPath: "/groups/fund/other_group_code_12",
+      joinCode: "other_group_code_12",
+      kind: "custom",
+      runtimeMemberId: "member_other_group_runtime",
+    });
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "other_group_key_1234",
+      joinCode: "other_group_code_12",
+      now: new Date(NOW.getTime() + 2_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      recovered: true,
+      status: "checkout_open",
+      targetConflict: true,
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(fake.purchases.size).toBe(1);
+  });
+
+  it("rejects request-key replay against a different group target", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
+      displayName: null,
+      fundingPath: "/groups/fund/other_group_code_12",
+      joinCode: "other_group_code_12",
+      kind: "custom",
+      runtimeMemberId: "member_other_group_runtime",
+    });
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "other_group_code_12",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+      httpStatus: 409,
+    });
+    expect(fake.purchases.size).toBe(1);
+  });
+
   it("persists the purchase ambiguity fence before one-time Checkout creation", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
@@ -1038,6 +1237,53 @@ describe("expireHostedUsageCreditCheckout", () => {
 });
 
 describe("usage-credit account-deletion convergence", () => {
+  it("detaches a terminal payer and later permits the group beneficiary deletion", async () => {
+    const fake = createFakePrisma();
+    const purchase = {
+      beneficiaryMemberId: "member_group_runtime",
+      id: "hucp_group_purchase",
+      lastReconciledAt: NOW,
+      paidAt: NOW,
+      payerMemberId: MEMBER_ID,
+      status: "fulfilled",
+      stripeChargeIdEncrypted: "encrypted:charge",
+      stripeChargeLookupKey: "charge:lookup",
+      stripeCheckoutSessionIdEncrypted: "encrypted:session",
+      stripeCheckoutSessionLookupKey: "session:lookup",
+      stripeCheckoutUrlEncrypted: null,
+      stripeCustomerIdEncrypted: "encrypted:customer",
+      stripePaymentIntentIdEncrypted: "encrypted:payment-intent",
+      stripePaymentIntentLookupKey: "payment-intent:lookup",
+      stripePriceIdEncrypted: "encrypted:price",
+      terminalAt: NOW,
+      updatedAt: NOW,
+    };
+    fake.purchases.set(String(purchase.id), purchase);
+
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 1_000),
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+
+    expect(purchase).toMatchObject({
+      beneficiaryMemberId: "member_group_runtime",
+      payerMemberId: null,
+      stripeChargeIdEncrypted: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCustomerIdEncrypted: null,
+      stripePaymentIntentIdEncrypted: null,
+      stripePriceIdEncrypted: null,
+    });
+    expect(purchase.stripeChargeLookupKey).toBe("charge:lookup");
+    expect(purchase.stripePaymentIntentLookupKey).toBe("payment-intent:lookup");
+
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: ["member_group_runtime"],
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+  });
+
   it("expires a bound open Session before permitting local deletion", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
@@ -1417,6 +1663,28 @@ describe("readHostedUsageCreditPurchaseStatus", () => {
       httpStatus: 404,
     });
   });
+
+  it("does not reveal a payer's purchase for another beneficiary", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).rejects.toBeTruthy();
+    const purchase = onlyPurchase(fake.purchases);
+
+    await expect(readHostedUsageCreditPurchaseStatus({
+      beneficiaryMemberId: "member_other_beneficiary",
+      payerMemberId: MEMBER_ID,
+      purchaseId: String(purchase.id),
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_PURCHASE_NOT_FOUND",
+      httpStatus: 404,
+    });
+  });
 });
 
 function buildStripeSession(request: Record<string, unknown>) {
@@ -1503,6 +1771,7 @@ function buildStripeSessionFromPurchase(purchase: Record<string, unknown>) {
 }
 
 function createFakePrisma(input: {
+  groupFundingTargetLocked?: boolean;
   memberOverride?: Record<string, unknown>;
 } = {}) {
   const purchases = new Map<string, Record<string, unknown>>();
@@ -1592,7 +1861,13 @@ function createFakePrisma(input: {
   };
   const prisma = {
     hostedMember,
+    hostedGroup: {
+      findUnique: vi.fn(async () => ({ runtimeMemberId: "member_group_runtime" })),
+    },
     hostedUsageCreditPurchase,
+    $queryRaw: vi.fn(async () =>
+      input.groupFundingTargetLocked === false ? [] : [{ id: "hgrp_123" }]
+    ),
     $transaction: vi.fn(),
   };
   prisma.$transaction.mockImplementation(async (

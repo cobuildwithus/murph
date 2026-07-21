@@ -65,11 +65,7 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedUsageCreditOfferCode[]> {
-  const priceIdsByOffer =
-    getHostedOnboardingEnvironment().stripeUsageCreditPriceIdsByOffer;
-  const configuredOfferCodes = HOSTED_USAGE_CREDIT_OFFER_CODES.filter(
-    (offerCode) => Boolean(priceIdsByOffer[offerCode]),
-  );
+  const configuredOfferCodes = readHostedConfiguredUsageCreditOfferCodes();
   if (configuredOfferCodes.length === 0) {
     return [];
   }
@@ -105,4 +101,12 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
   }
 
   return configuredOfferCodes;
+}
+
+export function readHostedConfiguredUsageCreditOfferCodes(): HostedUsageCreditOfferCode[] {
+  const priceIdsByOffer =
+    getHostedOnboardingEnvironment().stripeUsageCreditPriceIdsByOffer;
+  return HOSTED_USAGE_CREDIT_OFFER_CODES.filter(
+    (offerCode) => Boolean(priceIdsByOffer[offerCode]),
+  );
 }

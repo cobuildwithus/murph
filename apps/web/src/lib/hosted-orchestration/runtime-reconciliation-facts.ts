@@ -452,6 +452,7 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
       message: await projectHostedAiUsageLimitNoticeForDelivery({
         memberId: input.userId,
         message: decision.userNotice.message,
+        noticeCode: decision.userNotice.code,
         prisma: input.prisma,
       }),
       noticeCode: decision.userNotice.code,
@@ -470,8 +471,10 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
       message: await projectHostedAiUsageLimitNoticeForDelivery({
         memberId: input.userId,
         message: decision.userNotice.message,
+        noticeCode: decision.userNotice.code,
         prisma: input.prisma,
       }),
+      noticeCode: decision.userNotice.code,
       periodStart: decision.periodStart,
       prisma: input.prisma,
       replyToMessageId: wake.message.telegramMessage.messageId,
