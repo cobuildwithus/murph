@@ -558,6 +558,29 @@ test("HomePage opens persona onboarding for initial visits", async () => {
   assert.doesNotMatch(markup, /data-home-initial-visit-dialog/);
 });
 
+test("HomePage skips the contact-card picker for Telegram-only members", async () => {
+  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+    href: "https://t.me/withmurph_bot",
+    kind: "telegram",
+    label: "Message Murph on Telegram",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "true",
+      }),
+    }),
+  );
+
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-show-contact-card="false"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+});
+
 test("HomePage keeps persona onboarding gated behind the exact initial-visit marker", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
