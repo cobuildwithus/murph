@@ -142,8 +142,7 @@ test("only device-derived readings render, count, and decide the latest value", 
 
     // The header count includes only the device metrics that render.
     expect(text).toContain("1 biomarker");
-    expect(text).toContain("No lab results yet");
-    expect(text.indexOf("From your devices")).toBeLessThan(text.indexOf("No lab results yet"));
+    expect(text).not.toContain("No lab results yet");
   } finally {
     await rendered.cleanup();
   }
@@ -187,6 +186,51 @@ test("device biomarkers appear before closed lab sections", async () => {
     const pageSections = [...(deviceSection.parentElement?.children ?? [])];
     expect(pageSections.indexOf(deviceSection)).toBeLessThan(
       pageSections.indexOf(labGroupContainer),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("device biomarkers remain visible above the notice for unclassified saved labs", async () => {
+  browserVaultMock.value.client = clientWithMetricRows(
+    [
+      metricRow({
+        date: "2026-07-14",
+        id: "w1",
+        metricKey: "resting-heart-rate",
+        sourceKind: "wearable-summary",
+        value: 59,
+      }),
+    ],
+    [{
+      ...labRow(),
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }],
+  );
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("From your devices");
+    expect(text).toContain("Resting heart rate");
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("Report sequence");
+    expect(text.indexOf("From your devices")).toBeLessThan(
+      text.indexOf("No recognized lab biomarkers yet"),
     );
   } finally {
     await rendered.cleanup();

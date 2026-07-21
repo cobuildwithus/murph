@@ -4564,7 +4564,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 18);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 19);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4692,7 +4692,86 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
       readOnly: true,
     });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 18);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime reads rebuild v18 test-result identities after expanded lab-only alias curation", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+
+  try {
+    const existingLedger = await readFile(eventLedgerPath, "utf8");
+    await writeFile(
+      eventLedgerPath,
+      existingLedger.concat(
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_testosterone_projection_upgrade",
+          kind: "test",
+          occurredAt: "2026-03-14T11:15:00.000Z",
+          recordedAt: "2026-03-14T12:00:00.000Z",
+          dayKey: "2026-03-14",
+          source: "import",
+          title: "Hormone panel",
+          testName: "hormone_panel",
+          testCategory: "blood",
+          specimenType: "serum",
+          results: [
+            { analyte: "Testosterone", unit: "ng/dL", value: 480 },
+            { analyte: "Testosterone total", unit: "ng/dL", value: 510 },
+          ],
+        }),
+        "\n",
+      ),
+      "utf8",
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      staleDatabase.exec(`
+        PRAGMA user_version = 18;
+
+        UPDATE query_metric_points
+        SET
+          metric_key = 'testosterone',
+          biomarker_key = NULL
+        WHERE source_record_id = 'evt_testosterone_projection_upgrade'
+          AND source_result_index = 0;
+      `);
+    } finally {
+      staleDatabase.close();
+    }
+
+    const staleStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(staleStatus.exists, true);
+    assert.equal(staleStatus.fresh, false);
+
+    const rebuiltPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "total-testosterone",
+    });
+    assert.equal(rebuiltPoints.length, 2);
+    assert.equal(rebuiltPoints.every((point) => point.metricKey === "total-testosterone"), true);
+    assert.equal(
+      rebuiltPoints.every((point) => point.biomarkerKey === "biomarker:total-testosterone"),
+      true,
+    );
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
     } finally {
       reopened.close();
     }

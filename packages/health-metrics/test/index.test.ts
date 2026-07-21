@@ -13,7 +13,9 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   normalizeUnit,
+  normalizeLabResultMetricValue,
   normalizeMetricValue,
+  resolveLabResultMetricDefinition,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   resolveExperimentSessionMetricSpec,
@@ -165,8 +167,13 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("TSH")?.key, "thyroid-stimulating-hormone");
   assert.equal(resolveMetricDefinition("MCH")?.key, "mean-corpuscular-hemoglobin");
   assert.equal(resolveMetricDefinition("MCHC")?.key, "mean-corpuscular-hemoglobin-concentration");
+  assert.equal(resolveMetricDefinition("Testosterone"), null);
   assert.equal(resolveMetricDefinition("BUN/Creatinine Ratio"), null);
   assert.equal(resolveMetricDefinition("Urea"), null);
+  assert.equal(resolveLabResultMetricDefinition("Estimated GFR CKD-EPI")?.key, "egfr-ckd-epi");
+  assert.equal(resolveLabResultMetricDefinition("HbA1c NGSP")?.key, "hba1c");
+  assert.equal(resolveLabResultMetricDefinition("HbA1c SI")?.key, "hba1c");
+  assert.equal(resolveLabResultMetricDefinition("Testosterone total")?.key, "total-testosterone");
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
@@ -649,6 +656,27 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "g/dL",
     value: 32.5,
   }).canonicalUnit, "g/dL");
+
+  assert.deepEqual(normalizeLabResultMetricValue({
+    metricKey: "egfr-ckd-epi",
+    unit: "mL/min/1.73m^2",
+    value: 89,
+  }), {
+    canonicalUnit: "mL/min/1.73m^2",
+    canonicalValue: 89,
+    unit: "mL/min/1.73m^2",
+    warnings: [],
+  });
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "egfr-ckd-epi",
+    unit: "mL/min/1.73m^2",
+    value: 89,
+  }), {
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: "mL/min/1.73m^2",
+    warnings: [],
+  });
 });
 
 test("lists Murph Age source routes as metadata-only model strategy", () => {
