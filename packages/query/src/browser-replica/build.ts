@@ -17,6 +17,7 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   parseGoalMetricTargets,
+  resolveCanonicalBiomarkerKey,
   selectMetricGoalProgress,
   type GoalMetricTarget,
   type MetricPoint,
@@ -253,7 +254,7 @@ function collectExperimentMeasurementAnchorRecords(
       if (recordId && biomarkerKeys.length > 0) {
         const existing = records.get(recordId) ?? new Set<string>();
         for (const biomarkerKey of biomarkerKeys) {
-          existing.add(biomarkerKey);
+          existing.add(resolveCanonicalBiomarkerKey(biomarkerKey));
         }
         records.set(recordId, existing);
       }

@@ -65,6 +65,7 @@ export {
   metricPointRecordIds,
   normalizeMetricKey,
   normalizeMetricValue,
+  resolveCanonicalBiomarkerKey,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,

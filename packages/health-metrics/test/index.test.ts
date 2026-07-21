@@ -1408,6 +1408,54 @@ test("latest-lab policy does not silently fall back to non-lab event points", ()
   assert.equal(noLab.point, null);
 });
 
+test("catalog metrics require reported units when canonical fields are unavailable", () => {
+  const cases = [
+    { key: "blood-urea-nitrogen", unit: "mg/dL", unitful: 14, unitless: 7 },
+    { key: "thyroid-stimulating-hormone", unit: "mIU/L", unitful: 2.5, unitless: 4 },
+    { key: "mean-corpuscular-hemoglobin", unit: "pg", unitful: 30, unitless: 32 },
+    { key: "mean-corpuscular-hemoglobin-concentration", unit: "g/dL", unitful: 33, unitless: 35 },
+  ] as const;
+
+  for (const testCase of cases) {
+    const unitful = metricPoint({
+      effectiveDate: "2026-03-01",
+      id: `metric-point:${testCase.key}:unitful`,
+      metricKey: testCase.key,
+      observedAt: "2026-03-01T08:00:00.000Z",
+      recordId: `${testCase.key}-unitful`,
+      sourceKind: "test-result",
+      unit: testCase.unit,
+      value: testCase.unitful,
+    });
+    const unitless = {
+      ...unitful,
+      canonicalUnit: null,
+      canonicalValue: null,
+      effectiveDate: "2026-04-01",
+      id: `metric-point:${testCase.key}:unitless`,
+      observedAt: "2026-04-01T08:00:00.000Z",
+      source: { ...unitful.source, recordId: `${testCase.key}-unitless` },
+      unit: null,
+      value: testCase.unitless,
+    } satisfies MetricPoint;
+
+    const selected = selectMetricValue({
+      metricKey: testCase.key,
+      points: [unitful, unitless],
+    });
+    const series = selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey: testCase.key,
+      points: [unitful, unitless],
+    });
+
+    assert.equal(selected.point?.id, unitful.id, testCase.key);
+    assert.equal(selected.value, testCase.unitful, testCase.key);
+    assert.equal(selected.unit, testCase.unit, testCase.key);
+    assert.deepEqual(series.rows.map((row) => row.value), [testCase.unitful], testCase.key);
+  }
+});
+
 test("supports daily aggregate policy selections with contributing provenance", () => {
   const points = [
     metricPoint({

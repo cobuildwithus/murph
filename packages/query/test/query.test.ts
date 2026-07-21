@@ -4611,6 +4611,21 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
           ],
         }),
         "\n",
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_bun_projection_unitless",
+          kind: "test",
+          occurredAt: "2026-03-13T11:15:00.000Z",
+          recordedAt: "2026-03-13T12:00:00.000Z",
+          dayKey: "2026-03-13",
+          source: "import",
+          title: "Follow-up blood panel",
+          testName: "blood_panel",
+          testCategory: "blood",
+          specimenType: "serum",
+          results: [{ analyte: "BUN", value: 7 }],
+        }),
+        "\n",
       ),
       "utf8",
     );
@@ -4645,7 +4660,7 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
       limit: null,
       metricKey: "BUN",
     });
-    assert.equal(rebuiltPoints.length, 2);
+    assert.equal(rebuiltPoints.length, 3);
     assert.equal(rebuiltPoints.every((point) => point.metricKey === "blood-urea-nitrogen"), true);
     assert.equal(
       rebuiltPoints.every((point) => point.biomarkerKey === "biomarker:blood-urea-nitrogen"),
@@ -4655,15 +4670,22 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
       rebuiltPoints.map((point) => point.canonicalValue).sort((left, right) =>
         (left ?? 0) - (right ?? 0)
       ),
-      [14, 14.0056],
+      [null, 14, 14.0056],
     );
-    assert.equal(rebuiltPoints.every((point) => point.canonicalUnit === "mg/dL"), true);
     assert.deepEqual(
       rebuiltPoints.map((point) => [point.value, point.unit]).sort((left, right) =>
         Number(left[0]) - Number(right[0])
       ),
-      [[5, "mmol/L"], [14, "mg/dL"]],
+      [[5, "mmol/L"], [7, null], [14, "mg/dL"]],
     );
+    const runtimeSelection = selectMetricValue({
+      metricKey: "BUN",
+      points: rebuiltPoints,
+    });
+    assert.equal(runtimeSelection.status, "ready");
+    assert.equal(runtimeSelection.effectiveDate, "2026-03-12");
+    assert.equal(runtimeSelection.unit, "mg/dL");
+    assert.notEqual(runtimeSelection.value, 7);
 
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
       create: false,

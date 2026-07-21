@@ -480,7 +480,7 @@ test("browser-vault metric goal targets honor selectionPolicyOverride from goal 
   assert.notEqual(progress.selectedPointIds[0], metricSelection.pointIds[0]);
 });
 
-test("BUN goal aliases use explicit unit conversion and the lab freshness policy", async () => {
+test("lab goal aliases use only reported units for conversion and comparison", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-07-20T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
@@ -492,11 +492,29 @@ test("BUN goal aliases use explicit unit conversion and the lab freshness policy
           attributes: {
             collectedAt: "2026-01-01T08:00:00.000Z",
             labName: "Example Lab",
-            results: [{
-              analyte: "Urea Nitrogen",
-              unit: "mmol/L",
-              value: 5,
-            }],
+            results: [
+              { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
+              { analyte: "TSH", unit: "uIU/mL", value: 2.5 },
+              { analyte: "MCH", unit: "pg", value: 30 },
+              { analyte: "MCHC", unit: "g/dL", value: 33 },
+            ],
+            source: "import",
+            specimenType: "serum",
+            testCategory: "blood",
+          },
+          }),
+        createEvent("evt_unitless_goal_lab", "test", {
+          occurredAt: "2026-02-01T08:00:00.000Z",
+          title: "Unitless kidney and blood panel",
+          attributes: {
+            collectedAt: "2026-02-01T08:00:00.000Z",
+            labName: "Example Lab",
+            results: [
+              { analyte: "BUN", value: 7 },
+              { analyte: "TSH", value: 4 },
+              { analyte: "MCH", value: 32 },
+              { analyte: "MCHC", value: 35 },
+            ],
             source: "import",
             specimenType: "serum",
             testCategory: "blood",
@@ -511,16 +529,48 @@ test("BUN goal aliases use explicit unit conversion and the lab freshness policy
           family: "goal",
           frontmatter: {
             status: "active",
-            metricTargets: [{
-              biomarkerKey: "biomarker:bun",
-              comparator: "<",
-              evaluation: { kind: "latest-lab" },
-              kind: "metric",
-              metricKey: "BUN",
-              targetId: "bun-under-20",
-              unit: "mg/dL",
-              value: 20,
-            }],
+            metricTargets: [
+              {
+                biomarkerKey: "biomarker:bun",
+                comparator: "<",
+                evaluation: { kind: "latest-lab" },
+                kind: "metric",
+                metricKey: "BUN",
+                targetId: "bun-under-10",
+                unit: "mg/dL",
+                value: 10,
+              },
+              {
+                biomarkerKey: "biomarker:tsh",
+                comparator: "<",
+                evaluation: { kind: "latest-lab" },
+                kind: "metric",
+                metricKey: "TSH",
+                targetId: "tsh-under-3",
+                unit: "mIU/L",
+                value: 3,
+              },
+              {
+                biomarkerKey: "biomarker:mch",
+                comparator: ">",
+                evaluation: { kind: "latest-lab" },
+                kind: "metric",
+                metricKey: "MCH",
+                targetId: "mch-over-31",
+                unit: "pg",
+                value: 31,
+              },
+              {
+                biomarkerKey: "biomarker:mchc",
+                comparator: ">",
+                evaluation: { kind: "latest-lab" },
+                kind: "metric",
+                metricKey: "MCHC",
+                targetId: "mchc-over-34",
+                unit: "g/dL",
+                value: 34,
+              },
+            ],
           },
           kind: "goal",
           links: [],
@@ -543,7 +593,9 @@ test("BUN goal aliases use explicit unit conversion and the lab freshness policy
 
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const selection = client.metricSelections.get("BUN");
-  const progress = client.metricGoals.progress({ goalId: "goal_bun" })[0];
+  const progress = new Map(
+    client.metricGoals.progress({ goalId: "goal_bun" }).map((row) => [row.metricKey, row]),
+  );
   const labRow = client.labResults.list({ metricKey: "BUN" })[0];
 
   assert.ok(selection);
@@ -551,9 +603,16 @@ test("BUN goal aliases use explicit unit conversion and the lab freshness policy
   assert.equal(selection.status, "ready");
   assert.equal(selection.unit, "mg/dL");
   assert.equal(Number((selection.value ?? NaN).toFixed(4)), 14.0056);
-  assert.ok(progress);
-  assert.equal(progress.status, "met");
-  assert.equal(Number((progress.currentValue ?? NaN).toFixed(4)), 14.0056);
+  assert.equal(progress.get("blood-urea-nitrogen")?.status, "not_met");
+  assert.equal(Number((progress.get("blood-urea-nitrogen")?.currentValue ?? NaN).toFixed(4)), 14.0056);
+  assert.deepEqual(
+    [
+      progress.get("thyroid-stimulating-hormone"),
+      progress.get("mean-corpuscular-hemoglobin"),
+      progress.get("mean-corpuscular-hemoglobin-concentration"),
+    ].map((row) => [row?.currentValue, row?.status]),
+    [[2.5, "met"], [30, "not_met"], [33, "not_met"]],
+  );
   assert.ok(labRow);
   assert.equal(labRow.unit, "mmol/L");
   assert.equal(labRow.value, 5);

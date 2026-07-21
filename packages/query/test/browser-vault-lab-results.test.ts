@@ -8,6 +8,7 @@ import {
   createVaultReadModel,
   parseBrowserVaultReplica,
   selectBrowserVaultLabBiomarkerDetail,
+  selectBrowserVaultExperimentResults,
   selectBrowserVaultMeasuredBiomarkers,
 } from "../src/browser.ts";
 import { buildMetricProjection } from "../src/index.ts";
@@ -214,7 +215,7 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
         { analyte: "MCHC", unit: "g/dL", value: 33 },
         { analyte: "BUN/Creatinine Ratio", value: 12 },
       ]),
-      createLabTest("evt_aliases_2025", "2025-03-01T08:00:00.000Z", [
+      createLabTest("evt_aliases_2025", "2025-09-01T08:00:00.000Z", [
         { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 16 },
         { analyte: "Thyroid Stimulating Hormone", unit: "mIU/L", value: 3.1 },
         { analyte: "Mean Corpuscular Hemoglobin", unit: "pg", value: 31 },
@@ -230,6 +231,24 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
         { analyte: "MCH", value: 32 },
         { analyte: "MCHC", value: 35 },
       ]),
+      createExperiment("exp_bun_alias", "bun-alias", {
+        primaryBiomarkerKey: "biomarker:bun",
+        desiredDirection: "decrease",
+        measurementAnchors: [
+          {
+            role: "baseline",
+            kind: "lab_panel",
+            recordId: "evt_aliases_2024",
+            biomarkerKeys: ["biomarker:bun"],
+          },
+          {
+            role: "followup",
+            kind: "lab_panel",
+            recordId: "evt_aliases_2025",
+            biomarkerKeys: ["biomarker:bun"],
+          },
+        ],
+      }),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -251,6 +270,27 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
     "thyroid-stimulating-hormone",
     "urea",
   ]);
+  for (const [metricKey, value, unit, series] of [
+    ["BUN", 14.0056, "mg/dL", [14, 16, 14.0056]],
+    ["TSH", 3.1, "mIU/L", [3.1]],
+    ["MCH", 31, "pg", [31]],
+    ["MCHC", 34, "g/dL", [34]],
+  ] as const) {
+    const selection = client.metricSelections.get(metricKey);
+    assert.equal(selection?.value, value, metricKey);
+    assert.equal(selection?.unit, unit, metricKey);
+    assert.deepEqual(client.metrics.series({ metricKey }).map((row) => row.value), series, metricKey);
+  }
+
+  const experiment = selectBrowserVaultExperimentResults(client, "bun-alias");
+  assert.ok(experiment);
+  assert.deepEqual(experiment.progress?.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(experiment.biomarkers[0]?.baseline.mean, 14);
+  assert.equal(experiment.biomarkers[0]?.intervention.mean, 16);
+  assert.equal(experiment.biomarkers[0]?.deltaAbs, 2);
 
   const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
   assert.ok(bun);
@@ -602,6 +642,34 @@ function createLabTest(
     testCategory: "blood",
     testName: "blood_panel",
   });
+}
+
+function createExperiment(
+  entityId: string,
+  experimentSlug: string,
+  analysisPlan: Record<string, unknown>,
+): CanonicalEntity {
+  return {
+    attributes: {},
+    body: null,
+    date: "2026-01-01",
+    entityId,
+    experimentSlug,
+    family: "experiment",
+    frontmatter: { analysisPlan, status: "active" },
+    kind: "experiment",
+    links: [],
+    lookupIds: [entityId, experimentSlug],
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    path: `bank/experiments/${experimentSlug}.md`,
+    primaryLookupId: entityId,
+    recordClass: "bank",
+    relatedIds: [],
+    status: "active",
+    stream: null,
+    tags: [],
+    title: "BUN alias experiment",
+  } satisfies CanonicalEntity;
 }
 
 function createEvent(

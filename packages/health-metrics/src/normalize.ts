@@ -1,5 +1,10 @@
 import { createCustomMetricDefinition, normalizeMetricKey, resolveMetricDefinition } from "./catalog.ts";
-import type { MetricSelectionWarning, MetricValueNormalization } from "./types.ts";
+import type {
+  MetricDefinition,
+  MetricPoint,
+  MetricSelectionWarning,
+  MetricValueNormalization,
+} from "./types.ts";
 
 const HOUR_INTENT_DURATION_ALIASES = new Set([
   "sleep-duration-hours",
@@ -88,6 +93,25 @@ export function normalizeMetricValue(input: {
       };
     }
   }
+}
+
+export function resolveComparableMetricPointValue(
+  point: MetricPoint,
+  definition: MetricDefinition,
+): { unit: string | null; value: number } | null {
+  if (
+    definition.canonicalUnit !== null &&
+    point.canonicalUnit === definition.canonicalUnit &&
+    point.canonicalValue !== null &&
+    Number.isFinite(point.canonicalValue)
+  ) {
+    return { unit: point.canonicalUnit, value: point.canonicalValue };
+  }
+
+  if (point.value === null || !Number.isFinite(point.value) || point.unit === null) {
+    return null;
+  }
+  return { unit: point.unit, value: point.value };
 }
 
 function inferUnitFromMetricAlias(metricKey: string): string | null {
