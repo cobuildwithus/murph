@@ -93,6 +93,10 @@ Updated: 2026-07-21
   Telegram helpers and reject a different migrated target before retrying.
   Ordinary immediate sends retain migration because they omit that constraint;
   recovery for a scheduled route remains an explicit re-save from the new chat.
+- Treat the follow-up ReviewGPT round-2 Purpose Drift finding as accepted: the
+  exact runner-bundle ceiling ratchet is a necessary deploy-admission surface,
+  so the PR intent contract now discloses its value, reason, zero-margin fixed
+  policy, and regression proof. The correction changes no production code.
 
 ## Verification
 
@@ -115,6 +119,11 @@ Updated: 2026-07-21
   including all affected reverse dependents and Cloudflare Node/Workers lanes.
   The required coverage audit added one hosted image/reaction wiring regression;
   all focused suites and final privacy/diff checks pass.
-- Pending for the final correction head: acceptance verification, hosted-local
-  proof, exact-head preflight, green PR CI, and ReviewGPT
-  `ROUND_OUTCOME: PASS`.
+- Passed full acceptance on the conflict-resolved correction head. The exact
+  runner-bundle contract and canonical Cloudflare diff verification pass, with
+  106 Node test files (1,845 tests) and the Workers lane green.
+- Passed a fresh 9,369,574B runner-bundle assembly, deploy smoke, and the full
+  hosted-local Telegram scheduled-reminder scenario (2 tests, 500.89s).
+- Every exact-head PR CI check passes. ReviewGPT round 1 passed with no finding;
+  round 2 found only the accepted missing deploy-surface disclosure above.
+  Pending: the final disclosure-verification round.
