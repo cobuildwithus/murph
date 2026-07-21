@@ -7,6 +7,78 @@ import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 import { renderClientComponent } from "./render-client-component";
 
+test("VoiceMemoPlayer adapts waveform density to its rendered width", async () => {
+  let notifyResize: ((width: number) => void) | undefined;
+  let observedElement: Element | undefined;
+  class TestResizeObserver {
+    constructor(
+      callback: (entries: Array<{ contentRect: { width: number } }>) => void,
+    ) {
+      notifyResize = (width) => callback([{ contentRect: { width } }]);
+    }
+
+    disconnect() {}
+    observe(element: Element) {
+      observedElement = element;
+    }
+  }
+  const rendered = await renderClientComponent(
+    createElement(VoiceMemoPlayer, {
+      bars: 12,
+      src: "/audio/responsive.mp3",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    await rendered.rerender(
+      createElement(VoiceMemoPlayer, {
+        bars: 12,
+        key: "responsive-waveform",
+        src: "/audio/responsive.mp3",
+      }),
+    );
+    const waveform = rendered.container.querySelector(
+      "button[data-voice-memo-waveform]",
+    );
+    assert.ok(waveform);
+    assert.equal(observedElement, waveform);
+    assert.equal(waveform.querySelectorAll("span").length, 12);
+    assert.ok(notifyResize);
+
+    await act(async () => notifyResize?.(360));
+    assert.equal(waveform.querySelectorAll("span").length, 60);
+
+    await act(async () => notifyResize?.(90));
+    assert.equal(waveform.querySelectorAll("span").length, 24);
+  } finally {
+    await rendered.cleanup();
+    vi.unstubAllGlobals();
+  }
+});
+
+test("VoiceMemoPlayer gives both controls a voice-specific accessible name", async () => {
+  const rendered = await renderClientComponent(
+    createElement(VoiceMemoPlayer, {
+      accessibleLabel: "Husky voice preview",
+      src: "/audio/husky.mp3",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const labels = Array.from(rendered.container.querySelectorAll("button"))
+      .map((button) => button.getAttribute("aria-label"));
+    assert.deepEqual(labels, [
+      "Play Husky voice preview",
+      "Play Husky voice preview from waveform",
+    ]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("VoiceMemoPlayer pauses sibling players in the same exclusive group", async () => {
   const rendered = await renderClientComponent(
     createElement(
@@ -111,7 +183,7 @@ test("VoiceMemoPlayer falls back once before marking a preview unavailable", asy
   const rendered = await renderClientComponent(
     createElement(VoiceMemoPlayer, {
       fallbackSrc: "/audio/murph-voices/warm.mp3",
-      src: "/audio/murph-personas/grandma/warm.mp3",
+      src: "/audio/murph-personas/classic/warm.mp3",
       unavailableLabel: "Preview unavailable",
     }),
     { requireButton: false },
@@ -122,7 +194,7 @@ test("VoiceMemoPlayer falls back once before marking a preview unavailable", asy
     assert.ok(audio);
     assert.equal(
       audio.getAttribute("src"),
-      "/audio/murph-personas/grandma/warm.mp3",
+      "/audio/murph-personas/classic/warm.mp3",
     );
 
     await act(async () => {

@@ -117,6 +117,41 @@ describe("hosted member assistant preferences", () => {
     });
   });
 
+  it("normalizes legacy stored persona ids in hosted preference results", async () => {
+    const member = {
+      assistantPersona: "medical-detective" as string | null,
+      assistantPersonaCausalSeq: 1n as bigint | null,
+      assistantDetail: null as number | null,
+      assistantDetailCausalSeq: null as bigint | null,
+      assistantHumor: null as number | null,
+      assistantHumorCausalSeq: null as bigint | null,
+      assistantPush: null as number | null,
+      assistantPushCausalSeq: null as bigint | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 1n as bigint | null,
+      assistantVoice: null as string | null,
+      assistantVoiceCausalSeq: null as bigint | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 2n, id: "mailbox_item_123" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: { tone: "formal" },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantPersona: "scientist",
+      assistantTone: "formal",
+      updated: false,
+    });
+  });
+
   it("uses a durable unique wake identity for same-millisecond preference writes", async () => {
     const member = {
       assistantPersona: null as string | null,

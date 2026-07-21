@@ -12,6 +12,7 @@ import {
   assistantVoiceOptionIdSchema,
   isAssistantPersonalitySettingId,
   isWearablePreferenceProvider,
+  normalizeStoredAssistantPersonaId,
   normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
@@ -87,6 +88,25 @@ function normalizeWearablePreferencesForRead(value: unknown): WearablePreference
   );
 
   return { desiredProviders };
+}
+
+function normalizePreferencesDocumentForRead(value: unknown): unknown {
+  if (!isPlainRecord(value) || !isPlainRecord(value.assistant)) {
+    return value;
+  }
+
+  const persona = normalizeStoredAssistantPersonaId(value.assistant.persona);
+  if (persona === null || persona === value.assistant.persona) {
+    return value;
+  }
+
+  return {
+    ...value,
+    assistant: {
+      ...value.assistant,
+      persona,
+    },
+  };
 }
 
 function normalizeAssistantPreferencesForRead(value: unknown): AssistantPreferences | undefined {
@@ -298,7 +318,9 @@ export async function readPreferencesDocument(
   }
 
   const parsedDocument = preferencesDocumentSchema.parse(
-    await readJsonFile(vaultRoot, resolved.relativePath),
+    normalizePreferencesDocumentForRead(
+      await readJsonFile(vaultRoot, resolved.relativePath),
+    ),
   );
   const assistantPreferences = normalizeAssistantPreferencesForRead(parsedDocument.assistant);
   const document = buildPreferencesDocument({

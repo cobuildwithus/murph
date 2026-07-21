@@ -27,7 +27,7 @@ const voiceById = new Map(
   contracts.assistantVoiceOptions.map((voice) => [voice.id, voice]),
 );
 
-for (const persona of contracts.assistantPersonaOptions) {
+for (const persona of contracts.assistantBasePersonaOptions) {
   const personaDir = path.join(OUTPUT_DIR, persona.id);
   await mkdir(personaDir, { recursive: true });
   for (const voiceOptionId of persona.recommendedVoiceIds) {
@@ -56,7 +56,7 @@ async function readContracts() {
   }
   const contracts = await import(pathToFileURL(entry).href);
   if (
-    !Array.isArray(contracts.assistantPersonaOptions)
+    !Array.isArray(contracts.assistantBasePersonaOptions)
     || !Array.isArray(contracts.assistantVoiceOptions)
   ) {
     throw new Error("packages/contracts did not export the persona and voice catalogs.");
