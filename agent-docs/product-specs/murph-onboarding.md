@@ -235,10 +235,11 @@ independent work families, immediately start three children before replying:
 2. supplement persistence plus useful exact-label enrichment; and
 3. medical and safety persistence.
 
-The parent replies without waiting and may say, in natural words, that Murph's
-best people are sorting, saving, and checking what the member shared. That is a
-same-turn start acknowledgement, not a completion claim. The final labs
-question follows in the same response as generated voice when available, with
+The parent does not wait. Immediately after accepted spawns, it sends one
+progress update saying, in natural words, that Murph's best people are sorting,
+saving, and checking what the member shared. That is a same-turn start
+acknowledgement, not a completion claim, and it is not repeated in the final
+reply. The final labs response is voice-only when generation is available, with
 no text duplicate unless the channel adapter must deliver the existing
 transcript after audio fails.
 

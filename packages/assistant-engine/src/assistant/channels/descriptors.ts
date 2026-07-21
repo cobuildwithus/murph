@@ -797,7 +797,9 @@ async function sendLinqVoiceMemoDelivery(input: {
     if (fallbackText) {
       try {
         const deliveredFallback = await sendLinqVoiceMemoFallbackText({
+          attachmentId,
           dependencies: input.dependencies,
+          deliveryIdempotencyKey: input.idempotencyKey ?? null,
           message: fallbackText,
           target: voiceMemoTarget,
           targetKind: voiceMemoTargetKind,
@@ -857,14 +859,17 @@ async function sendLinqVoiceMemoDelivery(input: {
 }
 
 async function sendLinqVoiceMemoFallbackText(input: {
+  attachmentId: string
   dependencies: AssistantChannelDependencies
+  deliveryIdempotencyKey: string | null
   message: string
   target: string
   targetKind: 'explicit' | 'participant' | 'thread'
 }) {
+  const idempotencyKey = buildLinqVoiceMemoFallbackIdempotencyKey(input)
   return input.dependencies.sendLinq
     ? await input.dependencies.sendLinq({
-        idempotencyKey: null,
+        idempotencyKey,
         message: input.message,
         replyToMessageId: null,
         ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
@@ -873,7 +878,7 @@ async function sendLinqVoiceMemoFallbackText(input: {
       })
     : await sendLinqMessage(
         {
-          idempotencyKey: null,
+          idempotencyKey,
           message: input.message,
           replyToMessageId: null,
           target: input.target,
@@ -881,6 +886,14 @@ async function sendLinqVoiceMemoFallbackText(input: {
         },
         input.dependencies.signal ? { signal: input.dependencies.signal } : {},
       )
+}
+
+function buildLinqVoiceMemoFallbackIdempotencyKey(input: {
+  attachmentId: string
+  deliveryIdempotencyKey: string | null
+}): string {
+  const stableParent = input.deliveryIdempotencyKey?.trim() || input.attachmentId
+  return `linq-voice-memo-transcript:${stableParent}`
 }
 
 function createLinqVoiceMemoPartialDeliveryFailure(input: {

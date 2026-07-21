@@ -1864,6 +1864,15 @@ describe('assistant skill assets', () => {
       "I've got my best people on it—they're sorting, saving, and checking what you just shared.",
     )
     expect(compact).toContain(
+      'Immediately call `murph.send_progress_update` once',
+    )
+    expect(compact).toContain(
+      'This final response is voice-only',
+    )
+    expect(compact).toContain(
+      'Do not repeat this acknowledgement in the final reply',
+    )
+    expect(compact).toContain(
       'Do not claim the records are already saved.',
     )
     expect(compact).toContain(
@@ -1984,7 +1993,7 @@ describe('assistant skill assets', () => {
       "Okay, one last question and then I'll leave you alone, promise: have you had any blood tests or lab panels in the past year or two?",
     )
     expect(compact).toContain(
-      'Do not duplicate that question in text.',
+      'This final response is voice-only: do not duplicate that question',
     )
     expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',

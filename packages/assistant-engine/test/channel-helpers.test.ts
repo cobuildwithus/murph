@@ -1391,7 +1391,7 @@ describe('channel helper seams', () => {
         },
       )
     expect(sendLinq).toHaveBeenNthCalledWith(2, {
-      idempotencyKey: null,
+      idempotencyKey: 'linq-voice-memo-transcript:idem-partial-voice',
       message: 'Have you had any recent blood tests?',
       replyToMessageId: null,
       target: 'thread-linq-voice',
@@ -1453,6 +1453,10 @@ describe('channel helper seams', () => {
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })
+    expect(sendLinq).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      idempotencyKey: 'linq-voice-memo-transcript:idem-failed-fallback',
+      message: 'Have you had any recent blood tests?',
+    }))
   })
 
   it('keeps Linq text-plus-voice memo rate limits retryable after accepted text', async () => {

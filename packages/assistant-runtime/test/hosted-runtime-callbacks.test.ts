@@ -10,6 +10,9 @@ import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
+  getAssistantChannelAdapter,
+} from "@murphai/assistant-engine/assistant-channel-adapters";
+import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
@@ -7935,6 +7938,89 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("carries distinct stable identities through hosted Linq voice transcript fallback", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      media: [createHostedVoiceMemoMedia({
+        transcript: "Have you had any recent blood tests?",
+      })],
+      message: "",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request));
+    mocks.sendLinqMessage
+      .mockResolvedValueOnce({
+        providerMessageId: "linq_transcript_fallback",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread" as const,
+      });
+    mocks.sendLinqVoiceMemoMessage.mockRejectedValueOnce(new VaultCliError(
+      "LINQ_API_REQUEST_FAILED",
+      "Linq rejected the voice memo.",
+      {
+        failureStage: "http",
+        operation: "send_voice_memo",
+        retryable: true,
+        status: 503,
+      },
+    ));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const adapter = getAssistantChannelAdapter("linq");
+      assert.ok(adapter);
+      const delivery = await adapter.send({
+        actorId: "actor_123",
+        bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+        explicitTarget: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        identityId: "identity_123",
+        media: [createHostedVoiceMemoMedia({
+          transcript: "Have you had any recent blood tests?",
+        })],
+        message: "",
+        replyToMessageId: null,
+        threadIsDirect: true,
+      }, dependencies);
+      return createDispatchResult({
+        delivery,
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(assertRecentInbound.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.authorityCheckOnly === false)
+      .map((request) => request.idempotencyKey)).toEqual([
+      "linq-voice-memo:intent_123",
+      "linq-voice-memo-transcript:assistant-outbox:intent_123",
+    ]);
+    expect(assertRecentInbound.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.authorityCheckOnly === true)
+      .map((request) => request.idempotencyKey)).toEqual([
+      "linq-voice-memo:intent_123",
+    ]);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
   });
 
   it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {

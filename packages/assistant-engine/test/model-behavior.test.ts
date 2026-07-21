@@ -694,7 +694,7 @@ describe('assistant execution prompt contract', () => {
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
     )
     expect(prompt).toContain(
-      'Background work does not delay the reply or trigger progress by itself.',
+      'Background work does not trigger progress by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns.',
     )
     expect(prompt).toContain(
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
