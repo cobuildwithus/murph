@@ -48,7 +48,7 @@ import {
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
-} from "./epic-beta-policy";
+} from "./epic-policy";
 import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,

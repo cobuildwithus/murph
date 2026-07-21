@@ -45,7 +45,7 @@ import {
 import {
   buildEpicBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
-} from "./epic-beta-policy";
+} from "./epic-policy";
 
 const OAUTH_SESSION_TTL_MS = 10 * 60 * 1_000;
 const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
