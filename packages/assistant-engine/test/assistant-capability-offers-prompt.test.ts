@@ -157,6 +157,51 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('to join by reacting')
   })
 
+  it('uses memberships only as bounded last-resort direct disambiguation', () => {
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    const groupPrompt = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    ).prompt
+    const unverifiedPrompt = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'unverified-external',
+      }),
+    ).prompt
+    const directSection = getPromptSection(
+      directLayers.stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(directLayers.prompt).toContain('last-resort disambiguation check')
+    expect(directSection).toContain('possible group cue')
+    expect(directSection).toContain('club, team, community, or shared challenge')
+    expect(directSection).toContain(
+      '`murph.group action="list_memberships"` is available',
+    )
+    expect(directSection).toContain('last-resort disambiguation check')
+    expect(directSection).toContain(
+      'generic group reference only when exactly one membership exists',
+    )
+    expect(directSection).toContain(
+      'name-like reference only when one exact normalized visible label matches',
+    )
+    expect(directSection).toContain('use `action="ask"`')
+    expect(directSection).toContain('With no memberships')
+    expect(directSection).toContain('paste-or-screenshot fallback')
+    expect(directSection).toContain('distinct nonblank visible labels')
+    expect(directSection).toContain('duplicate or unnamed labels')
+    expect(directSection).toContain('Never fuzzy-match')
+    expect(directSection).toContain('select by role or newness')
+    expect(directSection).toContain('expose identifiers, or fan out')
+    expect(directSection).toContain('ordinary ambiguity without a group cue')
+    expect(groupPrompt).not.toContain('last-resort disambiguation check')
+    expect(unverifiedPrompt).not.toContain('last-resort disambiguation check')
+  })
+
   it('does not fork challenge behavior into a scheduled-only prompt', () => {
     const commonInput = createCommonCodexPromptInput({
       channel: 'linq',
