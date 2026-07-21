@@ -321,7 +321,7 @@ async function sendTelegramVoiceMemoDelivery(input: {
         replyToMessageId: input.replyToMessageId ?? null,
         targetOverride: voiceMemoTarget,
       },
-      input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      voiceMemoRuntimeDependencies,
     )
   } catch (error) {
     if (fallbackText) {

@@ -257,6 +257,51 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
+  it('blocks an authority-bound Telegram text redirect before the migrated request', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'group chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: '456',
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 1001,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'private group update',
+          target: '123',
+        },
+        {
+          authorityBoundTarget: '123',
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      text: 'private group update',
+    })
+  })
+
   it('converts markdown emphasis to Telegram message entities', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(200, {
@@ -725,6 +770,59 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('blocks an authority-bound Telegram photo redirect before the migrated request', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'group chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: '456',
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3001,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: 'Private chart',
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/private.png',
+            },
+          ],
+          message: 'Private chart',
+          target: '123',
+        },
+        {
+          authorityBoundTarget: '123',
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      photo: 'https://cdn.example.test/private.png',
+    })
+  })
+
   it('generates and sends Telegram voice memos with multipart sendVoice', async () => {
     const fetchImplementation = createQueuedFetch([
       createAudioResponse(mp3Bytes),
@@ -842,6 +940,60 @@ describe('assistant channels runtime seam', () => {
       'https://telegram.test/botbot-token/sendVoice',
     )
     expect(fetchImplementation.mock.calls[2]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+  })
+
+  it('blocks an authority-bound Telegram voice redirect before the migrated request', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(400, {
+        description: 'group chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: '456',
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 2002,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128',
+            text: 'Private group memo.',
+            voiceId: 'voice_murph',
+          },
+          target: '123',
+        },
+        {
+          authorityBoundTarget: '123',
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[0]?.[0]).toContain('api.elevenlabs.io')
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
       'https://telegram.test/botbot-token/sendVoice',
     )
   })
