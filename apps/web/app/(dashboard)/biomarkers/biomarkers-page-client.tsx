@@ -378,23 +378,10 @@ function MeasuredBiomarkerSection({
         />
       </summary>
 
-      <div className="grid md:grid-cols-2 xl:grid-cols-3">
-        {group.items.map((biomarker, index) => (
+      <div className="flex flex-col">
+        {group.items.map((biomarker) => (
           <MeasuredBiomarkerRow
             biomarker={biomarker}
-            className={cn(
-              "min-w-0 border-t border-border/70 bg-card/70",
-              group.items.length % 2 === 1
-                && index === group.items.length - 1
-                && "md:col-span-2 xl:col-span-1",
-              index % 2 === 0
-                && index + 1 < group.items.length
-                && "md:border-r",
-              "xl:border-r-0",
-              index % 3 !== 2
-                && index + 1 < group.items.length
-                && "xl:border-r",
-            )}
             key={biomarker.metricKey}
           />
         ))}
@@ -405,26 +392,21 @@ function MeasuredBiomarkerSection({
 
 function MeasuredBiomarkerRow({
   biomarker,
-  className,
 }: {
   biomarker: BrowserVaultMeasuredBiomarker;
-  className?: string;
 }) {
   const status = measuredBiomarkerStatus(biomarker.latest.flag);
 
   return (
     <Link
-      className={cn(
-        "flex min-h-24 cursor-pointer flex-col justify-center px-4 py-4 transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5",
-        className,
-      )}
+      className="flex min-h-20 cursor-pointer flex-col justify-center gap-1 border-t border-border/70 bg-card/70 px-4 py-4 transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-24 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5"
       href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
       prefetch={false}
     >
-      <h3 className="break-words text-lg font-medium tracking-tight text-foreground">
+      <h3 className="min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
         {biomarker.displayName}
       </h3>
-      <p className="mt-1.5 text-sm">
+      <p className="min-w-0 break-words text-sm sm:ml-auto sm:max-w-[50%] sm:text-right">
         <strong
           className={cn(
             status === "review" && "text-destructive",
@@ -528,20 +510,14 @@ function BiomarkerListSkeleton() {
             <Skeleton className="h-6 min-w-0 flex-1 motion-reduce:animate-none" />
             <Skeleton className="size-4 shrink-0 motion-reduce:animate-none" />
           </div>
-          <div className="grid md:grid-cols-2 xl:grid-cols-3">
+          <div className="flex flex-col">
             {[0, 1, 2].map((item) => (
               <div
-                className={cn(
-                  "flex min-h-24 flex-col justify-center gap-2 border-t border-border/70 px-4 py-4 sm:px-5",
-                  item === 2 && "md:col-span-2 xl:col-span-1",
-                  item === 0 && "md:border-r",
-                  "xl:border-r-0",
-                  item < 2 && "xl:border-r",
-                )}
+                className="flex min-h-20 flex-col justify-center gap-2 border-t border-border/70 px-4 py-4 sm:min-h-24 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5"
                 key={item}
               >
-                <Skeleton className="h-5 w-3/4 motion-reduce:animate-none" />
-                <Skeleton className="h-4 w-1/2 motion-reduce:animate-none" />
+                <Skeleton className="h-5 w-3/4 motion-reduce:animate-none sm:w-64" />
+                <Skeleton className="h-4 w-1/2 motion-reduce:animate-none sm:w-40" />
               </div>
             ))}
           </div>

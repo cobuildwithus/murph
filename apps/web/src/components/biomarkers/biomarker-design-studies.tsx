@@ -14,6 +14,7 @@ import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
+import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { cn } from "@/src/lib/utils";
@@ -323,14 +324,9 @@ function BiomarkerStudyDisclosure({
         />
       </summary>
 
-      <div className="grid md:grid-cols-2">
-        {group.results.map((result, index) => (
+      <div className="flex flex-col">
+        {group.results.map((result) => (
           <BiomarkerStudyRow
-            className={cn(
-              "min-w-0 border-t border-border/70 bg-card",
-              group.results.length % 2 === 1 && "last:md:col-span-2",
-              index % 2 === 0 && index + 1 < group.results.length && "md:border-r",
-            )}
             key={result.id}
             result={result}
           />
@@ -341,27 +337,22 @@ function BiomarkerStudyDisclosure({
 }
 
 function BiomarkerStudyRow({
-  className,
   result,
 }: {
-  className?: string;
   result: BiomarkerStudyResult;
 }) {
   const needsAttention = result.status === "attention";
 
   return (
     <Link
-      className={cn(
-        "flex min-h-24 w-full cursor-pointer flex-col justify-center px-5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-7",
-        className,
-      )}
+      className="flex min-h-20 w-full cursor-pointer flex-col justify-center gap-1 border-t border-border/70 bg-card px-5 py-3 text-left transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-24 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-7"
       href={`/biomarkers/results/${encodeURIComponent(result.metricKey)}`}
       prefetch={false}
     >
-      <span className="block break-words text-lg font-medium tracking-tight text-foreground">
+      <span className="block min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
         {result.name}
       </span>
-      <span className="mt-1 block text-sm">
+      <span className="block min-w-0 break-words text-sm sm:ml-auto sm:max-w-[50%] sm:text-right">
         <strong className={needsAttention ? "text-destructive" : "text-primary"}>
           {result.statusLabel}
         </strong>
@@ -396,15 +387,29 @@ export function BiomarkerDetailStudy() {
         <h4 className="text-2xl font-semibold tracking-tight text-destructive">Above range</h4>
         <div className="mt-3 flex items-baseline gap-3">
           <span aria-hidden="true" className="size-3 self-center rounded-full bg-destructive/80" />
-          <span className="text-3xl font-semibold tracking-tight tabular-nums text-foreground">18.0</span>
-          <span className="text-base text-muted-foreground">g/dL</span>
+          <LabResultValue
+            presentation="hero"
+            result={{
+              comparator: null,
+              textValue: null,
+              unit: "g/dL",
+              value: 18,
+            }}
+          />
         </div>
         <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-01-01">
           Jan 1, 2026
         </time>
 
         <div className="mt-9 min-w-0 border-y border-border/70 py-5">
+          <p
+            className="mb-3 text-xs text-muted-foreground"
+            id="illustrative-biomarker-chart-caption"
+          >
+            {HEMOGLOBIN_HISTORY.length} results plotted in g/dL · Shaded lab range: 13 to 17 g/dL
+          </p>
           <LabBiomarkerHistoryChart
+            ariaDescribedBy="illustrative-biomarker-chart-caption"
             displayName="Illustrative hemoglobin"
             points={HEMOGLOBIN_HISTORY}
             referenceRange={{ high: 17, low: 13 }}
