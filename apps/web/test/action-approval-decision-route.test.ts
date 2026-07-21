@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   requirePendingHostedActionApproval: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
-  signalHostedRuntimeRecheckRuntime: vi.fn(),
   transaction: vi.fn(),
   verifySensitiveActionChallenge: vi.fn(),
 }));
@@ -38,7 +37,6 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-  signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -107,10 +105,6 @@ describe("hosted action approval decision route", () => {
       label: "Text Murph",
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_action_decision",
-    });
-    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_action_decision",
     });
@@ -190,36 +184,6 @@ describe("hosted action approval decision route", () => {
     );
   });
 
-  it("keeps the legacy signal path while automatic continuation is gated off", async () => {
-    mocks.decideHostedActionApprovalTx.mockImplementationOnce(async (input: {
-      decision: "approved" | "denied";
-    }) => ({
-      approval: {
-        approvalId: APPROVAL_ID,
-        expiresAt: PENDING_APPROVAL.expiresAt.toISOString(),
-        presentation: PENDING_APPROVAL.presentation,
-        returnContactKind: "text",
-        status: input.decision,
-      },
-      runtimeResume: null,
-    }));
-
-    const response = await route.POST(
-      jsonRequest({ decision: "denied" }),
-      routeContext(),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
-      userId: "member_action_decision",
-    });
-    expect(mocks.resolveHostedMurphContactOption).toHaveBeenCalledWith({
-      message: { body: "I denied the secure request." },
-      preferredKind: "text",
-    });
-  });
-
   it("uses the same durable continuation for denial", async () => {
     const response = await route.POST(
       jsonRequest({ decision: "denied" }),
@@ -271,7 +235,6 @@ describe("hosted action approval decision route", () => {
           errorMessage:
             "Temporal signal unavailable for hosted-user-runtime:<redacted-id> member_<redacted-id>",
           errorType: "Error",
-          mailboxItemIdPresent: true,
         },
       );
     } finally {

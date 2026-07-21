@@ -171,30 +171,18 @@ exact admitted group thread.
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare
   `container_rollout=immediate` is not applicable to this Vercel-only lane; the
   bounded drain wait and final alias check own the old-function window.
-- Automatic approval-outcome mailbox emission is an explicit cross-plane
-  activation exception: `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED`
-  must stay unset or `0` while the matching consumers are unverified. Deploy and
-  verify the web bundle that serves the action-approval read route first. That
-  bundle is the web rollback floor for the compatible runtime. After the
-  protected-main Cloudflare `container_rollout=immediate` deployment
-  and managed-container smoke pass, keep it disabled for a full 30-minute drain
-  after the last old runtime bundle can serve an approval request. Restart that
-  drain if an old bundle can still serve later. This covers the 15-minute pending
-  approval lifetime plus the fresh 15-minute approved lifetime before the gate
-  is set to `1` and web is redeployed. To roll back, set it to `0` and redeploy
-  web first. Once the gate has ever been enabled, the first compatible
-  Cloudflare/runner bundle and the first web bundle serving the read route are
-  permanent rollback floors. Keep web at that floor or newer while compatible
-  runtime or pending approval work can depend on the route; removing the web
-  floor requires a separate migration or forward runtime. System-lane
+- Automatic approval-outcome mailbox emission is unconditional. The first
+  compatible Cloudflare/runner bundle and the first web bundle serving the
+  action-approval read route are permanent rollback floors. Keep web at that
+  floor or newer while compatible runtime or pending approval work can depend
+  on the route; removing the web floor requires a separate migration or forward
+  runtime. System-lane
   lag proves import progress, not that imported pending items or committed hot
   snapshots no longer contain the new wake. Roll back only to that floor or
   newer, or forward-fix. A below-floor rollback requires a separate migration
   and proof covering server rows, imported local pending items, committed
-  snapshots, and in-flight producers. The disabled path emits no new mailbox
-  kind and retains the legacy approval confirmation fallback. Approval-outcome
-  coverage also proves bare
-  return links when enabled, one parked owner across repeated turns in the same
+  snapshots, and in-flight producers. Approval-outcome coverage also proves
+  bare return links, one parked owner across repeated turns in the same
   approval cycle, exact-cycle causal selection and generation validation instead
   of oldest-owner fallback, retained causal control work across foreground
   preemption, one causal observation read and dispatch allowlist,

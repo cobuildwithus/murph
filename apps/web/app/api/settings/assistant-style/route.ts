@@ -1,5 +1,4 @@
 import {
-  assistantPersonalityCausalWritesEnabled,
   assistantPersonalityPreferencesSchema,
   isAssistantPersonaId,
   isAssistantTonePreference,
@@ -47,32 +46,11 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Assistant style request body is too large.",
   });
   const preferences = parseAssistantStyleRequestBody(body);
-  const causalWritesEnabled = assistantPersonalityCausalWritesEnabled(process.env);
-
-  if (preferences.persona !== undefined && !causalWritesEnabled) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_PERSONA_ROLLOUT_PENDING",
-      httpStatus: 503,
-      message: "Murph personas are temporarily unavailable during rollout.",
-      retryable: true,
-    });
-  }
-  if (preferences.personality !== undefined && !causalWritesEnabled) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
-      httpStatus: 503,
-      message: "Personality settings are temporarily unavailable during rollout.",
-      retryable: true,
-    });
-  }
 
   const prisma = getPrisma();
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => (
     upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: causalWritesEnabled
-        ? "sparse_delta"
-        : "legacy_snapshot",
       memberId: auth.member.id,
       occurredAt: now.toISOString(),
       preferences,

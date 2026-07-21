@@ -730,6 +730,74 @@ describe('channel helper seams', () => {
     })
   })
 
+  it('keeps Telegram voice memo route authority through the descriptor', async () => {
+    const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: { 'content-type': 'audio/mpeg' },
+          status: 200,
+        })
+      }
+      if (url === 'https://telegram.test/botbot-token/sendVoice') {
+        return Response.json(
+          {
+            description: 'group chat migrated',
+            error_code: 400,
+            ok: false,
+            parameters: { migrate_to_chat_id: '456' },
+          },
+          { status: 400 },
+        )
+      }
+      throw new Error(`Unexpected Telegram request: ${url}`)
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', '123'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          media: [
+            createVoiceMemoMedia({
+              transport: {
+                generation: {
+                  kind: 'elevenlabs_speech',
+                  modelId: 'eleven_multilingual_v2',
+                  outputFormat: 'mp3_44100_128',
+                  text: 'Private group memo.',
+                  voiceId: 'voice_murph',
+                },
+                kind: 'telegram_generation',
+              },
+            }),
+          ],
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          telegramVoiceMemoRuntime: {
+            authorityBoundTarget: '123',
+            env: {
+              ELEVENLABS_API_KEY: 'elevenlabs-key',
+              TELEGRAM_API_BASE_URL: 'https://telegram.test',
+              TELEGRAM_BOT_TOKEN: 'bot-token',
+            },
+            fetchImplementation: telegramFetch,
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE',
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+    expect(telegramFetch).toHaveBeenCalledTimes(2)
+  })
+
   it.each([
     {
       failedCount: 1,

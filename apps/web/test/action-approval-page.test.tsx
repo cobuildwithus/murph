@@ -5,7 +5,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(() => ({ database: "test" })),
-  isHostedActionApprovalOutcomeWakeEnabled: vi.fn(() => true),
   readHostedActionApproval: vi.fn(),
   redirect: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
@@ -24,8 +23,6 @@ vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
 }));
 
 vi.mock("@/src/lib/action-approvals", () => ({
-  isHostedActionApprovalOutcomeWakeEnabled:
-    mocks.isHostedActionApprovalOutcomeWakeEnabled,
   readHostedActionApproval: mocks.readHostedActionApproval,
   requireHostedActionApprovalId: mocks.requireHostedActionApprovalId,
 }));
@@ -52,7 +49,6 @@ describe("action approval page", () => {
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_test" },
     });
-    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValue(true);
     mocks.readHostedActionApproval.mockResolvedValue({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -195,7 +191,7 @@ describe("action approval page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("sms:+15550100001");
   });
 
-  it("does not request a confirmation when enabled contact resolution fails", async () => {
+  it("does not request a confirmation when contact resolution fails", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -225,51 +221,4 @@ describe("action approval page", () => {
     assert.equal(markup.includes("and send:"), false);
   });
 
-  it("retains the confirmation message while automatic continuation is gated off", async () => {
-    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValueOnce(false);
-    mocks.readHostedActionApproval.mockResolvedValueOnce({
-      approvalId: "haa_test",
-      expiresAt: "2026-07-09T16:00:00.000Z",
-      presentation: {
-        body: "Share the requested file.",
-        title: "Share this file?",
-      },
-      returnContactKind: null,
-      status: "denied",
-    });
-
-    const view = await actionApprovalPage.default({
-      params: Promise.resolve({ approvalId: "haa_test" }),
-    });
-    const stream = await renderToReadableStream(view);
-    await stream.allReady;
-    const markup = await new Response(stream).text();
-
-    assert.match(markup, /I denied the request\./);
-    expect(mocks.redirect).not.toHaveBeenCalled();
-  });
-
-  it("retains an approved pre-cutover confirmation during the drain window", async () => {
-    mocks.isHostedActionApprovalOutcomeWakeEnabled.mockReturnValueOnce(false);
-    mocks.readHostedActionApproval.mockResolvedValueOnce({
-      approvalId: "haa_test",
-      expiresAt: "2026-07-09T16:15:00.000Z",
-      presentation: {
-        body: "Share the requested file.",
-        title: "Share this file?",
-      },
-      returnContactKind: null,
-      status: "approved",
-    });
-
-    const view = await actionApprovalPage.default({
-      params: Promise.resolve({ approvalId: "haa_test" }),
-    });
-    const stream = await renderToReadableStream(view);
-    await stream.allReady;
-    const markup = await new Response(stream).text();
-
-    assert.match(markup, /I approved the request\./);
-    expect(mocks.redirect).not.toHaveBeenCalled();
-  });
 });
