@@ -474,17 +474,13 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("keeps low and exhausted crossings distinct within one capacity epoch", async () => {
+  it("sends the exhausted notice when prior accounting created no low candidate", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx
-      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
-        noticeCode: "thread_usage_low",
-        noticeMessage: "This chat is running low on Murph usage.",
-        sourceUsageId: "turn_123.attempt-1",
-      }))
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
         noticeCode: "thread_usage_limit_reached",
         noticeMessage: "Murph usage is paused for this chat.",
@@ -516,11 +512,11 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .toHaveBeenCalledTimes(2);
+      .toHaveBeenCalledTimes(1);
     expect(
       noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock.calls
         .map(([input]) => input.noticeCode),
-    ).toEqual(["thread_usage_low", "thread_usage_limit_reached"]);
+    ).toEqual(["thread_usage_limit_reached"]);
   });
 
   it("passes Family-sponsored notice codes through the same crossing send path", async () => {

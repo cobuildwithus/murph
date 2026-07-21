@@ -598,6 +598,14 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
   const record = requireObject(value, "Hosted mailbox fetch response");
 
   return {
+    ...(record.conversationUsageStatus === undefined
+      ? {}
+      : {
+          conversationUsageStatus:
+            parseHostedMailboxConversationUsageStatus(
+              record.conversationUsageStatus,
+            ),
+        }),
     ...(record.consumedSeqByLane === undefined || record.consumedSeqByLane === null
       ? {}
       : {
@@ -621,6 +629,16 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
   };
+}
+
+function parseHostedMailboxConversationUsageStatus(value: unknown): "low" | null {
+  if (value === null || value === "low") {
+    return value;
+  }
+
+  throw new TypeError(
+    "Hosted mailbox fetch response conversationUsageStatus must be low or null.",
+  );
 }
 
 export function parseHostedRuntimeDeviceSyncBridgeEnvelope(

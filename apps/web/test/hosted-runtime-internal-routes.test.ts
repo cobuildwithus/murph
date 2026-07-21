@@ -973,6 +973,65 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 
+  it("projects low usage only with an allowed conversation mailbox batch", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-low",
+          expiresAt: null,
+          id: "mailbox_item_low",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_low",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
+      status: "allowed",
+      usageRunningLow: true,
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_usage_low",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      conversationUsageStatus: "low",
+      items: [expect.objectContaining({ id: "mailbox_item_low" })],
+    });
+  });
+
   it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {

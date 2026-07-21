@@ -73,7 +73,6 @@ export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
   | "pulse_upgrade_edge"
-  | "thread_usage_low"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
@@ -1710,17 +1709,8 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 
   const remainingBeforeUsdMicros =
     baseRemainingUsdMicros + input.period.usageCreditBalanceUsdMicros;
-  const limitNoticeEligible = remainingBeforeUsdMicros > 0n
+  const noticeEligible = remainingBeforeUsdMicros > 0n
     && input.costUsdMicros >= remainingBeforeUsdMicros;
-  const remainingAfterUsdMicros = input.costUsdMicros >= remainingBeforeUsdMicros
-    ? 0n
-    : remainingBeforeUsdMicros - input.costUsdMicros;
-  const lowThresholdUsdMicros = (input.period.limitUsdMicros + 4n) / 5n;
-  const lowNoticeEligible =
-    input.period.allowanceSource === "thread_container"
-    && remainingBeforeUsdMicros > lowThresholdUsdMicros
-    && remainingAfterUsdMicros > 0n
-    && remainingAfterUsdMicros <= lowThresholdUsdMicros;
 
   const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
@@ -1745,7 +1735,7 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
   }
 
-  if (!limitNoticeEligible && !lowNoticeEligible) {
+  if (!noticeEligible) {
     return null;
   }
 
@@ -1756,18 +1746,13 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     periodStart: input.period.periodStart,
     sourceUsageId: input.sourceUsageId,
     usageCreditLedgerVersion,
-    userNotice: lowNoticeEligible
-      ? buildHostedAiUsageGateThreadLowNotice({
-          memberId: input.memberId,
-          periodStart: input.period.periodStart,
-        })
-      : buildHostedAiUsageGateLimitNotice({
-          allowanceSource: input.period.allowanceSource,
-          billingPlanCode: input.period.billingPlanCode,
-          limitUsdMicros: input.period.limitUsdMicros,
-          memberId: input.memberId,
-          periodStart: input.period.periodStart,
-        }),
+    userNotice: buildHostedAiUsageGateLimitNotice({
+      allowanceSource: input.period.allowanceSource,
+      billingPlanCode: input.period.billingPlanCode,
+      limitUsdMicros: input.period.limitUsdMicros,
+      memberId: input.memberId,
+      periodStart: input.period.periodStart,
+    }),
   };
 }
 
@@ -2886,24 +2871,6 @@ function buildHostedAiUsageGateLimitNotice(input: {
       noticeCode: "pulse_upgrade_edge",
       periodStart: input.periodStart,
     }),
-  };
-}
-
-function buildHostedAiUsageGateThreadLowNotice(input: {
-  memberId: string;
-  periodStart: Date;
-}): HostedAiUsageLimitNotice {
-  return {
-    code: "thread_usage_low",
-    message: renderUserFacingMessage({
-      context: {},
-      key: "linq.ai_usage.thread_low",
-      seed: buildHostedAiUsageNoticeSeed({
-        memberId: input.memberId,
-        noticeCode: "thread_usage_low",
-        periodStart: input.periodStart,
-      }),
-    }).text,
   };
 }
 

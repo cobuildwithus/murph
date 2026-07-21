@@ -34,7 +34,9 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
   ] as const)(
     "routes %s mode to %s",
     async (mode, owner) => {
-      mocks[owner].mockResolvedValue({ allowed: true });
+      mocks[owner].mockResolvedValue(buildAllowedUsageGateDecision({
+        remainingUsdMicros: 8_000_000n,
+      }));
 
       await expect(resolveHostedRuntimeAiUsageGate({
         mode,
@@ -55,6 +57,38 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
       }
     },
   );
+
+  it.each([
+    ["personal", "direct_paid_member_plan"],
+    ["group", "thread_container"],
+  ] as const)("marks allowed %s usage low at the shared threshold", async (
+    _label,
+    allowanceSource,
+  ) => {
+    mocks.checkHostedAiUsageGate.mockResolvedValue(buildAllowedUsageGateDecision({
+      allowanceSource,
+      remainingUsdMicros: 2_000_000n,
+    }));
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
+      userId: "member_123",
+    })).resolves.toEqual({
+      status: "allowed",
+      usageRunningLow: true,
+    });
+  });
+
+  it("does not mark capacity low above the threshold", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildAllowedUsageGateDecision({
+      remainingUsdMicros: 2_000_001n,
+    }));
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "read_only",
+      userId: "member_123",
+    })).resolves.toEqual({ status: "allowed" });
+  });
 
   it("returns the canonical denial after included and purchased usage are exhausted", async () => {
     const decision = buildMonthlyUsageExhaustedGateDecision();
@@ -99,6 +133,25 @@ function buildMonthlyUsageExhaustedGateDecision() {
       code: "pulse_upgrade_edge",
       message: "You've used this month's Murph allowance. Add usage to keep going.",
     },
+  };
+}
+
+function buildAllowedUsageGateDecision(input: {
+  allowanceSource?: "direct_paid_member_plan" | "thread_container";
+  remainingUsdMicros: bigint;
+}) {
+  return {
+    allowed: true,
+    allowanceSource: input.allowanceSource ?? "direct_paid_member_plan",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    periodStart: new Date("2026-06-01T00:00:00.000Z"),
+    remainingUsdMicros: input.remainingUsdMicros,
+    spentUsdMicros: 10_000_000n - input.remainingUsdMicros,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
   };
 }
 

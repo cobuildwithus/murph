@@ -195,14 +195,17 @@ Large Fraunces stat number (the value) + DM Mono unit label + delta in sage gree
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
-native `<details>` disclosures, closed by default, with a Fraunces area name, a
-small DM Mono biomarker count, and one rotating chevron in the summary. The
-opened contents are one partitioned notebook surface rather than a stack of
-nested cards: one column on narrow screens, two columns from `md`, with warm
-one-pixel seams between rows. Each compact row keeps the biomarker identity and
-history on the left, latest value and date on the right, and one navigation
-chevron. Use explicit health-area classification; never show an `Other` dump or
-invent interpretation for an unclassified lab field.
+native `<details>` disclosures, expanded by default, with a Fraunces area name
+and one rotating chevron in the summary. Search and `All` / `Review` / `In
+range` filters apply only to saved lab biomarkers. The opened contents are one
+partitioned notebook surface rather than a stack of nested cards: one column on
+narrow screens, two from `md`, and three from `xl`, with warm one-pixel seams
+between cells. Each cell is one full-size link showing only the biomarker name,
+source status, and latest value; flagged results sort before in-range and
+unflagged results within their health area. Render `normal` in sage, source
+flags that need review in sienna, and missing flags neutrally as `Reported`.
+Use explicit health-area classification; never show an `Other` dump, infer that
+an unflagged result is in range, or turn a source flag into a diagnosis.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
@@ -248,7 +251,7 @@ Two distinct chart types live in the system:
 
 **Experiment trend (dual-phase).** SVG sparklines. **Baseline phase:** dashed line in sand (`#d4c4a8`) with a shaded baseline region underneath. **Active phase:** solid line in sage (`#7a8c6e`). Two phases on one chart. No filled-area gradients, no axes busy work, no tooltips that explain what HRV means.
 
-**Saved outcome comparison.** A completed outcome can retain trustworthy baseline and intervention window averages without retaining raw daily points. Never drop the chart or invent a time series in that state. Render a two-point slope chart labeled `WINDOW AVERAGES`, show `Baseline average` and `Experiment average`, and disclose measured-day coverage for both windows. Use the ordinary dual-phase trend only when observed daily points are actually present.
+**Saved outcome comparison.** A completed outcome can retain trustworthy baseline and intervention window averages without retaining raw daily points. Keep the ordinary experiment trend-chart frame instead of introducing a bespoke comparison graphic: render only the flat baseline and intervention window averages, label the card `WINDOW AVERAGES`, show `Baseline average` and `Experiment average`, and disclose measured-day coverage for both windows. Use a stable padded Y-domain so a small delta cannot fill the chart height. Never imply that the aggregate points are daily measurements.
 
 **Biomarker trend + tile pair (single-phase).** Used on the biomarker overview tab. Recharts AreaChart paired with two stacked stat tiles in a `md:grid-cols-[minmax(0,1fr)_300px] md:items-stretch` grid (chart fills, tiles each `flex-1`, heights match). Anchor the visible Y-domain on the typical band, not the data — `extraPad = bandSpan × 0.5` above and below, so the user sees headroom. Hide the Y-axis (`<YAxis hide />`) — the dashed `Typical {min}` / `Typical {max}` reference lines (sage at 50% opacity, 4-4 dash, mono labels via `insideBottomLeft` / `insideTopLeft`) carry the context. Range band is an Area at `fillOpacity={0.14}`. Series fill gradient runs `0.32 → 0.04` opacity; stroke is solid sage `2.5px`. First/last date footer in `text-[10px] text-muted-foreground` below the chart. Timeframe selector (30D / 90D / 1Y) sits top-right as a rounded pill group, active = primary fill. The two tiles: **Average tile** (mono uppercase label that adapts to timeframe — `30-DAY AVERAGE` / `90-DAY AVERAGE` / `1-YEAR AVERAGE` — Fraunces value, sans unit, sentence sub-line that reads as a finding: `"Down 4 bpm from where you started the past month."`, primary color when direction matches `goodDirection`) and **Range tile** (`55–75 bpm` Fraunces + `healthy adults` sub + right-aligned `In range` / `Out of range` pill with bg-primary/15 or bg-destructive/15 — never with an explanatory tooltip).
 

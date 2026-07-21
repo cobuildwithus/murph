@@ -123,7 +123,6 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
         dispatch.claim = await startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
           attemptedAt: input.sentAt,
           memberId: input.memberId,
-          ...(input.noticeCode ? { noticeCode: input.noticeCode } : {}),
           noticeDeliveryTarget: {
             channel: "telegram",
             replyToMessageId: input.replyToMessageId,
