@@ -432,7 +432,7 @@ function ProviderSearch({
               inputSize="lg"
               maxLength={120}
               name="provider-search"
-              placeholder="Piedmont, Atlanta, GA, or 30309"
+              placeholder="Hospital name, New York, NY, or 10001"
               readOnly={searchPending || Boolean(startingProviderId)}
               ref={attachSearchInput}
               required
