@@ -162,6 +162,34 @@ test("times out the first approval setup click if Privy never finishes loading",
   }
 });
 
+test("stops waiting when Privy finishes loading without an authenticated user", async () => {
+  const rendered = await renderClientComponent(createElement(PasskeySetupHarness));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(rendered.button.textContent).toBe("Loading secure approval…");
+  expect(readResult(rendered.container)).toBe("idle");
+
+  mocks.privy.ready = true;
+  mocks.privy.user = null;
+  await rendered.rerender(createElement(PasskeySetupHarness));
+
+  await act(async () => {
+    await delay(75);
+  });
+
+  expect(readResult(rendered.container)).toBe(
+    "error:Sign in on this device to continue.",
+  );
+  expect(rendered.button.textContent).toBe("Start");
+  expect(mocks.createWallet).not.toHaveBeenCalled();
+  expect(mocks.linkWithPasskey).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 function PasskeySetupHarness() {
   const setup = usePasskeyWalletMfa();
   const [result, setResult] = useState("idle");

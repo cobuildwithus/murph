@@ -71,7 +71,7 @@ Ordered by importance:
 2. **Photos as input.** During onboarding or gap-filling the member can send a photo of the bedroom, desk, home gym, or sauna; Murph extracts indicators from the image (darkness, LED sources, monitor height, equipment) and saves them like any other answer. This is an input mechanism for all aspects, not a separate feature.
 3. **UI handoff.** A web zone showing "unknown" (or a weak audit grade) offers "Fill this in with Murph": a deep link into the member's chosen channel (iMessage/Telegram) with a prefilled opener; the member writes freely and Murph parses and saves all indicators at once.
 4. **New-member onboarding.** Ask a Habitat question only when it supports the selected first thread or the member accepts the optional baseline review. Ask at most one or two; there is no universal environment checkpoint.
-5. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. Existing notification-decision turns may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
+5. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. An ordinary turn started by an authorized scheduled automation may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
 6. **Write-through.** Every answer saves immediately to `bank/habitat/<aspect>.md` via the habitat CLI command, with dates.
 
 ## Environment v1 — Aspects and Indicators

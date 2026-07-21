@@ -1568,7 +1568,7 @@ describe("executeHostedMailboxEvent", () => {
         },
         vaultRoot: "/tmp/assistant-runtime-events",
       }),
-      turnTrigger: "automation-cron",
+      turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
@@ -2099,7 +2099,7 @@ describe("executeHostedMailboxEvent", () => {
         },
         vaultRoot: "/tmp/assistant-runtime-events",
       }),
-      turnTrigger: "automation-cron",
+      turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
@@ -2678,7 +2678,7 @@ describe("executeHostedMailboxEvent", () => {
       turnEnvironment: expectHostedTurnEnvironment({
         vaultRoot: "/tmp/assistant-runtime-events",
       }),
-      turnTrigger: "automation-cron",
+      turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(

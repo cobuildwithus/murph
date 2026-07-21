@@ -598,9 +598,7 @@ export async function sendAssistantMessageLocal(
           journal: initialAcceptedInputJournal,
           vault: input.vault,
         })
-        const threadScope = resolveAssistantCodexThreadScope({
-          turnTrigger: input.turnTrigger ?? null,
-        })
+        const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
         const currentAudienceReplyDeliveryAvailable =
@@ -703,34 +701,9 @@ export async function sendAssistantMessageLocal(
           && vaultFileSendTargetFingerprint !== null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
-              actionApprovalPort,
-              automationTool: hostedExecutionContext.automationTool ?? null,
-              assistantConfigurationTool:
-                hostedExecutionContext.assistantConfigurationTool ?? null,
-              connectedApps: hostedExecutionContext.connectedApps ?? null,
-              clinicalRecordsConnectLinkTool:
-                hostedExecutionContext.clinicalRecordsConnectLinkTool ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               beforeToolExecution: () => beforeHostedToolExecution(),
-              familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
-              deviceTool: hostedExecutionContext.deviceTool ?? null,
-              groupPermissionOfferTool:
-                hostedExecutionContext.groupPermissionOfferTool ?? null,
-              groupSharedReader:
-                hostedExecutionContext.groupSharedReader ?? null,
-              groupTool: hostedExecutionContext.groupTool ?? null,
-              labsTool: hostedExecutionContext.labsTool ?? null,
-              newsletterTool: hostedExecutionContext.newsletterTool ?? null,
-              personalizationTool: hostedExecutionContext.personalizationTool ?? null,
-              planUsageTool: hostedExecutionContext.planUsageTool ?? null,
-              subscriptionTool: hostedExecutionContext.subscriptionTool ?? null,
-              phoneCalls: hostedExecutionContext.phoneCalls ?? null,
-              ...(hostedExecutionContext.currentAssistantInputId
-                ? {
-                    getAssistantInputId:
-                      hostedExecutionContext.currentAssistantInputId,
-                  }
-                : {}),
+              executionContext: hostedExecutionContext,
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

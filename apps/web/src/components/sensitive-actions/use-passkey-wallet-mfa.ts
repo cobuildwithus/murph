@@ -168,8 +168,11 @@ async function waitForClientReady(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (state.readyRef.current && state.userRef.current) {
-      return;
+    if (state.readyRef.current) {
+      if (state.userRef.current) {
+        return;
+      }
+      throw new Error("Sign in on this device to continue.");
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

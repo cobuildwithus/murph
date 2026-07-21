@@ -1,4 +1,5 @@
 import {
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
@@ -111,7 +112,8 @@ export function resolveHostedDeviceReconnectLinkTarget(
   const matches = listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(env),
   ).filter((target) =>
-    (!connectSourceId || target.connectSourceId === connectSourceId)
+    isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+    && (!connectSourceId || target.connectSourceId === connectSourceId)
     && (!connectTarget || target.connectTarget === connectTarget)
     && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
   );

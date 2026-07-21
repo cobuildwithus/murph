@@ -5,7 +5,10 @@ import {
 
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
 import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  resolveBrowserVaultExperimentRun,
+  resolveBrowserVaultExperimentRunById,
+} from "@/src/lib/browser-vault/experiment-run";
 import {
   buildExperimentRunCardSummary,
   type ExperimentRunCardSummary,
@@ -92,7 +95,10 @@ export function buildExperimentLibraryCards({
   );
   const trackedOnlyCards = trackedExperiments
     .filter((entry) => !matchedTrackedExperimentIds.has(entry.id))
-    .map(trackedExperimentToCard);
+    .map((entry) => trackedExperimentToCard(
+      entry,
+      resolveBrowserVaultExperimentRunById({ client, experimentId: entry.id }),
+    ));
 
   return [...protocolCards, ...trackedOnlyCards].sort(compareExperimentCards);
 }
@@ -147,32 +153,49 @@ function formatProtocolDays(protocol: ExperimentProtocol): number {
   return Math.max(1, protocol.durationDays - protocol.baselineDays);
 }
 
-function trackedExperimentToCard(entry: OverviewExperiment): ExperimentLibraryCard {
-  const statusLabel = formatStatusLabel(entry.status);
-  const title = entry.title || entry.slug || entry.id;
+function trackedExperimentToCard(
+  entry: OverviewExperiment,
+  privateRun: ExperimentRunProjection | null,
+): ExperimentLibraryCard {
+  const statusLabel = privateRun?.statusLabel ?? formatStatusLabel(entry.status);
+  const title = privateRun?.title || entry.title || entry.slug || entry.id;
   const category = "Private";
-  const startedOn = entry.startedOn;
+  const startedOn = privateRun?.startedOn ?? entry.startedOn;
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
     "Private run only",
   ].filter((part): part is string => part !== null).join(" · ");
-  const runStatus = runStatusForTrackedExperiment(entry);
+  const runStatus = privateRun?.status ?? runStatusForTrackedExperiment(entry);
 
   return {
     id: entry.id,
     title,
     category,
     image: selectTrackedExperimentImage(entry),
-    href: null,
+    href: `/experiments/runs/${encodeURIComponent(entry.id)}`,
     privateBadgeLabel: "Private only",
     metadata,
     statusLabel,
     statusVariant: statusVariantForRunStatus(runStatus),
-    description: entry.summary ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
+    description: entry.summary
+      ?? privateRun?.summaryDetail
+      ?? privateRun?.summary
+      ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
     hasPrivateData: true,
     runStatus,
+    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
     startedOn,
-    searchText: [entry.id, entry.slug, entry.title, entry.summary, ...entry.tags]
+    trackedExperimentId: entry.id,
+    searchText: [
+      entry.id,
+      entry.slug,
+      entry.title,
+      entry.summary,
+      privateRun?.title,
+      privateRun?.summary,
+      ...(privateRun?.tags ?? []),
+      ...entry.tags,
+    ]
       .filter((value): value is string => typeof value === "string")
       .join(" "),
   };

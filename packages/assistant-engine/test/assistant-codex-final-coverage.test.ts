@@ -114,6 +114,8 @@ import type {
   AssistantCodexTurnExecutionPlan,
   AssistantRouteTurnPlan,
 } from '../src/assistant/codex-turn/planning.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionResult,
@@ -515,6 +517,156 @@ describe('Codex model catalog', () => {
     expect(catalog.selectedModel?.id).toBe('custom-codex')
     expect(resolveCodexCatalogReasoningOptions(null)).toEqual([])
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
+  })
+
+  it('enforces the output-only boundary at provider execution', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      codexConfigOverrides: [
+        'features.shell_tool=true',
+        'features.apps=true',
+      ],
+      prompt: 'Format an untrusted provider result.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const unsafeDynamicTools = resolveMurphDynamicTools({
+      automationAvailable: true,
+    })
+    const unsafeHostedToolContext: AssistantHostedToolContext = {
+      automationTool: { request: vi.fn() },
+      computerToolsAvailable: true,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(async () => {
+        throw new Error('Unsafe hosted context must not be reachable.')
+      }),
+      vaultFileSendAvailable: true,
+    }
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          generatedImageUploader: {
+            uploadGeneratedImage: vi.fn(),
+          },
+          generatedImageUploaderRequired: true,
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-system-notification',
+          providerFetch: fetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: unsafeHostedToolContext,
+      input,
+      profile: {
+        promptProfile: 'system-notification',
+        toolProfile: 'output-only-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-system-notification',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
+        },
+        dynamicTools: unsafeDynamicTools,
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Output-only system prompt.',
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-20T00:00:00.000Z',
+      turnId: 'turn-system-notification',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual(
+      expect.arrayContaining([
+        'features.shell_tool=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ]),
+    )
+    expect(providerInput?.codexConfigOverrides).not.toContain(
+      'features.shell_tool=true',
+    )
+    expect(providerInput?.codexConfigOverrides).not.toContain(
+      'features.apps=true',
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [],
+      environments: [],
+      generatedImageUploader: null,
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: null,
+      publicInternetFetch: null,
+      requireGeneratedImageUploader: false,
+    })
+    expect(unsafeDynamicTools).not.toEqual([])
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
@@ -1253,8 +1405,8 @@ describe('Codex model catalog', () => {
       },
       input,
       profile: {
-        promptProfile: 'notification-decision',
-        toolProfile: 'notification-turn',
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
         threadScope: 'isolated-thread',
       },
       promptTimeContext: {

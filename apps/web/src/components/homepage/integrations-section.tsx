@@ -19,7 +19,7 @@ const INTEGRATIONS: ReadonlyArray<Integration | "murph" | "lab"> = [
   "murph",
   { label: "Eight Sleep", src: "/brand-logos/connect/eight-sleep.svg" },
   { label: "Withings", src: "/brand-logos/connect/withings.png" },
-  { label: "Strava", src: "/brand-logos/connect/strava.svg" },
+  { label: "Peloton", src: "/brand-logos/connect/peloton.svg" },
   { label: "Cronometer", src: "/brand-logos/connect/cronometer.png" },
   { label: "Gmail", src: "/brand-logos/connect/gmail.svg" },
   { label: "Google Calendar", src: "/brand-logos/connect/google-calendar.svg" },

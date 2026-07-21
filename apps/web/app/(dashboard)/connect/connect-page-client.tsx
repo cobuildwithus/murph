@@ -103,6 +103,12 @@ export function ConnectSourcesGrid({
       markLocallyDisconnectedSources(
         markCallbackConnectedSource(sources, callbackConnectedSourceId),
         disconnectedConnectionIds,
+      ).filter((source) =>
+        source.connectionAvailable !== false
+        || source.connected === true
+        || source.requiresReconnect === true
+        || Boolean(source.recoveryKind)
+        || source.historicalResetIncomplete === true
       ),
     ),
     [callbackConnectedSourceId, disconnectedConnectionIds, sources],

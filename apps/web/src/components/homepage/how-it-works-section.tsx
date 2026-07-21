@@ -5,7 +5,7 @@ const SYNC_DEVICES: ReadonlyArray<{
   { connected: true, name: "Oura" },
   { name: "WHOOP" },
   { name: "Garmin" },
-  { name: "Strava" },
+  { name: "Fitbit" },
 ];
 
 const CHAT_INPUTS = ["Meals", "Supplements", "Workouts"] as const;

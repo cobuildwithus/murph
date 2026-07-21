@@ -5,6 +5,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   selectBrowserVaultExperimentResults,
+  selectBrowserVaultTrackedExperiments,
   type BrowserVaultQueryClient,
   type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
@@ -12,13 +13,21 @@ import type { ExperimentOutcome } from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 
 import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
+import { ExperimentSummaryTiles } from "@/src/components/experiments/experiment-detail/experiment-summary-tiles";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
 import {
   TrendChart,
   buildTrendChartPoints,
 } from "@/src/components/experiments/experiment-detail/trend-chart";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  resolveBrowserVaultExperimentRun,
+  resolveBrowserVaultExperimentRunById,
+} from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
+import {
+  buildExperimentLibraryCards,
+  splitHomeExperimentCards,
+} from "@/src/lib/experiments/library-cards";
 import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 
@@ -74,6 +83,157 @@ async function createClient(input: {
 }
 
 describe("experiment detail private-run composition", () => {
+  it("resolves a private run and saved metrics by exact id without a public protocol", async () => {
+    const outcome = createSavedOutcome({
+      id: "exp_private_unlisted",
+      slug: "private-unlisted-run",
+      title: "Private unlisted run",
+    });
+    const client = await createClient({
+      experimentOutcomes: [outcome],
+      generatedAt: "2026-04-20T08:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          commonsProtocolRef: {
+            key: "protocol_variant:private/example-draft",
+            pageRevisionId: `sha256:${"1".repeat(64)}`,
+            runSpecRevisionId: `sha256:${"2".repeat(64)}`,
+          },
+          id: "exp_private_unlisted",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/private-unlisted.json",
+          },
+          runPlan: {
+            baselineEnd: "2026-04-03",
+            baselineStart: "2026-04-01",
+            interventionEnd: "2026-04-06",
+            interventionStart: "2026-04-04",
+          },
+          slug: "private-unlisted-run",
+          startedOn: "2026-04-01",
+          status: "completed",
+          title: "Private unlisted run",
+        }),
+        id: "exp_private_unlisted",
+        slug: "private-unlisted-run",
+        startedOn: "2026-04-01",
+        status: "completed",
+        summary: "Private result fixture.",
+        tags: [],
+        title: "Private unlisted run",
+      }],
+    });
+
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client,
+      experimentId: "exp_private_unlisted",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: 3,
+      durationDays: 6,
+      id: "exp_private_unlisted",
+      outcomeStatus: "available",
+      status: "finished",
+    }));
+    expect(privateRun?.signals).toEqual([
+      expect.objectContaining({
+        delta: "-4 bpm",
+        label: "Resting heart rate",
+        value: "58",
+      }),
+    ]);
+
+    const [homeCard] = buildExperimentLibraryCards({
+      client,
+      protocols: [],
+      trackedExperiments: selectBrowserVaultTrackedExperiments(client),
+    });
+    expect(homeCard).toEqual(expect.objectContaining({
+      href: "/experiments/runs/exp_private_unlisted",
+      id: "exp_private_unlisted",
+      runStatus: "finished",
+    }));
+    expect(homeCard?.runSummary?.metrics).toEqual([
+      expect.objectContaining({
+        delta: "-4 bpm",
+        label: "Resting heart rate",
+      }),
+    ]);
+  });
+
+  it("preserves an active private run baseline without inventing a total duration", async () => {
+    const client = await createClient({
+      generatedAt: "2026-04-05T08:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          id: "exp_private_active",
+          runPlan: {
+            baselineEnd: "2026-04-03",
+            baselineStart: "2026-04-01",
+            interventionStart: "2026-04-04",
+          },
+          slug: "private-active-run",
+          startedOn: "2026-04-01",
+          status: "active",
+          title: "Private active run",
+        }),
+        id: "exp_private_active",
+        slug: "private-active-run",
+        startedOn: "2026-04-01",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Private active run",
+      }],
+    });
+
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client,
+      experimentId: "exp_private_active",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: 3,
+      completionPercent: undefined,
+      day: 5,
+      durationDays: undefined,
+      id: "exp_private_active",
+      status: "active",
+    }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      title: "Continue the protocol",
+      when: "Day 5",
+    }));
+    expect(privateRun?.timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "Day 5",
+        title: "Protocol",
+      }),
+    ]));
+  });
+
+  it("renders progress without a false total when private duration is unknown", () => {
+    const markup = renderToStaticMarkup(
+      <ExperimentSummaryTiles
+        experiment={{
+          baselineDays: 3,
+          day: 5,
+          durationDays: undefined,
+        }}
+      />,
+    );
+
+    expect(markup).toContain("Day 5");
+    expect(markup).not.toContain("Day 5 of 5");
+  });
+
   it("matches browser-vault tracked experiments against Health Commons protocol aliases", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -380,6 +540,67 @@ describe("experiment detail private-run composition", () => {
     },
   );
 
+  it("uses the canonical review-due projection for a private-only home card", async () => {
+    const client = await createClient({
+      generatedAt: "2026-04-20T08:00:00.000Z",
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 64],
+        ["2026-04-02", 63],
+        ["2026-04-03", 62],
+        ["2026-04-04", 59],
+        ["2026-04-05", 58],
+        ["2026-04-06", 57],
+      ]),
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+          },
+          id: "exp_private_review_due",
+          runPlan: {
+            baselineEnd: "2026-04-03",
+            baselineStart: "2026-04-01",
+            interventionEnd: "2026-04-06",
+            interventionStart: "2026-04-04",
+          },
+          slug: "private-review-due",
+          startedOn: "2026-04-01",
+          status: "active",
+          title: "Private review due run",
+        }),
+        id: "exp_private_review_due",
+        slug: "private-review-due",
+        startedOn: "2026-04-01",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Private review due run",
+      }],
+    });
+    const cards = buildExperimentLibraryCards({
+      client,
+      protocols: [],
+      trackedExperiments: selectBrowserVaultTrackedExperiments(client),
+    });
+    const [card] = cards;
+
+    expect(card).toEqual(expect.objectContaining({
+      runStatus: "finished",
+      statusLabel: "Review due",
+    }));
+    expect(card?.runSummary?.metrics).toEqual([
+      expect.objectContaining({
+        delta: "-5 bpm",
+        label: "Resting Heart Rate",
+      }),
+    ]);
+    expect(splitHomeExperimentCards(cards)).toEqual(expect.objectContaining({
+      history: [card],
+      inProgress: [],
+    }));
+  });
+
   it("renders honest baseline progress before the protocol window starts", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -500,9 +721,10 @@ describe("experiment detail private-run composition", () => {
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
-  it("keeps the exact canonical saved outcome after normal lifecycle and title changes", async () => {
+  it("keeps the exact canonical saved outcome and charts window means without a saved delta", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     const outcome = createSavedOutcome({
+      deltaAbs: null,
       id: "exp_sauna_saved_outcome",
       slug: "finnish-sauna",
       status: "paused",
@@ -564,21 +786,30 @@ describe("experiment detail private-run composition", () => {
       statusLabel: "Finished",
       summary: outcome.conclusion.headline,
     }));
-    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.plainLanguage);
-    expect(privateRun?.summaryDetail).toContain(outcome.confidence.reasons[0]);
-    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.caveats[0]);
-    expect(privateRun?.signals).toEqual([
+    expect(privateRun?.summaryDetail).toBe(outcome.conclusion.plainLanguage);
+    expect(privateRun?.outcomeConfidence).toBe("medium");
+    expect(privateRun?.signals).toEqual([]);
+    expect(privateRun?.trends).toEqual([
       expect.objectContaining({
-        baseline: "62 bpm",
-        delta: "-4 bpm",
+        active: [],
+        baseline: [],
+        baselineAvg: 62,
+        currentValue: 58,
         label: "Resting heart rate",
-        value: "58",
+        windowComparison: {
+          baselineDaysWithData: 3,
+          baselineTotalDays: 3,
+          interventionDaysWithData: 3,
+          interventionTotalDays: 3,
+        },
       }),
     ]);
-    expect(privateRun?.trends).toEqual([]);
-    expect(privateRun?.conclusions?.[0]?.items[0]?.text).toBe(
-      outcome.conclusion.plainLanguage,
-    );
+    expect(privateRun?.conclusions?.[0]?.title).toBe("What limits this read");
+    expect(privateRun?.conclusions?.[0]?.items.map((item) => item.text)).toEqual([
+      outcome.confidence.reasons[0],
+      outcome.conclusion.caveats[0],
+      outcome.confounders[0],
+    ]);
 
     const markup = renderToStaticMarkup(
       <ResultsTab
@@ -592,6 +823,12 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain(outcome.conclusion.plainLanguage);
     expect(markup).toContain(outcome.confidence.reasons[0]);
     expect(markup).toContain(outcome.conclusion.caveats[0]);
+    expect(markup).toContain("medium confidence");
+    expect(markup).toContain("Window averages");
+    expect(markup).toContain("Baseline average");
+    expect(markup).toContain("Experiment average");
+    expect(markup).toContain("3 of 3 days measured");
+    expect(markup).not.toContain("What the saved analysis says");
 
     const emptyMetricMarkup = renderToStaticMarkup(
       <ResultsTab
@@ -725,6 +962,7 @@ describe("experiment detail private-run composition", () => {
           { day: 9, value: 59 },
           { day: 10, value: 58 },
         ],
+        currentValueLabel: "experiment average",
         expectedRange: undefined,
       }),
     ]);
@@ -734,6 +972,8 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(trendMarkup).not.toContain("Expected");
+    expect(trendMarkup).toContain("experiment average");
+    expect(trendMarkup).not.toContain("latest");
   });
 
   it("projects ordered comparable card metrics from production browser-vault signals", async () => {
@@ -2142,6 +2382,7 @@ function createExperimentFrontmatter(input: {
 }
 
 function createSavedOutcome(input: {
+  deltaAbs?: number | null;
   id: string;
   slug: string;
   status?: ExperimentOutcome["experiment"]["status"];
@@ -2186,8 +2427,8 @@ function createSavedOutcome(input: {
       baselineMean: 62,
       biomarkerKey: "biomarker:resting-heart-rate",
       completeness: "good",
-      deltaAbs: -4,
-      deltaPct: -6.45,
+      deltaAbs: input.deltaAbs === undefined ? -4 : input.deltaAbs,
+      deltaPct: input.deltaAbs === null ? null : -6.45,
       expectedDirection: "decrease",
       intervention: {
         daysWithData: 3,
