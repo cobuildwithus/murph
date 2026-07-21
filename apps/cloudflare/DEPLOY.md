@@ -120,6 +120,16 @@ closed. Smoke one private-to-group ask while the group runtime is idle and one
 while its foreground Murph is replying; neither may create group-visible
 activity or delay the foreground reply.
 
+The Ask admission advisory-lock correction is Web-only and does not require a
+Cloudflare deploy. The optional failed-request correlation headers are additive:
+old runners ignore them safely, while the runner bundle that surfaces its
+bounded request id, allowlisted Prisma diagnostic code, and HTTP status requires
+a Cloudflare deploy. Deploy
+that diagnostic consumer with `container_rollout=immediate`, prove the new
+runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
+the correlation metadata immediately. Either mixed version remains functionally
+safe because Web does not require the runner to consume the header.
+
 ## Consented Group Disclosure Rollout
 
 The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
