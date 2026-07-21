@@ -53,12 +53,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunks, so path comments, content hashes, and platform-specific emit jitter
 // have more surface.
 //
-// The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
-// ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
-// dynamic (non-boot) chunk jitter should not force a baseline bump. Ratchet it
-// too if total creep becomes the concern. Investigate the listed largest
-// inputs before raising either.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
+// PR #813's reviewed route-authority boundary, after merging current main,
+// measured 9,314,428B on CI Linux and 9,364,555B on local macOS. Ratchet the
+// fixed total backstop to the exact larger measurement; dynamic chunk jitter
+// still receives no extra margin or platform-specific branch.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_364_555;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
