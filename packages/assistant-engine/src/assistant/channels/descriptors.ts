@@ -235,22 +235,48 @@ async function sendTelegramVoiceMemoDelivery(input: {
     )
   }
 
+  const providerMessageIds: string[] = []
+  const cleanupTargetAliases = new Set<string>()
+  const text = messageTextOrNull(input.message)
+  const fallbackText = messageTextOrNull(voiceMemo.transcript ?? '')
   const voiceMemoRuntimeDependencies = {
     ...(input.dependencies.telegramVoiceMemoRuntime ?? {}),
     ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
   }
-  const preparedVoiceMemo = await prepareTelegramVoiceMemoMessage(
-    {
-      filename: voiceMemo.filename,
-      generation: voiceMemo.transport.generation,
+  let preparedVoiceMemo: Awaited<ReturnType<typeof prepareTelegramVoiceMemoMessage>>
+  try {
+    preparedVoiceMemo = await prepareTelegramVoiceMemoMessage(
+      {
+        filename: voiceMemo.filename,
+        generation: voiceMemo.transport.generation,
+        target: input.candidate.target,
+      },
+      voiceMemoRuntimeDependencies,
+    )
+  } catch (error) {
+    if (!fallbackText) {
+      throw error
+    }
+    const deliveredFallback = await sendTelegramTextDelivery({
+      dependencies: input.dependencies,
+      idempotencyKey: null,
+      message: composeVoiceMemoFallbackText(text, fallbackText),
+      replyToMessageId: input.replyToMessageId ?? null,
       target: input.candidate.target,
-    },
-    voiceMemoRuntimeDependencies,
-  )
+    })
+    appendDeliveredProviderMessageIds(providerMessageIds, deliveredFallback)
+    for (const alias of readDeliveredCleanupTargetAliases(deliveredFallback) ?? []) {
+      cleanupTargetAliases.add(alias)
+    }
+    return summarizeTelegramVoiceMemoDelivery({
+      cleanupTargetAliases,
+      delivered: deliveredFallback,
+      fallbackTarget: input.candidate.target,
+      fallbackTargetKind: input.candidate.kind,
+      providerMessageIds,
+    })
+  }
 
-  const providerMessageIds: string[] = []
-  const cleanupTargetAliases = new Set<string>()
-  const text = messageTextOrNull(input.message)
   let deliveredText:
     | {
         cleanupTargetAliases?: string[] | null
@@ -261,23 +287,13 @@ async function sendTelegramVoiceMemoDelivery(input: {
     | void
     = undefined
   if (text) {
-    deliveredText = input.dependencies.sendTelegram
-      ? await input.dependencies.sendTelegram({
-          idempotencyKey: input.idempotencyKey ?? null,
-          target: input.candidate.target,
-          message: text,
-          replyToMessageId: input.replyToMessageId ?? null,
-          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
-        })
-      : await sendTelegramMessage(
-          {
-            idempotencyKey: input.idempotencyKey ?? null,
-            target: input.candidate.target,
-            message: text,
-            replyToMessageId: input.replyToMessageId ?? null,
-          },
-          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
-        )
+    deliveredText = await sendTelegramTextDelivery({
+      dependencies: input.dependencies,
+      idempotencyKey: input.idempotencyKey ?? null,
+      message: text,
+      replyToMessageId: input.replyToMessageId ?? null,
+      target: input.candidate.target,
+    })
     appendDeliveredProviderMessageIds(providerMessageIds, deliveredText)
     for (const alias of readDeliveredCleanupTargetAliases(deliveredText) ?? []) {
       cleanupTargetAliases.add(alias)
@@ -304,6 +320,31 @@ async function sendTelegramVoiceMemoDelivery(input: {
       input.dependencies.signal ? { signal: input.dependencies.signal } : {},
     )
   } catch (error) {
+    if (fallbackText) {
+      try {
+        const deliveredFallback = await sendTelegramTextDelivery({
+          dependencies: input.dependencies,
+          idempotencyKey: null,
+          message: fallbackText,
+          replyToMessageId: null,
+          target: voiceMemoTarget,
+        })
+        appendDeliveredProviderMessageIds(providerMessageIds, deliveredFallback)
+        for (const alias of readDeliveredCleanupTargetAliases(deliveredFallback) ?? []) {
+          cleanupTargetAliases.add(alias)
+        }
+        return summarizeTelegramVoiceMemoDelivery({
+          cleanupTargetAliases,
+          delivered: deliveredFallback,
+          fallbackTarget: voiceMemoTarget,
+          fallbackTargetKind: input.candidate.kind,
+          providerMessageIds,
+        })
+      } catch {
+        // Preserve the existing partial-delivery owner when accepted text is
+        // the only effect we can prove.
+      }
+    }
     if (!text) {
       throw error
     }
@@ -322,14 +363,65 @@ async function sendTelegramVoiceMemoDelivery(input: {
     cleanupTargetAliases.add(alias)
   }
 
+  return summarizeTelegramVoiceMemoDelivery({
+    cleanupTargetAliases,
+    delivered: deliveredVoiceMemo,
+    fallbackTarget: voiceMemoTarget,
+    fallbackTargetKind: input.candidate.kind,
+    providerMessageIds,
+  })
+}
+
+async function sendTelegramTextDelivery(input: {
+  dependencies: AssistantChannelDependencies
+  idempotencyKey: string | null
+  message: string
+  replyToMessageId: string | null
+  target: string
+}) {
+  return input.dependencies.sendTelegram
+    ? await input.dependencies.sendTelegram({
+        idempotencyKey: input.idempotencyKey,
+        target: input.target,
+        message: input.message,
+        replyToMessageId: input.replyToMessageId,
+        ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+      })
+    : await sendTelegramMessage(
+        {
+          idempotencyKey: input.idempotencyKey,
+          target: input.target,
+          message: input.message,
+          replyToMessageId: input.replyToMessageId,
+        },
+        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      )
+}
+
+function summarizeTelegramVoiceMemoDelivery(input: {
+  cleanupTargetAliases: ReadonlySet<string>
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        target?: string | null
+        targetKind?: 'explicit' | 'participant' | 'thread' | null
+      }
+    | void
+  fallbackTarget: string
+  fallbackTargetKind: 'explicit' | 'participant' | 'thread'
+  providerMessageIds: readonly string[]
+}) {
   return {
-    ...(cleanupTargetAliases.size > 0
-      ? { cleanupTargetAliases: [...cleanupTargetAliases] }
+    ...(input.cleanupTargetAliases.size > 0
+      ? { cleanupTargetAliases: [...input.cleanupTargetAliases] }
       : {}),
-    target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
-    targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? input.candidate.kind,
-    providerMessageId: readDeliveredProviderMessageId(deliveredVoiceMemo),
-    providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
+    target: readDeliveredTarget(input.delivered) ?? input.fallbackTarget,
+    targetKind:
+      readDeliveredTargetKind(input.delivered) ?? input.fallbackTargetKind,
+    providerMessageId: readDeliveredProviderMessageId(input.delivered),
+    providerMessageIds:
+      input.providerMessageIds.length > 0 ? [...input.providerMessageIds] : null,
   }
 }
 
@@ -577,6 +669,7 @@ async function sendLinqVoiceMemoDelivery(input: {
 
   const providerMessageIds: string[] = []
   const text = messageTextOrNull(input.message)
+  const fallbackText = messageTextOrNull(voiceMemo.transcript ?? '')
   if (input.nativeReplyRequested === true && !text) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_NATIVE_REPLY_TEXT_REQUIRED',
@@ -701,6 +794,41 @@ async function sendLinqVoiceMemoDelivery(input: {
           input.dependencies.signal ? { signal: input.dependencies.signal } : {},
         )
   } catch (error) {
+    if (fallbackText) {
+      try {
+        const deliveredFallback = await sendLinqVoiceMemoFallbackText({
+          answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+          attachmentId,
+          dependencies: input.dependencies,
+          directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
+          deliveryIdempotencyKey: input.idempotencyKey ?? null,
+          fromPhoneNumber:
+            input.deliverySource?.kind === 'linq'
+              ? input.deliverySource.fromPhoneNumber
+              : null,
+          homeRouteFallbackAllowed,
+          message: fallbackText,
+          replyToMessageId: input.replyToMessageId ?? null,
+          target: voiceMemoTarget,
+          targetKind: voiceMemoTargetKind,
+        })
+        appendDeliveredProviderMessageIds(providerMessageIds, deliveredFallback)
+        return {
+          target: readDeliveredTarget(deliveredFallback) ?? voiceMemoTarget,
+          targetKind:
+            readDeliveredTargetKind(deliveredFallback) ?? voiceMemoTargetKind,
+          providerMessageId: readDeliveredProviderMessageId(deliveredFallback),
+          providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
+          providerThreadId:
+            readDeliveredProviderThreadId(deliveredFallback) ??
+            readDeliveredProviderThreadId(deliveredText) ??
+            voiceMemoTarget,
+        }
+      } catch {
+        // Preserve the existing partial-delivery owner when accepted text is
+        // the only effect we can prove.
+      }
+    }
     if (!text) {
       if (isAmbiguousLinqVoiceMemoDeliveryError(error)) {
         throw createLinqVoiceMemoAmbiguousDeliveryFailure({
@@ -711,7 +839,7 @@ async function sendLinqVoiceMemoDelivery(input: {
       }
       throw error
     }
-    if (isRetryableLinqVoiceMemoRateLimitError(error)) {
+    if (!fallbackText && isRetryableLinqVoiceMemoRateLimitError(error)) {
       throw error
     }
     throw createLinqVoiceMemoPartialDeliveryFailure({
@@ -736,6 +864,54 @@ async function sendLinqVoiceMemoDelivery(input: {
     providerThreadId:
       readDeliveredProviderThreadId(deliveredVoiceMemo) ?? voiceMemoTarget,
   }
+}
+
+async function sendLinqVoiceMemoFallbackText(input: {
+  answeredMailboxItemIds: readonly string[]
+  attachmentId: string
+  dependencies: AssistantChannelDependencies
+  directRecipientPhoneNumber: string | null
+  deliveryIdempotencyKey: string | null
+  fromPhoneNumber: string | null
+  homeRouteFallbackAllowed: boolean
+  message: string
+  replyToMessageId: string | null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+}) {
+  const idempotencyKey = buildLinqVoiceMemoFallbackIdempotencyKey(input)
+  return input.dependencies.sendLinq
+    ? await input.dependencies.sendLinq({
+        answeredMailboxItemIds: input.answeredMailboxItemIds,
+        directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+        fromPhoneNumber: input.fromPhoneNumber,
+        homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
+        idempotencyKey,
+        message: input.message,
+        replyToMessageId: input.replyToMessageId,
+        ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+        target: input.target,
+        targetKind: input.targetKind,
+      })
+    : await sendLinqMessage(
+        {
+          fromPhoneNumber: input.fromPhoneNumber,
+          idempotencyKey,
+          message: input.message,
+          replyToMessageId: input.replyToMessageId,
+          target: input.target,
+          targetKind: input.targetKind,
+        },
+        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      )
+}
+
+function buildLinqVoiceMemoFallbackIdempotencyKey(input: {
+  attachmentId: string
+  deliveryIdempotencyKey: string | null
+}): string {
+  const stableParent = input.deliveryIdempotencyKey?.trim() || input.attachmentId
+  return `linq-voice-memo-transcript:${stableParent}`
 }
 
 function createLinqVoiceMemoPartialDeliveryFailure(input: {
@@ -876,6 +1052,13 @@ function normalizeDeliveryFailureCode(error: unknown): string | null {
 function messageTextOrNull(value: string): string | null {
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
+}
+
+function composeVoiceMemoFallbackText(
+  message: string | null,
+  transcript: string,
+): string {
+  return message ? `${message}\n\n${transcript}` : transcript
 }
 
 function inferDeliveredLinqTargetKind(
