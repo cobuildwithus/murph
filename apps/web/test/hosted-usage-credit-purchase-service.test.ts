@@ -1248,6 +1248,7 @@ describe("usage-credit account-deletion convergence", () => {
       lastReconciledAt: NOW,
       paidAt: NOW,
       payerMemberId: MEMBER_ID,
+      reconciliationVersion: 0n,
       status: "fulfilled",
       stripeChargeIdEncrypted: "encrypted:charge",
       stripeChargeLookupKey: "charge:lookup",
@@ -1272,6 +1273,7 @@ describe("usage-credit account-deletion convergence", () => {
     expect(purchase).toMatchObject({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: null,
+      reconciliationVersion: 1n,
       stripeChargeIdEncrypted: null,
       stripeCheckoutSessionIdEncrypted: null,
       stripeCustomerIdEncrypted: null,

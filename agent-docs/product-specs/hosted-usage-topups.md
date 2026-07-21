@@ -342,10 +342,11 @@ deleted member before removing local owner state.
 Financial records do not cascade blindly through the Prisma relations. When a
 beneficiary is deleted, its ledger entries and purchases are removed before the
 member. When only the payer is deleted, terminal credit owned by a surviving
-beneficiary remains: the purchase detaches the payer and clears encrypted
-provider references while retaining non-secret lookup keys needed for later
-refund or dispute reconciliation. Stripe retains payment records under its
-required retention.
+beneficiary remains: the purchase detaches the payer, advances the existing
+reconciliation-version fence so payer-era preparation must retry, and clears
+encrypted provider references while retaining non-secret lookup keys needed for
+later refund or dispute reconciliation. Stripe retains payment records under
+its required retention.
 
 Browser-vault export omits payment identifiers, Checkout URLs, semantic source
 keys, usage references, and allocation history.

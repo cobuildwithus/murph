@@ -385,7 +385,8 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal
-  cross-owner purchases may detach the payer only while retaining the
+  cross-owner purchases may detach the payer only while invalidating in-flight
+  payer-era reconciliation, clearing payer-bound ciphertext, and retaining the
   non-secret lookup evidence required to reconcile later refunds or disputes.
 - Identity, authentication, consent, privacy, recipient, and irreversible-effect
   authority fail closed. An advisory dependency may degrade only into an

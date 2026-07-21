@@ -148,6 +148,9 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
       const detached = await prisma.hostedUsageCreditPurchase.updateMany({
         data: {
           payerMemberId: null,
+          reconciliationVersion: {
+            increment: 1n,
+          },
           stripeChargeIdEncrypted: null,
           stripeCheckoutSessionIdEncrypted: null,
           stripeCheckoutUrlEncrypted: null,
