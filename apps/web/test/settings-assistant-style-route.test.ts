@@ -116,6 +116,7 @@ describe("assistant style settings route", () => {
       prisma: { tx: true },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_preferences",
     });
@@ -248,6 +249,29 @@ describe("assistant style settings route", () => {
       updated: true,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_preferences",
+    });
+  });
+
+  it("returns the durable save when the best-effort runtime signal hangs", async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockReturnValue(new Promise(() => {}));
+
+    const responsePromise = route.POST(jsonRequest({
+      tone: "casual",
+    }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      runTriggered: true,
+      updated: true,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_preferences",
     });

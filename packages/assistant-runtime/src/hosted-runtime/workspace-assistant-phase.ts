@@ -3799,7 +3799,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
   }
 
   return {
-    continueAssistantLane: true,
+    continueAssistantLane: !hostedAssistantPhaseWakeIsDueAt(pendingWake.at, now),
     result: mergeHostedAssistantPhaseResults(
       result,
       buildPrePlanningMemberPreferencesMailboxPendingResult({

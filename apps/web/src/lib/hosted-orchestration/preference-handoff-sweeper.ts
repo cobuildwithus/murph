@@ -6,6 +6,10 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 import { signalHostedMailboxAppendRuntime } from "./signal-runtime";
 
 const DEFAULT_HANDOFF_LIMIT = 25;
@@ -38,6 +42,7 @@ type HostedPreferenceHandoffSweepLogger = Pick<Console, "info" | "warn">;
 
 export async function runHostedPreferenceHandoffSweeper(input: {
   hasActiveAccess?: typeof hasHostedRuntimeActiveAccess;
+  handoffTimeoutMs?: number;
   handoffLimit?: number;
   logger?: HostedPreferenceHandoffSweepLogger;
   now?: Date;
@@ -85,6 +90,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     activeUserIds.has(candidate.userId)
   );
   const selectedCandidates = activeCandidates.slice(0, handoffLimit);
+  const handoffDeadlineMs = createHostedPostCommitDeadline(input.handoffTimeoutMs);
 
   await runWithConcurrency(
     selectedCandidates,
@@ -92,9 +98,13 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     async (candidate) => {
       handoffAttempted += 1;
       try {
-        const handoff = await requestHandoff({
-          expectedUserId: candidate.userId,
-          mailboxItemId: candidate.mailboxItemId,
+        const handoff = await waitForHostedPostCommitOperation({
+          deadlineMs: handoffDeadlineMs,
+          operation: (abortSignal) => requestHandoff({
+            abortSignal,
+            expectedUserId: candidate.userId,
+            mailboxItemId: candidate.mailboxItemId,
+          }),
         });
         if (handoff.signalAccepted) {
           handoffAccepted += 1;
