@@ -1389,7 +1389,7 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         wake.message.telegramMessage.threadId,
       ),
-      threadIsDirect: true,
+      threadIsDirect: wake.message.telegramMessage.threadIsDirect ?? true,
     };
   }
 
@@ -1564,11 +1564,16 @@ function createHostedConversationAssistantInputSourceMetadata(
   const replyContext = normalizeHostedAssistantInputMetadataText(
     wake.message.telegramMessage.replyContextPreview ?? "",
   );
-  if (!mediaGroupId && !replyContext) {
+  const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
+    && wake.message.routeAuthority !== null;
+  if (!mediaGroupId && !replyContext && !externalThreadRouteAuthorityPresent) {
     return null;
   }
 
   return {
+    ...(externalThreadRouteAuthorityPresent
+      ? { externalThreadRouteAuthorityPresent: true }
+      : {}),
     kind: "telegram",
     mediaGroupId,
     replyContext,

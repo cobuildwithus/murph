@@ -77,7 +77,6 @@ describe("hosted group newsletter participants", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     const recipients = await readHostedGroupNewsletterEmailRecipients({
@@ -158,7 +157,6 @@ describe("hosted group newsletter participants", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -206,7 +204,6 @@ describe("hosted group newsletter participants", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -293,7 +290,6 @@ describe("hosted group newsletter participants", () => {
     );
 
     const result = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -351,7 +347,6 @@ describe("hosted group newsletter participants", () => {
     prisma.hostedVaultShare.findMany.mockResolvedValue(preparedGrants);
     mocks.getPrisma.mockReturnValue(prisma);
     const prepared = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     if (prepared.status !== "ok") {
@@ -393,7 +388,6 @@ describe("hosted group newsletter participants", () => {
     const preparedPrisma = createPrismaMock();
     mocks.getPrisma.mockReturnValue(preparedPrisma);
     const prepared = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     if (prepared.status !== "ok") {
@@ -422,7 +416,6 @@ describe("hosted group newsletter participants", () => {
 
   it("rejects final recipients after verified-email identity rotates with email still present", async () => {
     const prepared = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     if (prepared.status !== "ok") {
@@ -468,11 +461,9 @@ describe("hosted group newsletter participants", () => {
       });
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -490,7 +481,6 @@ describe("hosted group newsletter participants", () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -504,7 +494,6 @@ describe("hosted group newsletter participants", () => {
     );
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -527,7 +516,6 @@ describe("hosted group newsletter participants", () => {
     );
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -552,7 +540,6 @@ describe("hosted group newsletter participants", () => {
     );
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -582,7 +569,6 @@ describe("hosted group newsletter participants", () => {
       });
 
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -591,11 +577,9 @@ describe("hosted group newsletter participants", () => {
 
     memberHasDirectRoute = true;
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
     await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -626,7 +610,6 @@ describe("hosted group newsletter participants", () => {
     );
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 
@@ -642,7 +625,6 @@ describe("hosted group newsletter participants", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("append failed"));
 
     const participants = await prepareHostedGroupNewsletterParticipants({
-      groupId: "hgrp_123",
       runtimeMemberId: "group_runtime_member",
     });
 

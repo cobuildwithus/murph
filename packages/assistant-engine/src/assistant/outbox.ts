@@ -250,6 +250,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
   emailHtml?: string | null
+  externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   explicitTarget?: string | null
   identityId?: string | null
   initialState?:
@@ -357,9 +358,14 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
+      const authorityUpgradedExisting =
+        maybeUpgradeAssistantOutboxIntentExternalThreadRouteAuthority({
+          externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
+          intent: idempotencyUpgradedExisting,
+        })
       const answeredItemsUpgradedExisting = maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds({
         answeredMailboxItemIds,
-        intent: idempotencyUpgradedExisting,
+        intent: authorityUpgradedExisting,
       })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
@@ -424,6 +430,7 @@ export async function createAssistantOutboxIntent(
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
+      externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -1125,6 +1132,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
+  externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   explicitTarget?: string | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
@@ -1151,6 +1159,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     media: input.media,
@@ -2241,6 +2250,45 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
       answeredMailboxItemIds: [...input.answeredMailboxItemIds],
+    }),
+  )
+}
+
+function maybeUpgradeAssistantOutboxIntentExternalThreadRouteAuthority(input: {
+  externalThreadRouteAuthority: AssistantOutboxIntent['externalThreadRouteAuthority']
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  const requested = input.externalThreadRouteAuthority ?? null
+  if (!requested) {
+    return input.intent
+  }
+
+  const existing = input.intent.externalThreadRouteAuthority ?? null
+  if (existing) {
+    if (
+      existing.accountLookupKey === requested.accountLookupKey
+      && existing.channel === requested.channel
+      && existing.containerMemberId === requested.containerMemberId
+      && existing.threadId === requested.threadId
+    ) {
+      return input.intent
+    }
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+
+  if (
+    input.intent.status !== 'pending'
+    && input.intent.status !== 'retryable'
+    && input.intent.status !== 'sending'
+    && input.intent.status !== 'awaiting_approval'
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      externalThreadRouteAuthority: requested,
     }),
   )
 }

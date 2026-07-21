@@ -871,6 +871,8 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     ...messageDeliveryFields,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    externalThreadRouteAuthority:
+      input.input.outboxExternalThreadRouteAuthority ?? null,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

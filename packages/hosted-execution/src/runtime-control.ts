@@ -1254,7 +1254,6 @@ export interface HostedRuntimeNewsletterScheduledAuthority {
 }
 
 export interface HostedRuntimeNewsletterToolSendRequest {
-  groupId: string;
   html: string;
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
   subject: string;
@@ -1263,7 +1262,6 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 
 export interface HostedRuntimeNewsletterToolPrepareRequest {
   action: "prepare";
-  groupId: string;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }

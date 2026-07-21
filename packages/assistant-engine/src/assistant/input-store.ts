@@ -354,6 +354,7 @@ const assistantInputReplyTargetSchema = z
 
 const assistantInputTelegramSourceMetadataSchema = z
   .object({
+    externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('telegram'),
     mediaGroupId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.mediaGroupId',

@@ -4713,6 +4713,67 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('passes Telegram thread-container authority into the auto-reply policy', async () => {
+    const channels = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.ts')
+    const telegramAdapter = channels.getAssistantChannelAdapter('telegram')
+    if (!telegramAdapter) {
+      throw new Error('expected Telegram channel adapter')
+    }
+    const canAutoReply = vi.spyOn(telegramAdapter, 'canAutoReply')
+    replyMocks.getAssistantChannelAdapter.mockImplementation(
+      channels.getAssistantChannelAdapter,
+    )
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'hid_telegram_group_thread',
+      inputId: 'ain_12121212121212121212121212121212',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '7001234567',
+        threadId: '-1006001234567',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
+      text: 'set up our weekly newsletter here',
+      threadIsDirect: false,
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(canAutoReply).toHaveBeenCalledWith(expect.objectContaining({
+      externalThreadRouteAuthorityPresent: true,
+      source: 'telegram',
+      threadIsDirect: false,
+    }))
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalled()
+  })
+
   it('defers the group when prompt preparation asks to wait for more evidence', async () => {
     replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({
       kind: 'defer',

@@ -2281,10 +2281,13 @@ export function parseHostedRuntimeNewsletterToolRequest(
       new Set(["action", "groupId"]),
       "Hosted runtime newsletter tool prepare request",
     );
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-    };
+    // `groupId` is accepted and ignored only for consumer-first deploy skew.
+    // Current callers rely on the callback-authenticated runtime member, which
+    // maps uniquely to its hosted group.
+    if (record.groupId !== undefined) {
+      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
+    }
+    return { action };
   }
   if (action === "send") {
     assertAllowedObjectKeys(
@@ -2313,9 +2316,11 @@ export function parseHostedRuntimeNewsletterToolRequest(
     if (text !== null && text.length > HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH) {
       throw new TypeError("Hosted runtime newsletter tool text is too long.");
     }
+    if (record.groupId !== undefined) {
+      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
+    }
     return {
       action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
       html,
       subject,
       text,
