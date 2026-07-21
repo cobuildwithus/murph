@@ -14,7 +14,6 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
       databaseUrlOverride: null,
       forceResetLocalDatabase: false,
-      forceResetLocalTemporal: false,
       linqWebhookPublicUrl: null,
       linqWebhookRegistrationCachePath: ".tmp/linq-webhook-registration.json",
       linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
@@ -48,7 +47,6 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(
       resolveHostedLocalDevConfig({
         MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
-        MURPH_DEV_FORCE_RESET_TEMPORAL: "1",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
         MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://linq-webhook.example.test",
         MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE: ".tmp/custom-linq-cache.json",
@@ -78,7 +76,6 @@ describe("resolveHostedLocalDevConfig", () => {
     ).toEqual({
       databaseUrlOverride: "postgresql://127.0.0.1:5432/custom",
       forceResetLocalDatabase: true,
-      forceResetLocalTemporal: true,
       linqWebhookPublicUrl: "https://linq-webhook.example.test",
       linqWebhookRegistrationCachePath: ".tmp/custom-linq-cache.json",
       linqWebhookTunnelConfigPath: ".tmp/custom-linq-cloudflared.yml",
@@ -166,7 +163,7 @@ describe("printHelp", () => {
     const output = writes.join("");
     expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
-    expect(output).toContain("MURPH_DEV_FORCE_RESET_TEMPORAL=1");
+    expect(output).not.toContain("MURPH_DEV_FORCE_RESET_TEMPORAL");
     expect(output).toContain("HOSTED_ASSISTANT_PROVIDER=openai");
     expect(output).toContain("OPENAI_API_KEY=...");
     expect(output).not.toContain("MURPH_DEV_CODEX_BRIDGE");

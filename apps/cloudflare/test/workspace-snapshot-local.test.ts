@@ -1,22 +1,32 @@
 import { execFile } from "node:child_process";
-import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { createCipheriv, createHash } from "node:crypto";
+import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 
 import {
   buildHostedWorkspaceSnapshotV2Aad,
+  decodeHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  serializeHostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  getQueryProjectionStatus,
+  listBloodTests,
+  rebuildQueryProjection,
+} from "@murphai/query";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
 } from "@murphai/runtime-state/node";
@@ -103,6 +113,9 @@ describe("workspace snapshot local restore", () => {
         "utf8",
       );
       await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "projection-shm\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "projection-wal\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "inboxd.sqlite"), "other-projection\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".git", "config"), "git config\n", "utf8");
       await writeFile(
@@ -202,13 +215,179 @@ describe("workspace snapshot local restore", () => {
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, "vault-share")))
         .rejects.toThrow();
-      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite")))
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"))
+        .resolves.toBe("projection\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"))
+        .resolves.toBe("projection-shm\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"))
+        .resolves.toBe("projection-wal\n");
+      await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "inboxd.sqlite")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "cache", "cache.txt")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".git", "config"))).rejects.toThrow();
       await expect(access(path.join(restoredOperatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt")))
         .rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("keeps a real fractional-mtime query projection fresh across encrypted restore", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-query-projection-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
+    const sourceOperatorHomeRoot = path.join(sourceDurableRoot, "home");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const vaultManifestPath = path.join(sourceVaultRoot, "vault.json");
+    const eventPath = path.join(sourceVaultRoot, "ledger", "events", "2026", "2026-04.jsonl");
+    const snapshotId = "snapshot_query_projection_fresh";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_query_projection_fresh.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 41);
+
+    try {
+      await mkdir(path.dirname(eventPath), { recursive: true });
+      await mkdir(sourceOperatorHomeRoot, { recursive: true });
+      await writeFile(
+        vaultManifestPath,
+        `${JSON.stringify({
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
+          createdAt: "2026-04-07T00:00:00.000Z",
+          title: "Query projection restore fixture",
+          timezone: "UTC",
+        })}\n`,
+        "utf8",
+      );
+      await writeFile(
+        eventPath,
+        `${JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_01K72NW6HB9Y8M6W6VNZG4TF4M",
+          kind: "test",
+          occurredAt: "2026-04-07T08:15:00.000Z",
+          recordedAt: "2026-04-07T08:15:00.000Z",
+          dayKey: "2026-04-07",
+          source: "import",
+          title: "Cardiometabolic panel",
+          testCategory: "blood",
+          testName: "cardiometabolic_panel",
+          resultStatus: "normal",
+          results: [{
+            analyte: "Apolipoprotein B",
+            biomarkerSlug: "apob",
+            value: 87,
+            unit: "mg/dL",
+            flag: "normal",
+          }],
+        })}\n`,
+        "utf8",
+      );
+
+      const fractionalMtimeSeconds = 1_777_000_000.123;
+      await utimes(vaultManifestPath, fractionalMtimeSeconds, fractionalMtimeSeconds);
+      await utimes(eventPath, fractionalMtimeSeconds + 0.25, fractionalMtimeSeconds + 0.25);
+      expect((await stat(eventPath)).mtimeMs % 1_000).not.toBe(0);
+
+      await rebuildQueryProjection(sourceVaultRoot);
+      const sourceStatus = await getQueryProjectionStatus(sourceVaultRoot);
+      expect(sourceStatus?.fresh).toBe(true);
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+        durableRoot: sourceDurableRoot,
+        operatorHomeRoot: sourceOperatorHomeRoot,
+        vaultRoot: sourceVaultRoot,
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: archivePlan.entries,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 30))
+          .toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const ref = createHostedWorkspaceSnapshotTestRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: encrypted.encryptedFilePath,
+        ref,
+      });
+
+      const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
+      const restoredStatus = await getQueryProjectionStatus(restoredVaultRoot);
+      expect(restoredStatus?.fresh).toBe(true);
+      expect(restoredStatus?.builtAt).toBe(sourceStatus?.builtAt);
+
+      const projectionPath = path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite");
+      const projectionMtimeBefore = (await stat(projectionPath)).mtimeMs;
+      const records = await listBloodTests(restoredVaultRoot, {
+        limit: 1,
+        text: "Apolipoprotein B",
+      });
+      expect(records).toHaveLength(1);
+      expect(records[0]?.data.results).toEqual(expect.arrayContaining([
+        expect.objectContaining({ analyte: "Apolipoprotein B", value: 87 }),
+      ]));
+      expect((await stat(projectionPath)).mtimeMs).toBe(projectionMtimeBefore);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
+  it("keeps restore compatible with older ustar workspace archives", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-legacy-ustar-"));
+    const sourceDurableRoot = path.join(tempRoot, "source", "durable");
+    const restoredDurableRoot = path.join(tempRoot, "restored", "durable");
+    const notePath = path.join(sourceDurableRoot, "vault", "note.md");
+    const snapshotId = "snapshot_legacy_ustar";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_legacy_ustar.snapshot.enc";
+    const userId = "member_123";
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 61);
+
+    try {
+      await mkdir(path.dirname(notePath), { recursive: true });
+      await writeFile(notePath, "legacy workspace archive\n", "utf8");
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const encrypted = await createLegacyUstarEncryptedSnapshot({
+        aad,
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: sourceDurableRoot,
+        ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 50))
+          .toString("base64url"),
+        notePath,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      const ref = createHostedWorkspaceSnapshotTestRef({
+        aad,
+        encrypted,
+        objectKey,
+        snapshotId,
+        userId,
+      });
+
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: restoredDurableRoot,
+        encryptedFilePath: encrypted.encryptedFilePath,
+        ref,
+      });
+
+      await expect(readFile(path.join(restoredDurableRoot, "vault", "note.md"), "utf8"))
+        .resolves.toBe("legacy workspace archive\n");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
@@ -995,6 +1174,69 @@ function createHostedWorkspaceSnapshotTestRef(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: input.userId,
   };
+}
+
+async function createLegacyUstarEncryptedSnapshot(input: {
+  aad: HostedWorkspaceSnapshotV2Aad;
+  dataKey: string;
+  durableRoot: string;
+  ivBase64: string;
+  notePath: string;
+  outputDir: string;
+}): Promise<EncryptedWorkspaceSnapshotFile> {
+  await mkdir(input.outputDir, { mode: 0o700, recursive: true });
+  const temporaryDirectoryPath = await mkdtemp(path.join(input.outputDir, "legacy-ustar-"));
+  const tarPath = path.join(temporaryDirectoryPath, "workspace.tar");
+  const compressedPath = path.join(temporaryDirectoryPath, "workspace.tar.zst");
+  const encryptedFilePath = path.join(temporaryDirectoryPath, "workspace.snapshot.enc");
+  const key = decodeHostedWorkspaceSnapshotV2DataKey(input.dataKey);
+
+  try {
+    await execFileAsync("tar", [
+      "-C",
+      input.durableRoot,
+      "--format=ustar",
+      "-cf",
+      tarPath,
+      "./vault/note.md",
+    ]);
+    await execFileAsync("zstd", [
+      "-1",
+      "--no-progress",
+      "-T2",
+      "-f",
+      tarPath,
+      "-o",
+      compressedPath,
+    ]);
+    const compressedArchive = await readFile(compressedPath);
+    const cipher = createCipheriv(
+      "aes-256-gcm",
+      Buffer.from(key),
+      Buffer.from(input.ivBase64, "base64url"),
+    );
+    cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.aad)));
+    const encryptedBytes = Buffer.concat([
+      cipher.update(compressedArchive),
+      cipher.final(),
+      cipher.getAuthTag(),
+    ]);
+    await writeFile(encryptedFilePath, encryptedBytes, { mode: 0o600 });
+
+    return {
+      compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+      encryptedByteSize: encryptedBytes.byteLength,
+      encryptedFilePath,
+      encryptedObjectSha256: createHash("sha256").update(encryptedBytes).digest("hex"),
+      fileCount: 1,
+      ivBase64: input.ivBase64,
+      plaintextArchiveSha256: createHash("sha256").update(compressedArchive).digest("hex"),
+      temporaryDirectoryPath,
+      totalPlainBytes: (await stat(input.notePath)).size,
+    };
+  } finally {
+    key.fill(0);
+  }
 }
 
 async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {

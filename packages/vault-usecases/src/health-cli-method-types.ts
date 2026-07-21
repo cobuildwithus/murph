@@ -25,6 +25,7 @@ export interface HealthListInput extends CommandContext {
   to?: string
   kind?: string
   status?: string
+  text?: string
   limit?: number
 }
 
@@ -44,6 +45,7 @@ export interface BloodTestListRuntimeOptions {
   to?: string
   limit?: number
   status?: string
+  text?: string
 }
 
 export interface ImmunizationListRuntimeOptions {
@@ -68,6 +70,7 @@ export interface HealthListFilters {
   to?: string
   kind?: string
   status?: string
+  text?: string
   limit: number
 }
 

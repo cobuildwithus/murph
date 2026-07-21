@@ -440,11 +440,12 @@ during migration; when using it, temporarily assign that database URL to
 target without requiring food search extensions.
 `product_tests` rows must link to the exact returned `foods.id` or
 `supplements.id`; the lookup layer does not infer contaminants from names,
-brands, ingredients, tags, categories, or fuzzy matches. The PlasticList import
-helper creates PlasticList-backed `foods` rows for source products that keep
-tests on the source-backed food id, while curated remaps attach tests directly
-to the explicit target row. Those imports are exact measured evidence; concern
-alerts require separately curated active `contaminant_thresholds` rows. Daily
+brands, ingredients, tags, categories, or fuzzy matches. Product-test imports
+create source-only observations and never create catalog labels. Reviewed
+remaps attach those observations directly to an existing, independently sourced
+food or supplement label; a genuinely missing product must first enter through
+the normal full-label ingestion path. Those imports are exact measured evidence;
+concern alerts require separately curated active `contaminant_thresholds` rows. Daily
 exposure screens, such as the BPA one-serving-per-day adult screen, use the
 label row's `serving_grams` when it is available instead of storing manual
 product-threshold application rows.

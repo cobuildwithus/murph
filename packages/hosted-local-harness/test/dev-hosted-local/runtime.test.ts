@@ -126,6 +126,82 @@ describe("resolveHostedLocalWorkerPortMode", () => {
 });
 
 describe("terminateChildProcessAndWait", () => {
+  it("signals the detached group created for a retained current-run child", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: ReturnType<typeof vi.fn>;
+      once: EventEmitter["once"];
+      pid: number;
+    };
+    child.exitCode = null;
+    child.kill = vi.fn(() => true);
+    child.pid = 3131;
+    let groupRunning = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
+      if (signal === 0 && !groupRunning) {
+        throw missingProcessError();
+      }
+      if (pid === -child.pid && signal === "SIGTERM") {
+        groupRunning = false;
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      await terminateChildProcessAndWait(child, { signal: "SIGTERM" });
+      expect(killSpy).toHaveBeenCalledWith(-3131, 0);
+      expect(killSpy).toHaveBeenCalledWith(-3131, "SIGTERM");
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      platformSpy.mockRestore();
+    }
+  });
+
+  it("waits for group descendants after the retained leader exits and escalates", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: ReturnType<typeof vi.fn>;
+      once: EventEmitter["once"];
+      pid: number;
+    };
+    child.exitCode = 0;
+    child.kill = vi.fn(() => true);
+    child.pid = 3232;
+    let groupRunning = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((
+      _pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
+      if (signal === 0 && !groupRunning) {
+        throw missingProcessError();
+      }
+      if (signal === "SIGKILL") {
+        groupRunning = false;
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      await terminateChildProcessAndWait(child, {
+        graceMs: 1,
+        signal: "SIGTERM",
+      });
+
+      expect(killSpy).toHaveBeenCalledWith(-3232, "SIGTERM");
+      expect(killSpy).toHaveBeenCalledWith(-3232, "SIGKILL");
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      platformSpy.mockRestore();
+    }
+  });
+
   it("escalates to SIGKILL when the child ignores the initial graceful signal", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const child = new EventEmitter() as EventEmitter & {
@@ -157,52 +233,83 @@ describe("terminateChildProcessAndWait", () => {
     platformSpy.mockRestore();
   });
 
-  it("terminates the detached process group after the direct child has exited", async () => {
+  it.each([
+    { exitCode: 0, signalCode: null },
+    { exitCode: null, signalCode: "SIGTERM" as const },
+  ])("does not send a terminating signal after the retained child exits (%o)", async ({
+    exitCode,
+    signalCode,
+  }) => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
     const child = new EventEmitter() as EventEmitter & {
       exitCode: number | null;
       kill: (signal?: NodeJS.Signals | number) => boolean;
       once: EventEmitter["once"];
       pid: number;
+      signalCode: NodeJS.Signals | null;
     };
-    const groupSignals: Array<NodeJS.Signals | number | undefined> = [];
-    let gracefulSignalSent = false;
-    child.exitCode = 0;
+    child.exitCode = exitCode;
     child.pid = 5252;
+    child.signalCode = signalCode;
     child.kill = vi.fn(() => true);
-    const killSpy = vi.spyOn(process, "kill").mockImplementation((
-      ((pid: number, signal?: NodeJS.Signals | number) => {
-        if (pid !== -child.pid) {
-          return true;
-        }
-
-        groupSignals.push(signal);
-        if (signal === 0 && gracefulSignalSent) {
-          const error = new Error("process group exited") as NodeJS.ErrnoException;
-          error.code = "ESRCH";
-          throw error;
-        }
-        if (signal === "SIGTERM") {
-          gracefulSignalSent = true;
-        }
-        return true;
-      }) as typeof process.kill
-    ));
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((_pid, signal) => {
+      if (signal === 0) {
+        throw missingProcessError();
+      }
+      return true;
+    }) as typeof process.kill);
 
     try {
       await terminateChildProcessAndWait(child, {
         graceMs: 1,
         signal: "SIGTERM",
       });
+      expect(killSpy.mock.calls).toEqual([[-5252, 0]]);
+      expect(child.kill).not.toHaveBeenCalled();
     } finally {
       killSpy.mockRestore();
       platformSpy.mockRestore();
     }
+  });
 
-    expect(groupSignals).toContain("SIGTERM");
-    expect(child.kill).not.toHaveBeenCalled();
+  it("falls back to the retained child when its owned group cannot be signaled", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: ReturnType<typeof vi.fn>;
+      once: EventEmitter["once"];
+      pid: number;
+    };
+    child.exitCode = null;
+    child.pid = 6262;
+    child.kill = vi.fn(() => {
+      child.exitCode = 0;
+      queueMicrotask(() => child.emit("exit", 0, null));
+      return true;
+    });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((_pid, signal) => {
+      if (signal === 0) {
+        return true;
+      }
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    }) as typeof process.kill);
+
+    try {
+      await terminateChildProcessAndWait(child, {
+        graceMs: 1,
+        signal: "SIGTERM",
+      });
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    } finally {
+      killSpy.mockRestore();
+      platformSpy.mockRestore();
+    }
   });
 });
+
+function missingProcessError(): Error & { code: "ESRCH" } {
+  return Object.assign(new Error("missing process"), { code: "ESRCH" as const });
+}
 
 describe("waitForFirstChildExit", () => {
   it("observes a child that exited before listeners were attached", async () => {

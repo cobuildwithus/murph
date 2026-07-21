@@ -4,6 +4,8 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  buildHostedPulseTrialContinuationClearCookie: vi.fn(),
+  buildHostedPulseTrialContinuationCookie: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   startHostedPulseTrialPaidPlan: vi.fn(),
@@ -21,6 +23,13 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
+  buildHostedPulseTrialContinuationClearCookie:
+    mocks.buildHostedPulseTrialContinuationClearCookie,
+  buildHostedPulseTrialContinuationCookie:
+    mocks.buildHostedPulseTrialContinuationCookie,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
   startHostedPulseTrialPaidPlan: mocks.startHostedPulseTrialPaidPlan,
 }));
@@ -34,12 +43,19 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
+  mocks.buildHostedPulseTrialContinuationClearCookie.mockReturnValue(
+    "murph-start-pulse=; Max-Age=0",
+  );
+  mocks.buildHostedPulseTrialContinuationCookie.mockReturnValue(
+    "murph-start-pulse=issued; Max-Age=900",
+  );
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       billingStatus: "active",
       id: "member_123",
       suspendedAt: null,
     },
+    sessionId: "hws_session_123",
   });
   mocks.startHostedPulseTrialPaidPlan.mockResolvedValue({
     billingPlanCode: "launch_monthly",
@@ -68,10 +84,70 @@ test("starts paid Pulse for an authenticated hosted trial member", async () => {
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
     memberId: "member_123",
+    paymentMethodContinuation: "settings",
     prisma: {
       label: "test-prisma",
     },
   });
+  expect(response.headers.get("set-cookie")).toBe(
+    "murph-start-pulse=; Max-Age=0",
+  );
+});
+
+test("issues a continuation claim before redirecting to payment-method setup", async () => {
+  mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.stripe.test/session_123",
+    resumeStartAfterPaymentMethodSetup: true,
+    status: "payment_required",
+  });
+
+  const response = await billingStartPaidPulseRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.buildHostedPulseTrialContinuationCookie).toHaveBeenCalledWith({
+    action: "start_pulse_now",
+    memberId: "member_123",
+    sessionId: "hws_session_123",
+  });
+  expect(response.headers.get("set-cookie")).toBe(
+    "murph-start-pulse=issued; Max-Age=900",
+  );
+  await expect(response.json()).resolves.toEqual({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.stripe.test/session_123",
+    status: "payment_required",
+  });
+});
+
+test("does not issue a continuation claim for hosted-invoice recovery", async () => {
+  mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://invoice.stripe.test/in_123",
+    status: "payment_required",
+  });
+
+  const response = await billingStartPaidPulseRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/start-paid-pulse", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.buildHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
+  expect(response.headers.get("set-cookie")).toBe(
+    "murph-start-pulse=; Max-Age=0",
+  );
 });
 
 test("rejects a generic request body", async () => {

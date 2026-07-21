@@ -1232,6 +1232,19 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Use it only for the support loop; this skill still owns protocol resolution, safety, run creation, and experiment mechanics.',
     )
+    expect(raw).toContain(
+      'reuse relevant lab output already read by the owning domain skill in this turn',
+    )
+    expect(raw).toContain(
+      'vault-cli blood-test list --text "<biomarker>" --limit 1 --format json',
+    )
+    expect(raw).toContain(
+      'use `vault-cli blood-test list --format json` only for a panel-wide question',
+    )
+    expect(raw).toContain(
+      'only when the targeted result lacks necessary panel context',
+    )
+    expect(raw).toContain('only when setup needs history')
     expect(raw).toContain('analysisPlan.measurementAnchors')
     expect(raw).toContain('analysisPlan.plannedMeasurements')
     expect(raw).toContain(
@@ -1743,10 +1756,20 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
     )
-    expect(raw).toContain('vault-cli blood-test list --format json')
+    expect(raw).toContain(
+      'vault-cli blood-test list --text "<biomarker>" --limit 1 --format json',
+    )
+    expect(raw).toContain(
+      'use `vault-cli blood-test list --format json` only for a panel-wide question',
+    )
+    expect(raw).toContain('once and reuse that result')
     expect(raw).toContain(
       'vault-cli blood-test show <id> --format json',
     )
+    expect(raw).toContain(
+      'only when the targeted result lacks necessary panel context',
+    )
+    expect(raw).toContain('only when the question needs history')
     expect(raw).toContain(
       'When blood-test records exist, cite the latest relevant markers with dates',
     )

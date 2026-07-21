@@ -32,7 +32,7 @@ import {
 export type { JsonObject } from "./health-cli-method-types.js";
 export { getHealthRegistryCommandMetadata } from "./health-registry-command-metadata.js";
 
-export type HealthListFilterCapability = "date-range" | "kind" | "status";
+export type HealthListFilterCapability = "date-range" | "kind" | "status" | "text";
 export type HealthUpsertInputCapability = never;
 export type HealthUpsertResultCapability = "path" | "ledger-file";
 
@@ -119,6 +119,7 @@ export const healthListFiltersSchema = z.object({
   to: localDateSchema.optional(),
   kind: z.string().min(1).optional(),
   status: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
   limit: z.number().int().positive().max(200).default(10),
 }) satisfies z.ZodType<HealthListFilters>;
 
@@ -276,7 +277,7 @@ const checkedHealthEntityDescriptorExtensions = {
       upsertServiceMethod: "upsertBloodTest",
     },
     query: {
-      genericListFilterCapabilities: ["date-range", "status"],
+      genericListFilterCapabilities: ["date-range", "status", "text"],
       listServiceMethod: "listBloodTests",
       notFoundLabel: "blood test",
       runtimeListMethod: "listBloodTests",

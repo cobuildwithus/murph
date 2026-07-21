@@ -9,8 +9,13 @@ const runtimeMocks = vi.hoisted(() => ({
 }));
 
 const childProcessMocks = vi.hoisted(() => ({
+  spawnedChildren: [] as Array<EventEmitter & {
+    kill: ReturnType<typeof vi.fn>;
+  }>,
   spawnResponses: [] as Array<{
+    error?: Error;
     exitCode?: number;
+    hang?: boolean;
     stderr?: string;
     stdout?: string;
   }>,
@@ -23,18 +28,28 @@ const childProcessMocks = vi.hoisted(() => ({
       : {};
     const response = childProcessMocks.spawnResponses.shift() ?? defaultResponse;
     Object.assign(child, {
+      kill: vi.fn(() => true),
       stderr: new EventEmitter(),
       stdout: new EventEmitter(),
     });
-    queueMicrotask(() => {
-      if (response.stdout) {
-        (child as EventEmitter & { stdout: EventEmitter }).stdout.emit("data", response.stdout);
-      }
-      if (response.stderr) {
-        (child as EventEmitter & { stderr: EventEmitter }).stderr.emit("data", response.stderr);
-      }
-      child.emit("exit", response.exitCode ?? 0);
+    childProcessMocks.spawnedChildren.push(child as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
     });
+    if (!response.hang) {
+      queueMicrotask(() => {
+        if (response.error) {
+          child.emit("error", response.error);
+          return;
+        }
+        if (response.stdout) {
+          (child as EventEmitter & { stdout: EventEmitter }).stdout.emit("data", response.stdout);
+        }
+        if (response.stderr) {
+          (child as EventEmitter & { stderr: EventEmitter }).stderr.emit("data", response.stderr);
+        }
+        child.emit("exit", response.exitCode ?? 0);
+      });
+    }
     return child;
   }),
 }));
@@ -122,6 +137,7 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => runtimeMocks);
 describe("hosted-local MinIO sidecar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    childProcessMocks.spawnedChildren = [];
     childProcessMocks.spawnResponses = [];
     httpMocks.healthStatuses = [];
     netMocks.listenErrors = [];
@@ -547,6 +563,69 @@ describe("hosted-local MinIO sidecar", () => {
       ["rm", "-f", "container-a", "container-b"],
       expect.objectContaining({ stdio: "ignore" }),
     );
+  });
+
+  it("bounds a hung exact-child MinIO removal command", async () => {
+    vi.useFakeTimers();
+    childProcessMocks.spawnResponses = [
+      { hang: true },
+      {},
+    ];
+    const { cleanupHostedLocalMinioContainerBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+
+    try {
+      const cleanup = cleanupHostedLocalMinioContainerBestEffort(
+        { DOCKER_CONFIG: ".tmp/docker-config" },
+        "murph-hosted-local-r2-build-test",
+      );
+      await vi.runAllTimersAsync();
+
+      await expect(cleanup).resolves.toBeUndefined();
+      expect(childProcessMocks.spawnedChildren[0]?.kill).toHaveBeenCalledOnce();
+      expect(childProcessMocks.spawnedChildren[0]?.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a hung exact-child MinIO listing command", async () => {
+    vi.useFakeTimers();
+    childProcessMocks.spawnResponses = [{ hang: true }];
+    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+
+    try {
+      const cleanup = cleanupHostedLocalMinioE2eContainersBestEffort({
+        DOCKER_CONFIG: ".tmp/docker-config",
+      });
+      await vi.runAllTimersAsync();
+
+      await expect(cleanup).resolves.toBeUndefined();
+      const timedOutChild = childProcessMocks.spawnedChildren[0];
+      expect(timedOutChild?.kill).toHaveBeenCalledOnce();
+      expect(timedOutChild?.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
+      expect(() => {
+        timedOutChild?.emit("exit", 0);
+        timedOutChild?.emit("error", new Error("late Docker error"));
+      }).not.toThrow();
+      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an early Docker listing error best-effort", async () => {
+    childProcessMocks.spawnResponses = [{
+      error: new Error("docker unavailable"),
+    }];
+    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+
+    await expect(cleanupHostedLocalMinioE2eContainersBestEffort({
+      DOCKER_CONFIG: ".tmp/docker-config",
+    })).resolves.toBeUndefined();
+
+    expect(childProcessMocks.spawnedChildren[0]?.kill).not.toHaveBeenCalled();
+    expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
   });
 
   it("restarts the same hosted-local R2 sidecar when health is lost", async () => {

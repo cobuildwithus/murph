@@ -248,7 +248,7 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
   assert.doesNotMatch(markup, /Morning walk/);
 });
 
-test("ExperimentsPage shows private-only tracked experiments as non-link cards", async () => {
+test("ExperimentsPage links private-only tracked experiments to their private results", async () => {
   const clientWithPrivateOnlyExperiment = await createFixtureClient();
   mocks.useBrowserVault.mockReturnValue({
     client: clientWithPrivateOnlyExperiment,
@@ -262,8 +262,9 @@ test("ExperimentsPage shows private-only tracked experiments as non-link cards",
   const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
   assert.match(markup, /Private/);
-  assert.match(markup, /<article[^>]*>[\s\S]*Private only run[\s\S]*Started Apr 19, 2026 · Private run only[\s\S]*Private run only[\s\S]*<\/article>/);
-  assert.doesNotMatch(markup, /href="\/experiments\/private-only-run"/);
+  assert.match(markup, /href="\/experiments\/runs\/exp_private_only"/);
+  assert.match(markup, /Private only run/);
+  assert.match(markup, /Started Apr 19, 2026 · Private run only/);
 });
 
 test("ExperimentsPage keeps the public library visible when browser-vault loading fails", () => {

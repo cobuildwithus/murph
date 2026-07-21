@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedPulseTrialContinuationCookie: vi.fn(),
+  PulseTrialBillingContinuation: vi.fn(() =>
+    React.createElement("div", null, "Finishing Pulse automatically")),
   CustomizeMurphSettings: vi.fn((props: {
     assistant?: unknown;
     murphPhoneNumber?: string | null;
@@ -56,6 +59,7 @@ const mocks = vi.hoisted(() => ({
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    pulseTrialBillingContinuationPending?: boolean;
     usageCreditBalanceUsdMicros?: string | null;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
@@ -118,6 +122,11 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
+  readHostedPulseTrialContinuationCookie:
+    mocks.readHostedPulseTrialContinuationCookie,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -170,6 +179,10 @@ vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
 
 vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-start-paid-pulse-button", () => ({
+  PulseTrialBillingContinuation: mocks.PulseTrialBillingContinuation,
 }));
 
 vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
@@ -253,6 +266,7 @@ beforeEach(() => {
     ledgerVersion: 0n,
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -339,6 +353,96 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+});
+
+test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_session_123",
+    },
+  });
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("continue_pulse");
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startPulse: "complete",
+    }),
+  }));
+
+  expect(mocks.readHostedPulseTrialContinuationCookie).toHaveBeenCalledWith({
+    memberId: "member_123",
+    sessionId: "hws_session_123",
+  });
+  expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledTimes(1);
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    pulseTrialBillingContinuationPending: true,
+  }), undefined);
+  assert.match(markup, /Finishing Pulse automatically/);
+});
+
+test("SettingsPage treats the return marker as inert without its bound claim", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_session_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startPulse: "complete",
+    }),
+  }));
+
+  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
+  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
+});
+
+test("SettingsPage treats a surviving claim as inert without the marked return", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_session_123",
+    },
+  });
+  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("start_pulse_now");
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
+  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
+  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
 });
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {

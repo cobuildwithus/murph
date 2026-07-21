@@ -2264,7 +2264,7 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thre
   assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 0)
 })
 
-test('sendAssistantMessageLocal runs automation cron turns on isolated Codex threads', async () => {
+test('sendAssistantMessageLocal keeps automation cron turns on the session Codex thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -2277,13 +2277,13 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated Codex thr
   assert.deepEqual(
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
-      threadScope: 'isolated-thread',
+      threadScope: 'session-thread',
     },
   )
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.providerResumeStateAction,
-    'preserve-existing',
+    'persist-from-provider-turn',
   )
   assert.equal(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls.length, 1)
 })

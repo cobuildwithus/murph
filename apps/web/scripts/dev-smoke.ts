@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessByStdio } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { access, readFile, readdir, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import http from "node:http";
@@ -16,8 +16,6 @@ const requestTimeoutMs = 30_000;
 const serverReadyTimeoutMs = 90_000;
 const serverReadyPollIntervalMs = 250;
 const childShutdownTimeoutMs = 5_000;
-const staleLockWaitTimeoutMs = 15_000;
-const staleLockWaitPollIntervalMs = 250;
 const artifactFreshnessToleranceMs = 2_000;
 const hostedWebSmokeLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV";
 const hostedWebSmokePreparedLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV";
@@ -29,9 +27,6 @@ type HostedWebSmokeDevCommand = "dev" | "dev:local-env" | "dev:prepared-local-en
 
 interface HostedWebSmokeLockCleanupOptions {
   isProcessRunning?: (pid: number) => boolean;
-  processCommand?: (pid: number) => string | null;
-  sleep?: (milliseconds: number) => Promise<void>;
-  terminateProcess?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 export function resolveHostedWebSmokeDevCommand(
@@ -96,7 +91,7 @@ async function main(): Promise<void> {
   const removeExitCleanup = installProcessExitCleanup(() => {
     terminateChildProcess(child, "SIGKILL");
   });
-  const removeSignalCleanup = installProcessTerminationCleanup(child, nextLockPath);
+  const removeSignalCleanup = installProcessTerminationCleanup(child, removeExitCleanup);
 
   let combinedOutput = "";
   const captureChunk = (chunk: Buffer | string) => {
@@ -116,7 +111,8 @@ async function main(): Promise<void> {
   } finally {
     removeSignalCleanup();
     removeExitCleanup();
-    await shutdownChildProcess(child, nextLockPath);
+    await shutdownHostedWebSmokeChildProcess(child);
+    await removeDeadHostedWebSmokeLock(nextLockPath);
   }
 }
 
@@ -309,37 +305,16 @@ export async function clearStaleHostedWebSmokeLocks(
   options: HostedWebSmokeLockCleanupOptions = {},
 ): Promise<void> {
   const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
-  const sleepFor = options.sleep ?? sleep;
-  const deadline = Date.now() + staleLockWaitTimeoutMs;
+  const lockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
 
-  while (true) {
-    const lockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
-
-    if (lockDescriptor === null) {
-      return;
-    }
-
-    if (!checkProcessRunning(lockDescriptor.pid)) {
-      await rm(nextLockPath, { force: true });
-      return;
-    }
-
-    await shutdownHostedWebLockProcess(lockDescriptor.pid, nextLockPath, options);
-    const nextLockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
-
-    if (nextLockDescriptor === null || !checkProcessRunning(nextLockDescriptor.pid)) {
-      await rm(nextLockPath, { force: true });
-      return;
-    }
-
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `apps/web smoke dist dir still has an active Next dev process after waiting ${staleLockWaitTimeoutMs}ms (pid ${lockDescriptor.pid}, port ${lockDescriptor.port}).`,
-      );
-    }
-
-    await sleepFor(staleLockWaitPollIntervalMs);
+  if (lockDescriptor === null || !checkProcessRunning(lockDescriptor.pid)) {
+    await rm(nextLockPath, { force: true });
+    return;
   }
+
+  throw new Error(
+    `apps/web smoke dist dir has an active process lock (pid ${lockDescriptor.pid}, port ${lockDescriptor.port}). Stop that process before running the smoke test.`,
+  );
 }
 
 async function readHostedWebSmokeLockDescriptor(
@@ -383,21 +358,28 @@ async function readHostedWebSmokeLockDescriptor(
 
 function installProcessTerminationCleanup(
   child: HostedWebSmokeChildProcess,
-  nextLockPath: string,
+  removeExitCleanup: () => void,
 ): () => void {
   const listeners: Array<readonly [NodeJS.Signals, () => void]> = [];
+  let shutdown: Promise<void> | null = null;
 
   for (const signal of resolveTerminationSignals()) {
     const listener = () => {
-      void shutdownChildProcess(child, nextLockPath).finally(() => {
+      terminateChildProcess(child, signal);
+      if (shutdown !== null) {
+        return;
+      }
+      shutdown = shutdownHostedWebSmokeChildProcess(child, signal);
+      void shutdown.finally(() => {
         removeListeners();
+        removeExitCleanup();
         process.exitCode = signal === "SIGINT" ? 130 : 143;
         process.exit();
       });
     };
 
     listeners.push([signal, listener]);
-    process.once(signal, listener);
+    process.on(signal, listener);
   }
 
   const removeListeners = () => {
@@ -420,18 +402,21 @@ function installProcessExitCleanup(cleanup: () => void): () => void {
   };
 }
 
-async function shutdownChildProcess(
+export async function shutdownHostedWebSmokeChildProcess(
   child: HostedWebSmokeChildProcess,
-  nextLockPath: string,
+  signal: NodeJS.Signals = "SIGINT",
 ): Promise<void> {
-  const hostedWebLockPid = await readHostedWebSmokeLockPid(nextLockPath, child.pid);
-
-  if (child.exitCode !== null) {
-    await shutdownHostedWebLockProcess(hostedWebLockPid, nextLockPath);
+  const processGroupId = resolveOwnedProcessGroupId(child);
+  if (processGroupId !== null) {
+    await terminateOwnedProcessGroupAndWait(processGroupId, signal);
     return;
   }
 
-  terminateChildProcess(child, "SIGINT");
+  if (hasChildExited(child)) {
+    return;
+  }
+
+  terminateChildProcess(child, signal);
 
   try {
     await waitForChildExit(child, childShutdownTimeoutMs);
@@ -442,17 +427,15 @@ async function shutdownChildProcess(
       // Best-effort cleanup only.
     });
   }
-
-  await shutdownHostedWebLockProcess(hostedWebLockPid, nextLockPath);
 }
 
 function terminateChildProcess(
   child: HostedWebSmokeChildProcess,
   signal: NodeJS.Signals,
 ): void {
-  const pid = typeof child.pid === "number" && child.pid > 0 ? child.pid : null;
+  const pid = resolveOwnedProcessGroupId(child);
 
-  if (pid !== null && process.platform !== "win32") {
+  if (pid !== null) {
     try {
       process.kill(-pid, signal);
       return;
@@ -461,11 +444,79 @@ function terminateChildProcess(
     }
   }
 
-  try {
-    child.kill(signal);
-  } catch {
-    // Best-effort cleanup only.
+  if (!hasChildExited(child)) {
+    try {
+      child.kill(signal);
+    } catch {
+      // Best-effort cleanup only.
+    }
   }
+}
+
+async function terminateOwnedProcessGroupAndWait(
+  processGroupId: number,
+  signal: NodeJS.Signals,
+): Promise<void> {
+  if (!isProcessGroupRunning(processGroupId)) {
+    return;
+  }
+
+  if (!signalProcessGroup(processGroupId, signal)) {
+    return;
+  }
+  if (await waitForProcessGroupExit(processGroupId, childShutdownTimeoutMs)) {
+    return;
+  }
+
+  if (!signalProcessGroup(processGroupId, "SIGKILL")) {
+    return;
+  }
+  await waitForProcessGroupExit(processGroupId, childShutdownTimeoutMs);
+}
+
+function resolveOwnedProcessGroupId(child: HostedWebSmokeChildProcess): number | null {
+  return process.platform !== "win32"
+    && typeof child.pid === "number"
+    && child.pid > 0
+    ? child.pid
+    : null;
+}
+
+function signalProcessGroup(processGroupId: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-processGroupId, signal);
+    return true;
+  } catch (error) {
+    return !isMissingProcessError(error);
+  }
+}
+
+function isProcessGroupRunning(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return !isMissingProcessError(error);
+  }
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessGroupRunning(processGroupId)) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    await sleep(Math.min(serverReadyPollIntervalMs, remainingMs));
+  }
+  return true;
+}
+
+function hasChildExited(child: HostedWebSmokeChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
 }
 
 async function waitForChildExit(
@@ -501,106 +552,10 @@ async function waitForChildExit(
   });
 }
 
-async function readHostedWebSmokeLockPid(
-  lockPath: string,
-  childPid: number | undefined,
-): Promise<number | null> {
-  const lockDescriptor = await readHostedWebSmokeLockDescriptor(lockPath);
-
-  if (lockDescriptor === null) {
-    return null;
-  }
-
-  return lockDescriptor.pid === childPid ? null : lockDescriptor.pid;
-}
-
-async function shutdownHostedWebLockProcess(
-  pid: number | null,
-  lockPath: string,
-  options: HostedWebSmokeLockCleanupOptions = {},
-): Promise<void> {
-  const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
-  const getProcessCommand = options.processCommand ?? readProcessCommand;
-  const sleepFor = options.sleep ?? sleep;
-  const terminateProcess = options.terminateProcess ?? terminateProcessId;
-
-  if (pid !== null && checkProcessRunning(pid)) {
-    const command = getProcessCommand(pid);
-    if (!isRecoverableHostedWebSmokeLockOwner(command)) {
-      throw new Error(
-        [
-          `apps/web smoke lock is held by an active non-Next process (pid ${pid}).`,
-          "Stop that process or remove apps/web/.next-smoke after confirming it is stale.",
-        ].join(" "),
-      );
-    }
-
-    terminateProcess(pid, "SIGINT");
-
-    try {
-      await waitForProcessExit(pid, childShutdownTimeoutMs, checkProcessRunning, sleepFor);
-    } catch {
-      terminateProcess(pid, "SIGKILL");
-      await waitForProcessExit(pid, childShutdownTimeoutMs, checkProcessRunning, sleepFor).catch(() => {
-        // Best-effort cleanup only.
-      });
-    }
-  }
-
-  const lockDescriptor = await readHostedWebSmokeLockDescriptor(lockPath);
-  if (lockDescriptor !== null && !checkProcessRunning(lockDescriptor.pid)) {
+async function removeDeadHostedWebSmokeLock(lockPath: string): Promise<void> {
+  const descriptor = await readHostedWebSmokeLockDescriptor(lockPath);
+  if (descriptor === null || !isProcessRunning(descriptor.pid)) {
     await rm(lockPath, { force: true });
-  }
-}
-
-function terminateProcessId(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Best-effort cleanup only.
-  }
-}
-
-async function waitForProcessExit(
-  pid: number,
-  timeoutMs: number,
-  checkProcessRunning: (pid: number) => boolean = isProcessRunning,
-  sleepFor: (milliseconds: number) => Promise<void> = sleep,
-): Promise<void> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    if (!checkProcessRunning(pid)) {
-      return;
-    }
-
-    await sleepFor(100);
-  }
-
-  throw new Error(`Timed out waiting ${timeoutMs}ms for process ${pid} to exit.`);
-}
-
-export function isRecoverableHostedWebSmokeLockOwner(command: string | null): boolean {
-  if (command === null) {
-    return false;
-  }
-
-  const normalizedCommand = command.replace(/\\/gu, "/");
-  return (
-    normalizedCommand.startsWith("next-server ")
-    || normalizedCommand === "next-server"
-    || normalizedCommand.includes("/node_modules/next/dist/bin/next")
-  );
-}
-
-function readProcessCommand(pid: number): string | null {
-  try {
-    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim() || null;
-  } catch {
-    return null;
   }
 }
 
@@ -655,17 +610,21 @@ function isMissingPathError(error: unknown): boolean {
   );
 }
 
+function isMissingProcessError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ESRCH",
+  );
+}
+
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (
-      error
-      && typeof error === "object"
-      && "code" in error
-      && error.code === "ESRCH"
-    ) {
+    if (isMissingProcessError(error)) {
       return false;
     }
 

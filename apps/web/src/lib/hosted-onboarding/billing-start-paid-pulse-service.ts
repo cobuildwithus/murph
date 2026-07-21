@@ -21,6 +21,14 @@ import {
   parseHostedBillingPlanCode,
 } from "./billing-plans";
 import {
+  HOSTED_START_PAID_PULSE_RETURN_PARAM,
+  HOSTED_START_PAID_PULSE_RETURN_VALUE,
+  type HostedPulseTrialContinuationAction,
+} from "./billing-pulse-trial-continuation-contract";
+import {
+  buildHostedPulseTrialPaymentReturnUrl,
+} from "./billing-pulse-trial-continuation";
+import {
   assertHostedMemberOwnActiveBillingAllowed,
   assertHostedMemberNotSuspended,
 } from "./entitlement";
@@ -44,7 +52,7 @@ import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
-const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings";
+const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings#subscription";
 const START_PAID_PULSE_STRIPE_RETRIEVE_EXPANSIONS = [
   "customer",
   "items.data.price",
@@ -97,6 +105,7 @@ export type HostedPulseTrialStartPaidResult =
   | {
     billingPlanCode: "launch_monthly";
     paymentUrl: string;
+    resumeStartAfterPaymentMethodSetup?: true;
     status: "payment_required";
   };
 
@@ -110,11 +119,24 @@ export type HostedPulseTrialContinueResult =
 interface HostedPulseTrialPaidPlanInput {
   memberId: string;
   now?: Date;
+  paymentMethodContinuation?: "conversation" | "settings";
   prisma?: PrismaClient;
 }
 
+type HostedPulseTrialStartPaidPlanInput = HostedPulseTrialPaidPlanInput;
+
+type HostedPulseTrialPaymentMethodPortalContinuation =
+  | {
+    kind: "conversation";
+    action: HostedPulseTrialContinuationAction;
+    memberId: string;
+  }
+  | {
+    kind: "settings";
+  };
+
 export async function startHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialPaidPlanInput,
+  input: HostedPulseTrialStartPaidPlanInput,
 ): Promise<HostedPulseTrialStartPaidResult> {
   return transitionHostedPulseTrialPaidPlan({
     ...input,
@@ -132,13 +154,13 @@ export async function continueHostedPulseTrialPaidPlan(
 }
 
 async function transitionHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialPaidPlanInput & { timing: "now" },
+  input: HostedPulseTrialStartPaidPlanInput & { timing: "now" },
 ): Promise<HostedPulseTrialStartPaidResult>;
 async function transitionHostedPulseTrialPaidPlan(
   input: HostedPulseTrialPaidPlanInput & { timing: "at_trial_end" },
 ): Promise<HostedPulseTrialContinueResult>;
 async function transitionHostedPulseTrialPaidPlan(
-  input: HostedPulseTrialPaidPlanInput & { timing: "at_trial_end" | "now" },
+  input: HostedPulseTrialStartPaidPlanInput & { timing: "at_trial_end" | "now" },
 ): Promise<HostedPulseTrialContinueResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -241,10 +263,16 @@ async function transitionHostedPulseTrialPaidPlan(
   }
 
   if (canResumePausedAutoTrial) {
+    const paymentMethodContinuation = resolveHostedPulseTrialPaymentMethodContinuation({
+      continuation: input.paymentMethodContinuation,
+      memberId: input.memberId,
+      timing: input.timing,
+    });
     const pausedStartResult = await resumeHostedPulseTrialStartPaidPausedSubscription({
       legacyMeteredItems,
       memberId: input.memberId,
       now,
+      paymentMethodContinuation,
       priceId: pulseConfig.priceId,
       prisma,
       stripe,
@@ -276,12 +304,22 @@ async function transitionHostedPulseTrialPaidPlan(
   });
 
   if (!hasHostedStripeSubscriptionPaymentMethod(subscription)) {
+    const paymentMethodContinuation = resolveHostedPulseTrialPaymentMethodContinuation({
+      continuation: input.paymentMethodContinuation,
+      memberId: input.memberId,
+      timing: input.timing,
+    });
     return {
       billingPlanCode: START_PAID_PULSE_PLAN,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        continuation: paymentMethodContinuation,
+        now,
         stripe,
         stripeCustomerId,
       }),
+      ...(paymentMethodContinuation?.kind === "settings"
+        ? { resumeStartAfterPaymentMethodSetup: true as const }
+        : {}),
       status: "payment_required",
     };
   }
@@ -337,7 +375,7 @@ function buildHostedPulseTrialStartPaidUnsupportedError(): Error {
   return hostedOnboardingError({
     code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
     httpStatus: 409,
-    message: "Start Pulse is only available while your Pulse trial is active.",
+    message: "This Pulse update is only available while your Pulse trial is active.",
   });
 }
 
@@ -495,11 +533,19 @@ function readExpandedStripeCustomer(
 }
 
 async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
+  continuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
+  now: Date;
   stripe: Stripe;
   stripeCustomerId: string;
 }): Promise<string> {
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
   const returnUrl = new URL(START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH, publicBaseUrl).toString();
+  const completedReturnUrl = buildHostedPulseTrialPaymentMethodCompletedReturnUrl({
+    continuation: input.continuation,
+    now: input.now,
+    publicBaseUrl,
+    settingsReturnUrl: returnUrl,
+  });
   const session = await callHostedStripeStartPaidPulseOperation(
     "billingPortal.sessions.create.payment-method-update",
     () => input.stripe.billingPortal.sessions.create({
@@ -507,7 +553,7 @@ async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: returnUrl,
+            return_url: completedReturnUrl,
           },
           type: "redirect",
         },
@@ -527,6 +573,56 @@ async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
     message: "Stripe did not return a billing setup link. Try again shortly.",
     retryable: true,
   });
+}
+
+function resolveHostedPulseTrialPaymentMethodContinuation(input: {
+  continuation: HostedPulseTrialPaidPlanInput["paymentMethodContinuation"];
+  memberId: string;
+  timing: "at_trial_end" | "now";
+}): HostedPulseTrialPaymentMethodPortalContinuation | null {
+  if (input.continuation === undefined) {
+    return null;
+  }
+
+  if (input.continuation === "settings") {
+    if (input.timing !== "now") {
+      throw new TypeError(
+        "Settings payment continuation is only valid for starting Pulse now.",
+      );
+    }
+    return { kind: "settings" };
+  }
+
+  return {
+    action: input.timing === "now" ? "start_pulse_now" : "continue_pulse",
+    kind: "conversation",
+    memberId: input.memberId,
+  };
+}
+
+function buildHostedPulseTrialPaymentMethodCompletedReturnUrl(input: {
+  continuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
+  now: Date;
+  publicBaseUrl: string;
+  settingsReturnUrl: string;
+}): string {
+  if (input.continuation?.kind === "conversation") {
+    return buildHostedPulseTrialPaymentReturnUrl({
+      action: input.continuation.action,
+      memberId: input.continuation.memberId,
+      now: input.now,
+      publicBaseUrl: input.publicBaseUrl,
+    });
+  }
+
+  const completedReturnUrl = new URL(input.settingsReturnUrl);
+  if (input.continuation?.kind === "settings") {
+    completedReturnUrl.searchParams.set(
+      HOSTED_START_PAID_PULSE_RETURN_PARAM,
+      HOSTED_START_PAID_PULSE_RETURN_VALUE,
+    );
+  }
+  return completedReturnUrl.toString();
 }
 
 function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
@@ -820,6 +916,7 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
   legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[];
   memberId: string;
   now: Date;
+  paymentMethodContinuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
   priceId: string;
   prisma: PrismaClient;
   stripe: Stripe;
@@ -836,9 +933,14 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
     return {
       billingPlanCode: START_PAID_PULSE_PLAN,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        continuation: input.paymentMethodContinuation,
+        now: input.now,
         stripe: input.stripe,
         stripeCustomerId: input.stripeCustomerId,
       }),
+      ...(input.paymentMethodContinuation?.kind === "settings"
+        ? { resumeStartAfterPaymentMethodSetup: true as const }
+        : {}),
       status: "payment_required",
     };
   }

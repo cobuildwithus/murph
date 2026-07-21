@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -7,6 +7,10 @@ import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
 
+import {
+  signalOwnedChildProcess,
+  terminateOwnedChildProcessAndWait,
+} from "../process.ts";
 import {
   cloudflareDir,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
@@ -136,21 +140,6 @@ export async function assertPortAvailable(host: string, port: number, message: s
   }
 }
 
-export async function assertHostedWebPortAvailable(input: {
-  host: string;
-  message: string;
-  port: number;
-  stderrTarget?: NodeJS.WritableStream;
-}): Promise<void> {
-  const available = await isPortAvailable(input.host, input.port);
-  const recovered = await recoverStaleHostedWebDevPortOwner(input);
-  if (available || recovered) {
-    return;
-  }
-
-  throw new Error(input.message);
-}
-
 export async function resolveHostedLocalWorkerPortMode(input: {
   allowReuseExisting?: boolean;
   host: string;
@@ -211,169 +200,6 @@ async function isPortAvailable(host: string, port: number): Promise<boolean> {
     });
     server.listen(port, host);
   });
-}
-
-async function recoverStaleHostedWebDevPortOwner(input: {
-  host: string;
-  port: number;
-  stderrTarget?: NodeJS.WritableStream;
-}): Promise<boolean> {
-  const owner = findHostedWebDevPortOwner(input.port);
-  if (owner === null) {
-    return false;
-  }
-
-  const stderrTarget = input.stderrTarget ?? process.stderr;
-  stderrTarget.write(
-    `Recovering stale hosted-web dev listener on port ${input.port} (pid ${owner.pid}).\n`,
-  );
-
-  terminateProcessId(owner.pid, "SIGTERM");
-  if (await waitForHostedWebDevPortOwnerGone(input.port, 5_000)) {
-    return true;
-  }
-
-  if (owner.processGroupId !== null) {
-    terminateProcessGroup(owner.processGroupId, "SIGKILL");
-  }
-  terminateProcessId(owner.pid, "SIGKILL");
-  return await waitForHostedWebDevPortOwnerGone(input.port, 5_000);
-}
-
-function findHostedWebDevPortOwner(port: number): {
-  pid: number;
-  processGroupId: number | null;
-} | null {
-  for (const listenerPid of listListeningProcessIds(port)) {
-    const owner = findHostedWebDevAncestor(listenerPid);
-    if (owner !== null) {
-      return owner;
-    }
-  }
-
-  return null;
-}
-
-function listListeningProcessIds(port: number): number[] {
-  let output: string;
-
-  try {
-    output = execFileSync("lsof", [
-      "-nP",
-      `-iTCP:${port}`,
-      "-sTCP:LISTEN",
-      "-t",
-    ], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return [];
-  }
-
-  return output
-    .split(/\r?\n/u)
-    .map((line) => Number.parseInt(line.trim(), 10))
-    .filter((pid) => Number.isInteger(pid) && pid > 0);
-}
-
-function findHostedWebDevAncestor(listenerPid: number): {
-  pid: number;
-  processGroupId: number | null;
-} | null {
-  let currentPid = listenerPid;
-  const seenPids = new Set<number>();
-
-  for (let depth = 0; depth < 12; depth += 1) {
-    if (seenPids.has(currentPid)) {
-      return null;
-    }
-    seenPids.add(currentPid);
-
-    const info = readProcessInfo(currentPid);
-    if (info === null) {
-      return null;
-    }
-    if (isHostedWebDevCommand(info.command)) {
-      return {
-        pid: currentPid,
-        processGroupId: info.processGroupId,
-      };
-    }
-    if (info.parentPid <= 1) {
-      return null;
-    }
-
-    currentPid = info.parentPid;
-  }
-
-  return null;
-}
-
-function readProcessInfo(pid: number): {
-  command: string;
-  parentPid: number;
-  processGroupId: number | null;
-} | null {
-  let output: string;
-
-  try {
-    output = execFileSync("ps", [
-      "-p",
-      String(pid),
-      "-o",
-      "ppid=",
-      "-o",
-      "pgid=",
-      "-o",
-      "command=",
-    ], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
-
-  const match = /^\s*(\d+)\s+(\d+)\s+([\s\S]*)$/u.exec(output.trim());
-  if (!match) {
-    return null;
-  }
-
-  const parentPid = Number.parseInt(match[1] ?? "", 10);
-  const processGroupId = Number.parseInt(match[2] ?? "", 10);
-  return {
-    command: match[3] ?? "",
-    parentPid,
-    processGroupId: Number.isInteger(processGroupId) && processGroupId > 0
-      ? processGroupId
-      : null,
-  };
-}
-
-function isHostedWebDevCommand(command: string): boolean {
-  const normalizedCommand = command.replace(/\\/gu, "/");
-  return (
-    normalizedCommand.includes("apps/web/scripts/dev-local.ts")
-    && normalizedCommand.includes(repoRoot.replace(/\\/gu, "/"))
-  );
-}
-
-async function waitForHostedWebDevPortOwnerGone(
-  port: number,
-  timeoutMs: number,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() <= deadline) {
-    if (findHostedWebDevPortOwner(port) === null) {
-      return true;
-    }
-
-    await sleep(250);
-  }
-
-  return findHostedWebDevPortOwner(port) === null;
 }
 
 export function spawnChildProcess(
@@ -481,7 +307,7 @@ export async function waitForFirstChildExit(
   children: readonly NamedChildProcess[],
 ): Promise<NamedChildProcess> {
   const exitedChild = children.find((entry) =>
-    entry.child.exitCode !== null || entry.child.signalCode !== null
+    entry.child.exitCode !== null || (entry.child.signalCode ?? null) !== null
   );
   if (exitedChild) {
     return exitedChild;
@@ -599,11 +425,9 @@ export async function spawnStripeListenerWithSecretCapture(input: {
     // Otherwise kill the child best-effort — if it has already exited, kill()
     // returns false without throwing, so this stays safe either way.
     if (!(error instanceof StripeCliMissingError)) {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // best-effort; child may already be gone
-      }
+      await terminateOwnedChildProcessAndWait(child).catch(() => {
+        // Best-effort cleanup only; preserve the startup error.
+      });
     }
     throw error;
   }
@@ -691,6 +515,7 @@ export async function runCommand(
   throwIfAbortSignalAborted(input.signal);
   const child = spawn(command, args, {
     cwd: input.cwd,
+    detached: process.platform !== "win32",
     env: input.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -706,6 +531,7 @@ export async function runCommand(
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let abortCleanup: Promise<void> | null = null;
     const cleanup = (): void => {
       settled = true;
       input.signal?.removeEventListener("abort", onAbort);
@@ -718,7 +544,7 @@ export async function runCommand(
       if (settled) {
         return;
       }
-      terminateChildProcess(child, "SIGTERM");
+      abortCleanup ??= terminateOwnedChildProcessAndWait(child);
     };
 
     input.signal?.addEventListener("abort", onAbort, { once: true });
@@ -727,17 +553,20 @@ export async function runCommand(
       reject(error);
     });
     child.once("exit", (code) => {
-      if (input.signal?.aborted) {
-        rejectAbort();
-        return;
-      }
-      cleanup();
-      if (code === 0) {
-        resolve();
-        return;
-      }
+      const aborted = input.signal?.aborted === true;
+      void (abortCleanup ?? terminateOwnedChildProcessAndWait(child)).then(() => {
+        if (aborted) {
+          rejectAbort();
+          return;
+        }
+        cleanup();
+        if (code === 0) {
+          resolve();
+          return;
+        }
 
-      reject(new Error(`${command} ${args.join(" ")} exited with code ${code ?? "unknown"}.`));
+        reject(new Error(`${command} ${args.join(" ")} exited with code ${code ?? "unknown"}.`));
+      }, aborted ? rejectAbort : reject);
     });
     if (input.signal?.aborted) {
       onAbort();
@@ -963,47 +792,6 @@ export async function cleanupHostedRunnerContainerLocalState(input: {
       }
       throw error;
     }
-  }
-}
-
-export function cleanupHostedLocalOrphanedWorkerdProcesses(input: {
-  signal?: NodeJS.Signals;
-} = {}): void {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  const result = spawnSync("ps", ["-axo", "pid=,ppid=,command="], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  if (result.status !== 0 || !result.stdout) {
-    return;
-  }
-
-  const signal = input.signal ?? "SIGTERM";
-  const workerdPathMarker = `${repoRoot}${path.sep}node_modules${path.sep}.pnpm${path.sep}@cloudflare+workerd-`;
-  for (const line of result.stdout.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/u.exec(line);
-    if (!match) {
-      continue;
-    }
-
-    const pid = Number.parseInt(match[1] ?? "", 10);
-    const parentPid = Number.parseInt(match[2] ?? "", 10);
-    const command = match[3] ?? "";
-    if (
-      !Number.isSafeInteger(pid)
-      || parentPid !== 1
-      || !command.includes(workerdPathMarker)
-      || !command.includes("workerd serve")
-      || !command.includes("--socket-addr=entry=127.0.0.1:0")
-      || !command.includes("--external-addr=loopback=127.0.0.1:")
-    ) {
-      continue;
-    }
-
-    terminateProcessId(pid, signal);
   }
 }
 
@@ -1571,63 +1359,7 @@ export function terminateChildProcess(
   child: HostedLocalChildProcess,
   signal: NodeJS.Signals,
 ): void {
-  if (child.pid === undefined) {
-    return;
-  }
-
-  const descendantPids = child.exitCode === null && process.platform !== "win32"
-    ? listDescendantProcessIds(child.pid)
-    : [];
-
-  try {
-    if (process.platform !== "win32") {
-      process.kill(-child.pid, signal);
-    }
-  } catch {
-    // Ignore process-group errors and fall through to the direct signal.
-  }
-
-  for (const pid of descendantPids.reverse()) {
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // Ignore already-dead descendants.
-    }
-  }
-
-  if (child.exitCode === null) {
-    try {
-      child.kill(signal);
-    } catch {
-      // Ignore already-dead children.
-    }
-  }
-}
-
-function terminateProcessGroup(
-  pid: number,
-  signal: NodeJS.Signals,
-): void {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // Ignore missing/already-dead process groups.
-  }
-}
-
-function terminateProcessId(
-  pid: number,
-  signal: NodeJS.Signals,
-): void {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Ignore missing/already-dead processes.
-  }
+  signalOwnedChildProcess(child, signal);
 }
 
 export async function terminateChildProcessAndWait(
@@ -1637,81 +1369,10 @@ export async function terminateChildProcessAndWait(
     signal?: NodeJS.Signals;
   } = {},
 ): Promise<void> {
-  const signal = input.signal ?? "SIGTERM";
-  const graceMs = input.graceMs ?? 15_000;
-  const processGroupId = process.platform === "win32" ? null : (child.pid ?? null);
-
-  if (child.pid === undefined) {
-    return;
-  }
-
-  if (child.exitCode === null) {
-    await waitForChildExit(child, graceMs, () => {
-      terminateChildProcess(child, signal);
-    });
-  }
-
-  if (child.exitCode !== null) {
-    if (processGroupId === null) {
-      return;
-    }
-
-    const processGroupExited = await waitForProcessGroupExit(processGroupId, graceMs, signal);
-    if (processGroupExited) {
-      return;
-    }
-  }
-
-  if (processGroupId !== null) {
-    const processGroupExited = await waitForProcessGroupExit(processGroupId, 5_000, "SIGKILL");
-    if (processGroupExited) {
-      return;
-    }
-  }
-
-  await waitForChildExit(child, 5_000, () => {
-    terminateChildProcess(child, "SIGKILL");
+  await terminateOwnedChildProcessAndWait(child, {
+    graceMs: input.graceMs ?? 15_000,
+    signal: input.signal ?? "SIGTERM",
   });
-}
-
-async function waitForChildExit(
-  child: HostedLocalChildProcess,
-  timeoutMs: number,
-  terminate: () => void,
-): Promise<boolean> {
-  if (child.exitCode !== null) {
-    return true;
-  }
-
-  const exited = new Promise<boolean>((resolve) => {
-    child.once("exit", () => resolve(true));
-  });
-  const timedOut = new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeoutMs);
-    timer.unref?.();
-  });
-
-  terminate();
-  return await Promise.race([exited, timedOut]);
-}
-
-async function waitForProcessGroupExit(
-  processGroupId: number,
-  timeoutMs: number,
-  signal: NodeJS.Signals,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() <= deadline) {
-    if (!isProcessGroupRunning(processGroupId)) {
-      return true;
-    }
-
-    terminateProcessGroup(processGroupId, signal);
-    await sleep(250);
-  }
-
-  return !isProcessGroupRunning(processGroupId);
 }
 
 export function sleep(delayMs: number): Promise<void> {
@@ -1731,6 +1392,7 @@ function tail(value: string, maxChars: number = 2_000): string {
 async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCommandResult> {
   const child = spawn(input.command, [...input.args], {
     cwd: input.cwd,
+    detached: process.platform !== "win32",
     env: input.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -1750,19 +1412,7 @@ async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCom
   let timedOut = false;
   const timeout = setTimeout(() => {
     timedOut = true;
-    try {
-      if (process.platform !== "win32" && child.pid !== undefined) {
-        process.kill(-child.pid, "SIGKILL");
-      }
-    } catch {
-      // Fall through to the direct child kill.
-    }
-
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // Ignore already-dead children.
-    }
+    signalOwnedChildProcess(child, "SIGKILL");
   }, input.timeoutMs);
   timeout.unref?.();
 
@@ -1770,6 +1420,10 @@ async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCom
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code));
+    });
+    await terminateOwnedChildProcessAndWait(child, {
+      graceMs: timedOut ? 5_000 : 1_000,
+      signal: timedOut ? "SIGKILL" : "SIGTERM",
     });
 
     return {
@@ -1893,74 +1547,6 @@ function isProcessRunning(pid: number): boolean {
     }
 
     return true;
-  }
-}
-
-function isProcessGroupRunning(processGroupId: number): boolean {
-  if (process.platform === "win32") {
-    return false;
-  }
-
-  try {
-    process.kill(-processGroupId, 0);
-    return true;
-  } catch (error) {
-    if (
-      error
-      && typeof error === "object"
-      && "code" in error
-      && error.code === "ESRCH"
-    ) {
-      return false;
-    }
-
-    return true;
-  }
-}
-
-function listDescendantProcessIds(rootPid: number): number[] {
-  try {
-    const output = execFileSync("ps", ["-axo", "pid=,ppid="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const childrenByParent = new Map<number, number[]>();
-
-    for (const line of output.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      const [pidText, parentPidText] = trimmed.split(/\s+/, 2);
-      const pid = Number.parseInt(pidText ?? "", 10);
-      const parentPid = Number.parseInt(parentPidText ?? "", 10);
-
-      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
-        continue;
-      }
-
-      const siblings = childrenByParent.get(parentPid) ?? [];
-      siblings.push(pid);
-      childrenByParent.set(parentPid, siblings);
-    }
-
-    const descendants: number[] = [];
-    const queue = [...(childrenByParent.get(rootPid) ?? [])];
-
-    while (queue.length > 0) {
-      const pid = queue.shift();
-      if (pid === undefined) {
-        continue;
-      }
-
-      descendants.push(pid);
-      queue.push(...(childrenByParent.get(pid) ?? []));
-    }
-
-    return descendants;
-  } catch {
-    return [];
   }
 }
 

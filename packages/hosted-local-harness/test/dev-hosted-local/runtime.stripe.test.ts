@@ -30,19 +30,23 @@ interface StripeSpawnScript {
 
 function createStripeChild(script: StripeSpawnScript) {
   const child = new EventEmitter() as EventEmitter & {
+    exitCode: number | null;
     kill: (signal?: NodeJS.Signals | number) => boolean;
     killCalls: Array<NodeJS.Signals | number | undefined>;
     off: (event: string, listener: (...args: unknown[]) => void) => EventEmitter;
     pid: number;
+    signalCode: NodeJS.Signals | null;
     stderr: PassThrough;
     stdout: PassThrough;
   };
+  child.exitCode = null;
   child.killCalls = [];
   child.kill = (signal?: NodeJS.Signals | number): boolean => {
     child.killCalls.push(signal);
     return true;
   };
   child.pid = 9876;
+  child.signalCode = null;
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
 
@@ -206,6 +210,21 @@ describe("spawnStripeListenerWithSecretCapture", () => {
   });
 
   it("kills the stripe child on timeout so it does not outlive the caller", async () => {
+    const processKillCalls: Array<readonly [number, NodeJS.Signals | number]> = [];
+    let processGroupRunning = true;
+    const processKill = vi.spyOn(process, "kill").mockImplementation((pid, signal = 0) => {
+      processKillCalls.push([pid, signal]);
+      if (signal === 0) {
+        if (processGroupRunning) {
+          return true;
+        }
+        const error = new Error("process group exited") as NodeJS.ErrnoException;
+        error.code = "ESRCH";
+        throw error;
+      }
+      processGroupRunning = false;
+      return true;
+    });
     const spawnedChildren: ReturnType<typeof createStripeChild>[] = [];
     const spawn = vi.fn(() => {
       const child = createStripeChild({
@@ -230,7 +249,9 @@ describe("spawnStripeListenerWithSecretCapture", () => {
     ).rejects.toThrow(/did not print a webhook signing secret/);
 
     expect(spawnedChildren).toHaveLength(1);
-    expect(spawnedChildren[0]!.killCalls).toEqual(["SIGTERM"]);
+    expect(processKillCalls).toContainEqual([-spawnedChildren[0]!.pid, "SIGTERM"]);
+    expect(spawnedChildren[0]!.killCalls).toEqual([]);
+    processKill.mockRestore();
   });
 
   it("redacts a whsec that is split across chunk boundaries after capture", async () => {

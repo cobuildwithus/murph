@@ -34,6 +34,22 @@ applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
 
+Scheduled automation occurrences use this same ordinary turn path. The saved
+automation instructions become the turn request; schedule occurrence and
+delivery facts are trusted dynamic context, while the structured send-or-skip
+object is only an outbox delivery envelope. There is no scheduled prompt
+profile, tool profile, planner, thread policy, skill surface, or assistant stack.
+The ordinary invocation context and effect-owner checks determine which tools
+are usable.
+
+Detached `assistant.notification.requested` system events are a different kind
+of input, not a scheduled-turn profile. Without a valid occurrence they use one
+isolated output-only formatter with no history, private context, resume
+mutation, tools, or network callbacks; the platform still owns delivery. The
+formatter uses the existing one-shot App Server path so its restrictive launch
+configuration cannot replace the resident ordinary-turn process or interrupt
+detached enrichment.
+
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
 ports. The App Server and its descendant shell environments never receive that

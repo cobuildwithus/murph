@@ -93,6 +93,32 @@ const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
+const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
+  'memories.use_memories=false',
+  'memories.generate_memories=false',
+  'features.shell_tool=false',
+  'web_search="disabled"',
+  'features.web_search_request=false',
+  'features.standalone_web_search=false',
+  'features.apps=false',
+  'features.enable_mcp_apps=false',
+  'features.browser_use=false',
+  'features.plugins=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+] as const
+
+function resolveAssistantCodexConfigOverrides(input: {
+  outputOnlyTurn: boolean
+  requested: readonly string[] | null
+}): readonly string[] | null {
+  if (!input.outputOnlyTurn) {
+    return input.requested
+  }
+
+  return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
+}
 
 export {
   resolveAssistantCodexThreadScope,
@@ -406,9 +432,15 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.voiceMemoDeliveryChannel ?? null
     const assistantPreferredElevenLabsVoiceId =
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
+    const outputOnlyTurn =
+      executionPlan.profile.toolProfile === 'output-only-turn'
+    const systemNotificationTurn =
+      executionPlan.profile.promptProfile === 'system-notification'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
-        approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
+        approvalPolicy: outputOnlyTurn
+          ? 'never'
+          : attemptPlan.route.providerOptions.approvalPolicy,
         codexCommand:
           attemptPlan.route.codexCommand ??
           executionPlan.input.codexCommand ??
@@ -420,7 +452,9 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: attemptPlan.route.providerOptions.sandbox,
+        sandbox: outputOnlyTurn
+          ? 'read-only'
+          : attemptPlan.route.providerOptions.sandbox,
       },
       turn: {
         abortSignal: serviceTier
@@ -432,18 +466,29 @@ async function executeAssistantCodexAttempt(input: {
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
-        codexConfigOverrides: executionPlan.input.codexConfigOverrides ?? null,
+        codexConfigOverrides: resolveAssistantCodexConfigOverrides({
+          outputOnlyTurn,
+          requested: executionPlan.input.codexConfigOverrides ?? null,
+        }),
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
-        dynamicTools: attemptPlan.routePlan.dynamicTools,
-        environments: attemptPlan.routePlan.environments,
+        dynamicTools: outputOnlyTurn
+          ? []
+          : attemptPlan.routePlan.dynamicTools,
+        environments: outputOnlyTurn
+          ? []
+          : attemptPlan.routePlan.environments,
         env: attemptEnv,
-        generatedImageUploader:
-          executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
-        hostedToolContext: executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts:
-          executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
+        generatedImageUploader: outputOnlyTurn
+          ? null
+          : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
+        hostedToolContext: outputOnlyTurn
+          ? null
+          : executionPlan.hostedToolContext ?? null,
+        materializeWorkspaceArtifacts: outputOnlyTurn
+          ? null
+          : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -474,13 +519,22 @@ async function executeAssistantCodexAttempt(input: {
         }),
         providerThreadEphemeral:
           executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery: executionPlan.progressDelivery ?? null,
-        providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
+        progressDelivery: outputOnlyTurn
+          ? null
+          : executionPlan.progressDelivery ?? null,
+        ...(systemNotificationTurn
+          ? { processLifetime: 'one-shot' as const }
+          : {}),
+        providerFetch: outputOnlyTurn
+          ? null
+          : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch:
-          executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-        requireGeneratedImageUploader:
-          executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+        publicInternetFetch: outputOnlyTurn
+          ? null
+          : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+        requireGeneratedImageUploader: outputOnlyTurn
+          ? false
+          : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
         resume: attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,

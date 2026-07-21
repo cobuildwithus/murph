@@ -48,7 +48,7 @@ describe("hosted-local harness", () => {
     expect(scripts["dev"]).toBe("pnpm hosted-local up");
     expect(scripts["dev:worktree"]).toBe("pnpm hosted-local worktree up");
     expect(scripts["dev:reset"]).toBe(
-      "MURPH_DEV_FORCE_RESET_LOCAL_DB=1 MURPH_DEV_FORCE_RESET_TEMPORAL=1 MURPH_DEV_TEMPORAL=managed pnpm hosted-local up",
+      "MURPH_DEV_FORCE_RESET_LOCAL_DB=1 MURPH_DEV_TEMPORAL=managed pnpm hosted-local up",
     );
     expect(scripts["test:e2e:hosted-local"]).toBe("pnpm hosted-local e2e");
   });

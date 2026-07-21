@@ -33,6 +33,8 @@ export function SourceCard({
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const connectionOfferEnabled = source.connectionAvailable !== false;
+  const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
   const showReconnectStateDisconnect = canDisconnect
     && (reconnectUnavailable || requiresConnectionReset || source.disconnectScope === "junction_account");
   const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
@@ -102,7 +104,9 @@ export function SourceCard({
           <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
             {requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
-                {`${source.name} needs a fresh connection. Disconnect it first, then connect it again.`}
+                {connectionOfferEnabled
+                  ? `${source.name} needs a fresh connection. Disconnect it first, then connect it again.`
+                  : `${source.name} needs a fresh connection, but reconnecting is temporarily unavailable. You can disconnect the old connection here.`}
               </p>
             ) : source.requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
@@ -112,7 +116,9 @@ export function SourceCard({
               </p>
             ) : historicalResetIncomplete ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
-                {`The last reset for ${source.name} did not finish. Remove the old connection in your wearable provider account, then connect it again here.`}
+                {connectionOfferEnabled
+                  ? `The last reset for ${source.name} did not finish. Remove the old connection in your wearable provider account, then connect it again here.`
+                  : `The last reset for ${source.name} did not finish. Remove the old connection in your wearable provider account. Reconnecting through Murph is temporarily unavailable.`}
               </p>
             ) : null}
             {unavailableMessage ? (
@@ -146,7 +152,10 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
-            ) : reconnectUnavailable || requiresConnectionReset || unavailableMessage ? null : (
+            ) : reconnectUnavailable
+              || requiresConnectionReset
+              || historicalReconnectUnavailable
+              || unavailableMessage ? null : (
               <Button
                 type="button"
                 disabled={!canStart || pending}

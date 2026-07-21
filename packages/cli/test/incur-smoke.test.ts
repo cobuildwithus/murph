@@ -1168,7 +1168,7 @@ test('model schema explains preset-gated non-interactive updates', async () => {
   )
 })
 
-test('blood-test list schema stays scoped to shared date-range and status filters', async () => {
+test('blood-test list schema exposes targeted text, date-range, and status filters', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['blood-test', 'list', '--schema', '--format', 'json']),
   ) as {
@@ -1181,6 +1181,7 @@ test('blood-test list schema stays scoped to shared date-range and status filter
   assert.equal('status' in schema.options.properties, true)
   assert.equal('from' in schema.options.properties, true)
   assert.equal('to' in schema.options.properties, true)
+  assert.equal('text' in schema.options.properties, true)
   assert.equal('kind' in schema.options.properties, false)
   assert.deepEqual(schema.options.required, ['limit'])
 })

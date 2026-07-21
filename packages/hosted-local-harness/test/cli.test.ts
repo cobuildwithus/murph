@@ -15,7 +15,6 @@ const runHostedLocalE2eSuite = vi.hoisted(() =>
   vi.fn(async () => ({ terminationSignal: null as NodeJS.Signals | null })),
 );
 const startHostedLocalDevStack = vi.hoisted(() => vi.fn());
-const terminateKnownHostedLocalProcessResidue = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
 const releaseHostedLocalWorktreeLock = vi.hoisted(() => vi.fn(async () => {}));
 const recordHostedLocalWorktreeDatabaseCreated = vi.hoisted(() => vi.fn(async () => {}));
@@ -82,7 +81,6 @@ vi.mock("../src/process.ts", () => ({
 
 vi.mock("../src/dev-hosted-local/stack.ts", () => ({
   startHostedLocalDevStack,
-  terminateKnownHostedLocalProcessResidue,
 }));
 
 vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
@@ -618,7 +616,6 @@ describe("hosted-local run CLI", () => {
       await Promise.resolve();
 
       expect(startupSignal?.aborted).toBe(true);
-      expect(terminateKnownHostedLocalProcessResidue).not.toHaveBeenCalled();
       expect(cleanupHostedRunnerContainers).not.toHaveBeenCalled();
 
       resolveStart(stack);

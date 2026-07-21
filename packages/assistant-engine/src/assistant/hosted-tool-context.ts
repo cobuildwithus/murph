@@ -22,6 +22,7 @@ import type {
 import type {
   AssistantHostedActionApprovalPort,
   AssistantHostedAutomationTool,
+  AssistantHostedExecutionContext,
   AssistantHostedFamilyPlanTool,
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedClinicalRecordsConnectLinkTool,
@@ -130,24 +131,9 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
-  actionApprovalPort?: AssistantHostedActionApprovalPort | null
-  automationTool?: AssistantHostedAutomationTool | null
-  assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
-  connectedApps?: AssistantConnectedAppsPort | null
-  clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
-  familyPlanTool?: AssistantHostedFamilyPlanTool | null
-  deviceTool?: AssistantHostedDeviceTool | null
-  groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
-  groupSharedReader?: AssistantHostedGroupSharedReader | null
-  groupTool?: AssistantHostedGroupTool | null
-  labsTool?: AssistantHostedLabsTool | null
-  newsletterTool?: AssistantHostedNewsletterTool | null
-  personalizationTool?: AssistantHostedPersonalizationTool | null
-  planUsageTool?: AssistantHostedPlanUsageTool | null
-  subscriptionTool?: AssistantHostedSubscriptionTool | null
   computerToolsAvailable?: boolean
+  executionContext?: AssistantHostedExecutionContext | null
   beforeToolExecution?: () => Promise<void>
-  getAssistantInputId?: () => string | null
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
@@ -157,7 +143,6 @@ export function createAssistantHostedToolContext(input: {
     turnId: string
     vault: string
   } | null
-  phoneCalls?: AssistantPhoneCallPort | null
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
@@ -167,6 +152,10 @@ export function createAssistantHostedToolContext(input: {
   ) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
+  const executionContext = input.executionContext ?? null
+  const clinicalRecordsConnectLinkTool =
+    executionContext?.clinicalRecordsConnectLinkTool ?? null
+  const newsletterPort = executionContext?.newsletterTool ?? null
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
     messageInput: input.messageInput,
     session: input.session,
@@ -183,18 +172,19 @@ export function createAssistantHostedToolContext(input: {
       recipientKey: context?.recipientKey ?? null,
     }
   }
-  const newsletterOutboxTool = input.newsletterTool && input.newsletterOutbox
+  const newsletterOutboxTool = newsletterPort && input.newsletterOutbox
     ? createAssistantNewsletterOutboxTool({
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
-        newsletterTool: input.newsletterTool,
+        newsletterTool: newsletterPort,
         sessionId: input.session.sessionId,
         turnId: input.newsletterOutbox.turnId,
         vault: input.newsletterOutbox.vault,
       })
     : null
-  const newsletterTool = newsletterOutboxTool ?? input.newsletterTool ?? null
+  const newsletterTool = newsletterOutboxTool ?? newsletterPort
   const readCurrentUserActionAssistantInputId = () => {
-    const currentAssistantInputId = input.getAssistantInputId?.() ?? null
+    const currentAssistantInputId =
+      executionContext?.currentAssistantInputId?.() ?? null
     const userActionAcceptedInputIds =
       input.getUserActionAcceptedInputIds?.() ?? []
     return currentAssistantInputId !== null &&
@@ -216,16 +206,16 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   let subscriptionActionClaimed = false
-  const clinicalRecordsConnectLinkTool = input.clinicalRecordsConnectLinkTool ?? null
   let clinicalRecordsConnectLinkRequest: ReturnType<
     AssistantHostedClinicalRecordsConnectLinkTool['createConnectLink']
   > | null = null
 
   return {
-    actionApprovalPort: input.actionApprovalPort ?? null,
-    automationTool: input.automationTool ?? null,
-    assistantConfigurationTool: input.assistantConfigurationTool ?? null,
-    connectedApps: input.connectedApps ?? null,
+    actionApprovalPort: executionContext?.actionApprovalPort ?? null,
+    automationTool: executionContext?.automationTool ?? null,
+    assistantConfigurationTool:
+      executionContext?.assistantConfigurationTool ?? null,
+    connectedApps: executionContext?.connectedApps ?? null,
     clinicalRecordsConnectLinkTool: clinicalRecordsConnectLinkTool
       ? {
           createConnectLink: (options) => {
@@ -235,22 +225,24 @@ export function createAssistantHostedToolContext(input: {
           },
         }
       : null,
-    familyPlanTool: input.familyPlanTool ?? null,
-    deviceTool: input.deviceTool ?? null,
-    groupPermissionOfferTool: input.groupPermissionOfferTool ?? null,
-    groupSharedReader: input.groupSharedReader ?? null,
-    groupTool: input.groupTool ?? null,
-    labsTool: input.labsTool ?? null,
+    familyPlanTool: executionContext?.familyPlanTool ?? null,
+    deviceTool: executionContext?.deviceTool ?? null,
+    groupPermissionOfferTool:
+      executionContext?.groupPermissionOfferTool ?? null,
+    groupSharedReader: executionContext?.groupSharedReader ?? null,
+    groupTool: executionContext?.groupTool ?? null,
+    labsTool: executionContext?.labsTool ?? null,
     newsletterTool,
-    personalizationTool: input.personalizationTool ?? null,
-    planUsageTool: input.planUsageTool ?? null,
-    subscriptionTool: input.subscriptionTool ?? null,
-    phoneCalls: input.phoneCalls ?? null,
+    personalizationTool: executionContext?.personalizationTool ?? null,
+    planUsageTool: executionContext?.planUsageTool ?? null,
+    subscriptionTool: executionContext?.subscriptionTool ?? null,
+    phoneCalls: executionContext?.phoneCalls ?? null,
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantInputId: () => input.getAssistantInputId?.() ?? null,
+    currentAssistantInputId: () =>
+      executionContext?.currentAssistantInputId?.() ?? null,
     claimSubscriptionAssistantInputId: () => {
       if (subscriptionActionClaimed) {
         return null

@@ -170,7 +170,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
   });
 
-  test("collects a default payment method without ending an active trial", async () => {
+  test("collects a default payment method and returns the chat continuation to its exact action", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: null,
@@ -183,6 +183,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(continueHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
@@ -194,13 +195,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings",
+            return_url: expect.stringMatching(
+              /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=continue_pulse&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+            ),
           },
           type: "redirect",
         },
         type: "payment_method_update",
       },
-      return_url: "https://join.example.test/settings",
+      return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
@@ -276,9 +279,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
+      resumeStartAfterPaymentMethodSetup: true,
       status: "payment_required",
     });
 
@@ -287,15 +292,51 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings",
+            return_url: "https://join.example.test/settings?startPulse=complete#subscription",
           },
           type: "redirect",
         },
         type: "payment_method_update",
       },
-      return_url: "https://join.example.test/settings",
+      return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("returns conversational no-card starts through the signed exact-action bridge", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow_data: expect.objectContaining({
+          after_completion: {
+            redirect: {
+              return_url: expect.stringMatching(
+                /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=start_pulse_now&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+              ),
+            },
+            type: "redirect",
+          },
+        }),
+      }),
+    );
   });
 
   test("wraps Stripe portal creation failures without ending the trial", async () => {
@@ -1426,15 +1467,67 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      resumeStartAfterPaymentMethodSetup: true,
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
+      return_url: "https://join.example.test/settings#subscription",
+    }));
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("returns paused no-card conversational continuations through the signed exact-action bridge", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: "trial",
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+      status: "paused",
+      trialEnd: null,
+    }));
+
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.test/session_123",
       status: "payment_required",
     });
 
-    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "https://join.example.test/settings",
-    }));
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow_data: expect.objectContaining({
+          after_completion: {
+            redirect: {
+              return_url: expect.stringMatching(
+                /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=continue_pulse&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
+              ),
+            },
+            type: "redirect",
+          },
+        }),
+      }),
+    );
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });

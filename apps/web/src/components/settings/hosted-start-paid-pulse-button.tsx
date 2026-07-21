@@ -2,10 +2,15 @@
 
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { requestHostedPulseTrialStartPaid } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedPulseTrialContinuation,
+  requestHostedPulseTrialStartPaid,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
+import { Spinner } from "@/src/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +25,10 @@ import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
+type PulseTrialBillingContinuationStatus =
+  | "billing_pending"
+  | "error"
+  | "starting";
 
 const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
 const pulsePriceLabel = `$${pulsePlan.recurringAmountUsdCents / 100}`;
@@ -78,6 +87,12 @@ export function StartPaidPulseButton(props: {
         return;
       }
 
+      if (result.status === "payment_required") {
+        setStatus("idle");
+        setErrorMessage("Your payment method is still being confirmed. Try again shortly.");
+        return;
+      }
+
       setStatus("idle");
       setConfirmationOpen(false);
       router.refresh();
@@ -123,6 +138,101 @@ export function StartPaidPulseButton(props: {
         open={confirmationOpen}
       />
     </div>
+  );
+}
+
+export function PulseTrialBillingContinuation() {
+  const router = useRouter();
+  const started = useRef(false);
+  const [status, setStatus] = useState<PulseTrialBillingContinuationStatus>("starting");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const runContinuation = useCallback(async (redirectIfPaymentRequired: boolean) => {
+    setStatus("starting");
+    setErrorMessage(null);
+
+    try {
+      const result = await requestHostedPulseTrialContinuation({
+        redirectIfPaymentRequired,
+      });
+      if (result.status === "redirecting") {
+        return;
+      }
+
+      if (result.status === "payment_required") {
+        setStatus("error");
+        setErrorMessage("Your payment method is still being confirmed.");
+        return;
+      }
+
+      if (result.status === "billing_pending") {
+        setStatus("billing_pending");
+        return;
+      }
+
+      router.replace("/settings#subscription");
+    } catch (error) {
+      if (error instanceof HostedOnboardingApiError && !error.retryable) {
+        router.replace("/settings#subscription");
+        return;
+      }
+      setStatus("error");
+      setErrorMessage(toErrorMessage(error, "Could not finish your Pulse update automatically."));
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (started.current) {
+      return;
+    }
+    started.current = true;
+
+    void runContinuation(false);
+  }, [runContinuation]);
+
+  useEffect(() => {
+    if (status !== "billing_pending") {
+      return;
+    }
+
+    const refreshTimeout = window.setTimeout(() => {
+      router.replace("/settings#subscription");
+    }, 2_000);
+
+    return () => window.clearTimeout(refreshTimeout);
+  }, [router, status]);
+
+  if (status === "error") {
+    return (
+      <div
+        role="alert"
+        className="flex flex-col items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between"
+      >
+        <p>{errorMessage}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => void runContinuation(true)}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="flex items-center gap-2 rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-sm text-[#736a58]"
+    >
+      <Spinner aria-hidden="true" />
+      {status === "billing_pending"
+        ? "Finishing your Pulse update. Checking billing status…"
+        : "Payment method saved. Finishing your Pulse update…"}
+    </p>
   );
 }
 

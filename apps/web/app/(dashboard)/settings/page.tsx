@@ -15,6 +15,7 @@ import type {
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
+import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -27,6 +28,11 @@ import {
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
+import {
+  HOSTED_START_PAID_PULSE_RETURN_PARAM,
+  HOSTED_START_PAID_PULSE_RETURN_VALUE,
+} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
   readHostedFamilyAccessForMember,
@@ -55,6 +61,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 type SettingsSearchParams = {
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
+  startPulse?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usagePurchase?: string | string[] | undefined;
   voice?: string | string[] | undefined;
@@ -83,6 +90,17 @@ export default async function SettingsPage({
   if (!authenticated) {
     redirect("/");
   }
+
+  const pulseTrialBillingContinuationPending =
+    readFirstSearchParamValue(
+      resolvedSearchParams[HOSTED_START_PAID_PULSE_RETURN_PARAM],
+    ) === HOSTED_START_PAID_PULSE_RETURN_VALUE
+    && authenticatedMember !== null
+    && session !== null
+    && await readHostedPulseTrialContinuationCookie({
+      memberId: authenticatedMember.id,
+      sessionId: session.sessionId,
+    }) !== null;
 
   const prisma = getPrisma();
   const settingsData = authenticatedMember
@@ -172,11 +190,13 @@ export default async function SettingsPage({
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Subscription
         </div>
+        {pulseTrialBillingContinuationPending ? <PulseTrialBillingContinuation /> : null}
         <HostedBillingSettings
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
           canStartFamily={canStartFamily}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
+          pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
           canStartPaidPulse={canStartHostedPulseTrialPaidPlan({
             billingStatus: authenticatedMember?.billingStatus,
             currentBillingPhase: billingRef?.currentBillingPhase,

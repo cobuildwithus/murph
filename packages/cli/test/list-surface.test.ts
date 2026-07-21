@@ -45,6 +45,7 @@ test('list help and schemas no longer expose cursor pagination options', async (
   assert.doesNotMatch(bloodTestHelp, /--kind/u)
   assert.match(bloodTestHelp, /--from/u)
   assert.match(bloodTestHelp, /--to/u)
+  assert.match(bloodTestHelp, /--text/u)
   assert.equal('cursor' in readSchema.options.properties, false)
   assert.equal('recordType' in readSchema.options.properties, true)
   assert.equal('status' in readSchema.options.properties, true)

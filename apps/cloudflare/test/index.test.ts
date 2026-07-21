@@ -2549,9 +2549,7 @@ describe("cloudflare worker routes", () => {
       await vi.waitFor(() =>
         expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
           active_attempt_id: null,
-          backoff_until: null,
           failure_count: 0,
-          wake_at: null,
         })
       );
       expect(alarms).toEqual([]);
@@ -2589,6 +2587,7 @@ describe("cloudflare worker routes", () => {
           attemptId: token.attemptId,
           leaseGeneration: token.generation,
           orchestration: {
+            activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
@@ -2600,8 +2599,6 @@ describe("cloudflare worker routes", () => {
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
-        backoff_until: null,
-        wake_at: null,
       });
     });
 
@@ -2637,6 +2634,7 @@ describe("cloudflare worker routes", () => {
           attemptId: oldToken.attemptId,
           leaseGeneration: oldToken.generation,
           orchestration: {
+            activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
@@ -2648,8 +2646,6 @@ describe("cloudflare worker routes", () => {
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: oldToken.attemptId,
-        backoff_until: null,
-        wake_at: null,
       });
     });
 
@@ -2680,8 +2676,6 @@ describe("cloudflare worker routes", () => {
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
-        backoff_until: null,
-        wake_at: null,
       });
     });
 
@@ -3165,9 +3159,7 @@ type WorkerTestEnv = WorkerEnvironmentSource & {
 type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 type RuntimeControlMetaRow = {
   active_attempt_id: string | null;
-  backoff_until: string | null;
   failure_count: number;
-  wake_at: string | null;
 };
 
 function createRuntimeControlRunnerHarness(input: {
@@ -3327,7 +3319,7 @@ function readRunnerMetaForRuntimeControl(
   sql: ReturnType<typeof createTestSqlStorage>,
 ): RuntimeControlMetaRow {
   return sql.exec<RuntimeControlMetaRow>(
-    `SELECT active_attempt_id, backoff_until, failure_count, wake_at
+    `SELECT active_attempt_id, failure_count
      FROM runner_meta
      WHERE singleton = 1`,
   ).one();

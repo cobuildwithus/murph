@@ -1,6 +1,6 @@
 # Pulse Trial Start Paid Pulse
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 Status: Implemented
 
@@ -134,6 +134,43 @@ The route must:
 - require local Pulse Trial state
 - call a dedicated trial conversion service
 - return the conversion result
+
+When the confirmed command discovers that the existing subscription has no
+default payment method, the route issues a short-lived HttpOnly continuation
+claim bound to the authenticated member and app session, then returns Stripe's
+payment-method-update Billing Portal URL. Stripe cancel/back returns to ordinary
+Settings. Only Stripe's successful flow completion returns to the marked
+Settings URL, and Settings automatically repeats the protected POST after the
+server validates that claim. The marker is not billing authority by itself; a
+plain or forged GET must remain read-only. The first accepted automatic POST
+clears the claim. Existing Stripe idempotency makes overlapping valid
+continuations converge on the same subscription mutation.
+
+Payment-method continuation is an explicit, default-off service input. The
+Settings start route issues the existing session-bound `start_pulse_now`
+claim; the exact-action continuation route is its sole automatic consumer.
+Conversational `start_pulse_now` and `continue_pulse` calls select a
+signed conversational return whose action is derived from the service's
+existing transition timing. The URL contains the action, expiry, and HMAC but
+no member identifier. After Stripe reports successful flow completion, an
+authenticated bridge verifies the HMAC against the signed-in member and issues
+the HttpOnly continuation claim bound to that member, app session, and exact
+action. Cancel/back and invalid, expired, copied-to-another-member, or unsigned
+returns go to ordinary Settings without a claim or subscription mutation.
+
+The marked Settings page repeats one protected same-origin POST. That route
+reads the exact action only from the bound claim and dispatches to the existing
+start-now or continue-at-trial-end service; the marker and client cannot select
+an action. Completed, continuing, and billing-pending results clear the claim.
+If Stripe has not exposed the newly saved method yet, Settings shows a terminal
+status instead of opening another automatic portal loop; an explicit retry may
+reuse the still-short-lived exact-action claim and returned Stripe URL. A
+surviving claim from one action can never change the other action's timing.
+
+While the automatic continuation is starting or waiting for billing, Settings
+shows one busy status and suppresses every other Start Pulse action. A terminal
+automatic failure exposes one manual retry; Stripe can reopen only from that
+new user click, so a propagation delay cannot create an automatic portal loop.
 
 Suggested response:
 
@@ -395,6 +432,13 @@ CTA:
 Finish payment
 ```
 
+If payment is required only because the trial subscription has no saved payment
+method, the member's existing confirmation remains the authorization to start
+Pulse. Completing Stripe's payment-method form is the final required
+interaction: the successful Stripe return automatically starts Pulse and shows
+a short status message while billing settles. Canceling or backing out returns
+to Settings without starting billing, and must not loop back into Stripe.
+
 ## Non-Goals
 
 Do not add:
@@ -422,7 +466,11 @@ Do not add:
   with `trial_end: "now"` plus a deterministic idempotency key.
 - Payment recovery: `payment_required` is returned only with a Stripe-hosted
   payment URL for the same subscription/customer and never grants paid
-  allowance.
+  allowance. A missing-card Billing Portal flow uses separate cancel and
+  successful-completion return URLs; conversational completion first verifies
+  the short-lived member/action-bound signed return, and every automatic
+  continuation requires the short-lived member/session/action-bound claim.
+  A return marker without the claim performs no POST.
 - Pending billing: open or created invoices awaiting automatic Stripe
   collection return `billing_pending` and do not grant paid allowance.
 - Reconciliation: paid allowance opens only after a paid, non-initial invoice is
@@ -437,16 +485,22 @@ Use a Test Clock flow:
 2. Verify the subscription is `trialing` and has the Pulse recurring price.
 3. Simulate exhausted trial usage in local state.
 4. Click `Start Pulse`.
-5. Verify Stripe receives `trial_end=now`.
-6. Verify Stripe creates the first paid Pulse invoice and starts a new billing
+5. For a subscription without a default payment method, complete Stripe's
+   payment-method form and verify the app resumes without another click; repeat
+   with cancel/back and verify no billing mutation or redirect loop occurs.
+   Repeat from private-chat `start_pulse_now` and `continue_pulse` links and
+   verify each resumes only its original timing; copied, expired, and tampered
+   return URLs must remain inert.
+6. Verify Stripe receives `trial_end=now`.
+7. Verify Stripe creates the first paid Pulse invoice and starts a new billing
    period.
-7. Verify the app returns `billing_pending` while the invoice is open or
+8. Verify the app returns `billing_pending` while the invoice is open or
    collection is awaiting Stripe.
-8. Verify successful payment produces `invoice.paid`.
-9. Verify local billing ref converges to paid Pulse.
-10. Verify hosted AI allowance becomes normal paid Pulse allowance.
-11. Repeat with a card requiring authentication or failed payment.
-12. Verify the app shows `Finish payment` and does not grant paid allowance
+9. Verify successful payment produces `invoice.paid`.
+10. Verify local billing ref converges to paid Pulse.
+11. Verify hosted AI allowance becomes normal paid Pulse allowance.
+12. Repeat with a card requiring authentication or failed payment.
+13. Verify the app shows `Finish payment` and does not grant paid allowance
     until Stripe reports payment success.
 
 ## Open Question

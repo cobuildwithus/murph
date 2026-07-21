@@ -670,7 +670,6 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_HOSTED_LOCAL_PROFILE: HOSTED_LOCAL_WORKTREE_PROFILE,
     MURPH_DEV_CF_PERSIST_DIR: input.paths.wranglerPersistDir,
     MURPH_DEV_DATABASE_URL: input.databaseUrl,
-    MURPH_DEV_FORCE_RESET_TEMPORAL: "0",
     MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH: input.paths.cryptoStatePath,
     ...buildHostedLocalWorktreeLinqEnv({
       baseEnv: input.baseEnv,

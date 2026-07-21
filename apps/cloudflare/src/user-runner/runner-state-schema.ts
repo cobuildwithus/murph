@@ -13,7 +13,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
-      wake_at TEXT,
       active_attempt_id TEXT,
       active_generation INTEGER NOT NULL DEFAULT 0,
       active_kind TEXT,
@@ -21,9 +20,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_runner_container_name TEXT,
       active_reason TEXT,
       active_started_at TEXT,
-      active_expires_at TEXT,
       active_workspace_version TEXT,
-      backoff_until TEXT,
       failure_count INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
@@ -33,7 +30,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
 
   assertRunnerStateSchemaVersionSupported(sql);
   for (const [columnName, definition] of Object.entries({
-    wake_at: "TEXT",
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
     active_kind: "TEXT",
@@ -41,9 +37,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     active_runner_container_name: "TEXT",
     active_reason: "TEXT",
     active_started_at: "TEXT",
-    active_expires_at: "TEXT",
     active_workspace_version: "TEXT",
-    backoff_until: "TEXT",
     failure_count: "INTEGER NOT NULL DEFAULT 0",
     last_error_at: "TEXT",
     last_error_code: "TEXT",
@@ -59,7 +53,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     requiredColumns: [
       "singleton",
       "user_id",
-      "wake_at",
       "active_attempt_id",
       "active_generation",
       "active_kind",
@@ -67,9 +60,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_runner_container_name",
       "active_reason",
       "active_started_at",
-      "active_expires_at",
       "active_workspace_version",
-      "backoff_until",
       "failure_count",
       "last_error_at",
       "last_error_code",
@@ -112,36 +103,6 @@ function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number 
 
 function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   const columns = readRunnerStateTableColumns(sql, "runner_meta");
-  if (
-    columns.includes("wake_pending")
-    || columns.includes("next_wake_at")
-    || columns.includes("pending_work")
-    || columns.includes("pending_nudge")
-  ) {
-    const wakeSources: string[] = [];
-    if (columns.includes("wake_pending")) {
-      wakeSources.push("wake_pending = 1");
-    }
-    if (columns.includes("pending_work")) {
-      wakeSources.push("pending_work = 1");
-    }
-    if (columns.includes("pending_nudge")) {
-      wakeSources.push("pending_nudge = 1");
-    }
-    const wakeExists = wakeSources.length > 0 ? wakeSources.join(" OR ") : "0";
-    const nextWakeAt = columns.includes("next_wake_at") ? "next_wake_at" : "NULL";
-    sql.exec(`
-      UPDATE runner_meta
-      SET wake_at = COALESCE(
-        wake_at,
-        CASE
-          WHEN ${wakeExists} THEN COALESCE(${nextWakeAt}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-          ELSE ${nextWakeAt}
-        END
-      )
-      WHERE singleton = 1
-    `);
-  }
   if (columns.includes("active_invocation_id")) {
     const activeInvocationStartedAt = columns.includes("active_invocation_started_at")
       ? "active_invocation_started_at"
@@ -149,8 +110,8 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     const activeInvocationReason = columns.includes("active_invocation_reason")
       ? "active_invocation_reason"
       : "NULL";
-    // Legacy active/inFlight projections kept for deploy skew only.
-    // Delete after 2026-05-25; live state uses the write fence columns.
+    // Dormant objects can still hold the pre-write-fence row shape. Preserve
+    // its active identity when the object is activated after the hard cut.
     sql.exec(`
       UPDATE runner_meta
       SET
@@ -166,11 +127,6 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
       WHERE singleton = 1
     `);
   }
-  sql.exec(`
-    UPDATE runner_meta
-    SET active_expires_at = NULL
-    WHERE active_expires_at IS NOT NULL
-  `);
   if (columns.includes("lease_generation")) {
     sql.exec(`
       UPDATE runner_meta
@@ -178,13 +134,6 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
         WHEN active_generation > 0 THEN active_generation
         ELSE lease_generation
       END
-      WHERE singleton = 1
-    `);
-  }
-  if (columns.includes("retry_at")) {
-    sql.exec(`
-      UPDATE runner_meta
-      SET backoff_until = COALESCE(backoff_until, retry_at)
       WHERE singleton = 1
     `);
   }

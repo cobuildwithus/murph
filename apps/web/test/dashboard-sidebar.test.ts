@@ -239,15 +239,13 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
   );
 });
 
-test("Sidebar keeps Records active through the provider connect flow", () => {
+test("Sidebar keeps Records out of navigation", () => {
   mocks.usePathname.mockReturnValue("/records/connect");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(
-    markup,
-    /data-active="true">\s*<a[^>]*href="\/records"[^>]*>[\s\S]*Records<\/a>/,
-  );
+  assert.doesNotMatch(markup, /href="\/records"/);
+  assert.doesNotMatch(markup, />Records<\/a>/);
 });
 
 test("Sidebar ignores supplied signed-in user labels in the account trigger", () => {

@@ -230,6 +230,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
   assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
   assert.match(markup, /Wearable apps show status/);
+  assert.doesNotMatch(markup, /Strava/);
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
 });

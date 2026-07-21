@@ -1,4 +1,8 @@
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import {
+  buildHostedPulseTrialContinuationClearCookie,
+  buildHostedPulseTrialContinuationCookie,
+} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import { startHostedPulseTrialPaidPlan } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
@@ -16,10 +20,31 @@ export const POST = withJsonError(async (request: Request) => {
 
   const result = await startHostedPulseTrialPaidPlan({
     memberId: auth.member.id,
+    paymentMethodContinuation: "settings",
     prisma,
   });
 
-  return jsonOk(result);
+  const response = jsonOk(
+    result.status === "payment_required"
+      ? {
+        billingPlanCode: result.billingPlanCode,
+        paymentUrl: result.paymentUrl,
+        status: result.status,
+      }
+      : result,
+  );
+  response.headers.append(
+    "Set-Cookie",
+    result.status === "payment_required"
+      && result.resumeStartAfterPaymentMethodSetup === true
+      ? buildHostedPulseTrialContinuationCookie({
+        action: "start_pulse_now",
+        memberId: auth.member.id,
+        sessionId: auth.sessionId,
+      })
+      : buildHostedPulseTrialContinuationClearCookie(),
+  );
+  return response;
 });
 
 async function assertNoRequestBody(request: Request): Promise<void> {

@@ -424,7 +424,7 @@ test('device account list rejects an explicit base URL in hosted runtime', async
 })
 
 deviceControlPlaneTest(
-  'local daemon connect reports the requested mapped connect target',
+  'local daemon connect preserves Junction-backed Strava routing',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-mapped-connect-'))
     let connectBody: Record<string, unknown> | null = null
@@ -441,9 +441,9 @@ deviceControlPlaneTest(
         connectBody = await readJsonBody(request)
         respondJson(response, 200, {
           provider: 'junction',
-          state: 'state_garmin_01',
+          state: 'state_strava_01',
           expiresAt: '2026-03-17T13:00:00.000Z',
-          authorizationUrl: 'https://junction.test/connect/garmin?state=state_garmin_01',
+          authorizationUrl: 'https://junction.test/connect/strava?state=state_strava_01',
         })
         return
       }
@@ -474,7 +474,7 @@ deviceControlPlaneTest(
         }>([
           'device',
           'connect',
-          'garmin',
+          'strava',
           '--vault',
           vaultRoot,
           '--base-url',
@@ -484,18 +484,20 @@ deviceControlPlaneTest(
             JUNCTION_API_KEY: 'sk_us_junction-test',
             JUNCTION_CLIENT_USER_ID_SECRET: 'junction-client-user-id-secret',
             JUNCTION_ENV: 'sandbox',
-            JUNCTION_PROVIDER_FILTER: 'garmin',
+            JUNCTION_PROVIDER_FILTER: 'strava',
             JUNCTION_REGION: 'us',
             MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+            STRAVA_CLIENT_ID: '',
+            STRAVA_CLIENT_SECRET: '',
           },
         }),
       )
 
       assert.equal(connect.backend, 'local-daemon')
-      assert.equal(connect.provider, 'garmin')
-      assert.equal(connect.authorizationUrl.includes('state_garmin_01'), true)
+      assert.equal(connect.provider, 'strava')
+      assert.equal(connect.authorizationUrl.includes('state_strava_01'), true)
       assert.deepEqual(connectBody, {
-        sourceProviderSlug: 'garmin',
+        sourceProviderSlug: 'strava',
       })
     } finally {
       await new Promise<void>((resolve, reject) => {
