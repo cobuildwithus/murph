@@ -180,6 +180,7 @@ function mapExperimentResultsProjection(
         })
       : undefined,
     outcomeStatus: results.savedOutcomeStatus,
+    outcomeConfidence: results.persistedOutcome?.confidence.level,
     summary,
     summaryDetail,
     conclusions: results.persistedOutcome
@@ -363,42 +364,61 @@ function buildTrends(
       const currentValue = readCurrentBiomarkerValue(biomarker);
       const unit = biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit ?? "";
 
-      if (!runStart || currentValue === null || biomarker.baseline.mean === null) {
+      if (currentValue === null || biomarker.baseline.mean === null) {
         return [];
       }
 
-      const baseline = biomarker.points
-        .filter((point) => point.phase === "baseline")
-        .map((point) => ({
-          day: daysBetweenInclusive(runStart, point.date),
-          value: roundMetric(point.value),
-        }));
-      const active = biomarker.points
-        .filter((point) => point.phase === "intervention")
-        .map((point) => ({
-          day: daysBetweenInclusive(runStart, point.date),
-          value: roundMetric(point.value),
-        }));
+      const baseline = runStart
+        ? biomarker.points
+            .filter((point) => point.phase === "baseline")
+            .map((point) => ({
+              day: daysBetweenInclusive(runStart, point.date),
+              value: roundMetric(point.value),
+            }))
+        : [];
+      const active = runStart
+        ? biomarker.points
+            .filter((point) => point.phase === "intervention")
+            .map((point) => ({
+              day: daysBetweenInclusive(runStart, point.date),
+              value: roundMetric(point.value),
+            }))
+        : [];
+      const windowComparison = baseline.length === 0 && active.length === 0 &&
+          biomarker.intervention.mean !== null
+        ? {
+            baselineDaysWithData: biomarker.baseline.daysWithData,
+            baselineTotalDays: biomarker.baseline.totalDays,
+            interventionDaysWithData: biomarker.intervention.daysWithData,
+            interventionTotalDays: biomarker.intervention.totalDays,
+          }
+        : undefined;
 
-      if (baseline.length === 0 && active.length === 0) {
+      if (baseline.length === 0 && active.length === 0 && !windowComparison) {
         return [];
       }
 
-      const history = buildHistoryPoints(client, biomarker, runStart);
+      const history = runStart ? buildHistoryPoints(client, biomarker, runStart) : [];
 
       return [{
         label: biomarker.label,
         unit,
-        startDate: runStart,
+        startDate: runStart ?? results.asOf.slice(0, 10),
         history,
         baseline,
         active,
-        expectedRange: buildExpectedRangePoints(biomarker, results.experiment),
+        expectedRange: runStart
+          ? buildExpectedRangePoints(biomarker, results.experiment)
+          : undefined,
         baselineAvg: roundMetric(biomarker.baseline.mean),
         currentValue: roundMetric(currentValue),
+        currentValueLabel: biomarker.intervention.mean !== null
+          ? "experiment average"
+          : "latest",
         delta: biomarker.deltaAbs === null || biomarker.completeness !== "good"
           ? ""
           : formatDelta(biomarker.deltaAbs, unit),
+        windowComparison,
       }];
     });
 }
@@ -868,12 +888,7 @@ function buildRunSummaryDetail(
   if (status === "finished") {
     const persistedOutcome = results.persistedOutcome;
     if (persistedOutcome) {
-      return [
-        persistedOutcome.conclusion.plainLanguage,
-        `Outcome confidence is ${persistedOutcome.confidence.level}.`,
-        ...persistedOutcome.confidence.reasons,
-        ...persistedOutcome.conclusion.caveats,
-      ].join(" ");
+      return persistedOutcome.conclusion.plainLanguage;
     }
 
     const outcomeState = results.savedOutcomeStatus === "pending"
@@ -907,15 +922,6 @@ function buildConclusions(
 
   const sections: NonNullable<ExperimentRunProjection["conclusions"]> = [];
 
-  sections.push({
-    title: "What the saved analysis says",
-    variant: "positive",
-    items: [{
-      icon: "check",
-      text: persistedOutcome.conclusion.plainLanguage,
-    }],
-  });
-
   const limits = [
     ...persistedOutcome.confidence.reasons,
     ...persistedOutcome.conclusion.caveats,
@@ -923,22 +929,13 @@ function buildConclusions(
   ];
   if (limits.length > 0) {
     sections.push({
-      title: "What limits the read",
+      title: "What limits this read",
       variant: "insight",
       items: limits.map((text) => ({ icon: "→", text })),
     });
   }
 
-  sections.push({
-    title: "Confidence",
-    variant: "insight",
-    items: [{
-      icon: "→",
-      text: `The saved outcome confidence is ${persistedOutcome.confidence.level}.`,
-    }],
-  });
-
-  return sections;
+  return sections.length > 0 ? sections : undefined;
 }
 
 function buildBiomarkerCaveats(

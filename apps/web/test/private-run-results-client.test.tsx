@@ -21,7 +21,10 @@ const mocks = vi.hoisted(() => ({
       return null;
     },
   ),
-  resultsTab: vi.fn((props: { experiment: ResultsTabExperiment }) =>
+  resultsTab: vi.fn((props: {
+    experiment: ResultsTabExperiment;
+    showHeader?: boolean;
+  }) =>
     createElement("div", { "data-results-title": props.experiment.title })
   ),
   useBrowserVault: vi.fn(),
@@ -82,8 +85,10 @@ test("resolves the route by exact private experiment id and renders its result p
   assert.equal(experiment?.privateRun, privateRun);
   assert.equal(experiment?.baselineDays, 3);
   assert.equal(experiment?.durationDays, 14);
+  assert.equal(experiment?.outcomeConfidence, "low");
+  assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.showHeader, false);
   assert.match(markup, /Private run title/u);
-  assert.match(markup, /Completed · Started Jul 1, 2026/u);
+  assert.match(markup, /Completed.*Started Jul 1, 2026.*Saved privately in your vault/u);
 });
 
 test("keeps an unknown private duration absent from the results view", () => {
@@ -155,6 +160,7 @@ function createPrivateRun(): ExperimentRunProjection {
     durationDays: 14,
     id: "exp:private-run",
     outcomeStatus: "available",
+    outcomeConfidence: "low",
     signals: [],
     slug: "private-run",
     snapshotGeneratedAt: "2026-07-20T12:00:00.000Z",
