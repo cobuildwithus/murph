@@ -36,6 +36,8 @@ export function normalizeMetricValue(input: {
       return normalizePercent(input.value, unit, definition.displayName);
     case "creatinine":
       return normalizeCreatinine(input.value, unit);
+    case "blood-urea-nitrogen":
+      return normalizeBloodUreaNitrogen(input.value, unit);
     case "egfr":
       return normalizeExactUnit(input.value, unit, "mL/min/1.73m^2", definition.displayName);
     case "glucose":
@@ -51,8 +53,14 @@ export function normalizeMetricValue(input: {
       return normalizeExactUnit(input.value, unit, "mg/L", definition.displayName);
     case "ferritin":
       return normalizeExactUnit(input.value, unit, "ng/mL", definition.displayName);
+    case "mean-corpuscular-hemoglobin":
+      return normalizeExactUnit(input.value, unit, "pg", definition.displayName);
+    case "mean-corpuscular-hemoglobin-concentration":
+      return normalizeExactUnit(input.value, unit, "g/dL", definition.displayName);
     case "mean-corpuscular-volume":
       return normalizeExactUnit(input.value, unit, "fL", definition.displayName);
+    case "thyroid-stimulating-hormone":
+      return normalizeExactUnit(input.value, unit, "mIU/L", definition.displayName);
     case "white-blood-cell-count":
       return normalizeExactUnit(input.value, unit, "10^3/uL", definition.displayName);
     case "alkaline-phosphatase":
@@ -148,6 +156,8 @@ export function normalizeUnit(value: string | null): string | null {
     minutes: "minutes",
     mmol_l: "mmol/L",
     "mmol/l": "mmol/L",
+    miu_l: "mIU/L",
+    "miu/l": "mIU/L",
     ms: "ms",
     ng_ml: "ng/mL",
     "ng/ml": "ng/mL",
@@ -166,6 +176,10 @@ export function normalizeUnit(value: string | null): string | null {
     "k/ul": "10^3/uL",
     umol_l: "umol/L",
     "umol/l": "umol/L",
+    uiu_ml: "mIU/L",
+    "uiu/ml": "mIU/L",
+    "µiu/ml": "mIU/L",
+    "μiu/ml": "mIU/L",
   };
   const alias = Object.prototype.hasOwnProperty.call(aliases, lower)
     ? aliases[lower]
@@ -244,6 +258,21 @@ function normalizeCreatinine(value: number, unit: string | null): MetricValueNor
     return { canonicalUnit: "mg/dL", canonicalValue: Number((value / 88.42).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Creatinine", unit, "mg/dL")] };
+}
+
+function normalizeBloodUreaNitrogen(value: number, unit: string | null): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "mg/dL")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: value, unit: unit ?? "mg/dL", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "mmol/L")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: Number((value / 0.357).toFixed(4)), unit, warnings: [] };
+  }
+  return {
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit,
+    warnings: [unitWarning("Blood urea nitrogen", unit, "mg/dL")],
+  };
 }
 
 function normalizeMassConcentration(

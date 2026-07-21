@@ -204,6 +204,84 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.deepEqual(client.labResults.list({ biomarkerKey: "biomarker:missing" }), []);
 });
 
+test("lab aliases project into one comparable longitudinal biomarker", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_aliases_2024", "2024-03-01T08:00:00.000Z", [
+        { analyte: "BUN", unit: "mg/dL", value: 14 },
+        { analyte: "TSH", unit: "uIU/mL", value: 2.5 },
+        { analyte: "MCH", unit: "pg", value: 30 },
+        { analyte: "MCHC", unit: "g/dL", value: 33 },
+        { analyte: "BUN/Creatinine Ratio", value: 12 },
+      ]),
+      createLabTest("evt_aliases_2025", "2025-03-01T08:00:00.000Z", [
+        { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 16 },
+        { analyte: "Thyroid Stimulating Hormone", unit: "mIU/L", value: 3.1 },
+        { analyte: "Mean Corpuscular Hemoglobin", unit: "pg", value: 31 },
+        { analyte: "Mean Corpuscular Hemoglobin Concentration", unit: "g/dL", value: 34 },
+      ]),
+      createLabTest("evt_urea_2026", "2026-03-01T08:00:00.000Z", [
+        { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
+        { analyte: "Urea", unit: "mmol/L", value: 5 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const measured = selectBrowserVaultMeasuredBiomarkers(client);
+
+  assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
+    "blood-urea-nitrogen",
+    "bun-creatinine-ratio",
+    "mean-corpuscular-hemoglobin",
+    "mean-corpuscular-hemoglobin-concentration",
+    "thyroid-stimulating-hormone",
+    "urea",
+  ]);
+
+  const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
+  assert.ok(bun);
+  assert.equal(bun.displayName, "Blood urea nitrogen");
+  assert.equal(bun.rows.length, 3);
+  assert.equal(bun.comparableUnit, "mg/dL");
+  assert.deepEqual(bun.chartSeries.map((point) => point.value), [14, 16, 14.0056]);
+  const normalizedBun = bun.rows.at(-1);
+  assert.ok(normalizedBun);
+  assert.equal(normalizedBun.analyte, "Urea Nitrogen");
+  assert.equal(normalizedBun.normalizedUnit, "mg/dL");
+  assert.equal(normalizedBun.normalizedValue, 14.0056);
+  assert.equal(normalizedBun.unit, "mmol/L");
+  assert.equal(normalizedBun.value, 5);
+
+  const tsh = selectBrowserVaultLabBiomarkerDetail(client, "TSH");
+  assert.ok(tsh);
+  assert.equal(tsh.rows.length, 2);
+  assert.equal(tsh.comparableUnit, "mIU/L");
+  assert.deepEqual(tsh.chartSeries.map((point) => point.value), [2.5, 3.1]);
+  const normalizedTsh = tsh.rows[0];
+  assert.ok(normalizedTsh);
+  assert.equal(normalizedTsh.normalizedUnit, "mIU/L");
+  assert.equal(normalizedTsh.normalizedValue, 2.5);
+  assert.equal(normalizedTsh.unit, "uIU/mL");
+  assert.equal(normalizedTsh.value, 2.5);
+
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCH")?.rows.length, 2);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCHC")?.rows.length, 2);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows.length, 1);
+  const urea = selectBrowserVaultLabBiomarkerDetail(client, "Urea");
+  assert.ok(urea);
+  assert.equal(urea.biomarkerKey, null);
+  assert.equal(urea.rows.length, 1);
+  assert.deepEqual(urea.chartSeries.map((point) => point.value), [5]);
+});
+
 test("lab projection ignores test-result points whose collapsed live event is absent", async () => {
   const liveTest = createLabTest("evt_live", "2026-01-01T08:00:00.000Z", [{
     analyte: "Hemoglobin A1c",
