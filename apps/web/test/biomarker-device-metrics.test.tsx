@@ -95,7 +95,7 @@ beforeEach(() => {
   };
 });
 
-test("only device-derived readings render, count, and decide the latest value", async () => {
+test("only device-derived readings decide the latest card value without history metadata", async () => {
   browserVaultMock.value.client = clientWithMetricRows([
     // Device history for resting heart rate, plus newer manual and lab rows
     // that must not surface under a device heading.
@@ -118,7 +118,6 @@ test("only device-derived readings render, count, and decide the latest value", 
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("From your devices");
     expect(text).toContain("Resting heart rate");
-    expect(text).toContain("2 readings");
     expect(text).toContain("59 bpm");
     expect(text).not.toContain("70");
     expect(text).not.toContain("75");
@@ -131,10 +130,13 @@ test("only device-derived readings render, count, and decide the latest value", 
     const link = rendered.container.querySelector('a[href="/biomarkers/resting-heart-rate"]');
     expect(link).not.toBeNull();
     expect(link?.querySelector("svg")).not.toBeNull();
+    expect(link?.querySelector("time")).toBeNull();
+    expect(link?.querySelector("p")?.className).toContain("mb-5");
     expect(link?.textContent).toContain("HEART HEALTH");
     expect(link?.textContent).toContain("Resting heart rate reflects recovery load.");
-    expect(link?.textContent).toContain("Jul 14, 2026");
-    expect(link?.textContent).toContain("2025 to 2026");
+    expect(link?.textContent).not.toContain("2 readings");
+    expect(link?.textContent).not.toContain("Jul 14, 2026");
+    expect(link?.textContent).not.toContain("2025 to 2026");
 
     const section = rendered.container.querySelector('[aria-labelledby="biomarker-devices-heading"]');
     expect(section?.querySelector("ul")?.className).toContain("md:grid-cols-2");

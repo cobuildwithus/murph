@@ -242,10 +242,6 @@ function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
   return (
     <BiomarkerDeviceReadingCard
       category={entry.category}
-      date={summary.latest.date}
-      dateLabel={formatLabDate(summary.latest.date)}
-      historyLabel={formatDeviceSpan(summary)}
-      readingCount={summary.readingCount}
       routeId={entry.routeId}
       stale={summary.stale}
       summary={entry.summary}
@@ -253,12 +249,6 @@ function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
       valueLabel={`${formatMetricValue(summary.latest.value, entry.valuePrecision)}${labUnitSuffix(summary.latest.unit ?? entry.unit)}`}
     />
   );
-}
-
-function formatDeviceSpan(summary: BrowserVaultDeviceMetricSummary): string {
-  const firstYear = summary.firstDate.slice(0, 4);
-  const lastYear = summary.latest.date.slice(0, 4);
-  return firstYear === lastYear ? firstYear : `${firstYear} to ${lastYear}`;
 }
 
 function MeasuredBiomarkerSection({ group }: { group: MeasuredBiomarkerGroup }) {
