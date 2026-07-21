@@ -14,7 +14,7 @@ interface ExperimentSummaryTilesExperiment {
   baselineDays: number;
   dateRange?: string;
   day?: number;
-  durationDays: number;
+  durationDays?: number;
   nextStep?: ExperimentNextStep;
   schedule?: ExperimentSchedule;
 }
@@ -119,13 +119,13 @@ function renderExperimentValue({
   inBaseline,
 }: {
   baselineDays: number;
-  durationDays: number;
+  durationDays: number | undefined;
   day: number | undefined;
   inBaseline: boolean;
 }): string {
-  if (day == null) return `${durationDays}-day protocol`;
+  if (day == null) return durationDays ? `${durationDays}-day protocol` : "Collecting data";
   if (inBaseline) return `Starts day ${baselineDays + 1}`;
-  return `Day ${day} of ${durationDays}`;
+  return durationDays ? `Day ${day} of ${durationDays}` : `Day ${day}`;
 }
 
 function renderAdherenceDetail(tallies: ScheduleTallies | null): ReactNode {

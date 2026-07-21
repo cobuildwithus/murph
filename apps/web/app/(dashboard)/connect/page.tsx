@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
   DEVICE_CONNECT_SOURCES,
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
@@ -394,6 +395,7 @@ export function resolveConfiguredConnectSources(
 
   return sortConnectSourcesByConnectionState(
     sources.map((source) => {
+      const connectionAvailable = isDeviceConnectSourceAvailableForConnection(source.id);
       const connectTarget = connectTargetBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
       const recoveryKind = !connected ? options.recoveryKindBySourceId?.get(source.id) : undefined;
@@ -405,10 +407,13 @@ export function resolveConfiguredConnectSources(
       const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
       const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
-      const resolvedConnectTarget = reconnectTarget ?? connectTarget;
+      const resolvedConnectTarget = connectionAvailable
+        ? reconnectTarget ?? connectTarget
+        : undefined;
 
       return {
         ...source,
+        connectionAvailable,
         ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
         ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
@@ -419,6 +424,12 @@ export function resolveConfiguredConnectSources(
         ...(connected ? { connected } : {}),
       };
     }),
+  ).filter((source) =>
+    source.connectionAvailable !== false
+    || source.connected === true
+    || source.requiresReconnect === true
+    || Boolean(source.recoveryKind)
+    || source.historicalResetIncomplete === true
   );
 }
 

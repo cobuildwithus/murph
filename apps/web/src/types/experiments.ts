@@ -83,7 +83,14 @@ export interface TrendData {
   expectedRange?: { day: number; low: number; high: number }[];
   baselineAvg: number;
   currentValue: number;
+  currentValueLabel?: "experiment average" | "latest";
   delta: string;
+  windowComparison?: {
+    baselineDaysWithData: number;
+    baselineTotalDays: number;
+    interventionDaysWithData: number;
+    interventionTotalDays: number;
+  };
 }
 
 export type ExperimentSignalProminence = "focus" | "context";
@@ -339,6 +346,8 @@ export interface ExperimentRunProjection {
   startedOn: string | null;
   tags: string[];
   title: string;
+  baselineDays?: number;
+  durationDays?: number;
   day?: number;
   completionPercent?: number;
   dateRange?: string;
@@ -350,6 +359,7 @@ export interface ExperimentRunProjection {
   sessionContext?: ExperimentRunContextEntry[];
   nextStep?: ExperimentNextStep;
   outcomeStatus: "available" | "not_expected" | "pending" | "unavailable";
+  outcomeConfidence?: "low" | "medium" | "high";
   summary?: string;
   summaryDetail?: string;
   conclusions?: ExperimentConclusionSection[];
@@ -368,6 +378,7 @@ export interface Experiment extends ExperimentProtocol {
   sessionContext?: ExperimentRunContextEntry[];
   privateRun?: ExperimentRunProjection;
   nextStep?: ExperimentNextStep;
+  outcomeConfidence?: ExperimentRunProjection["outcomeConfidence"];
   summary?: string;
   summaryDetail?: string;
   conclusions?: ExperimentConclusionSection[];

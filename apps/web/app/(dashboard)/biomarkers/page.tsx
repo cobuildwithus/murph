@@ -32,11 +32,11 @@ function listDeviceTrackedBiomarkers(): DeviceTrackedBiomarker[] {
       }
 
       return [{
-        key: overview.key,
+        category: entry.categories[0] ?? null,
         privateMetricBindings: overview.privateMetricBindings,
         routeId: entry.routeId,
         shortName: overview.shortName,
-        trendDefaults: overview.trendDefaults,
+        summary: entry.summary,
         unit: overview.unit,
         valuePrecision: overview.valuePrecision,
       } satisfies DeviceTrackedBiomarker];

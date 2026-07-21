@@ -199,6 +199,9 @@ test("BrowserVaultOnboardingStepsContent shows in-progress runs and hides the ex
 
   assert.match(markup, /In progress/);
   assert.match(markup, /Red light glasses/);
+  assert.match(markup, /href="\/experiments\/runs\/exp%3Ared-light-glasses"/);
+  assert.match(markup, /Collecting data/);
+  assert.doesNotMatch(markup, /99%/);
   assert.doesNotMatch(markup, /Start an experiment/);
 });
 
@@ -488,9 +491,8 @@ test("BrowserVaultOnboardingStepsContent without protocols never renders experim
 function createClient(
   metricRows: BrowserVaultMetricRow[],
   entities: BrowserVaultEntity[] = [],
-): Pick<BrowserVaultQueryClient, "replica"> {
-  return {
-    replica: {
+): BrowserVaultQueryClient {
+  return createBrowserVaultQueryClient({
       assistantSummary: {
         highlights: [],
         latestDate: null,
@@ -517,8 +519,7 @@ function createClient(
       sourceHealthRows: [],
       timelineRows: [],
       weeklySampleSummaries: [],
-    } satisfies BrowserVaultReplica,
-  };
+    } satisfies BrowserVaultReplica);
 }
 
 function metricRow(input: {

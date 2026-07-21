@@ -8,6 +8,7 @@ const FINISHED_EXPERIMENT_STATUSES = new Set([
   "concluded",
   "done",
   "finished",
+  "waiting-for-review",
 ]);
 
 const STOPPED_EXPERIMENT_STATUSES = new Set([

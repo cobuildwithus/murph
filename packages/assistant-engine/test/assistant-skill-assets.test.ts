@@ -2062,10 +2062,31 @@ describe('assistant skill assets', () => {
       'hear a bit more about what Murph can do for them, or dive into the goals they named earlier, in their words',
     )
     expect(compact).toContain(
-      'running health challenges and group chats with friends, ordering things on Amazon, calling to book appointments, singing songs, and tracking meals and calories',
+      'use one short opener followed by exactly six short bullets, each with one concrete action and outcome',
     )
     expect(compact).toContain(
-      'steer back to the goals they named and toward setting up the first habit or experiment below',
+      'connect years of labs, records, and wearable data to surface patterns and questions worth investigating, without diagnosing or claiming causation',
+    )
+    expect(compact).toContain(
+      'call a dentist, doctor, or other health office to book, reschedule, or join a waitlist once the needed details and authorization are clear',
+    )
+    expect(compact).toContain(
+      'order or reorder the exact supplement or health item on Amazon once the product, seller, quantity, price, and approval boundary are clear',
+    )
+    expect(compact).toContain(
+      'create and run a private health challenge with friends in a group chat',
+    )
+    expect(compact).toContain(
+      'turn a health question into a bounded experiment, handle reminders and tracking, and review whether the change looks worth keeping',
+    )
+    expect(compact).toContain(
+      'track meals and calories from ordinary messages or photos and connect them back to the user\'s goals and trends',
+    )
+    expect(compact).toContain(
+      'do not dilute it into a category label such as “health insights” or “support.”',
+    )
+    expect(compact).toContain(
+      'End with one easy choice asking which capability they want to try, or whether they want to return to one of their named goals.',
     )
     expect(compact).toContain(
       'create the first-value launch offer before any plan or support write.',
@@ -2097,7 +2118,12 @@ describe('assistant skill assets', () => {
 
     const aspirationSection = raw.slice(aspirationIndex, parkIndex)
     const returnSection = raw.slice(returnIndex, completionIndex)
+    const capabilityTourSection = raw.slice(
+      raw.indexOf('If they pick the\ntour'),
+      raw.indexOf('Return to the one or two open threads.'),
+    )
     const completionSection = raw.slice(completionIndex, replyRulesIndex)
+    expect(capabilityTourSection.match(/^- /gmu)).toHaveLength(6)
     expect(
       [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
         .map((match) => match[1]),

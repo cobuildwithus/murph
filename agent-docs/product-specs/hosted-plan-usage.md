@@ -163,6 +163,14 @@ conversion-pending trial as a start-now choice, discloses the current terms,
 and asks for explicit confirmation instead of presenting it as non-charging
 continuation.
 
+After a signed-in member completes a payment-method-update link returned by
+private-chat `continue_pulse` or `start_pulse_now`, the authenticated browser
+return automatically resumes that exact claimed action. The short-lived signed
+return contains no member identifier, and the resulting HttpOnly claim is bound
+to the current member, app session, and action. Cancel, copied-to-another-member,
+expired, tampered, and marker-only returns remain inert. The browser never
+upgrades a continue-at-trial-end choice into an immediate start.
+
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
 Edge uses the existing plan-change service. Pulse activation keeps its existing
 Stripe-hosted invoice or Customer Portal handoff when payment is required. A
