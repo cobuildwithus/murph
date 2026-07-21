@@ -72,9 +72,11 @@ function PersonaGlyphPaths({ personaId }: { personaId: AssistantBasePersonaId })
       );
     case "straight-talking-friend":
       return (
-        <g fill="none" strokeWidth="2.1">
-          <path d="M11 34h13V22h-9v-2c0-5 3-8 9-10" />
-          <path d="M36 34h13V22h-9v-2c0-5 3-8 9-10" />
+        <g fill="none" strokeWidth="2.35">
+          <circle cx="41" cy="24" r="6" />
+          <path d="M37 36h4c7 0 12 5 12 12v3" />
+          <circle cx="24" cy="22" r="7" />
+          <path d="M10 51v-3c0-9 6-15 14-15s14 6 14 15v3" />
         </g>
       );
   }

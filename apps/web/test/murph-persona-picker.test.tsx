@@ -235,6 +235,11 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
       rendered.container.querySelectorAll("[data-persona-glyph]").length,
       6,
     );
+    const friendGlyph = rendered.container.querySelector(
+      "[data-persona-glyph='straight-talking-friend']",
+    );
+    assert.equal(friendGlyph?.querySelectorAll("circle").length, 2);
+    assert.equal(friendGlyph?.querySelectorAll("path").length, 2);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text style|Voice/u);
 
     await clickControlContaining(rendered, "Navy SEAL");
