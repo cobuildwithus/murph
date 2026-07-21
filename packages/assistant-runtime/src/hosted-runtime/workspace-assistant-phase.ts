@@ -256,6 +256,12 @@ const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-updat
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
+const HOSTED_FOREGROUND_PENDING_EFFECTS_ROUTE_ACTIONS = [
+  "apply-runtime-control-request",
+] as const;
+const HOSTED_FOREGROUND_PENDING_EFFECTS_WAKE_KINDS = [
+  "runtime.pending-effects-reconcile-requested",
+] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -1403,6 +1409,12 @@ export async function runHostedWorkspaceAssistantPhase(
     const shouldRunPendingAssistantInputFirst = pendingAssistantInputWakeAt !== null;
     const hasAssistantInputAtPassStart =
       hasFreshConversationInput || shouldRunPendingAssistantInputFirst;
+    const shouldRunForegroundPendingEffectsFirst =
+      !shouldRunPendingAssistantInputFirst
+      && await hasDueForegroundPendingEffectsReconciliation({
+        hasFreshConversationInput,
+        input,
+      });
     const systemMailboxMaintenanceStartedAt = Date.now();
     const systemMailboxMaintenance = shouldRunPendingAssistantInputFirst
       ? emptyHostedSystemMailboxMaintenanceResult({
@@ -1410,6 +1422,7 @@ export async function runHostedWorkspaceAssistantPhase(
       })
       : await runSystemMailboxMaintenancePhase({
         executionContext,
+        foregroundPendingEffectsOnly: shouldRunForegroundPendingEffectsFirst,
         hasFreshConversationInput,
         input,
         wake,
@@ -2133,6 +2146,24 @@ async function resolveInitialPendingAssistantInputWakeAt(input: {
   }
 
   return await resolvePendingAssistantInputWakeAt(input.input);
+}
+
+async function hasDueForegroundPendingEffectsReconciliation(input: {
+  hasFreshConversationInput: boolean;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<boolean> {
+  if (!input.hasFreshConversationInput) {
+    return false;
+  }
+
+  const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+  const wake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: HOSTED_FOREGROUND_PENDING_EFFECTS_ROUTE_ACTIONS,
+    allowedWakeKinds: HOSTED_FOREGROUND_PENDING_EFFECTS_WAKE_KINDS,
+    now: () => now,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  return wake.at !== null && hostedAssistantPhaseWakeIsDueAt(wake.at, now);
 }
 
 function emptyHostedSystemMailboxMaintenanceResult(input: {
@@ -3049,12 +3080,15 @@ function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
 
 function isCausalPendingEffectsReconciliation(
   systemMailboxPreparation: HostedSystemMailboxPreparation,
-): boolean {
+): systemMailboxPreparation is HostedCausalPendingEffectsReconciliationPreparation {
   // This wake names one already-persisted approval effect. Finishing that exact
   // continuation is part of the member's foreground action, not a background
   // scan that should yield to a later chat message.
   return "item" in systemMailboxPreparation
-    && systemMailboxPreparation.status === "processed"
+    && (
+      systemMailboxPreparation.status === "processed"
+      || systemMailboxPreparation.status === "recording"
+    )
     && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
     && systemMailboxPreparation.item.wake.kind
       === "runtime.pending-effects-reconcile-requested";
@@ -3074,6 +3108,17 @@ type HostedDeviceActivityAutomationScheduleResult =
 type HostedSystemMailboxPreparation = NonNullable<
   Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
 >;
+type HostedCausalPendingEffectsReconciliationPreparation = Extract<
+  HostedSystemMailboxPreparation,
+  { status: "processed" | "recording" }
+> & {
+  item: HostedSystemMailboxPendingItem & {
+    wake: Extract<
+      HostedSystemMailboxPendingItem["wake"],
+      { kind: "runtime.pending-effects-reconcile-requested" }
+    >;
+  };
+};
 type HostedAssistantCronStatus = Awaited<ReturnType<typeof getAssistantCronStatus>>;
 
 interface HostedAssistantCronWakeState {
@@ -3929,6 +3974,7 @@ function resolveDeferredPendingAssistantInputWakeAt(input: {
 
 async function runSystemMailboxMaintenancePhase(input: {
   executionContext: AssistantExecutionContext;
+  foregroundPendingEffectsOnly?: boolean;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputBlocksMaintenance?: boolean;
@@ -3942,9 +3988,13 @@ async function runSystemMailboxMaintenancePhase(input: {
   pendingAssistantInputWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
+  const foregroundPendingEffectsOnly = input.foregroundPendingEffectsOnly === true;
   if (
-    input.hasFreshConversationInput
-    || input.input.shouldYieldBackgroundMaintenance?.() === true
+    (
+      input.hasFreshConversationInput
+      || input.input.shouldYieldBackgroundMaintenance?.() === true
+    )
+    && !foregroundPendingEffectsOnly
   ) {
     return {
       backgroundMaintenanceYielded: false,
@@ -4006,11 +4056,15 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
   }
 
-  const memberPreferencesPrePlanning =
-    await runPrePlanningMemberPreferencesMailboxPhase({
-      executionContext: input.executionContext,
-      input: phaseInput,
-    });
+  const memberPreferencesPrePlanning = foregroundPendingEffectsOnly
+    ? {
+        continueAssistantLane: true,
+        result: null,
+      }
+    : await runPrePlanningMemberPreferencesMailboxPhase({
+        executionContext: input.executionContext,
+        input: phaseInput,
+      });
   const mergeMemberPreferencesPrePlanningResult = (
     result: HostedWorkspaceRunnerAssistantPhaseResult | null,
   ): HostedWorkspaceRunnerAssistantPhaseResult | null =>
@@ -4033,6 +4087,12 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
 
   const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
+    ...(foregroundPendingEffectsOnly
+      ? {
+          allowedRouteActions: HOSTED_FOREGROUND_PENDING_EFFECTS_ROUTE_ACTIONS,
+          allowedWakeKinds: HOSTED_FOREGROUND_PENDING_EFFECTS_WAKE_KINDS,
+        }
+      : {}),
     executionContext: input.executionContext,
     operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
     runtime: phaseInput.runtime,
@@ -4043,12 +4103,12 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
   const shouldYieldAfterSystemMailboxPreparation =
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
-  const causalPendingEffectsReconciliationOwnsThisPass =
+  const causalPendingEffectsReconciliationPrepared =
     systemMailboxPreparation !== null
     && isCausalPendingEffectsReconciliation(systemMailboxPreparation);
   const backgroundMaintenanceYielded =
     shouldYieldAfterSystemMailboxPreparation
-    && !causalPendingEffectsReconciliationOwnsThisPass;
+    && !causalPendingEffectsReconciliationPrepared;
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
@@ -4060,6 +4120,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     systemMailboxPreparation,
   });
   const dirtyDeviceSyncMetrics = shouldRunDirtyDeviceSyncWorkSource
+    && !foregroundPendingEffectsOnly
     ? await runIdleDeviceSyncWakeLaneBestEffort({
         phaseInput,
         wake: input.wake,
@@ -4077,6 +4138,16 @@ async function runSystemMailboxMaintenancePhase(input: {
     invalidateAssistantCronWakeState();
   }
   if (!systemMailboxPreparation) {
+    if (foregroundPendingEffectsOnly) {
+      return {
+        backgroundMaintenanceYielded: false,
+        continueAssistantLane: true,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: mergeMemberPreferencesPrePlanningResult(null),
+      };
+    }
     if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
       return {
         backgroundMaintenanceYielded,
@@ -4171,6 +4242,12 @@ async function runSystemMailboxMaintenancePhase(input: {
         vaultRoot: phaseInput.restored.vaultRoot,
       })
       : [];
+  const causalPendingEffectsReconciliationOwnsThisPass =
+    isCausalPendingEffectsReconciliation(systemMailboxPreparation)
+    && systemMailboxDeliveryEffects.length > 0;
+  const causalPendingEffectsReconciliationCompletedWithoutDelivery =
+    isCausalPendingEffectsReconciliation(systemMailboxPreparation)
+    && systemMailboxDeliveryEffects.length === 0;
   let systemMailboxDeliveryPreparation: HostedAssistantDeliveryPreparation | null = null;
   if (systemMailboxDeliveryEffects.length > 0) {
     systemMailboxDeliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
@@ -4295,7 +4372,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     continueAssistantLane:
       !causalPendingEffectsReconciliationOwnsThisPass
       && (
-        systemAssistantCronWakeState.dueNow
+        foregroundPendingEffectsOnly
+        || causalPendingEffectsReconciliationCompletedWithoutDelivery
+        || systemAssistantCronWakeState.dueNow
         || backgroundMaintenanceYielded
         || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation)
       ),
@@ -7375,7 +7454,10 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   preparation: HostedSystemMailboxCheckpointPreparation;
   shouldYieldAfterSystemMailboxPreparation: boolean;
 }): boolean {
-  if (input.preparation.status !== "processed") {
+  if (
+    input.preparation.status !== "processed"
+    && !isCausalPendingEffectsReconciliation(input.preparation)
+  ) {
     return false;
   }
   if (
@@ -7405,11 +7487,7 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
 function resolveHostedSystemMailboxPreferredEffectIds(
   preparation: HostedSystemMailboxCheckpointPreparation,
 ): readonly string[] {
-  if (
-    preparation.status !== "processed"
-    || preparation.item.wake.kind
-      !== "runtime.pending-effects-reconcile-requested"
-  ) {
+  if (!isCausalPendingEffectsReconciliation(preparation)) {
     return [];
   }
   return [preparation.item.wake.effectId];

@@ -294,6 +294,7 @@ function isHostedDeviceSyncDenseRawRetentionMailboxItem(
 
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<string | null> {
@@ -302,14 +303,22 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedRuntimeWakeCandidate> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const selectionState = input.allowedWakeKinds == null
+    ? state
+    : {
+        pending: state.pending.filter((item) =>
+          input.allowedWakeKinds?.includes(item.wake.kind)
+        ),
+      };
   const items = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: input.allowedRouteActions ?? null,
-    state,
+    state: selectionState,
   });
   return selectHostedRuntimeWakeCandidate(
     items.map((item) =>
