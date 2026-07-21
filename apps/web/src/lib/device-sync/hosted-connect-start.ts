@@ -1,6 +1,10 @@
 import "server-only";
 
-import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
+import {
+  isDeviceConnectSourceAvailableForConnection,
+  type DeviceSyncConnectTarget,
+} from "@murphai/device-syncd/connect-config";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import { assertHostedWhoopConnectCapacityAvailable } from "./whoop-connect-capacity";
@@ -20,6 +24,15 @@ export async function startHostedDeviceSyncConnection(input: {
   request: Request;
   target: DeviceSyncConnectTarget;
 }): Promise<HostedDeviceSyncConnectResponse> {
+  if (!isDeviceConnectSourceAvailableForConnection(input.target.connectSourceId)) {
+    throw deviceSyncError({
+      code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+      httpStatus: 404,
+      message: "Hosted device connect source is not configured.",
+      retryable: false,
+    });
+  }
+
   assertHostedOnboardingMutationOrigin(input.request);
   const prisma = getPrisma();
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);

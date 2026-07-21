@@ -1276,6 +1276,39 @@ describe("device sync settings routes", () => {
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
+  it("rejects Strava source starts even when direct and Junction credentials are configured", async () => {
+    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
+    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/strava/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "strava" }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        message: "Hosted device connect source is not configured.",
+        retryable: false,
+      },
+    });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
   it("starts a hosted connect source flow through Junction by source id", async () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");

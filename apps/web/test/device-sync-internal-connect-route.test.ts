@@ -104,6 +104,38 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
+  it("does not issue a hosted connect link for configured Strava routes", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
+    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
+    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/connect-targets/strava/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          connectTarget: "strava",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+        retryable: false,
+      },
+    });
+  });
+
   it("rejects wearable authorization for a synthetic group container", async () => {
     mocks.isHostedThreadContainerMember.mockResolvedValue(true);
 
