@@ -1360,10 +1360,17 @@ misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses browser-session backstops from the latest replica
-ref, client-known ref identity, and a bounded max-age policy; ref presence alone
-is never freshness. Workspace checkpoint timestamps are not content-version
-signals for replica freshness. Stale session reads may still serve a usable
-replica, but they must mark it stale and request refresh after the HTTP response.
+ref, the shared current projection generation, client-known ref identity, and a
+bounded max-age policy; ref presence alone is never freshness. Every newly built
+replica and published ref carries the shared generation marker. A missing or
+mismatched marker remains readable for deploy compatibility but is always stale,
+so opening any browser-vault-backed surface requests the existing refresh path.
+Projection-shape or projection-interpretation changes that make older sidecars
+incomplete must bump that one shared generation; feature routes must not add
+their own replica-version checks. Workspace checkpoint timestamps are not
+content-version signals for replica freshness. Stale session reads may still
+serve a usable replica, but they must mark it stale and request refresh after the
+HTTP response.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
@@ -1372,7 +1379,14 @@ write only the workspace snapshot ref; they do not publish browser-vault
 replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
-version.
+version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
+legacy readable replica while refresh retries, but the Worker and warm containers
+should converge immediately after a generation bump so refreshes produce the
+current marker instead of repeatedly publishing legacy refs. During rollback,
+an older Web or Worker parser may omit the additive marker while echoing an
+otherwise identical ref. The browser loader may restore only that omission from
+its exact known ref or the authenticated replica payload; present mismatches and
+all other immutable-field mismatches still fail closed.
 
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
