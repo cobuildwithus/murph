@@ -142,15 +142,14 @@ test("only device-derived readings decide the latest card value without history 
     expect(section?.querySelector("ul")?.className).toContain("md:grid-cols-2");
     expect(section?.querySelector("ul")?.className).toContain("xl:grid-cols-3");
 
-    // The header count includes only the device metrics that render.
-    expect(text).toContain("1 biomarker");
+    expect(text).toContain("1 metric");
     expect(text).not.toContain("No lab results yet");
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("device biomarkers appear before closed lab sections", async () => {
+test("device biomarkers remain first while lab sections start expanded", async () => {
   browserVaultMock.value.client = clientWithMetricRows(
     [
       metricRow({
@@ -180,7 +179,7 @@ test("device biomarkers appear before closed lab sections", async () => {
     if (!deviceSection || !labSection) {
       throw new Error("Expected device and lab sections");
     }
-    expect(labSection.hasAttribute("open")).toBe(false);
+    expect(labSection.hasAttribute("open")).toBe(true);
     const labGroupContainer = labSection.parentElement;
     if (!labGroupContainer) {
       throw new Error("Expected lab group container");

@@ -128,8 +128,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Health data/);
-  assert.match(markup, /Your biomarkers/);
+  assert.match(markup, />Biomarkers</);
   assert.match(markup, /No lab results yet/);
   assert.doesNotMatch(markup, /Library/);
   assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
@@ -148,8 +147,8 @@ test("BiomarkersPage shows a loading skeleton while the private vault opens", as
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, /Loading your saved biomarker results/);
-  assert.match(markup, /min-h-16/);
-  assert.doesNotMatch(markup, /min-h-24/);
+  assert.match(markup, /rounded-full/);
+  assert.match(markup, /xl:grid-cols-3/);
 });
 
 test("BiomarkersPage shows preparation copy while its replica refresh is pending", async () => {
