@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
@@ -78,6 +79,8 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 2);
+  assert.equal(replica.generation, 2);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   assert.equal(replica.labResultRows.length, 7);
@@ -466,6 +469,7 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     sourceBundleHash: "a".repeat(64),
     vault,
   });
+  assert.equal(replica.generation, 2);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const indexed = selectBrowserVaultMeasuredBiomarkers(client)
     .find((entry) => entry.metricKey === "total-testosterone");

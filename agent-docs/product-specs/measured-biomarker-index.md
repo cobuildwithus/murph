@@ -65,6 +65,9 @@ commentary, and unknown custom fields.
   index selector. Exact lab-row and detail queries remain read-only views of the
   preserved projection, and projection-version changes rebuild stored metric
   identities when alias semantics change.
+- `packages/contracts` owns the shared browser-replica generation. The expanded
+  alias interpretation advances it to generation 2 so generation-1 sidecars are
+  served as stale and refresh through the existing runtime path.
 - `apps/web` owns device-first ordering and the disclosure/notebook presentation;
   it must not maintain a second classification list.
 
