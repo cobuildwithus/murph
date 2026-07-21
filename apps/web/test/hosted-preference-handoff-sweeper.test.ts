@@ -34,6 +34,7 @@ describe("hosted preference handoff sweeper", () => {
     });
 
     expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_preference_1",
       mailboxItemId: "mailbox_preference_1",
     });
@@ -86,6 +87,32 @@ describe("hosted preference handoff sweeper", () => {
     });
 
     expect(requestHandoff).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a hung handoff so the recovery sweep can finish", async () => {
+    const requestHandoff = vi.fn(() => new Promise<never>(() => {}));
+
+    const result = await runHostedPreferenceHandoffSweeper({
+      handoffTimeoutMs: 1,
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+      store: buildStore([{
+        mailboxItemId: "mailbox_preference_hung",
+        userId: "member_preference_hung",
+      }]),
+    });
+
+    expect(result).toMatchObject({
+      handoffAccepted: 0,
+      handoffAttempted: 1,
+      handoffFailed: 1,
+    });
+    expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_preference_hung",
+      mailboxItemId: "mailbox_preference_hung",
+    });
   });
 
   it("skips inactive owners and keeps each sweep bounded", async () => {
@@ -141,6 +168,7 @@ describe("hosted preference handoff sweeper", () => {
     });
 
     expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: activeCandidate.userId,
       mailboxItemId: activeCandidate.mailboxItemId,
     });
@@ -183,6 +211,7 @@ describe("hosted preference handoff sweeper", () => {
       requestHandoff.mock.invocationCallOrder[0]!,
     );
     expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_group_runtime",
       mailboxItemId: "mailbox_group_preference",
     });
@@ -223,6 +252,7 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain('"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)');
     expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
     expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_clinical_current",
       mailboxItemId: "mailbox_clinical_current",
     });
@@ -254,6 +284,7 @@ describe("hosted preference handoff sweeper", () => {
     expect(hasActiveAccess).toHaveBeenCalledTimes(1);
     expect(requestHandoff).toHaveBeenCalledTimes(1);
     expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_shared",
       mailboxItemId: "mailbox_preference_shared",
     });

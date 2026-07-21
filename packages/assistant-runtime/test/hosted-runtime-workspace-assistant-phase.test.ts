@@ -12436,7 +12436,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("drains one bounded member preference page before planning fresh conversation input", async () => {
+  it("drains one bounded due preference page before rescheduling fresh conversation input", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValue({
       at: now,
@@ -12469,8 +12469,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(10);
-    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(12);
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(11);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: now,
       progressed: true,
