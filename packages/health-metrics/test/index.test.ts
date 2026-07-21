@@ -160,6 +160,20 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("Lymphocyte pct")?.key, "lymphocyte-percentage");
   assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
   assert.equal(resolveMetricDefinition("Red cell distribution width (RDW)")?.key, "red-cell-distribution-width");
+  assert.equal(resolveMetricDefinition("BUN")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinition("Urea Nitrogen")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinition("TSH")?.key, "thyroid-stimulating-hormone");
+  assert.equal(resolveMetricDefinition("MCH")?.key, "mean-corpuscular-hemoglobin");
+  assert.equal(resolveMetricDefinition("MCHC")?.key, "mean-corpuscular-hemoglobin-concentration");
+  assert.equal(resolveMetricDefinition("HbA1c NGSP")?.key, "hba1c");
+  assert.equal(resolveMetricDefinition("HbA1c SI")?.key, "hba1c");
+  assert.equal(resolveMetricDefinition("Estimated GFR")?.key, "egfr");
+  assert.equal(resolveMetricDefinition("GFR MDRD Af Amer"), null);
+  assert.equal(resolveMetricDefinition("GFR MDRD Non Af Amer"), null);
+  assert.equal(resolveMetricDefinition("ALT(SGPT)")?.key, "alt");
+  assert.equal(resolveMetricDefinition("Alanine Transaminase")?.key, "alt");
+  assert.equal(resolveMetricDefinition("BUN/Creatinine Ratio"), null);
+  assert.equal(resolveMetricDefinition("Urea"), null);
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
@@ -583,6 +597,36 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "%",
     value: 13.1,
   }).canonicalValue, 13.1);
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "urea-nitrogen",
+    unit: "mmol/L",
+    value: 4,
+  }), {
+    canonicalUnit: "mg/dL",
+    canonicalValue: 11.2045,
+    unit: "mmol/L",
+    warnings: [],
+  });
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "TSH",
+    unit: "uIU/mL",
+    value: 1.25,
+  }), {
+    canonicalUnit: "mIU/L",
+    canonicalValue: 1.25,
+    unit: "mIU/L",
+    warnings: [],
+  });
+  assert.equal(normalizeMetricValue({
+    metricKey: "MCH",
+    unit: "pg",
+    value: 29.4,
+  }).canonicalUnit, "pg");
+  assert.equal(normalizeMetricValue({
+    metricKey: "MCHC",
+    unit: "g/dL",
+    value: 32.5,
+  }).canonicalUnit, "g/dL");
 });
 
 test("lists Murph Age source routes as metadata-only model strategy", () => {

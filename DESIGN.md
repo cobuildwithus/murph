@@ -193,6 +193,17 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### Measured Biomarker Index
+On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
+native `<details>` disclosures, closed by default, with a Fraunces area name, a
+small DM Mono biomarker count, and one rotating chevron in the summary. The
+opened contents are one partitioned notebook surface rather than a stack of
+nested cards: one column on narrow screens, two columns from `md`, with warm
+one-pixel seams between rows. Each compact row keeps the biomarker identity and
+history on the left, latest value and date on the right, and one navigation
+chevron. Use explicit health-area classification; never show an `Other` dump or
+invent interpretation for an unclassified lab field.
+
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
 results pages. Use three columns at wide desktop widths, two at small desktop

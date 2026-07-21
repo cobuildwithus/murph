@@ -180,10 +180,7 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.equal(detail.hasIncompatibleHistory, true);
   assert.deepEqual(detail.chartSeries.map((point) => point.value), [5.4, 5.6]);
 
-  const custom = measured.find((entry) => entry.metricKey === "novel-marker");
-  assert.ok(custom);
-  assert.equal(custom.displayName, "Novel Marker");
-  assert.equal(custom.healthArea.id, "other");
+  assert.equal(measured.some((entry) => entry.metricKey === "novel-marker"), false);
   assert.deepEqual(
     selectBrowserVaultLabBiomarkerDetail(client, "novel-marker")?.chartSeries.map((point) => point.value),
     [1, 2],
@@ -192,6 +189,7 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   const qualitative = selectBrowserVaultLabBiomarkerDetail(client, "hepatitis-b-surface-antigen");
   assert.ok(qualitative);
   assert.deepEqual(qualitative.chartSeries, []);
+  assert.equal(replica.labResultRows.length, 7);
   assert.deepEqual(
     client.labResults.list({ from: "2023-01-01", metricKey: "hba1c", to: "2025-12-31" })
       .map((row) => row.date),
@@ -202,6 +200,111 @@ test("lab result selectors group measured biomarkers and chart only comparable e
     ["2020-02-01", "2023-03-01", "2025-04-01", "2026-06-01"],
   );
   assert.deepEqual(client.labResults.list({ biomarkerKey: "biomarker:missing" }), []);
+});
+
+test("lab aliases collapse while nearby measurements remain distinct", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_aliases_2024", "2024-03-01T08:00:00.000Z", [
+        { analyte: "BUN", unit: "mg/dL", value: 14 },
+        { analyte: "TSH", unit: "uIU/mL", value: 2.5 },
+        { analyte: "MCH", unit: "pg", value: 30 },
+        { analyte: "MCHC", unit: "g/dL", value: 33 },
+        { analyte: "BUN/Creatinine Ratio", value: 12 },
+        { analyte: "HbA1c NGSP", unit: "%", value: 5.1 },
+        { analyte: "Estimated GFR", unit: "mL/min/1.73m^2", value: 92 },
+        { analyte: "GFR MDRD Af Amer", unit: "mL/min/1.73m^2", value: 105 },
+        { analyte: "GFR MDRD Non Af Amer", unit: "mL/min/1.73m^2", value: 97 },
+      ]),
+      createLabTest("evt_aliases_2025", "2025-03-01T08:00:00.000Z", [
+        { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 15 },
+        { analyte: "Thyroid Stimulating Hormone", unit: "mIU/L", value: 3.1 },
+        { analyte: "Mean Corpuscular Hemoglobin", unit: "pg", value: 31 },
+        { analyte: "Mean Corpuscular Hemoglobin Concentration", unit: "g/dL", value: 34 },
+        { analyte: "HbA1c SI", unit: "mmol/mol", value: 32 },
+      ]),
+      createLabTest("evt_urea_2026", "2026-03-01T08:00:00.000Z", [
+        { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const measured = selectBrowserVaultMeasuredBiomarkers(client);
+
+  assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
+    "blood-urea-nitrogen",
+    "bun-creatinine-ratio",
+    "egfr",
+    "gfr-mdrd-af-amer",
+    "gfr-mdrd-non-af-amer",
+    "hba1c",
+    "mean-corpuscular-hemoglobin",
+    "mean-corpuscular-hemoglobin-concentration",
+    "thyroid-stimulating-hormone",
+  ]);
+
+  const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
+  assert.ok(bun);
+  assert.equal(bun.displayName, "Blood urea nitrogen");
+  assert.equal(bun.rows.length, 3);
+  assert.equal(bun.comparableUnit, "mg/dL");
+  assert.deepEqual(bun.chartSeries.map((point) => point.value), [14, 15, 14.0056]);
+
+  const tsh = selectBrowserVaultLabBiomarkerDetail(client, "TSH");
+  assert.ok(tsh);
+  assert.equal(tsh.rows.length, 2);
+  assert.equal(tsh.comparableUnit, "mIU/L");
+  assert.deepEqual(tsh.chartSeries.map((point) => point.value), [2.5, 3.1]);
+
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCH")?.rows.length, 2);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCHC")?.rows.length, 2);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "GFR MDRD Af Amer")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "GFR MDRD Non Af Amer")?.rows.length, 1);
+  const hba1c = selectBrowserVaultLabBiomarkerDetail(client, "HbA1c");
+  assert.equal(hba1c?.rows.length, 2);
+  assert.equal(hba1c?.hasIncompatibleHistory, true);
+});
+
+test("the measured index excludes unclassified lab-record fields without deleting their rows", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_mixed_record", "2026-03-01T08:00:00.000Z", [
+        { analyte: "Hemoglobin", unit: "g/dL", value: 15 },
+        { analyte: "ECG axis", unit: "degrees", value: 70 },
+        { analyte: "Urine color", textValue: "Clear" },
+        { analyte: "Screening result", textValue: "Negative" },
+        { analyte: "Report sequence", value: 12345 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "8".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  assert.equal(replica.labResultRows.length, 5);
+  assert.deepEqual(
+    selectBrowserVaultMeasuredBiomarkers(client).map((entry) => entry.metricKey),
+    ["hemoglobin"],
+  );
+  assert.equal(client.labResults.list({ metricKey: "ecg-axis" }).length, 1);
+  assert.equal(client.labResults.list({ metricKey: "urine-color" }).length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "report-sequence")?.rows.length, 1);
 });
 
 test("lab projection ignores test-result points whose collapsed live event is absent", async () => {
@@ -365,8 +468,7 @@ test("custom analytes with no normalized characters keep a deterministic private
   assert.equal(second.labResultRows[0]?.metricKey, metricKey);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(first));
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
-  assert.equal(measured[0]?.displayName, "β?!");
-  assert.equal(measured[0]?.healthArea.id, "other");
+  assert.deepEqual(measured, []);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, metricKey)?.rows.length, 1);
   // The hashed fallback is one identity across every scalar source: an
   // observation with the same non-normalizable name lands on the same key.

@@ -4,6 +4,7 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
   parseBrowserVaultReplica,
+  type BrowserVaultLabResultRow,
   type BrowserVaultMetricRow,
   type BrowserVaultQueryClient,
   type BrowserVaultReplica,
@@ -141,7 +142,96 @@ test("only device-derived readings render, count, and decide the latest value", 
 
     // The header count includes only the device metrics that render.
     expect(text).toContain("1 biomarker");
-    expect(text).toContain("No lab results yet");
+    expect(text).not.toContain("No lab results yet");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("device biomarkers appear before closed lab sections", async () => {
+  browserVaultMock.value.client = clientWithMetricRows(
+    [
+      metricRow({
+        date: "2026-07-14",
+        id: "w1",
+        metricKey: "resting-heart-rate",
+        sourceKind: "wearable-summary",
+        value: 59,
+      }),
+    ],
+    [labRow()],
+  );
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    const deviceSection = rendered.container.querySelector(
+      '[aria-labelledby="biomarker-devices-heading"]',
+    );
+    const labSection = rendered.container.querySelector("details");
+    expect(deviceSection).not.toBeNull();
+    expect(labSection).not.toBeNull();
+    if (!deviceSection || !labSection) {
+      throw new Error("Expected device and lab sections");
+    }
+    expect(labSection.hasAttribute("open")).toBe(false);
+    const labGroupContainer = labSection.parentElement;
+    if (!labGroupContainer) {
+      throw new Error("Expected lab group container");
+    }
+    const pageSections = [...(deviceSection.parentElement?.children ?? [])];
+    expect(pageSections.indexOf(deviceSection)).toBeLessThan(
+      pageSections.indexOf(labGroupContainer),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("device biomarkers remain visible above the notice for unclassified saved labs", async () => {
+  browserVaultMock.value.client = clientWithMetricRows(
+    [
+      metricRow({
+        date: "2026-07-14",
+        id: "w1",
+        metricKey: "resting-heart-rate",
+        sourceKind: "wearable-summary",
+        value: 59,
+      }),
+    ],
+    [{
+      ...labRow(),
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }],
+  );
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("From your devices");
+    expect(text).toContain("Resting heart rate");
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("Report sequence");
+    expect(text.indexOf("From your devices")).toBeLessThan(
+      text.indexOf("No recognized lab biomarkers yet"),
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -211,8 +301,11 @@ test("the device section stays hidden without device data or authentication", as
   }
 });
 
-function clientWithMetricRows(metricRows: BrowserVaultMetricRow[]): BrowserVaultQueryClient {
-  return createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica(metricRows)));
+function clientWithMetricRows(
+  metricRows: BrowserVaultMetricRow[],
+  labResultRows: BrowserVaultLabResultRow[] = [],
+): BrowserVaultQueryClient {
+  return createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica(metricRows, labResultRows)));
 }
 
 function metricRow(
@@ -243,12 +336,15 @@ function metricRow(
   };
 }
 
-function createReplica(metricRows: BrowserVaultMetricRow[]): BrowserVaultReplica {
+function createReplica(
+  metricRows: BrowserVaultMetricRow[],
+  labResultRows: BrowserVaultLabResultRow[] = [],
+): BrowserVaultReplica {
   return {
     assistantSummary: { highlights: [], latestDate: null },
     entities: [],
     generatedAt: "2026-07-16T12:00:00.000Z",
-    labResultRows: [],
+    labResultRows,
     metricGoalProgressRows: [],
     metricRows,
     metricSelectionRows: [],
@@ -268,5 +364,27 @@ function createReplica(metricRows: BrowserVaultMetricRow[]): BrowserVaultReplica
     sourceHealthRows: [],
     timelineRows: [],
     weeklySampleSummaries: [],
+  };
+}
+
+function labRow(): BrowserVaultLabResultRow {
+  return {
+    analyte: "Hemoglobin A1c",
+    biomarkerKey: "biomarker:hba1c",
+    comparator: null,
+    date: "2026-06-14",
+    flag: null,
+    id: "hba1c-default",
+    labName: "Example Lab",
+    metricKey: "hba1c",
+    normalizedUnit: "percent",
+    normalizedValue: 5.6,
+    observedAt: "2026-06-14T08:00:00.000Z",
+    referenceRange: null,
+    rowSchema: "murph.browser-vault.lab-result-row.v1",
+    sourceLabel: "Lab result",
+    textValue: null,
+    unit: "%",
+    value: 5.6,
   };
 }

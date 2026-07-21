@@ -15,6 +15,9 @@ export const LAB_HEALTH_AREA_IDS = [
   "nutrients",
   "inflammation",
   "electrolytes",
+  "muscle-tissue",
+  "environmental",
+  "prostate",
   "other",
 ] as const;
 
@@ -43,9 +46,12 @@ export const LAB_HEALTH_AREAS: readonly LabHealthArea[] = Object.freeze([
   Object.freeze({ id: "thyroid", label: "Thyroid" }),
   Object.freeze({ id: "blood", label: "Blood" }),
   Object.freeze({ id: "hormones", label: "Hormones" }),
-  Object.freeze({ id: "nutrients", label: "Nutrients" }),
-  Object.freeze({ id: "inflammation", label: "Inflammation" }),
+  Object.freeze({ id: "nutrients", label: "Nutrients & fatty acids" }),
+  Object.freeze({ id: "inflammation", label: "Inflammation & immune" }),
   Object.freeze({ id: "electrolytes", label: "Electrolytes" }),
+  Object.freeze({ id: "muscle-tissue", label: "Muscle & tissue" }),
+  Object.freeze({ id: "environmental", label: "Environmental exposure" }),
+  Object.freeze({ id: "prostate", label: "Prostate health" }),
   OTHER_LAB_HEALTH_AREA,
 ]);
 
@@ -82,12 +88,23 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "lpa",
     "apolipoprotein-a1",
     "apoa1",
+    "cholesterol-hdl-ratio",
+    "ldl-large-particles",
+    "ldl-medium-particles",
+    "ldl-particle-number",
+    "ldl-pattern",
+    "ldl-peak-size",
+    "ldl-small-particles",
+    "homocysteine",
+    "poc-troponin-i",
   ],
   kidneys: [
     "creatinine",
     "serum-creatinine",
     "egfr",
     "estimated-glomerular-filtration-rate",
+    "gfr-mdrd-af-amer",
+    "gfr-mdrd-non-af-amer",
     "bun",
     "blood-urea-nitrogen",
     "urea-nitrogen",
@@ -98,6 +115,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "albumin-creatinine-ratio",
     "urine-albumin-creatinine-ratio",
     "urine-protein",
+    "uric-acid",
+    "urine-albumin-random-without-creatinine",
   ],
   liver: [
     "albumin",
@@ -114,7 +133,9 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "indirect-bilirubin",
     "total-protein",
     "globulin",
+    "total-globulin",
     "albumin-globulin-ratio",
+    "fib4",
   ],
   thyroid: [
     "tsh",
@@ -128,6 +149,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "thyroid-peroxidase-antibody",
     "tpo-antibody",
     "thyroglobulin-antibody",
+    "thyroglobulin-antibodies",
+    "thyroid-peroxidase-antibodies",
   ],
   blood: [
     "white-blood-cell-count",
@@ -158,6 +181,17 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "mchc",
     "mean-platelet-volume",
     "mpv",
+    "neutrophil-percentage",
+    "absolute-neutrophils",
+    "absolute-lymphocytes",
+    "monocyte-percentage",
+    "absolute-monocytes",
+    "eosinophil-percentage",
+    "absolute-eosinophils",
+    "basophil-percentage",
+    "absolute-basophils",
+    "immature-granulocyte-percentage",
+    "absolute-immature-granulocytes",
   ],
   hormones: [
     "testosterone",
@@ -194,6 +228,22 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "zinc",
     "copper",
     "selenium",
+    "iron-saturation",
+    "magnesium-rbc",
+    "methylmalonic-acid",
+    "arachidonic-acid",
+    "arachidonic-acid-epa-ratio",
+    "dha",
+    "dpa",
+    "epa",
+    "linoleic-acid",
+    "omega-3-total-omegacheck",
+    "omega-3-total-omega-check",
+    "omega-6-3-ratio",
+    "omega-6-total",
+    "omega-3-total",
+    "omegacheck-total",
+    "omega-check-total",
   ],
   inflammation: [
     "hs-crp",
@@ -203,6 +253,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "erythrocyte-sedimentation-rate",
     "sedimentation-rate",
     "esr",
+    "ana-screen",
+    "rheumatoid-factor",
   ],
   electrolytes: [
     "sodium",
@@ -215,6 +267,26 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "magnesium",
     "phosphorus",
     "phosphate",
+    "adjusted-calcium",
+    "anion-gap",
+  ],
+  "muscle-tissue": [
+    "creatine-kinase",
+    "creatine-phosphokinase",
+    "ck",
+    "ldh",
+    "lactate-dehydrogenase",
+  ],
+  environmental: [
+    "lead",
+    "mercury",
+  ],
+  prostate: [
+    "psa-total",
+    "total-psa",
+    "psa-free",
+    "free-psa",
+    "psa-percent-free",
   ],
   other: [],
 };
@@ -236,8 +308,18 @@ export function listLabHealthAreas(): LabHealthArea[] {
  * navigation group. The result does not interpret the member's value.
  */
 export function resolveLabHealthArea(value: string): LabHealthArea {
+  return resolveIndexedLabHealthArea(value) ?? OTHER_LAB_HEALTH_AREA;
+}
+
+/**
+ * Resolves only analytes that are intentionally admitted to the member-facing
+ * Biomarkers index. A null result preserves the underlying lab row while
+ * keeping report metadata, procedures, screens, and unknown fields out of the
+ * index until an owner classifies them explicitly.
+ */
+export function resolveIndexedLabHealthArea(value: string): LabHealthArea | null {
   const key = resolveLabHealthAreaLookupKey(value);
-  return LAB_HEALTH_AREA_BY_KEY.get(key) ?? OTHER_LAB_HEALTH_AREA;
+  return LAB_HEALTH_AREA_BY_KEY.get(key) ?? null;
 }
 
 /**

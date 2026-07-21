@@ -2,6 +2,7 @@ import {
   groupLabItemsByHealthArea,
   normalizeMetricKey,
   normalizeUnit,
+  resolveIndexedLabHealthArea,
   resolveLabHealthArea,
   resolveMetricDefinition,
   type LabHealthArea,
@@ -147,13 +148,15 @@ export function selectBrowserVaultMeasuredBiomarkers(
   }
 
   const biomarkers = [...rowsByMetricKey.entries()].flatMap(([metricKey, rows]) => {
+    const healthArea = resolveIndexedLabHealthArea(metricKey);
+    if (!healthArea) return [];
     const detail = buildLabBiomarkerDetail(metricKey, rows);
     if (!detail) return [];
     return [{
       biomarkerKey: detail.biomarkerKey,
       displayName: detail.displayName,
       firstDate: detail.rows[0]?.date ?? detail.latest.date,
-      healthArea: detail.healthArea,
+      healthArea,
       lastDate: detail.latest.date,
       latest: detail.latest,
       metricKey: detail.metricKey,
