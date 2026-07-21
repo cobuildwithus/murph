@@ -180,6 +180,7 @@ import {
 } from '../src/assistant/cron/targets.ts'
 import {
   readAssistantCronStore,
+  resolveAssistantCronJobIndex,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
 import {
@@ -6971,6 +6972,126 @@ describe('assistant cron runtime orchestration', () => {
     const notificationContext = cronMocks.sendAssistantMessageLocal.mock
       .calls.at(-1)?.[0]?.executionContext
     expect(notificationContext?.hosted?.groupPermissionOfferTool).toBeUndefined()
+  })
+
+  it('withholds Telegram group tools from manual canonical and scheduled local cron runs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const groupSharedReader = {
+      async request() {
+        return {
+          status: 'unavailable' as const,
+          unavailableReason: 'synthetic_unavailable',
+        }
+      },
+    }
+    const groupTool = {
+      async request(): Promise<never> {
+        throw new Error('Untrusted cron runs must not expose the group tool.')
+      },
+    }
+    const createScheduledGroupTools = vi.fn(() => ({ groupSharedReader, groupTool }))
+    const resolveScheduledExternalThreadRoute = vi.fn(async (input: {
+      target: string
+    }) => ({
+      channel: 'telegram' as const,
+      containerMemberId: 'member-telegram-untrusted-cron',
+      threadId: input.target,
+    }))
+    const executionContext = {
+      hosted: {
+        createScheduledGroupTools,
+        groupSharedReader,
+        groupTool,
+        memberId: 'member-telegram-untrusted-cron',
+        resolveScheduledExternalThreadRoute,
+        userEnvKeys: [],
+      },
+    }
+
+    const canonicalContext = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-manual-group-tools-',
+    )
+    getVaultAutomationStore(canonicalContext.vaultRoot).push({
+      automationId: 'automation-telegram-manual-group-tools',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the manual group reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '-100123456701',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-manual-group-tools',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram manual group tools',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const canonical = await claimFirstCanonicalCronJob(canonicalContext.vaultRoot)
+    const manualResult = await executeClaimedAssistantCronJob({
+      executionContext,
+      job: canonical.claimed,
+      paths: canonical.paths,
+      trigger: 'manual',
+      vault: canonicalContext.vaultRoot,
+    })
+
+    const localContext = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-local-group-tools-',
+    )
+    const originalLocalJob = await createLocalJob(
+      localContext.vaultRoot,
+      'telegram-local-group-tools',
+    )
+    const localPaths = resolveAssistantStatePaths(localContext.vaultRoot)
+    const localStore = await readAssistantCronStore(localPaths)
+    const localJobIndex = resolveAssistantCronJobIndex(
+      localStore,
+      originalLocalJob.jobId,
+    )
+    const localJob = assistantCronJobSchema.parse({
+      ...originalLocalJob,
+      target: {
+        ...originalLocalJob.target,
+        channel: 'telegram',
+        threadId: '-100123456702',
+        threadIsDirect: false,
+      },
+    })
+    localStore.jobs[localJobIndex] = localJob
+    await writeAssistantCronStore(localPaths, localStore)
+    const claimedLocalJob = await claimResolvedAssistantCronJob({
+      job: { job: localJob, kind: 'local' },
+      paths: localPaths,
+    })
+    const localResult = await executeClaimedAssistantCronJob({
+      executionContext,
+      job: claimedLocalJob,
+      paths: localPaths,
+      trigger: 'scheduled',
+      vault: localContext.vaultRoot,
+    })
+
+    expect(manualResult.run.status).toBe('succeeded')
+    expect(localResult.run.status).toBe('succeeded')
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledTimes(2)
+    const notificationCalls = cronMocks.sendAssistantMessageLocal.mock.calls.slice(-2)
+    expect(notificationCalls).toHaveLength(2)
+    for (const [notification] of notificationCalls) {
+      expect(notification.executionContext?.hosted?.groupSharedReader).toBeUndefined()
+      expect(notification.executionContext?.hosted?.groupTool).toBeUndefined()
+    }
   })
 
   it('fails a hosted Telegram group cron before shared reads when live route authority is unavailable', async () => {

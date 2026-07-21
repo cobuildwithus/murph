@@ -674,6 +674,12 @@ export async function executeClaimedAssistantCronJob(
           executionContext: input.executionContext ?? null,
           job: claimedJob,
         })
+        const scheduledInvocationAuthority =
+          resolveAssistantCronScheduledInvocationAuthority({
+            job: input.job,
+            occurrenceAt,
+            trigger: input.trigger,
+          })
         const automationTurn = buildAssistantAutomationTurnEnvelope({
           assistantTargetOverride:
             resolveAssistantCronAutomationTargetOverride(input.job) ??
@@ -685,11 +691,7 @@ export async function executeClaimedAssistantCronJob(
             occurrenceAt,
             trigger: input.trigger,
           }),
-          scheduledInvocationAuthority: resolveAssistantCronScheduledInvocationAuthority({
-            job: input.job,
-            occurrenceAt,
-            trigger: input.trigger,
-          }),
+          scheduledInvocationAuthority,
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
           signal: yieldCancellation.signal,
@@ -728,6 +730,7 @@ export async function executeClaimedAssistantCronJob(
               executionContext: automationTurn.executionContext,
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
+              scheduledInvocationAuthority,
             })
           const assertNotificationStillAuthorized = async (): Promise<void> => {
             const authority = await resolveAssistantCronCanonicalSourceAuthority({
@@ -2087,6 +2090,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   executionContext: AssistantExecutionContext | null | undefined
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
   routeAuthorityVerified: boolean
+  scheduledInvocationAuthority: HostedRuntimeScheduledAutomationAuthority | null
 }): AssistantExecutionContext | null | undefined {
   const hosted = input.executionContext?.hosted
   if (
@@ -2110,6 +2114,9 @@ function scopeAssistantCronScheduledGroupTools(input: {
   void _unscopedGroupTool
   const unscopedExecutionContext: AssistantExecutionContext = {
     hosted: hostedWithoutScheduledGroupTools,
+  }
+  if (!input.scheduledInvocationAuthority) {
+    return unscopedExecutionContext
   }
   const target = normalizeNullableString(
     input.route.bindingDelivery?.target ?? input.route.deliveryTarget,
