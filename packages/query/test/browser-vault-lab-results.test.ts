@@ -8,8 +8,8 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
-  selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultExperimentResults,
+  selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
 } from "../src/browser.ts";
 import { buildMetricProjection, selectMetricGoalProgress, selectMetricValue } from "../src/index.ts";
@@ -85,7 +85,7 @@ test("browser vault projects all live lab history without widening the wearable 
 
   assert.equal(replica.labResultRows.length, 7);
   assert.deepEqual(client.metrics.series({ metricKey: "resting-heart-rate" }), []);
-  assert.deepEqual(client.metrics.series({ metricKey: "hba1c" }).map((row) => row.date), ["2026-06-01"]);
+  assert.deepEqual(client.metrics.series({ metricKey: "hba1c" }), []);
 
   const oldestHba1c = client.labResults.list({ metricKey: "HbA1c" })[0];
   assert.ok(oldestHba1c);
@@ -350,6 +350,319 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(urea.biomarkerKey, null);
   assert.equal(urea.rows.length, 1);
   assert.deepEqual(urea.chartSeries.map((point) => point.value), [5]);
+});
+
+test("lab detail normalizes result values and text-only numeric ranges without mutating source rows", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_albumin_structured", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { high: 50, low: 34 },
+        unit: "g/L",
+        value: 40,
+      }]),
+      createLabTest("evt_albumin_limit", "2026-01-15T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { text: "<= 50 g/L" },
+        unit: "g/L",
+        value: 45,
+      }]),
+      createLabTest("evt_albumin_gdl", "2026-02-17T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        unit: "g/dL",
+        value: 5.1,
+      }]),
+      createLabTest("evt_albumin_gl", "2026-04-23T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { text: "34 - 50" },
+        unit: "g/L",
+        value: 49,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const detail = selectBrowserVaultLabBiomarkerDetail(client, "albumin");
+
+  assert.ok(detail);
+  assert.equal(detail.comparableUnit, "g/dL");
+  assert.deepEqual(detail.chartSeries.map((point) => point.value), [4, 4.5, 5.1, 4.9]);
+  assert.deepEqual(detail.rows[0]?.normalizedReferenceRange, { high: 5, low: 3.4 });
+  assert.deepEqual(detail.rows[1]?.normalizedReferenceRange, {
+    high: 5,
+    highComparator: "<=",
+  });
+  assert.equal(detail.latest.normalizedValue, 4.9);
+  assert.equal(detail.latest.normalizedUnit, "g/dL");
+  assert.deepEqual(detail.latest.normalizedReferenceRange, { high: 5, low: 3.4 });
+
+  const sourceLatest = client.labResults.list({ metricKey: "albumin" }).at(-1);
+  assert.ok(sourceLatest);
+  assert.equal(sourceLatest.value, 49);
+  assert.equal(sourceLatest.unit, "g/L");
+  assert.deepEqual(sourceLatest.referenceRange, { text: "34 - 50" });
+});
+
+test("lab detail uses canonical units for conversion-owned and dimensionally universal mixed histories", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_calcium_si", "2025-01-01T08:00:00.000Z", [{
+        analyte: "Calcium",
+        unit: "mmol/L",
+        value: 2.5,
+      }]),
+      createLabTest("evt_calcium_us", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Calcium",
+        unit: "mg/dL",
+        value: 10,
+      }]),
+      createLabTest("evt_protein_si", "2025-02-01T08:00:00.000Z", [{
+        analyte: "Total Protein",
+        unit: "g/L",
+        value: 70,
+      }]),
+      createLabTest("evt_protein_us", "2026-02-01T08:00:00.000Z", [{
+        analyte: "Total Protein",
+        unit: "g/dL",
+        value: 7,
+      }]),
+      createLabTest("evt_neutrophils_cells", "2025-03-01T08:00:00.000Z", [{
+        analyte: "Neutrophils absolute",
+        unit: "cells/uL",
+        value: 4_000,
+      }]),
+      createLabTest("evt_neutrophils_billions", "2026-03-01T08:00:00.000Z", [{
+        analyte: "Neutrophils absolute",
+        unit: "x10^9/L",
+        value: 4,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "5".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  assert.deepEqual(
+    selectBrowserVaultLabBiomarkerDetail(client, "calcium")?.chartSeries
+      .map(({ unit, value }) => ({ unit, value })),
+    [{ unit: "mg/dL", value: 10 }, { unit: "mg/dL", value: 10 }],
+  );
+  assert.deepEqual(
+    selectBrowserVaultLabBiomarkerDetail(client, "total-protein")?.chartSeries
+      .map(({ unit, value }) => ({ unit, value })),
+    [{ unit: "g/dL", value: 7 }, { unit: "g/dL", value: 7 }],
+  );
+  assert.deepEqual(
+    selectBrowserVaultLabBiomarkerDetail(client, "neutrophils-absolute")?.chartSeries
+      .map(({ unit, value }) => ({ unit, value })),
+    [{ unit: "10^3/uL", value: 4 }, { unit: "10^3/uL", value: 4 }],
+  );
+});
+
+test("unitless lab values remain raw and are excluded from normalized presentation", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_cholesterol_mg", "2024-01-01T08:00:00.000Z", [{
+        analyte: "Total Cholesterol",
+        unit: "mg/dL",
+        value: 201.1,
+      }]),
+      createLabTest("evt_cholesterol_mmol", "2025-01-01T08:00:00.000Z", [{
+        analyte: "Total Cholesterol",
+        unit: "mmol/L",
+        value: 5.2,
+      }]),
+      createLabTest("evt_cholesterol_unitless", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Total Cholesterol",
+        referenceRange: { high: 6, text: "<6 mmol/L" },
+        value: 5.2,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "4".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const detail = selectBrowserVaultLabBiomarkerDetail(client, "total-cholesterol");
+
+  assert.ok(detail);
+  assert.equal(detail.latest.value, 5.2);
+  assert.equal(detail.latest.unit, null);
+  assert.equal(detail.latest.normalizedValue, null);
+  assert.equal(detail.latest.normalizedUnit, null);
+  assert.equal(detail.latest.normalizedReferenceRange, null);
+  assert.deepEqual(detail.latest.referenceRange, { high: 6, text: "<6 mmol/L" });
+  assert.equal(detail.latestComparable?.date, "2025-01-01");
+  assert.equal(detail.previousComparable?.date, "2024-01-01");
+  assert.deepEqual(
+    detail.chartSeries.map(({ unit, value }) => ({ unit, value })),
+    [
+      { unit: "mg/dL", value: 201.1 },
+      { unit: "mg/dL", value: 201.084 },
+    ],
+  );
+
+  const legacyReplica = parseBrowserVaultReplica({
+    ...replica,
+    labResultRows: replica.labResultRows.map((row) =>
+      row.id === detail.latest.id
+        ? { ...row, normalizedUnit: "mg/dL", normalizedValue: 5.2 }
+        : row
+    ),
+  });
+  const legacyDetail = selectBrowserVaultLabBiomarkerDetail(
+    createBrowserVaultQueryClient(legacyReplica),
+    "total-cholesterol",
+  );
+  assert.ok(legacyDetail);
+  assert.equal(legacyDetail.latest.unit, null);
+  assert.equal(legacyDetail.latest.normalizedValue, null);
+  assert.equal(legacyDetail.latest.normalizedUnit, null);
+  assert.equal(legacyDetail.latest.normalizedReferenceRange, null);
+  assert.deepEqual(legacyDetail.chartSeries, detail.chartSeries);
+});
+
+test("structured lab bounds normalize only when accompanying text is exactly equivalent", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_exact", "2023-01-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { high: 50, low: 34, text: "34-50 g/L" },
+        unit: "g/L",
+        value: 45,
+      }]),
+      createLabTest("evt_qualified", "2024-01-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { high: 50, low: 34, text: "34-50 fasting; <60 non-fasting" },
+        unit: "g/L",
+        value: 46,
+      }]),
+      createLabTest("evt_conflicting_unit", "2025-01-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { high: 50, low: 34, text: "3.4-5 g/dL" },
+        unit: "g/L",
+        value: 47,
+      }]),
+      createLabTest("evt_conflicting_bound", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { high: 50, low: 34, text: "35-50 g/L" },
+        unit: "g/L",
+        value: 48,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "3".repeat(64),
+    vault,
+  });
+  const detail = selectBrowserVaultLabBiomarkerDetail(
+    createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)),
+    "albumin",
+  );
+
+  assert.ok(detail);
+  assert.deepEqual(detail.rows.map((row) => row.normalizedReferenceRange), [
+    { high: 5, low: 3.4 },
+    null,
+    null,
+    null,
+  ]);
+  assert.deepEqual(detail.rows.slice(1).map((row) => row.referenceRange?.text), [
+    "34-50 fasting; <60 non-fasting",
+    "3.4-5 g/dL",
+    "35-50 g/L",
+  ]);
+});
+
+test("lab detail preserves qualitative and incompatible ranges without false conversion", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_albumin_narrative_range", "2025-03-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { text: "Expected for adults" },
+        unit: "g/L",
+        value: 45,
+      }]),
+      createLabTest("evt_albumin_incompatible_range", "2026-03-01T08:00:00.000Z", [{
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        referenceRange: { text: "34 - 50 mg/dL" },
+        unit: "g/L",
+        value: 49,
+      }]),
+      createLabTest("evt_custom_score", "2025-01-01T08:00:00.000Z", [{
+        analyte: "Custom marker",
+        referenceRange: { text: "Negative" },
+        textValue: "Negative",
+      }]),
+      createLabTest("evt_custom_index", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Custom marker",
+        referenceRange: { text: "1 - 3 index" },
+        unit: "index",
+        value: 2,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "6".repeat(64),
+    vault,
+  });
+  const detail = selectBrowserVaultLabBiomarkerDetail(
+    createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)),
+    "custom-marker",
+  );
+
+  assert.ok(detail);
+  assert.equal(detail.rows[0]?.normalizedReferenceRange, null);
+  assert.deepEqual(detail.rows[0]?.referenceRange, { text: "Negative" });
+  assert.deepEqual(detail.rows[1]?.normalizedReferenceRange, { high: 3, low: 1 });
+
+  const albumin = selectBrowserVaultLabBiomarkerDetail(
+    createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)),
+    "albumin",
+  );
+  assert.ok(albumin);
+  assert.deepEqual(albumin.rows.map((row) => row.normalizedValue), [4.5, 4.9]);
+  assert.deepEqual(albumin.rows.map((row) => row.normalizedReferenceRange), [null, null]);
+  assert.deepEqual(albumin.rows.map((row) => row.referenceRange), [
+    { text: "Expected for adults" },
+    { text: "34 - 50 mg/dL" },
+  ]);
 });
 
 test("calculation methods remain separate longitudinal identities", async () => {

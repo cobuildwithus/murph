@@ -7,7 +7,7 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue, formatNumber } from "./format.ts";
-import { resolveComparableMetricPointValue } from "./normalize.ts";
+import { resolveComparableMetricPointValue, unitsEquivalent } from "./normalize.ts";
 import { metricPointRecordIds } from "./record-ids.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
@@ -91,7 +91,7 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
   }
 
   const rows = input.aggregation
-    ? aggregateMetricSeriesPoints(selectedPoints, definition, input.aggregation)
+    ? aggregateMetricSeriesPoints(points, definition, input.aggregation)
     : selectMetricSeriesRowsByPolicy(selectedPoints, definition, input.duplicatePolicy ?? "selection-policy");
 
   return {
@@ -120,7 +120,6 @@ function selectMetricSeriesRowsByPolicy(
     const selected = duplicatePolicy === "selection-policy"
       ? selectMetricValue({ metricKey: definition.key, points: datePoints }).point ?? datePoints.at(-1) ?? null
       : datePoints.at(-1) ?? null;
-
     const row = selected ? metricPointToSeriesPoint(selected, definition) : null;
     return row ? [row] : [];
   });
@@ -133,12 +132,16 @@ function aggregateMetricSeriesPoints(
 ): MetricSeriesPoint[] {
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
     const useCanonicalValues = aggregation !== "count" && definition.canonicalUnit !== null;
-    if (useCanonicalValues && datePoints.some((point) => point.value !== null && point.canonicalValue === null)) {
+    if (useCanonicalValues && datePoints.some((point) =>
+      point.value !== null && resolveComparableMetricPointValue(point, definition) === null
+    )) {
       return [];
     }
 
     const values = datePoints
-      .map((point) => resolveComparableMetricPointValue(point, definition)?.value ?? null)
+      .map((point) => aggregation === "count"
+        ? point.canonicalValue ?? point.value
+        : resolveComparableMetricPointValue(point, definition)?.value ?? null)
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
     if (values.length === 0 && aggregation !== "count") {
@@ -192,10 +195,12 @@ function aggregateMetricSeriesPoints(
   });
 }
 
-function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefinition): MetricSeriesPoint | null {
+function metricPointToSeriesPoint(
+  point: MetricPoint,
+  definition: MetricDefinition,
+): MetricSeriesPoint | null {
   const comparable = resolveComparableMetricPointValue(point, definition);
   if (!comparable) return null;
-
   return {
     biomarkerKey: point.biomarkerKey,
     comparator: point.comparator,
@@ -232,9 +237,9 @@ function collectSeriesWarnings(input: {
   ));
 
   if (
-    input.minimumPoints > 0 &&
-    input.points.length > 0 &&
-    input.availablePointCount < input.minimumPoints
+    input.minimumPoints > 0
+    && input.points.length > 0
+    && input.availablePointCount < input.minimumPoints
   ) {
     warnings.push({
       code: "LOW_SAMPLE_COUNT",
@@ -263,9 +268,11 @@ function collectSeriesWarnings(input: {
     });
   }
 
-  if (input.definition.canonicalUnit && input.points.some((point) =>
-    point.value !== null && point.canonicalValue === null && point.canonicalUnit === null
-  )) {
+  if (input.definition.canonicalUnit && input.points.some((point) => {
+    if (point.value === null || !Number.isFinite(point.value)) return false;
+    const comparable = resolveComparableMetricPointValue(point, input.definition);
+    return comparable === null || !unitsEquivalent(comparable.unit, input.definition.canonicalUnit);
+  })) {
     warnings.push({
       code: "UNIT_NOT_NORMALIZED",
       message: `${input.definition.displayName} series includes values that could not be normalized to ${input.definition.canonicalUnit}.`,

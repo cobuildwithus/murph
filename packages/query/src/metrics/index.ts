@@ -69,6 +69,7 @@ export {
   normalizeMetricKey,
   normalizeMetricValue,
   resolveCanonicalBiomarkerKey,
+  resolveComparableMetricPointValue,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
@@ -78,6 +79,7 @@ export {
   selectMetricTrend,
   selectMetricWindowComparison,
   selectMetricValue,
+  unitsEquivalent,
   validateExperimentSessionMetricValue,
 } from "@murphai/health-metrics";
 
