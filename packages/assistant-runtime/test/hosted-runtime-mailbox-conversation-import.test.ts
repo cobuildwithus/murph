@@ -1656,10 +1656,13 @@ describe("hosted mailbox conversation import adapter", () => {
         );
       },
       async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_linq_group_identity_001",
-      }),
+      item: {
+        ...createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_linq_group_identity_001",
+        }),
+        usageRunningLow: true,
+      },
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -1718,6 +1721,7 @@ describe("hosted mailbox conversation import adapter", () => {
       Object.hasOwn(event.sourceMetadata ?? {}, "groupReactionContext"),
       false,
     );
+    assert.equal(Object.hasOwn(event, "usageRunningLow"), false);
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
 
@@ -1732,6 +1736,7 @@ describe("hosted mailbox conversation import adapter", () => {
       candidates.inputs[0]?.event.groupReactionContext,
       groupReactionContext,
     );
+    assert.equal(candidates.inputs[0]?.event.usageRunningLow, true);
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {

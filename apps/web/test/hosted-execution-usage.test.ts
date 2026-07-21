@@ -474,7 +474,7 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("keeps low and exhausted crossings distinct within one capacity epoch", async () => {
+  it("suppresses a standalone low warning while preserving the exhausted notice", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
@@ -516,11 +516,11 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
-      .toHaveBeenCalledTimes(2);
+      .toHaveBeenCalledTimes(1);
     expect(
       noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock.calls
         .map(([input]) => input.noticeCode),
-    ).toEqual(["thread_usage_low", "thread_usage_limit_reached"]);
+    ).toEqual(["thread_usage_limit_reached"]);
   });
 
   it("passes Family-sponsored notice codes through the same crossing send path", async () => {

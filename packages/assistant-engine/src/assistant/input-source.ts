@@ -55,6 +55,7 @@ export interface AssistantInputEvent {
   text: string | null
   transcriptText: string | null
   userMessageContent: readonly AssistantUserMessageContentPart[] | null
+  usageRunningLow?: true
 }
 
 export interface AssistantInputCandidate {
@@ -226,6 +227,9 @@ async function listStoredAssistantInputCandidates(input: {
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
           : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+        ...(hostedMailboxItem?.usageRunningLow === true
+          ? { usageRunningLow: true as const }
+          : {}),
       })
     }),
     nextCursor,
@@ -238,6 +242,7 @@ export function assistantInputCandidateFromStoredEvent(
     groupParticipantAdded?: true
     groupReactionContext?: string
     hostedMailboxItemId?: string | null
+    usageRunningLow?: true
   },
 ): AssistantInputCandidate {
   return assistantInputCandidateFromStoredEventWithHostedMailboxItem({
@@ -249,6 +254,9 @@ export function assistantInputCandidateFromStoredEvent(
       ? { groupReactionContext: input.groupReactionContext }
       : {}),
     hostedMailboxItemId: input?.hostedMailboxItemId ?? null,
+    ...(input?.usageRunningLow === true
+      ? { usageRunningLow: true as const }
+      : {}),
   })
 }
 
@@ -257,6 +265,7 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
   groupParticipantAdded?: true
   groupReactionContext?: string
   hostedMailboxItemId: string | null
+  usageRunningLow?: true
 }): AssistantInputCandidate {
   const event = input.event
   const captureIds = event.projection.captureId ? [event.projection.captureId] : []
@@ -303,6 +312,9 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
       text: event.content.text,
       transcriptText: event.content.transcriptText ?? event.content.text,
       userMessageContent: event.content.userMessageContent,
+      ...(input.usageRunningLow === true
+        ? { usageRunningLow: true as const }
+        : {}),
     },
     projection: {
       captureId: event.projection.captureId,

@@ -907,6 +907,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
+    ...(input.item.usageRunningLow === true
+      ? { usageRunningLow: true as const }
+      : {}),
     inputId: event.inputId,
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
