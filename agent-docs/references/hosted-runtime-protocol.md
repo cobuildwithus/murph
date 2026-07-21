@@ -406,6 +406,16 @@ runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
 
+The signed group-tool Web route returns the deterministic opaque request id in
+`x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask
+responses. On failure, Web may also return the underlying Prisma code only when
+it matches `P####`, in `x-murph-assistant-ask-diagnostic-code`. Cloudflare
+validates both exact shapes before adding them to its typed control-plane error.
+The private runtime may expose only the validated request id, diagnostic code,
+and HTTP status to the model; raw exception messages, response bodies,
+membership ids, and runtime ids remain hidden. These headers are correlation
+metadata only and are never accepted as routing or authorization input.
+
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
 interrupts the exact child, waits a bounded grace period, terminates only that

@@ -1,10 +1,15 @@
 import {
+  HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedAssistantAskRequestId,
+} from "@/src/lib/hosted-groups/group-assistant-ask";
 
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
@@ -93,4 +98,52 @@ describe("hosted group tool route", () => {
       scheduleMailboxWake: expect.any(Function),
     });
   });
+
+  it.each([
+    ["P2010", "P2010"],
+    ["PRIVATE_CODE", null],
+  ])(
+    "returns bounded Assistant Ask diagnostics for unexpected admission code %s",
+    async (errorCode, expectedDiagnosticCode) => {
+      const originAssistantInputId = `ain_${"a".repeat(32)}`;
+      const body = {
+        action: "ask",
+        groupLabel: "100 Club",
+        originAssistantInputId,
+        originSessionId: "session_private",
+        question: "What exercises are scheduled today?",
+      };
+      mocks.handleTool.mockRejectedValue(
+        Object.assign(
+          new Error("Private database detail must not reach the caller."),
+          { code: errorCode },
+        ),
+      );
+      const request = new Request(
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        {
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      const response = await route.POST(request);
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER))
+        .toBe(expectedDiagnosticCode);
+      expect(response.headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER))
+        .toBe(createHostedAssistantAskRequestId({
+          memberId: "member_group_runtime",
+          originAssistantInputId,
+        }));
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      });
+    },
+  );
 });

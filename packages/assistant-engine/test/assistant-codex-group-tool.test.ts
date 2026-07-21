@@ -914,6 +914,107 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("returns only safe group ask failure diagnostics", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      question: "What exercises are assigned today?",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const requestId = `aask_req_${"b".repeat(64)}`;
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw Object.assign(
+        new Error("Private upstream detail must stay hidden."),
+        {
+          code: "P2010",
+          requestId,
+          statusCode: 500,
+        },
+      );
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_private",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_private"],
+          originSessionId: "session_private",
+          recipientKey: "recipient_private",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(readGroupToolPayload(result)).toEqual({
+      errorCode: "P2010",
+      message: "group tool request failed",
+      requestId,
+      status: "request_failed",
+      statusCode: 500,
+    });
+    expect(JSON.stringify(result)).not.toContain("Private upstream detail");
+  });
+
+  it("falls back to a generic group ask failure for malformed diagnostics", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      question: "What exercises are assigned today?",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw Object.assign(
+        new Error("Private upstream detail must stay hidden."),
+        {
+          code: "provider_error_with_private_detail",
+          requestId: "aask_req_not-a-valid-correlation-id",
+          statusCode: 700,
+        },
+      );
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_private",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_private"],
+          originSessionId: "session_private",
+          recipientKey: "recipient_private",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems).toEqual([
+      { type: "inputText", text: "group tool request failed" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("Private upstream detail");
+    expect(JSON.stringify(result)).not.toContain("provider_error");
+    expect(JSON.stringify(result)).not.toContain("not-a-valid-correlation-id");
+  });
+
   it.each([
     ["missing", () => null],
     [

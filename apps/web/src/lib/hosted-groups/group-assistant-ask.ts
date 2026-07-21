@@ -902,7 +902,7 @@ async function acquireHostedAssistantAskLockTx(
   tx: Prisma.TransactionClient,
   requestId: string,
 ): Promise<void> {
-  await tx.$queryRaw`
+  await tx.$executeRaw`
     SELECT pg_advisory_xact_lock(
       hashtext(${HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE}),
       hashtext(${requestId})

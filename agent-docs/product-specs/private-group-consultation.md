@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-15
+Last verified: 2026-07-21
 
 ## Decision
 
@@ -114,6 +114,10 @@ If private messages intervene, the answer begins naturally, for example:
 - Duplicate or unnamed labels: fail closed and ask the member to name or
   rename one; never expose an id.
 - Cannot answer: say the group context was insufficient.
+- Admission transport failure: return only an allowlisted Prisma `P####`
+  diagnostic code when present, HTTP status, and opaque Assistant Ask request
+  id so support can correlate the failed attempt. Do not expose raw database,
+  provider, mailbox, question, answer, or routing details.
 - Write request: explain that private Murph may ask and read but cannot post or
   change anything in the group.
 - Membership ends, the request expires, or the original private route is no
@@ -183,6 +187,13 @@ The request and completion mailbox items are the only durable operation state.
   group-visible question.
 6. Web signals the existing group runtime after commit. `accepted` means
    durable, not answered.
+
+The signed Web response carries the deterministic opaque request id in an
+Assistant-Ask-specific response header, including for sanitized error
+responses. A failed response may additionally carry only an allowlisted Prisma
+`P####` code in its own diagnostic header. Those values are diagnostic
+correlation only: callers may display them after a failure, but Web never
+accepts them from the model or uses returned headers as authority.
 
 This needs one narrow mailbox-store seam that accepts a server-derived item
 id. It needs no new table or schema migration.

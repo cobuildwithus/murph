@@ -25,9 +25,11 @@ import {
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
-import type {
-  HostedWorkspaceCheckpointRequest,
-  HostedWorkspaceState,
+import {
+  HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  type HostedWorkspaceCheckpointRequest,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
@@ -2822,6 +2824,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
+    const requestId = `aask_req_${"a".repeat(64)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: {
         code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
@@ -2831,6 +2834,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER]: requestId,
       },
       status: 403,
     }));
@@ -2852,11 +2856,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(error).toMatchObject({
         code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
         context: {
+          requestId,
           retryable: false,
           status: 403,
           statusCode: 403,
         },
         retryable: false,
+        requestId,
         status: 403,
         statusCode: 403,
       });
@@ -2866,6 +2872,57 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         .not.toContain("\"retryable\":false");
     }
   });
+
+  it.each([
+    [`aask_req_${"b".repeat(64)}`, "P2010", `aask_req_${"b".repeat(64)}`, "P2010"],
+    ["aask_req_not-a-valid-correlation-id", "PRIVATE_CODE", undefined, "INTERNAL_ERROR"],
+  ])(
+    "bounds Assistant Ask diagnostics from web-control headers",
+    async (requestIdHeader, diagnosticCodeHeader, expectedRequestId, expectedCode) => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER]: diagnosticCodeHeader,
+          [HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER]: requestIdHeader,
+        },
+        status: 500,
+      }));
+      const platform = buildHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        webCallbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        webControlBaseUrl: "https://web.example.test",
+      });
+
+      try {
+        await platform.workspacePort!.read!();
+        throw new Error("Expected web-control read to fail.");
+      } catch (error) {
+        expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+        expect(error).toMatchObject({
+          code: expectedCode,
+          requestId: expectedRequestId,
+          status: 500,
+          statusCode: 500,
+        });
+        if (expectedRequestId === undefined) {
+          expect(
+            error instanceof HostedWebControlPlaneResponseError
+              ? error.context
+              : {},
+          ).not.toHaveProperty("requestId");
+        }
+      }
+    },
+  );
 
   it("stops buffering sensitive chunked web-control responses at the byte limit", async () => {
     const encoder = new TextEncoder();

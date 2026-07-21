@@ -849,6 +849,22 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 }
 
 export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS = 200;
+export const HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER =
+  "x-murph-assistant-ask-diagnostic-code";
+export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
+  "x-murph-assistant-ask-request-id";
+
+export function isHostedRuntimeAssistantAskDiagnosticCode(
+  value: unknown,
+): value is string {
+  return typeof value === "string" && /^P[0-9]{4}$/u.test(value);
+}
+
+export function isHostedRuntimeAssistantAskRequestId(
+  value: unknown,
+): value is string {
+  return typeof value === "string" && /^aask_req_[0-9a-f]{64}$/u.test(value);
+}
 
 export type HostedRuntimeAssistantAskControlRequest =
   | {
