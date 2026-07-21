@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 
 import {
@@ -7,6 +9,12 @@ import {
 
 type ClinicalSecretPrismaClient = Parameters<typeof sealHostedUserSecureBoxString>[0]["prisma"];
 type ClinicalConnectionSecretField = "accessToken" | "patientId";
+type ClinicalPageCursorIdentity = {
+  queryFingerprint?: string;
+  queryScopeId?: string;
+  retrievalProtocol?: "query-slices-v2";
+  sliceId?: string;
+};
 
 export async function sealClinicalConnectionFhirBaseUrl(input: {
   connectionId: string;
@@ -60,17 +68,22 @@ export async function sealClinicalPageCursor(input: {
   resourceType: string;
   runId: string;
   value: string;
-}): Promise<string> {
+} & ClinicalPageCursorIdentity): Promise<string> {
+  const binding = clinicalPageCursorBinding(input);
   const sealed = await sealHostedUserSecureBoxString({
     aad: {
       field: "pageCursor",
-      purpose: `clinical-records-fhir-page:${input.resourceType}`,
+      purpose: binding
+        ? `clinical-records-fhir-page:${binding}`
+        : `clinical-records-fhir-page:${input.resourceType}`,
       rowId: input.runId,
       sequence: input.generation,
       table: "clinical_record_retrieval_run",
     },
     lane: "clinical-records-page-cursor",
-    scope: `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
+    scope: binding
+      ? `clinical-records:${input.runId}:${binding}:pageCursor`
+      : `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
     userId: input.memberId,
     value: input.value,
   });
@@ -84,22 +97,57 @@ export async function openClinicalPageCursor(input: {
   resourceType: string;
   runId: string;
   value: string;
-}): Promise<string> {
+} & ClinicalPageCursorIdentity): Promise<string> {
+  const binding = clinicalPageCursorBinding(input);
   const opened = await openHostedUserSecureBoxString({
     aad: {
       field: "pageCursor",
-      purpose: `clinical-records-fhir-page:${input.resourceType}`,
+      purpose: binding
+        ? `clinical-records-fhir-page:${binding}`
+        : `clinical-records-fhir-page:${input.resourceType}`,
       rowId: input.runId,
       sequence: input.generation,
       table: "clinical_record_retrieval_run",
     },
     lane: "clinical-records-page-cursor",
-    scope: `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
+    scope: binding
+      ? `clinical-records:${input.runId}:${binding}:pageCursor`
+      : `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
     userId: input.memberId,
     value: input.value,
   });
   if (!opened) throw new TypeError("Clinical Records page cursor decryption failed.");
   return opened;
+}
+
+function clinicalPageCursorBinding(input: {
+  queryFingerprint?: string;
+  queryScopeId?: string;
+  resourceType: string;
+  retrievalProtocol?: "query-slices-v2";
+  sliceId?: string;
+}): string | null {
+  const fields = [
+    input.retrievalProtocol,
+    input.queryScopeId,
+    input.queryFingerprint,
+    input.sliceId,
+  ];
+  if (fields.every((field) => field === undefined)) return null;
+  if (
+    input.retrievalProtocol !== "query-slices-v2"
+    || typeof input.queryScopeId !== "string"
+    || typeof input.queryFingerprint !== "string"
+    || typeof input.sliceId !== "string"
+  ) {
+    throw new TypeError("Clinical Records page cursor retrieval identity is incomplete.");
+  }
+  return createHash("sha256").update([
+    input.queryScopeId,
+    input.resourceType,
+    input.queryFingerprint,
+    input.sliceId,
+  ].join("\n"), "utf8").digest("hex");
 }
 
 export async function sealClinicalOauthVerifier(input: {

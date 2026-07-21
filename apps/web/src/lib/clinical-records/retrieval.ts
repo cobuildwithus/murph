@@ -8,6 +8,7 @@ import {
   clinicalSourceSystemSchema,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
+  type ClinicalFhirRetrievalSlice,
   type ClinicalSourceSystem,
   type ClinicalFhirRetrievalPlan,
 } from "@murphai/clinical-records";
@@ -23,7 +24,7 @@ import {
   type HostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsRecordOutcomeRequest,
   type HostedClinicalRecordsRetrievalScope,
-  type HostedClinicalRecordsRunDescriptor,
+  type HostedClinicalRecordsAnyRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import type { Prisma } from "@prisma/client";
 
@@ -47,6 +48,7 @@ import {
 import {
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalPlan,
+  buildEpicLegacyBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
 } from "./epic-policy";
 import {
@@ -106,6 +108,7 @@ interface RunnableClinicalRun {
   pageCount: number;
   providerRequestCount: number;
   retrievalPlan: ClinicalFhirRetrievalPlan;
+  retrievalProtocol: "query-slices-v2" | null;
   resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   status: string;
 }
@@ -120,7 +123,7 @@ export async function readClinicalRetrievalRun(input: {
   memberId: string;
   runId: string;
 }): Promise<
-  | { run: HostedClinicalRecordsRunDescriptor; status: "ready" }
+  | { run: HostedClinicalRecordsAnyRunDescriptor; status: "ready" }
   | Extract<HostedClinicalRecordsReadRunResponse, { status: "unavailable" }>
 > {
   const loaded = await loadRunnableClinicalRun(input);
@@ -142,21 +145,30 @@ export async function readClinicalRetrievalRun(input: {
   } catch {
     return unavailable("patient-context-unavailable", false);
   }
+  const runDescriptorBase = {
+    connectionId: run.connection.id,
+    fetchedAt: run.createdAt.toISOString(),
+    fhirBaseUrlHash: run.connection.fhirBaseHash,
+    generation: run.generation,
+    grantedScopes,
+    patientIdHash,
+    providerDirectoryEntryId: run.connection.providerDirectoryEntryId,
+    requestedScopes,
+    retrievalJobId: run.id,
+    runId: run.id,
+    sourceSystem: run.connection.sourceSystem,
+  } as const;
   return {
-    run: {
-      connectionId: run.connection.id,
-      fetchedAt: run.createdAt.toISOString(),
-      fhirBaseUrlHash: run.connection.fhirBaseHash,
-      generation: run.generation,
-      grantedScopes,
-      patientIdHash,
-      providerDirectoryEntryId: run.connection.providerDirectoryEntryId,
-      requestedScopes,
-      retrievalJobId: run.id,
-      retrievalScopes: buildRetrievalScopes(run.retrievalPlan),
-      runId: run.id,
-      sourceSystem: run.connection.sourceSystem,
-    },
+    run: run.retrievalProtocol === "query-slices-v2"
+      ? {
+          ...runDescriptorBase,
+          retrievalProtocol: run.retrievalProtocol,
+          retrievalSlices: run.retrievalPlan.slices,
+        }
+      : {
+          ...runDescriptorBase,
+          retrievalScopes: buildRetrievalScopes(run.retrievalPlan),
+        },
     status: "ready",
   };
 }
@@ -172,10 +184,17 @@ export async function fetchClinicalRetrievalPage(input: {
     runId: input.request.runId,
   });
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
-  if ("retrievalProtocol" in input.request) {
-    return unavailable("retrieval-protocol-not-enabled", false);
-  }
   const run = loaded.run;
+  if (
+    !("retrievalProtocol" in input.request)
+    && !run.resourceTypes.includes(input.request.resourceType)
+  ) {
+    return unavailable("resource-family-not-requested", false);
+  }
+  const retrievalSlice = resolveRequestedRetrievalSlice(run, input.request);
+  if (!retrievalSlice) {
+    return unavailable("retrieval-identity-mismatch", false);
+  }
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
   }
@@ -202,6 +221,9 @@ export async function fetchClinicalRetrievalPage(input: {
     ? await openClinicalPageCursor({
         generation: run.generation,
         memberId: input.memberId,
+        ...(run.retrievalProtocol === "query-slices-v2"
+          ? queryCursorIdentity(retrievalSlice)
+          : {}),
         resourceType: input.request.resourceType,
         runId: run.id,
         value: input.request.cursor,
@@ -211,12 +233,15 @@ export async function fetchClinicalRetrievalPage(input: {
   try {
     const patientId = requireFhirPatientId(openedPatientId);
     pageUrl = openedCursor
-      ? parsePageCursor(openedCursor)
+      ? parsePageCursor(
+          openedCursor,
+          run.retrievalProtocol === "query-slices-v2" ? retrievalSlice : null,
+        )
       : (() => {
           const url = buildInitialFhirPageUrl({
             fhirBaseUrl,
             patientId,
-            resourceType: input.request.resourceType,
+            retrievalSlice,
           });
           return { raw: url.toString(), url };
         })();
@@ -230,15 +255,33 @@ export async function fetchClinicalRetrievalPage(input: {
     return unavailable("page-cursor-invalid", false);
   }
 
-  const requestFingerprint = sha256Hex([
-    String(run.generation),
-    input.request.resourceType,
-    hashClinicalFhirPageUrl(pageUrl.raw),
-  ].join("\n"));
+  const pageUrlHash = hashClinicalFhirPageUrl(pageUrl.raw);
+  const requestFingerprint = run.retrievalProtocol === "query-slices-v2"
+    ? sha256Hex([
+        run.connection.id,
+        String(run.generation),
+        run.id,
+        retrievalSlice.queryScopeId,
+        retrievalSlice.resourceType,
+        retrievalSlice.queryFingerprint,
+        retrievalSlice.sliceId,
+        pageUrlHash,
+      ].join("\n"))
+    : sha256Hex([
+        String(run.generation),
+        input.request.resourceType,
+        pageUrlHash,
+      ].join("\n"));
   const claimed = await claimRetrievalPageRequest({
     connectionId: run.connection.id,
     generation: run.generation,
     memberId: input.memberId,
+    ...(run.retrievalProtocol === "query-slices-v2"
+      ? {
+          queryScopeId: retrievalSlice.queryScopeId,
+          sliceId: retrievalSlice.sliceId,
+        }
+      : {}),
     requestFingerprint,
     runId: run.id,
   });
@@ -276,12 +319,24 @@ export async function fetchClinicalRetrievalPage(input: {
       ? await sealClinicalPageCursor({
           generation: run.generation,
           memberId: input.memberId,
+          ...(run.retrievalProtocol === "query-slices-v2"
+            ? queryCursorIdentity(retrievalSlice)
+            : {}),
           resourceType: input.request.resourceType,
           runId: run.id,
-          value: JSON.stringify({
-            schema: "murph.clinical-page-cursor.v2",
-            url: sanitized.nextUrl.raw,
-          }),
+          value: JSON.stringify(run.retrievalProtocol === "query-slices-v2"
+            ? {
+                queryFingerprint: retrievalSlice.queryFingerprint,
+                queryScopeId: retrievalSlice.queryScopeId,
+                resourceType: retrievalSlice.resourceType,
+                schema: "murph.clinical-page-cursor.v3",
+                sliceId: retrievalSlice.sliceId,
+                url: sanitized.nextUrl.raw,
+              }
+            : {
+                schema: "murph.clinical-page-cursor.v2",
+                url: sanitized.nextUrl.raw,
+              }),
         })
       : null;
     if (nextCursor && nextCursor.length > 2_048) {
@@ -363,6 +418,13 @@ export async function recordClinicalRetrievalOutcome(input: {
       },
     });
     if (!run) throw staleRunError();
+    assertOutcomeRetrievalIdentity({
+      createdAt: run.createdAt,
+      request: input.request,
+      retrievalPlanJson: run.retrievalPlanJson,
+      retrievalProtocol: run.retrievalProtocol,
+      resourceTypesJson: run.resourceTypesJson,
+    });
     if (input.request.status === "preempted") {
       if (run.completedAt) throw staleRunError();
       const connectionIsActive = run.connection.status === "active" || run.connection.status === "error";
@@ -523,10 +585,19 @@ export async function signalClinicalRetrievalWake(
 function buildRetrievalScopes(
   retrievalPlan: ClinicalFhirRetrievalPlan,
 ): HostedClinicalRecordsRetrievalScope[] {
-  return retrievalPlan.slices.map((slice) => {
-    const { queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope } = slice;
-    return scope;
-  });
+  return retrievalPlan.slices.map((slice) => slice.coverage === "whole-family"
+    ? {
+        coverage: slice.coverage,
+        queryFingerprint: slice.queryFingerprint,
+        resourceType: slice.resourceType,
+      }
+    : {
+        coverage: slice.coverage,
+        from: slice.from,
+        queryFingerprint: slice.queryFingerprint,
+        resourceType: slice.resourceType,
+        to: slice.to,
+      });
 }
 
 async function loadRunnableClinicalRun(input: {
@@ -565,6 +636,7 @@ async function loadRunnableClinicalRun(input: {
       pageCount: true,
       providerRequestCount: true,
       retrievalPlanJson: true,
+      retrievalProtocol: true,
       resourceTypesJson: true,
       status: true,
     },
@@ -604,7 +676,18 @@ async function loadRunnableClinicalRun(input: {
   let sourceSystem: ClinicalSourceSystem;
   try {
     resourceTypes = parseStoredResourceTypes(record.resourceTypesJson);
-    retrievalPlan = parseStoredRetrievalPlan(record.retrievalPlanJson, resourceTypes);
+    if (
+      record.retrievalProtocol !== null
+      && record.retrievalProtocol !== "query-slices-v2"
+    ) {
+      throw new TypeError("Stored Clinical Records retrieval protocol is unsupported.");
+    }
+    retrievalPlan = parseStoredRetrievalPlan({
+      createdAt: record.createdAt,
+      protocol: record.retrievalProtocol,
+      resourceTypes,
+      value: record.retrievalPlanJson,
+    });
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
   } catch {
     return { retryable: false, unavailable: "run-configuration-invalid" };
@@ -622,6 +705,7 @@ async function loadRunnableClinicalRun(input: {
       pageCount: record.pageCount,
       providerRequestCount: record.providerRequestCount,
       retrievalPlan,
+      retrievalProtocol: record.retrievalProtocol,
       resourceTypes,
       status: record.status,
     },
@@ -631,28 +715,92 @@ async function loadRunnableClinicalRun(input: {
 function buildInitialFhirPageUrl(input: {
   fhirBaseUrl: string;
   patientId: string;
-  resourceType: string;
+  retrievalSlice: ClinicalFhirRetrievalSlice;
 }): URL {
   return buildEpicBetaInitialFhirPageUrl({
     fhirBaseUrl: input.fhirBaseUrl,
     pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
     patientId: input.patientId,
-    resourceType: input.resourceType,
+    retrievalSlice: input.retrievalSlice,
   });
 }
 
-function parsePageCursor(plaintext: string): ValidatedFhirPageUrl {
+function parsePageCursor(
+  plaintext: string,
+  expectedSlice: ClinicalFhirRetrievalSlice | null,
+): ValidatedFhirPageUrl {
   const parsed: unknown = JSON.parse(plaintext);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;
-  if (
+  if (expectedSlice) {
+    if (
+      Object.keys(record).sort().join(",")
+        !== "queryFingerprint,queryScopeId,resourceType,schema,sliceId,url"
+      || record.schema !== "murph.clinical-page-cursor.v3"
+      || record.queryFingerprint !== expectedSlice.queryFingerprint
+      || record.queryScopeId !== expectedSlice.queryScopeId
+      || record.resourceType !== expectedSlice.resourceType
+      || record.sliceId !== expectedSlice.sliceId
+    ) throw new TypeError("Invalid cursor.");
+  } else if (
     Object.keys(record).sort().join(",") !== "schema,url"
     || record.schema !== "murph.clinical-page-cursor.v2"
-    || typeof record.url !== "string"
+  ) {
+    throw new TypeError("Invalid cursor.");
+  }
+  if (
+    typeof record.url !== "string"
     || hasSurroundingAsciiWhitespace(record.url)
     || record.url.length > FHIR_NEXT_URL_MAX_CHARS
   ) throw new TypeError("Invalid cursor.");
   return { raw: record.url, url: new URL(record.url) };
+}
+
+function resolveRequestedRetrievalSlice(
+  run: RunnableClinicalRun,
+  request: HostedClinicalRecordsFetchPageRequest,
+): ClinicalFhirRetrievalSlice | null {
+  const queryAwareRequest = "retrievalProtocol" in request;
+  if ((run.retrievalProtocol === "query-slices-v2") !== queryAwareRequest) {
+    return null;
+  }
+  if (queryAwareRequest) {
+    const slice = run.retrievalPlan.slices.find((candidate) =>
+      candidate.queryScopeId === request.queryScopeId
+      && candidate.sliceId === request.sliceId
+    );
+    if (
+      !slice
+      || slice.resourceType !== request.resourceType
+      || (
+        request.queryFingerprint !== undefined
+        && request.queryFingerprint !== slice.queryFingerprint
+      )
+    ) {
+      return null;
+    }
+    return slice;
+  }
+  const matches = run.retrievalPlan.slices.filter(
+    (candidate) => candidate.resourceType === request.resourceType,
+  );
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
+function queryCursorIdentity(
+  slice: ClinicalFhirRetrievalSlice,
+): {
+  queryFingerprint: string;
+  queryScopeId: string;
+  retrievalProtocol: "query-slices-v2";
+  sliceId: string;
+} {
+  return {
+    queryFingerprint: slice.queryFingerprint,
+    queryScopeId: slice.queryScopeId,
+    retrievalProtocol: "query-slices-v2",
+    sliceId: slice.sliceId,
+  };
 }
 
 function assertFhirPageUrlAllowed(input: {
@@ -855,8 +1003,10 @@ async function claimRetrievalPageRequest(input: {
   connectionId: string;
   generation: number;
   memberId: string;
+  queryScopeId?: string;
   requestFingerprint: string;
   runId: string;
+  sliceId?: string;
 }): Promise<
   | { claimed: false; errorCode: string; retryable: boolean }
   | {
@@ -877,8 +1027,10 @@ async function claimRetrievalPageRequest(input: {
       generation: input.generation,
       id: candidateId,
       memberId: input.memberId,
+      queryScopeId: input.queryScopeId ?? null,
       requestFingerprint: input.requestFingerprint,
       runId: input.runId,
+      sliceId: input.sliceId ?? null,
     },
     update: {},
     where: {
@@ -892,6 +1044,8 @@ async function claimRetrievalPageRequest(input: {
     record.memberId !== input.memberId
     || record.connectionId !== input.connectionId
     || record.generation !== input.generation
+    || record.queryScopeId !== (input.queryScopeId ?? null)
+    || record.sliceId !== (input.sliceId ?? null)
   ) return { claimed: false, errorCode: "request-page-conflict", retryable: false };
   const isFirstCompletion = record.responseBytes === null;
   const previousCompletedAt = record.completedAt;
@@ -1096,6 +1250,48 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
   return status;
 }
 
+function assertOutcomeRetrievalIdentity(input: {
+  createdAt: Date;
+  request: HostedClinicalRecordsRecordOutcomeRequest;
+  retrievalPlanJson: Prisma.JsonValue | null;
+  retrievalProtocol: string | null;
+  resourceTypesJson: Prisma.JsonValue;
+}): void {
+  const queryAwareOutcome = input.request.retrievalProtocol === "query-slices-v2";
+  if (queryAwareOutcome && input.retrievalProtocol !== "query-slices-v2") {
+    throw outcomeConflictError();
+  }
+  if (!queryAwareOutcome) {
+    // The PR 1 runner reports the legacy aggregate outcome even when it has
+    // consumed a query-aware descriptor. Keep that one deploy-skew reader until
+    // old runner bundles and their serviceable in-flight runs have drained and
+    // the runtime rollback floor has advanced.
+    return;
+  }
+  const resourceTypes = parseStoredResourceTypes(input.resourceTypesJson);
+  const plan = parseStoredRetrievalPlan({
+    createdAt: input.createdAt,
+    protocol: "query-slices-v2",
+    resourceTypes,
+    value: input.retrievalPlanJson,
+  });
+  const expected = plan.slices.map((slice) => ({
+    queryScopeId: slice.queryScopeId,
+    sliceId: slice.sliceId,
+  }));
+  if (JSON.stringify(input.request.retrievalSlices) !== JSON.stringify(expected)) {
+    throw outcomeConflictError();
+  }
+}
+
+function outcomeConflictError() {
+  return clinicalRecordsError({
+    code: "CLINICAL_RECORD_OUTCOME_CONFLICT",
+    httpStatus: 409,
+    message: "The Clinical Records retrieval outcome does not match its frozen query plan.",
+  });
+}
+
 function parseStoredResourceTypes(
   value: Prisma.JsonValue,
 ): HostedClinicalRecordsFetchPageRequest["resourceType"][] {
@@ -1107,21 +1303,32 @@ function parseStoredResourceTypes(
   return resourceTypes;
 }
 
-function parseStoredRetrievalPlan(
-  value: Prisma.JsonValue | null,
-  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][],
-): ClinicalFhirRetrievalPlan {
-  const expectedPlan = buildEpicBetaRetrievalPlan({
-    pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-    resourceTypes,
-  });
-  const plan = value === null
+function parseStoredRetrievalPlan(input: {
+  createdAt: Date;
+  protocol: "query-slices-v2" | null;
+  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][];
+  value: Prisma.JsonValue | null;
+}): ClinicalFhirRetrievalPlan {
+  if (input.protocol === "query-slices-v2" && input.value === null) {
+    throw new TypeError("Stored query-aware Clinical Records run is missing its frozen retrieval plan.");
+  }
+  const expectedPlan = input.protocol === "query-slices-v2"
+    ? buildEpicBetaRetrievalPlan({
+        frozenAt: input.createdAt,
+        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+        resourceTypes: input.resourceTypes,
+      })
+    : buildEpicLegacyBetaRetrievalPlan({
+        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+        resourceTypes: input.resourceTypes,
+      });
+  const plan = input.value === null
     ? expectedPlan
-    : clinicalFhirRetrievalPlanSchema.parse(value);
+    : clinicalFhirRetrievalPlanSchema.parse(input.value);
   if (
     JSON.stringify(plan.slices) !== JSON.stringify(expectedPlan.slices)
   ) {
-    throw new TypeError("Stored Clinical Records retrieval plan is unsupported by its legacy reader.");
+    throw new TypeError("Stored Clinical Records retrieval plan does not match its owned acquisition policy.");
   }
   return plan;
 }

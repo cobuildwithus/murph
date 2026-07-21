@@ -21,6 +21,7 @@ import {
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
   HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+  HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -42,6 +43,7 @@ export {
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
   HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+  HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -86,6 +88,11 @@ export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
   occurredAt: z.string().min(1),
   runId: identifierSchema,
   userId: z.string().min(1),
+}).strict();
+
+export const hostedClinicalRecordsReadRunRequestSchema = z.object({
+  generation: z.number().int().min(1),
+  runId: identifierSchema,
 }).strict();
 
 export const hostedClinicalRecordsRetrievalScopeSchema =
@@ -154,6 +161,10 @@ export const hostedClinicalRecordsLegacyFetchPageRequestSchema = z.object(
 
 export const hostedClinicalRecordsQueryFetchPageRequestSchema = z.object({
   ...hostedClinicalRecordsFetchPageRequestBaseShape,
+  // Optional for the one-way deploy window in which the PR 1 runner can read
+  // query descriptors but does not echo this frozen fingerprint. Remove after
+  // old runner bundles and their serviceable in-flight runs have drained.
+  queryFingerprint: sha256Schema.optional(),
   queryScopeId: clinicalFhirRetrievalSliceSchema.options[0].shape.queryScopeId,
   retrievalProtocol: z.literal("query-slices-v2"),
   sliceId: clinicalFhirRetrievalSliceSchema.options[0].shape.sliceId,
@@ -203,6 +214,9 @@ export type HostedClinicalRecordsAnyRunDescriptor = z.infer<
 >;
 export type HostedClinicalRecordsReadRunResponse = z.infer<
   typeof hostedClinicalRecordsReadRunResponseSchema
+>;
+export type HostedClinicalRecordsReadRunRequest = z.infer<
+  typeof hostedClinicalRecordsReadRunRequestSchema
 >;
 export type HostedClinicalRecordsFetchPageRequest = z.infer<
   typeof hostedClinicalRecordsFetchPageRequestSchema
@@ -265,6 +279,18 @@ export function parseHostedClinicalRecordsRunDescriptor(
   value: unknown,
 ): HostedClinicalRecordsAnyRunDescriptor {
   return hostedClinicalRecordsRunDescriptorSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsReadRunRequest(
+  value: unknown,
+): HostedClinicalRecordsReadRunRequest {
+  return hostedClinicalRecordsReadRunRequestSchema.parse(value);
+}
+
+export function parseHostedClinicalRecordsFetchPageRequest(
+  value: unknown,
+): HostedClinicalRecordsFetchPageRequest {
+  return hostedClinicalRecordsFetchPageRequestSchema.parse(value);
 }
 
 export function parseHostedClinicalRecordsReadRunResponse(

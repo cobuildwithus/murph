@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Product outcome
 
@@ -132,17 +132,16 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` is the single source of truth for Epic SMART base scopes,
 query-scope definitions, required FHIR operations, deterministic query
 templates, slicing rules, bounded dependency traversal, and the Epic API keys
-that must be registered. The longitudinal catalog is configuration only: all
-queries beyond `patient-demographics`, `laboratory-observations`, and
-`diagnostic-reports` are explicitly disabled. Provider endpoint presence does
-not imply support for a disabled query; any provider-specific claim requires a
+that must be registered. All 24 primary query scopes are active. They span 17
+unique FHIR resource families because Condition, Observation, and Procedure each
+have multiple policy-owned query variants. Provider endpoint presence still does
+not establish a provider-specific capability claim; any such claim requires a
 sorted capability override with an evidence version.
 
 Dependency policies are purpose-bound, restricted to the selected provider's
 FHIR base, capped at traversal depth two, and charged against the parent slice
-limits. They are not a generic reference crawler. Activating a query or adding
-a SMART operation is a separate behavior change and is outside this directory
-schema migration.
+limits. They are not a generic reference crawler, and dependency reads remain
+registration-only until that bounded traversal owner lands.
 
 ## Retrieval contract and limits
 
@@ -157,11 +156,16 @@ runtime uses three signed POST operations:
 - `/api/internal/clinical-records/runtime/record-outcome`
 
 The web control plane fetches only the exact configured FHIR origin and exact
-resource-family path. Patient uses a direct patient read, Observation uses
-`patient=<launch-patient>&category=laboratory&_count=100`, and DiagnosticReport
-uses `patient=<launch-patient>&_count=100`. Provider redirects are disabled. A
-continuation must remain on the same origin and family path; only its query may
-change. Root pages omit `pageUrlHash`; continuation pages include it, while the
+resource-family path. Patient uses a direct patient read; the other 23 primary
+queries use their policy-owned patient search template and fixed category where
+required. Fifteen queries use one whole-family slice. Nine use one initial
+newest-first bounded slice: clinical notes cover 90 days, and Encounter,
+Immunization, assessment, social-history, Procedure, and vital-sign searches
+cover 365 days. The frozen run creation time owns both endpoints; searches send
+repeated `ge`/`lt` values through the Epic-documented `period`, `date`, or
+`issued` parameter. Provider redirects are disabled. A continuation must remain
+on the same origin and family path; only its query may change. Root pages omit
+`pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
 root-reachable chain. Formally marked Bundle search-outcome entries remain in
 raw-page counts but do not enter patient-family mapping. The exact validated provider link text is the provenance
@@ -170,16 +174,22 @@ fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
 
 Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
-provider egress per run, 500 Bundle entries per page, and three Epic beta
-resource families. The shared FHIR schema retains its broader 14-family
-superset for future integrations; the Epic directory does not request it.
+provider egress per run, 500 Bundle entries per page, and 17 Epic primary
+resource families. The shared FHIR schema admits those families plus the legacy
+MedicationStatement family, for 18 total.
 New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
 deterministic slice ids. That plan can represent multiple queries for one FHIR
 resource type and ordered, non-overlapping bounded windows without treating
-either id as canonical clinical identity. This foundation does not expand the
-Epic beta request scopes: Web still emits the current resource-family runtime
-descriptor and rejects query-aware page traffic until compatible readers have
-deployed.
+either id as canonical clinical identity. Each run also pins its retrieval
+protocol: existing nullable-protocol rows remain legacy until terminal, while
+new runs emit `query-slices-v2`. Every query-aware page request, opaque cursor,
+server-derived request fingerprint, durable request claim, and terminal outcome
+is checked against the frozen query-scope and slice identity before provider
+egress or outcome mutation. New OAuth requests deduplicate the 24 queries into
+17 resource permissions, and each granted family expands back into every active
+query variant in the frozen run plan. A partial grant still requires Patient plus
+at least one clinical family and executes all active queries for each granted
+family.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual bytes after a valid response. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
@@ -232,35 +242,95 @@ control-plane credentials, OAuth state, page fingerprints, or raw provider pages
 
 ## Deployment
 
-Deploy the additive Prisma migration and Web control plane before enabling the
-UI/runtime path. The old Web build ignores the new tables. Then deploy
-Cloudflare and the hosted runner so their exact allowlist and optional Clinical
-Records capability converge. An old runner simply omits assistant link
-creation; a new runner against an old Cloudflare or Web deployment fails closed
-without creating an intent. Browser connection remains available once Web is
-current. Never fall back to direct unfenced provider access. After all three
-surfaces converge, smoke-test both browser-started and assistant-started links.
+Deploy the additive Prisma migration and Web control plane first. Existing run
+rows retain the nullable legacy protocol for their entire lifecycle; new runs
+pin `query-slices-v2`. The already-compatible reader can consume the new
+descriptor during this deploy window, while Web temporarily accepts its page
+request without `queryFingerprint` and its legacy aggregate terminal outcome.
+Then deploy Cloudflare and the hosted runner so page requests and outcomes echo
+the full frozen identity. Remove that narrow compatibility only after all old
+runner bundles and in-flight runs they can service have drained and the runtime
+rollback floor has advanced. Never fall back to direct unfenced provider access.
+After all three surfaces converge, smoke-test both browser-started and
+assistant-started links, one legacy run, and one new query-aware run.
 
 Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
-[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, USCDI v3,
-use the Murph product name without adding `Epic` to the app name, and select only
-[Patient.Read](https://fhir.epic.com/Specifications?api=931),
-[Observation.Search (Labs)](https://fhir.epic.com/Specifications?api=999), and
-[DiagnosticReport.Search (Results)](https://fhir.epic.com/Specifications?api=989).
-Do not request refresh tokens. Epic recommends a separate localhost-only test
-app that is never activated. Register the callback with the actual local port,
-for example `http://localhost:3000/api/clinical-records/oauth/callback`, and set
+[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
+Murph product name without adding `Epic` to the app name, set Automatic
+Client Distribution to `None`, and register the following exact 37 names from
+Epic's current
+[FHIR catalog](https://open.epic.com/Interface/FHIR):
+
+```text
+AllergyIntolerance.Search (Patient Chart) (R4)
+Binary.Read (Clinical Notes) (R4)
+CarePlan.Search (Longitudinal) (R4)
+CareTeam.Search (Longitudinal CareTeam) (R4)
+Condition.Search (Encounter Diagnosis) (R4)
+Condition.Search (Problems) (R4)
+Device.Search (Implants) (R4)
+DiagnosticReport.Search (Results) (R4)
+DocumentReference.Search (Clinical Notes) (R4)
+Encounter.Read (Patient Chart) (R4)
+Encounter.Search (Patient Chart) (R4)
+FamilyMemberHistory.Search (R4)
+Goal.Search (Patient) (R4)
+Immunization.Search (Patient Chart) (R4)
+Location.Read (Organizational Directory) (R4)
+MedicationDispense.Search (Fill Status) (R4)
+Medication.Read (Organization Med List) (R4)
+MedicationRequest.Read (Signed Medication Order) (R4)
+MedicationRequest.Search (Signed Medication Order) (R4)
+Observation.Read (Assessments) (R4)
+Observation.Read (Labs) (R4)
+Observation.Search (Assessments) (R4)
+Observation.Search (Labs) (R4)
+Observation.Search (SDOH Assessments) (R4)
+Observation.Search (Social History) (R4)
+Observation.Search (Vital Signs) (R4)
+Organization.Read (Organizational Directory) (R4)
+Patient.Read (Demographics) (R4)
+Practitioner.Read (Organizational Directory) (R4)
+PractitionerRole.Read (Organizational Directory) (R4)
+Procedure.Search (Orders) (R4)
+Procedure.Search (Patient-Reported Surgical History) (R4)
+Procedure.Search (Surgeries) (R4)
+Provenance.Read (R4)
+ServiceRequest.Read (Orders) (R4)
+ServiceRequest.Search (Orders) (R4)
+Specimen.Read (Patient Chart) (R4)
+```
+
+Registration covers both the 24 active primary queries and supporting dependency
+reads. Runtime requests only the 17 unique primary resource permissions and does
+not execute dependency traversal. Resource families without a canonical mapper
+are retained as patient-bound raw evidence with an explicit review decision; no
+family is silently dropped. The exact full-coverage registration cannot use
+USCDI-v3 automatic distribution: `FamilyMemberHistory.Search (R4)`,
+and `Procedure.Search (Patient-Reported Surgical History) (R4)` are absent
+from Epic's automatic-distribution appendix. Epic's patient-app registration
+also does not offer `Questionnaire.Read`; dependency traversal remains deferred,
+so the registration contract omits it instead of substituting unrelated
+`QuestionnaireResponse` APIs. Do not substitute Outside Record or SDOH APIs,
+because they expose different data surfaces. Each target Epic customer must
+instead download/request this client ID. Do not request refresh tokens or
+`offline_access`.
+Epic recommends a separate localhost-only
+test app that is never activated. Register the callback with the actual local
+port, for example
+`http://localhost:3000/api/clinical-records/oauth/callback`, and set
 `EPIC_SMART_NON_PRODUCTION_CLIENT_ID` to Epic's non-production client id. The
 curated sandbox FHIR base is
 `https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4`.
 
 Before production authorization, add the exact HTTPS callback
-`https://<production-host>/api/clinical-records/oauth/callback`, enable
-Auto-download, complete Epic's Data Use Questionnaire, mark the app ready for
-production, and set `EPIC_SMART_CLIENT_ID` to Epic's production client id.
-Preview hosts need their own registered callback and the non-production client
-id. A missing exact client id fails closed before redirect.
+`https://<production-host>/api/clinical-records/oauth/callback`, keep Automatic
+Client Distribution set to `None`, complete Epic's Data Use Questionnaire,
+mark the app ready for production, coordinate each customer download, and set
+`EPIC_SMART_CLIENT_ID` to Epic's production client id. Preview hosts need their
+own registered callback and the non-production client id. A missing exact
+client id fails closed before redirect.
 
 ## Deliberately deferred
 
@@ -269,11 +339,10 @@ id. A missing exact client id fails closed before redirect.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Background scheduled refresh and provider-directory network refresh jobs.
-- Vital-sign Observations. The query/slice acquisition identity now supports a
-  second Observation query, but enabling it still requires the follow-up Epic
-  scope policy, canonical mapping, and production wire cutover.
-- Retry, reconnect, and reauthorization after the initial retrieval; these
-  require a bounded raw-evidence retention lifecycle before they can create
-  another retrieval job.
+- Retry, reconnect, and reauthorization after the initial retrieval. Active,
+  disconnected, and `needs_reauth` member/provider rows all remain ineligible
+  for another OAuth start in this beta. Supporting another generation requires
+  a bounded raw-evidence retention lifecycle that preserves every canonical
+  raw reference.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

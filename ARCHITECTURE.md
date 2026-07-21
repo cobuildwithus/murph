@@ -445,8 +445,17 @@ resuming from the vault-owned operational checkpoint after preemption. The
 versioned runtime contract accepts either the current resource-family descriptor
 or explicit query slices; query-aware raw pages and completion state remain
 grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
-manifests and v1 checkpoints remain readable. Web continues to emit the current
-descriptor until the compatible runner deployment is complete. Then
+manifests and v1 checkpoints remain readable. Each run pins its retrieval
+protocol at creation: existing nullable-protocol rows remain legacy for their
+entire lifecycle, while new runs emit `query-slices-v2`. Query-aware page
+requests, opaque cursors, durable request claims, and terminal outcomes bind
+the frozen query-scope and slice identities so they cannot be swapped across
+the same resource type. Epic's active policy expands 24 primary query scopes
+from 17 unique granted FHIR resource permissions. Fifteen scopes use one
+whole-family slice and nine freeze one newest-first 90- or 365-day initial
+window at run creation. Supporting dependency reads remain registration-only;
+resource families without a canonical mapper still enter the patient-bound raw
+evidence and explicit-review path. Then
 `@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
 immediately before atomically committing immutable raw pages and the retrieval
 manifest, and again before lazily invoking
