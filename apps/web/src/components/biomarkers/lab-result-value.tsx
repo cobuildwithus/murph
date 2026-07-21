@@ -1,16 +1,64 @@
 import type { ComponentProps } from "react";
 
-import { formatLabResultValue } from "@/src/lib/biomarkers/lab-result-display";
+import {
+  formatLabResultValue,
+  formatLabUnit,
+} from "@/src/lib/biomarkers/lab-result-display";
+import { cn } from "@/src/lib/utils";
 
 type LabResultValueInput = Parameters<typeof formatLabResultValue>[0];
 
 export function LabResultValue({
   className,
+  presentation = "default",
   result,
 }: {
+  presentation?: "default" | "hero";
   result: LabResultValueInput;
 } & Pick<ComponentProps<"span">, "className">) {
   const visibleValue = formatLabResultValue(result);
+
+  if (presentation === "hero") {
+    const numeric = result.value !== null && Number.isFinite(result.value);
+    if (!numeric) {
+      return (
+        <span className={cn(
+          "min-w-0 break-words font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl",
+          className,
+        )}>
+          {visibleValue}
+        </span>
+      );
+    }
+
+    const visibleNumber = formatLabResultValue({ ...result, unit: null });
+    const unit = result.unit ? formatLabUnit(result.unit) : null;
+    const visualValue = (
+      <>
+        <span className="min-w-0 break-words font-serif text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
+          {visibleNumber}
+        </span>
+        {unit ? (
+          <span className="text-lg text-muted-foreground sm:text-xl">{unit}</span>
+        ) : null}
+      </>
+    );
+
+    return (
+      <span className={cn("inline-flex min-w-0 items-baseline gap-3", className)}>
+        {result.comparator ? (
+          <>
+            <span aria-hidden="true" className="contents">{visualValue}</span>
+            <span className="sr-only">
+              {formatComparatorLabel(result.comparator)}{" "}
+              {formatLabResultValue({ ...result, comparator: null })}
+            </span>
+          </>
+        ) : visualValue}
+      </span>
+    );
+  }
+
   if (!result.comparator) {
     return <span className={className}>{visibleValue}</span>;
   }

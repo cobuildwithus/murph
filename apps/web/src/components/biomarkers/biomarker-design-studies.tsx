@@ -14,6 +14,7 @@ import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
+import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { cn } from "@/src/lib/utils";
@@ -386,15 +387,29 @@ export function BiomarkerDetailStudy() {
         <h4 className="text-2xl font-semibold tracking-tight text-destructive">Above range</h4>
         <div className="mt-3 flex items-baseline gap-3">
           <span aria-hidden="true" className="size-3 self-center rounded-full bg-destructive/80" />
-          <span className="text-3xl font-semibold tracking-tight tabular-nums text-foreground">18.0</span>
-          <span className="text-base text-muted-foreground">g/dL</span>
+          <LabResultValue
+            presentation="hero"
+            result={{
+              comparator: null,
+              textValue: null,
+              unit: "g/dL",
+              value: 18,
+            }}
+          />
         </div>
         <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-01-01">
           Jan 1, 2026
         </time>
 
         <div className="mt-9 min-w-0 border-y border-border/70 py-5">
+          <p
+            className="mb-3 text-xs text-muted-foreground"
+            id="illustrative-biomarker-chart-caption"
+          >
+            {HEMOGLOBIN_HISTORY.length} results plotted in g/dL · Shaded lab range: 13 to 17 g/dL
+          </p>
           <LabBiomarkerHistoryChart
+            ariaDescribedBy="illustrative-biomarker-chart-caption"
             displayName="Illustrative hemoglobin"
             points={HEMOGLOBIN_HISTORY}
             referenceRange={{ high: 17, low: 13 }}

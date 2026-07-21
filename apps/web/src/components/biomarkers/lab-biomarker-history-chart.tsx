@@ -47,11 +47,13 @@ const RANGE_LINE_STYLE = {
 } as const;
 
 export function LabBiomarkerHistoryChart({
+  ariaDescribedBy,
   displayName,
   points,
   referenceRange = null,
   unit,
 }: {
+  ariaDescribedBy?: string;
   displayName: string;
   points: readonly LabBiomarkerChartPoint[];
   referenceRange?: LabBiomarkerChartRange | null;
@@ -79,10 +81,10 @@ export function LabBiomarkerHistoryChart({
 
   return (
     <ChartContainer
+      aria-describedby={ariaDescribedBy}
       aria-label={`${displayName} results over time`}
       className="h-72 w-full sm:h-80"
       config={chartConfig}
-      data-reference-range={range ? "present" : "absent"}
       initialDimension={{ height: 320, width: 760 }}
       role="img"
     >

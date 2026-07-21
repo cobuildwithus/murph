@@ -35,7 +35,6 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   formatLabDate,
   formatLabFlag,
-  formatLabNumber,
   formatLabReferenceRange,
   formatLabUnit,
   labResultYear,
@@ -44,6 +43,7 @@ import {
   useBrowserVault,
   useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
+
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
   metricKey: string;
@@ -185,6 +185,11 @@ function BiomarkerDetailContent({
   }));
   const chartNotes = buildChartNotes(detail);
   const chartRange = resolveChartedReferenceRange(detail);
+  const chartCaption = formatChartCaption(
+    chartPoints.length,
+    detail.comparableUnit,
+    chartRange,
+  );
   const latestStatus = resolveLatestResultStatus(detail.latest.flag);
 
   return (
@@ -220,7 +225,10 @@ function BiomarkerDetailContent({
                 ? "size-3 shrink-0 self-center rounded-full bg-destructive/80"
                 : "size-3 shrink-0 self-center rounded-full bg-muted-foreground/70"}
           />
-          <LatestResultValue row={detail.latest} />
+          <LabResultValue
+            presentation="hero"
+            result={detail.latest}
+          />
         </div>
         <time
           className="mt-4 block text-sm text-muted-foreground"
@@ -231,7 +239,14 @@ function BiomarkerDetailContent({
 
         {chartPoints.length > 0 ? (
           <div className="mt-9 min-w-0 border-t border-border/70 pt-5">
+            <p
+              className="mb-3 text-xs text-muted-foreground"
+              id="biomarker-chart-caption"
+            >
+              {chartCaption}
+            </p>
             <LabBiomarkerHistoryChart
+              ariaDescribedBy="biomarker-chart-caption"
               displayName={detail.displayName}
               points={chartPoints}
               referenceRange={chartRange}
@@ -287,53 +302,6 @@ function BiomarkerDetailContent({
       </section>
     </>
   );
-}
-
-function LatestResultValue({ row }: { row: BrowserVaultLabResultRow }) {
-  if (row.value === null || !Number.isFinite(row.value)) {
-    return (
-      <LabResultValue
-        className="min-w-0 break-words font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
-        result={row}
-      />
-    );
-  }
-
-  return (
-    <>
-      <span
-        className="min-w-0 break-words font-serif text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl"
-      >
-        {row.comparator ? (
-          <>
-            <span aria-hidden="true">{row.comparator}</span>
-            <span className="sr-only">{formatComparatorLabel(row.comparator)} </span>
-          </>
-        ) : null}
-        {formatLabNumber(row.value)}
-      </span>
-      {row.unit ? (
-        <span className="text-lg text-muted-foreground sm:text-xl">
-          {formatLabUnit(row.unit)}
-        </span>
-      ) : null}
-    </>
-  );
-}
-
-function formatComparatorLabel(
-  comparator: NonNullable<BrowserVaultLabResultRow["comparator"]>,
-): string {
-  switch (comparator) {
-    case "<":
-      return "Less than";
-    case "<=":
-      return "Less than or equal to";
-    case ">":
-      return "Greater than";
-    case ">=":
-      return "Greater than or equal to";
-  }
 }
 
 function resolveLatestResultStatus(flag: string | null): {
@@ -590,6 +558,31 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
     ? firstDate.slice(0, 4)
     : `${firstDate.slice(0, 4)} to ${detail.latest.date.slice(0, 4)}`;
   return `${detail.rows.length} saved ${detail.rows.length === 1 ? "result" : "results"}, ${span}.`;
+}
+
+function formatChartCaption(
+  pointCount: number,
+  unit: string | null,
+  range: LabBiomarkerChartRange | null,
+): string {
+  const plottedUnit = unit ? ` in ${formatLabUnit(unit)}` : "";
+  const plotted = `${pointCount} ${pointCount === 1 ? "result" : "results"} plotted${plottedUnit}`;
+  if (!range) {
+    return plotted;
+  }
+
+  const formattedRange = formatLabReferenceRange({
+    ...(range.high === null ? {} : { high: range.high }),
+    ...(range.low === null ? {} : { low: range.low }),
+  }, unit);
+  if (!formattedRange) {
+    return plotted;
+  }
+
+  const rangeStyle = range.low !== null && range.high !== null
+    ? "Shaded lab range"
+    : "Dashed lab limit";
+  return `${plotted} · ${rangeStyle}: ${formattedRange}`;
 }
 
 /**

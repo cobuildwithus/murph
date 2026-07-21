@@ -378,6 +378,7 @@ test("a numeric result with source text remains plotted without a qualitative om
     expect(text).toContain("Reported");
     expect(text).toContain("5.6%");
     expect(text).not.toContain("comparable numeric results");
+    expect(text).toContain("2 results plotted in %");
     expect(text).not.toContain("qualitative result");
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
@@ -472,6 +473,8 @@ test("detail charts comparable results across years and keeps excluded values in
     expect(text).toContain("HbA1c");
     expect(text).not.toContain("Change over time");
     expect(text).not.toContain("comparable numeric results");
+    expect(text).toContain("2 results plotted in %");
+    expect(text).not.toContain("5 results plotted");
     expect(text).toContain("1 result was reported as a limit");
     expect(text).toContain("Less than 5.4%");
     expect(text).toContain("1 qualitative result is shown in history");
@@ -573,11 +576,11 @@ test("a latest comparator result keeps its visible and spoken boundary", async (
     expect(hero?.textContent).toContain("5.4%");
     expect(
       [...(hero?.querySelectorAll('span[aria-hidden="true"]') ?? [])]
-        .find((span) => span.textContent === ">="),
+        .find((span) => span.textContent === ">=5.4%"),
     ).toBeDefined();
     expect(
       [...(hero?.querySelectorAll("span.sr-only") ?? [])]
-        .find((span) => span.textContent?.trim() === "Greater than or equal to"),
+        .find((span) => span.textContent?.trim() === "Greater than or equal to 5.4%"),
     ).toBeDefined();
     expect(hero?.querySelector('[role="img"]')).toBeNull();
     expect(hero?.textContent).toContain("No comparable numeric trend");
@@ -605,6 +608,15 @@ test("a single numeric result stays visible without implying a trend", async () 
     expect(
       rendered.container.querySelector("#biomarker-latest-result-heading")?.className,
     ).toContain("text-primary");
+    const hero = rendered.container.querySelector("#biomarker-latest-result-heading")
+      ?.parentElement;
+    const heroValue = [...(hero?.querySelectorAll("span") ?? [])]
+      .find((span) => span.textContent === "5.6");
+    const heroUnit = [...(hero?.querySelectorAll("span") ?? [])]
+      .find((span) => span.textContent === "%");
+    expect(heroValue?.className).toContain("text-4xl");
+    expect(heroUnit?.className).toContain("text-lg");
+    expect(heroUnit?.className).toContain("text-muted-foreground");
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
     ).not.toBeNull();
@@ -873,9 +885,42 @@ test("a shared lab-reported range yields a chart band without summary tiles", as
     expect(text).not.toContain("Saved history");
     expect(text).not.toContain("Up 0.2% since Jun 3, 2025");
     expect(text).toContain("Range 4 to 5.6%");
+    expect(text).toContain("2 results plotted in % · Shaded lab range: 4 to 5.6%");
     expect(
-      rendered.container.querySelector('[data-reference-range="present"]'),
-    ).not.toBeNull();
+      rendered.container.querySelector('[aria-label="HbA1c results over time"]')
+        ?.getAttribute("aria-describedby"),
+    ).toBe("biomarker-chart-caption");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a one-sided lab range explains the chart limit", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      date: "2025-06-03",
+      id: "hba1c-2025",
+      referenceRange: { high: 5.6 },
+      value: 5.4,
+    }),
+    labRow({
+      date: "2026-06-14",
+      id: "hba1c-2026",
+      referenceRange: { high: 5.6 },
+      value: 5.8,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).toContain(
+      "2 results plotted in % · Dashed lab limit: Up to 5.6%",
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -905,12 +950,11 @@ test("disagreeing or missing ranges withhold the band without adding summary til
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).not.toContain("shaded area");
+    expect(text).toContain("2 results plotted in %");
+    expect(text).not.toContain("Shaded lab range");
+    expect(text).not.toContain("Dashed lab limit");
     expect(text).not.toContain("Saved history");
     expect(text).not.toContain("Down 0.2% since Jun 3, 2025");
-    expect(
-      rendered.container.querySelector('[data-reference-range="absent"]'),
-    ).not.toBeNull();
   } finally {
     await rendered.cleanup();
   }
