@@ -12,6 +12,7 @@ import {
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
@@ -29,8 +30,10 @@ import {
   buildAssistantVaultFileDeliveryIdempotencyKey,
   buildAssistantVaultFileSendApprovalRequest,
   buildAssistantVaultFileSendApprovalRequestForTarget,
+  hasActivePriorTurnGeneratedVaultFileSendForTarget,
   readVerifiedAssistantVaultFileBytes,
   requestAssistantVaultFileSend,
+  resolveAssistantVaultFileSendTargetFingerprint,
   resolveAssistantVaultFileResponseMedia,
 } from '../src/assistant/vault-file-send.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -117,6 +120,83 @@ describe('assistant vault-file send', () => {
     expect(buildAssistantVaultFileSendApprovalRequest(intents[0]!)).toEqual(
       approvalPort.request.mock.calls[0]?.[0],
     )
+  })
+
+  it('keeps a second generated send closed while the same target already has an active generated delivery', () => {
+    const baseIntent = createVaultFileIntent()
+    const active = {
+      ...baseIntent,
+      media: baseIntent.media.map((media) => ({
+        ...media,
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/owned-report.pdf`,
+      })),
+    }
+    const targetFingerprint = resolveAssistantVaultFileSendTargetFingerprint(
+      active,
+    )
+    if (!targetFingerprint) {
+      throw new Error('Expected a concrete vault-file target fingerprint.')
+    }
+    const differentTargetFingerprint =
+      resolveAssistantVaultFileSendTargetFingerprint({
+        ...active,
+        bindingDelivery: { kind: 'thread', target: 'chat_other' },
+        threadId: 'chat_other',
+      })
+    if (!differentTargetFingerprint) {
+      throw new Error('Expected a second vault-file target fingerprint.')
+    }
+
+    for (const status of [
+      'awaiting_approval',
+      'pending',
+      'sending',
+      'retryable',
+    ] as const) {
+      expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+        candidateRef: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/replacement.pdf`,
+        intents: [{ ...active, status }],
+        targetFingerprint,
+        turnId: 'turn-after-approval',
+      })).toBe(true)
+    }
+
+    expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      candidateRef: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/replacement.pdf`,
+      intents: [active],
+      targetFingerprint: differentTargetFingerprint,
+      turnId: 'turn-after-approval',
+    })).toBe(false)
+
+    expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      candidateRef: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/replacement.pdf`,
+      intents: [active],
+      targetFingerprint,
+      turnId: active.turnId,
+    })).toBe(false)
+
+    expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      candidateRef: active.media[0]?.ref ?? '',
+      intents: [active],
+      targetFingerprint,
+      turnId: 'turn-after-approval',
+    })).toBe(false)
+
+    expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      candidateRef: 'documents/replacement.pdf',
+      intents: [active],
+      targetFingerprint,
+      turnId: 'turn-after-approval',
+    })).toBe(false)
+
+    for (const status of ['sent', 'failed', 'abandoned'] as const) {
+      expect(hasActivePriorTurnGeneratedVaultFileSendForTarget({
+        candidateRef: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/replacement.pdf`,
+        intents: [{ ...active, status }],
+        targetFingerprint,
+        turnId: 'turn-after-approval',
+      })).toBe(false)
+    }
   })
 
   it('uses a distinct parked owner for a refreshed approval cycle', () => {
@@ -420,6 +500,77 @@ describe('assistant vault-file send', () => {
         vaultRoot,
       })).resolves.toEqual(expected)
     }
+  })
+
+  it('does not adopt or re-approve a generated file for the same target on a later turn while the first send is active', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-prior-turn-active-',
+    )
+    tempRoots.push(parentRoot)
+    const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`
+    const stagingPath = path.join(vaultRoot, ...ref.split('/'))
+    await mkdir(path.dirname(stagingPath), { recursive: true })
+    await writeFile(stagingPath, 'first generated report')
+
+    await requestAssistantVaultFileSend({
+      actionApprovalPort: {
+        request: vi.fn().mockResolvedValue({
+          approvalId: `haa_${'a'.repeat(32)}`,
+          approvalUrl: 'https://murph.test/approve/first',
+          expiresAt: '2026-06-24T12:15:00.000Z',
+          status: 'pending' as const,
+        }),
+      },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-prior-turn-active',
+      },
+      channel: 'linq',
+      identityId: 'identity-prior-turn-active',
+      ref,
+      sessionId: 'session-prior-turn-active',
+      threadId: 'thread-prior-turn-active',
+      threadIsDirect: true,
+      toolCallId: 'call-first-turn',
+      turnId: 'turn-first',
+      vault: vaultRoot,
+    })
+
+    const replacementBytes = 'replacement generated report'
+    await writeFile(stagingPath, replacementBytes)
+    const secondApprovalRequest = vi.fn()
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: { request: secondApprovalRequest },
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-prior-turn-active',
+      },
+      channel: 'linq',
+      identityId: 'identity-prior-turn-active',
+      ref,
+      sessionId: 'session-prior-turn-active',
+      threadId: 'thread-prior-turn-active',
+      threadIsDirect: true,
+      toolCallId: 'call-after-approval',
+      turnId: 'turn-after-approval',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE',
+    })
+
+    expect(secondApprovalRequest).not.toHaveBeenCalled()
+    expect(await readFile(stagingPath, 'utf8')).toBe(replacementBytes)
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    expect(intents).toHaveLength(1)
+    const [activeIntent] = intents
+    const [activeFile] = activeIntent?.media ?? []
+    if (!activeFile || activeFile.kind !== 'vault_file') {
+      throw new Error('Expected the first generated delivery to stay active.')
+    }
+    await expect(readVerifiedAssistantVaultFileBytes({
+      file: activeFile,
+      vaultRoot,
+    })).resolves.toEqual(Buffer.from('first generated report'))
   })
 
   // Proves the exact-call-id re-delivery path only: the same tool call
@@ -815,6 +966,44 @@ describe('assistant vault-file send', () => {
       status: 'pending',
     }))
     expect(result.rpcResult.contentItems[0]?.text).not.toContain('haa_test')
+  })
+
+  it('treats a prior-turn active send as an existing obligation instead of requesting another approval', async () => {
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(async () => {
+        throw new VaultCliError(
+          'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE',
+          'A vault-file delivery for this conversation is already active.',
+        )
+      }),
+      vaultFileSendAvailable: true,
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      publicFetchImpl: fetch,
+      request: {
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+        toolCallId: 'call-after-approval',
+      },
+    })
+
+    expect(result.requiredVaultFileApprovalUrl).toBeUndefined()
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
+      note:
+        'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+      status: 'already_in_progress',
+    }))
   })
 
   it('attaches an approved vault file to the normal assistant reply path', async () => {

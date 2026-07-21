@@ -576,6 +576,10 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain('Never invent or print a link')
     expect(prompt).toContain(
+      'On later approval or confirmation turns, do not list, recreate, rename, delete, overwrite, or call `send_vault_file` again for the same send',
+    )
+    expect(prompt).toContain('let the runtime resume it')
+    expect(prompt).toContain(
       'On `status: "approved"`',
     )
     expect(prompt).toContain(

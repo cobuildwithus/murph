@@ -819,6 +819,17 @@ coalescing decision that no currently available input provides; this is
 intentionally deferred rather than solved with a registry, sidecar, scan-based
 recovery, or reconciliation loop.
 
+Once a vault-file outbox intent exists, it remains the delivery owner across
+later conversation turns. An exact retry may reuse that intent's physical ref,
+but a later turn cannot adopt a different physical ref for the same persisted
+provider target until the earlier intent is terminal. The tool reports the
+existing obligation as already in progress before touching the new staging file
+or requesting approval. This prevents a confirmation turn from replacing the
+approved file identity or starting a second approval cycle while preserving
+same-turn multi-file preparation and exact-ref retries. The model contract also
+forbids later confirmation turns from inspecting, replacing, or deleting the
+runtime-owned bytes for that pending send.
+
 Idle snapshot publication already waits for foreground and background assistant
 work to become quiescent. At that boundary, cleanup validates the complete direct
 staging inventory and outbox state before deleting anything. Exact files remain

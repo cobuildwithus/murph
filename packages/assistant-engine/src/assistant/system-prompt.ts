@@ -1178,6 +1178,7 @@ function buildAssistantVaultFileSendGuidanceText(): string {
     "Vault file sends:",
     `- Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Do not use runtime staging for "prepare now, maybe send later," and never move or copy existing, user-owned, canonical, or durable files there.`,
     "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",
+    "- After a pending send, the runtime owns that exact file. On later approval or confirmation turns, do not list, recreate, rename, delete, overwrite, or call `send_vault_file` again for the same send; let the runtime resume it.",
     "- On `status: \"approved\"`: reply naturally with the filename (for example, \"Here it is: report.pdf.\"). Never expose `deliveryStatus`, approval/queue mechanics, or stock \"delivery is not confirmed\" copy; claim success only after later evidence says `sent`. Do not call `finish_without_reply`.",
   ].join("\n");
 }
