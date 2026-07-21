@@ -7,7 +7,7 @@ import {
 } from "@murphai/clinical-records";
 
 export const EPIC_ACQUISITION_POLICY_ID = "epic-r4-longitudinal-v1";
-export const EPIC_ACQUISITION_POLICY_VERSION = "2026-07-21.longitudinal-active-v3";
+export const EPIC_ACQUISITION_POLICY_VERSION = "2026-07-21.longitudinal-active-v4";
 export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 const REQUIRED_BASE_SCOPES = Object.freeze(["fhirUser", "launch/patient", "openid"] as const);
@@ -25,7 +25,6 @@ export type EpicDependencyPurpose =
   | "location"
   | "medication"
   | "order"
-  | "panel-definition"
   | "performer"
   | "provenance"
   | "result-member"
@@ -133,7 +132,6 @@ const REGISTRATION_APIS = [
   registrationApi("procedure-search-surgeries", "Procedure.Search (Surgeries) (R4)", "Procedure", "search"),
   registrationApi("procedure-search-surgical-history", "Procedure.Search (Patient-Reported Surgical History) (R4)", "Procedure", "search"),
   registrationApi("provenance-read", "Provenance.Read (R4)", "Provenance", "read"),
-  registrationApi("questionnaire-read-patient-entered", "Questionnaire.Read (Patient-Entered Questionnaires) (R4)", "Questionnaire", "read"),
   registrationApi("service-request-read-orders", "ServiceRequest.Read (Orders) (R4)", "ServiceRequest", "read"),
   registrationApi("service-request-search-orders", "ServiceRequest.Search (Orders) (R4)", "ServiceRequest", "search"),
   registrationApi("specimen-read-patient-chart", "Specimen.Read (Patient Chart) (R4)", "Specimen", "read"),
@@ -266,10 +264,6 @@ const DEPENDENCY_POLICIES = [
     "laboratory-observations",
     "medication-requests",
   ], ["provenance-read"]),
-  dependencyPolicy("questionnaire-definition", "Questionnaire", "read", "panel-definition", [
-    "observation-assessments",
-    "observation-sdoh-assessments",
-  ], ["questionnaire-read-patient-entered"]),
   dependencyPolicy("service-request-context", "ServiceRequest", "read", "order", [
     "diagnostic-reports",
     "observation-sdoh-assessments",
@@ -324,8 +318,8 @@ const QUERY_SCOPES = [
   queryScope("laboratory-observations", "Observation", "laboratory-observations-search", "whole-scope", ["observation-search-labs"], []),
   queryScope("medication-dispenses", "MedicationDispense", "medication-dispenses-search", "whole-scope", ["medication-dispense-search-fill-status"], ["medication-definition", "medication-request-context", "organization-context", "practitioner-context"]),
   queryScope("medication-requests", "MedicationRequest", "medication-requests-search", "whole-scope", ["medication-request-search-signed-order"], ["medication-definition", "organization-context", "practitioner-context", "provenance-target"]),
-  queryScope("observation-assessments", "Observation", "observation-assessments-search", "bounded-date-365d", ["observation-search-assessments"], ["encounter-context", "observation-result-member", "practitioner-context", "questionnaire-definition"]),
-  queryScope("observation-sdoh-assessments", "Observation", "observation-sdoh-assessments-search", "bounded-date-365d", ["observation-search-sdoh-assessments"], ["encounter-context", "observation-result-member", "practitioner-context", "questionnaire-definition", "service-request-context"]),
+  queryScope("observation-assessments", "Observation", "observation-assessments-search", "bounded-date-365d", ["observation-search-assessments"], ["encounter-context", "observation-result-member", "practitioner-context"]),
+  queryScope("observation-sdoh-assessments", "Observation", "observation-sdoh-assessments-search", "bounded-date-365d", ["observation-search-sdoh-assessments"], ["encounter-context", "observation-result-member", "practitioner-context", "service-request-context"]),
   queryScope("observation-social-history", "Observation", "observation-social-history-search", "bounded-date-365d", ["observation-search-social-history"], []),
   queryScope("patient-demographics", "Patient", "patient-demographics-read", "whole-scope", ["patient-read-demographics"], []),
   queryScope("procedure-orders", "Procedure", "procedure-orders-search", "bounded-date-365d", ["procedure-search-orders"], ["encounter-context", "organization-context", "practitioner-context", "service-request-context"]),

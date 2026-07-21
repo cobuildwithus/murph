@@ -258,7 +258,7 @@ Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
 [Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
 Murph product name without adding `Epic` to the app name, set Automatic
-Client Distribution to `None`, and register the following exact 38 names from
+Client Distribution to `None`, and register the following exact 37 names from
 Epic's current
 [FHIR catalog](https://open.epic.com/Interface/FHIR):
 
@@ -297,7 +297,6 @@ Procedure.Search (Orders) (R4)
 Procedure.Search (Patient-Reported Surgical History) (R4)
 Procedure.Search (Surgeries) (R4)
 Provenance.Read (R4)
-Questionnaire.Read (Patient-Entered Questionnaires) (R4)
 ServiceRequest.Read (Orders) (R4)
 ServiceRequest.Search (Orders) (R4)
 Specimen.Read (Patient Chart) (R4)
@@ -309,12 +308,14 @@ not execute dependency traversal. Resource families without a canonical mapper
 are retained as patient-bound raw evidence with an explicit review decision; no
 family is silently dropped. The exact full-coverage registration cannot use
 USCDI-v3 automatic distribution: `FamilyMemberHistory.Search (R4)`,
-`Procedure.Search (Patient-Reported Surgical History) (R4)`, and
-`Questionnaire.Read (Patient-Entered Questionnaires) (R4)` are absent from
-Epic's automatic-distribution appendix. Do not substitute Outside Record or
-SDOH APIs, because they expose different data surfaces. Each target Epic
-customer must instead download/request this client ID. Do not request refresh
-tokens or `offline_access`.
+and `Procedure.Search (Patient-Reported Surgical History) (R4)` are absent
+from Epic's automatic-distribution appendix. Epic's patient-app registration
+also does not offer `Questionnaire.Read`; dependency traversal remains deferred,
+so the registration contract omits it instead of substituting unrelated
+`QuestionnaireResponse` APIs. Do not substitute Outside Record or SDOH APIs,
+because they expose different data surfaces. Each target Epic customer must
+instead download/request this client ID. Do not request refresh tokens or
+`offline_access`.
 Epic recommends a separate localhost-only
 test app that is never activated. Register the callback with the actual local
 port, for example

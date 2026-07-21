@@ -44,7 +44,6 @@ const EXACT_EPIC_REGISTRATION_API_NAMES = [
   "Procedure.Search (Surgeries) (R4)",
   "Procedure.Search (Patient-Reported Surgical History) (R4)",
   "Provenance.Read (R4)",
-  "Questionnaire.Read (Patient-Entered Questionnaires) (R4)",
   "ServiceRequest.Read (Orders) (R4)",
   "ServiceRequest.Search (Orders) (R4)",
   "Specimen.Read (Patient Chart) (R4)",
