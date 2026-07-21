@@ -241,11 +241,39 @@ describe("Clinical Records authorization persistence", () => {
               resourceType: "Observation",
               sliceId: "whole",
             }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-assessments",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-sdoh-assessments",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-social-history",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "vital-sign-observations",
+              resourceType: "Observation",
+            }),
           ],
         },
+        retrievalProtocol: "query-slices-v2",
         status: "queued",
       }),
     });
+    const retrievalRun = harness.retrievalRunCreate.mock.calls[0]?.[0]?.data as {
+      createdAt: Date;
+      retrievalPlanJson: { slices: Array<{ coverage: string; to?: string }> };
+    };
+    expect(retrievalRun.retrievalPlanJson.slices
+      .filter((slice) => slice.coverage === "bounded-window")
+      .every((slice) => slice.to === retrievalRun.createdAt.toISOString())).toBe(true);
   });
 
   it("rejects a second retrieval for the same member and provider", async () => {
@@ -260,23 +288,26 @@ describe("Clinical Records authorization persistence", () => {
     expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
   });
 
-  it("rejects an existing member-provider connection before provider discovery", async () => {
-    const harness = createHarness(existingConnection());
-    mocks.getPrisma.mockReturnValue(harness.prisma);
+  it.each(["active", "disconnected", "needs_reauth"] as const)(
+    "keeps a %s legacy member-provider row ineligible before provider discovery",
+    async (status) => {
+      const harness = createHarness(existingConnection(status));
+      mocks.getPrisma.mockReturnValue(harness.prisma);
 
-    await expect(startClinicalRecordConnection({
-      claim: CONNECT_CLAIM,
-      providerDirectoryEntryId: PROVIDER_ID,
-      request: new Request(
-        "https://join.example.test/api/clinical-records/connect-intents/start",
-        { headers: { origin: "https://join.example.test" }, method: "POST" },
-      ),
-    })).rejects.toMatchObject({
-      code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
-    });
-    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
-    expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
-  });
+      await expect(startClinicalRecordConnection({
+        claim: CONNECT_CLAIM,
+        providerDirectoryEntryId: PROVIDER_ID,
+        request: new Request(
+          "https://join.example.test/api/clinical-records/connect-intents/start",
+          { headers: { origin: "https://join.example.test" }, method: "POST" },
+        ),
+      })).rejects.toMatchObject({
+        code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
+      });
+      expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+      expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
+    },
+  );
 
   it("maps the member-provider uniqueness race to the same bounded conflict", async () => {
     const harness = createHarness(null);
@@ -409,9 +440,10 @@ function oauthSession() {
   };
 }
 
-function existingConnection() {
+function existingConnection(status: "active" | "disconnected" | "needs_reauth" = "active") {
   return {
     id: "crc_existing",
+    status,
   };
 }
 

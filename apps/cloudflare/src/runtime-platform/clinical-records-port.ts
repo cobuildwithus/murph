@@ -62,10 +62,12 @@ export function createHostedWebClinicalRecordsPort(input: {
     },
     async fetchPage(request, options) {
       const {
+        parseHostedClinicalRecordsFetchPageRequest,
         parseHostedClinicalRecordsFetchPageResponse,
       } = await import("@murphai/hosted-execution/clinical-records");
+      const parsedRequest = parseHostedClinicalRecordsFetchPageRequest(request);
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: parsedRequest,
         boundUserId: input.boundUserId,
         description: "Hosted clinical records fetch page",
         fetchImpl: input.fetchImpl,
@@ -82,10 +84,12 @@ export function createHostedWebClinicalRecordsPort(input: {
     },
     async readRun(request, options) {
       const {
+        parseHostedClinicalRecordsReadRunRequest,
         parseHostedClinicalRecordsReadRunResponse,
       } = await import("@murphai/hosted-execution/clinical-records");
+      const parsedRequest = parseHostedClinicalRecordsReadRunRequest(request);
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: parsedRequest,
         boundUserId: input.boundUserId,
         description: "Hosted clinical records read run",
         fetchImpl: input.fetchImpl,
@@ -103,9 +107,11 @@ export function createHostedWebClinicalRecordsPort(input: {
     async recordOutcome(request, options) {
       const {
         parseHostedClinicalRecordsRecordOutcomeResponse,
+        parseHostedClinicalRecordsRecordOutcomeRequest,
       } = await import("@murphai/hosted-execution/clinical-records");
+      const parsedRequest = parseHostedClinicalRecordsRecordOutcomeRequest(request);
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: parsedRequest,
         boundUserId: input.boundUserId,
         description: "Hosted clinical records record outcome",
         fetchImpl: input.fetchImpl,

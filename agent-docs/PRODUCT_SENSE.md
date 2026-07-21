@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-15
+Last verified: 2026-07-21
 
 ## Current Posture
 
@@ -38,9 +38,9 @@ Last verified: 2026-07-15
   a problem.
 - Hosted landing-page signup should hand members directly toward messaging
   Murph. Signup-oriented accessible-stage landing auth routes to
-  `/home?initialVisit=true`, where `/home` opens a one-shot welcome dialog with
-  a primary Murph contact CTA and a secondary exploration path. Login-oriented
-  landing CTAs continue to route to ordinary `/home`.
+  `/home?initialVisit=true`, where `/home` opens the one-shot four-step Murph
+  personality picker. Login-oriented landing CTAs continue to route to
+  ordinary `/home`.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older
   item resolve to the exact archive window and anchor that contains it.

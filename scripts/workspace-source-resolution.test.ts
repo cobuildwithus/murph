@@ -32,6 +32,9 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/clinical-records")).toBe(
       path.join(repoRoot, "packages/clinical-records/src/index.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/clinical-records/retrieval-limits")).toBe(
+      path.join(repoRoot, "packages/clinical-records/src/retrieval-limits.ts"),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/hosted-email")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/hosted-email.ts"),
     );
@@ -158,6 +161,8 @@ describe("workspace source resolution", () => {
       .toEqual(["./packages/hosted-execution/src/assistant-identifiers.ts"]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-personalization"])
       .toEqual(["./packages/hosted-execution/src/assistant-personalization.ts"]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/clinical-records/retrieval-limits"])
+      .toEqual(["./packages/clinical-records/src/retrieval-limits.ts"]);
   });
 });
 

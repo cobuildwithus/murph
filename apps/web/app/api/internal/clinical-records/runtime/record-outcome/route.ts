@@ -1,4 +1,5 @@
 import {
+  HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   parseHostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records";
 
@@ -10,8 +11,6 @@ import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-executi
 import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { readJsonObject } from "@/src/lib/http";
 
-const BODY_LIMIT_BYTES = 8 * 1_024;
-
 export async function GET(): Promise<Response> {
   return methodNotAllowed();
 }
@@ -19,7 +18,7 @@ export async function GET(): Promise<Response> {
 export const POST = withClinicalJsonError(async (request: Request) => {
   requireClinicalRecordsRuntimeWriteFence(request);
   const memberId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: BODY_LIMIT_BYTES,
+    maxBodyBytes: HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   });
   await requireHostedRuntimeActiveAccess(memberId, {
     code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
@@ -28,7 +27,9 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   let parsed: ReturnType<typeof parseHostedClinicalRecordsRecordOutcomeRequest>;
   try {
     parsed = parseHostedClinicalRecordsRecordOutcomeRequest(
-      await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }),
+      await readJsonObject(request, {
+        limitBytes: HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
+      }),
     );
   } catch {
     throw invalidRequestError();
