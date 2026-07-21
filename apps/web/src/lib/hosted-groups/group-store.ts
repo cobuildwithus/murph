@@ -69,7 +69,6 @@ import {
 } from "./join-policy";
 import {
   appendHostedGroupJoinConfirmationTx,
-  isHostedGroupJoinConfirmationProducerEnabled,
   type HostedGroupJoinConfirmationOrigin,
   type HostedGroupJoinConfirmationSignal,
 } from "./group-join-confirmation";
@@ -1697,7 +1696,6 @@ async function acceptHostedGroupJoinTx(input: {
 
   const joinConfirmationResult = !alreadyMember
     && group.joinCode
-    && isHostedGroupJoinConfirmationProducerEnabled()
     ? await appendHostedGroupJoinConfirmationTx({
         groupDisplayName: group.displayName,
         joinCode: group.joinCode,

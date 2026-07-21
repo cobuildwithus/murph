@@ -2271,19 +2271,19 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   signal: AbortSignal | null;
   target: string | null;
   userId: string;
-}): Promise<void> {
+}): Promise<string | null> {
   const payload = input.assistantDeliveryEffect.payload;
   if (
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "telegram"
     || payload.threadIsDirect !== false
   ) {
-    return;
+    return null;
   }
 
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
   if (!authority && !input.intent?.automationAuthority) {
-    return;
+    return null;
   }
   if (!authority) {
     throw new VaultCliError(
@@ -2314,6 +2314,7 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     );
   }
   await assertAuthority(authority, { signal: input.signal });
+  return target;
 }
 
 function isHostedAssistantReactionOnlyEffect(
@@ -2585,6 +2586,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       return disabledAutoReplyOutcome;
     }
     assertHostedBackgroundDeliveryNotYielded(input);
+    const telegramAuthorityBoundTarget =
+      normalizeHostedAssistantDeliveryChannel(
+        input.assistantDeliveryEffect.payload.channel,
+      )?.toLowerCase() === "telegram"
+      && input.assistantDeliveryEffect.payload.threadIsDirect === false
+      && mirrorState.intent?.externalThreadRouteAuthority?.channel === "telegram"
+        ? mirrorState.intent.externalThreadRouteAuthority.threadId
+        : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -2679,15 +2688,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
-          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-            assistantDeliveryEffect: input.assistantDeliveryEffect,
-            effectsPort: input.effectsPort,
-            intent: mirrorState.intent,
-            signal: input.signal,
-            target: request.target,
-            userId: input.userId,
-          });
+          const authorityBoundTarget =
+            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              effectsPort: input.effectsPort,
+              intent: mirrorState.intent,
+              signal: input.signal,
+              target: request.target,
+              userId: input.userId,
+            });
           const dependencies = requireHostedProviderFetchDependencies({
+            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
             ...(input.signal ? { signal: input.signal } : {}),
@@ -2699,15 +2710,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegramImage: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
-          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-            assistantDeliveryEffect: input.assistantDeliveryEffect,
-            effectsPort: input.effectsPort,
-            intent: mirrorState.intent,
-            signal: request.signal ?? input.signal,
-            target: request.target,
-            userId: input.userId,
-          });
+          const authorityBoundTarget =
+            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              effectsPort: input.effectsPort,
+              intent: mirrorState.intent,
+              signal: request.signal ?? input.signal,
+              target: request.target,
+              userId: input.userId,
+            });
           const dependencies = requireHostedProviderFetchDependencies({
+            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
             ...(request.signal ?? input.signal
@@ -2727,15 +2740,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         setTelegramMessageReaction: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
-          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-            assistantDeliveryEffect: input.assistantDeliveryEffect,
-            effectsPort: input.effectsPort,
-            intent: mirrorState.intent,
-            signal: input.signal,
-            target: request.target,
-            userId: input.userId,
-          });
+          const authorityBoundTarget =
+            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              effectsPort: input.effectsPort,
+              intent: mirrorState.intent,
+              signal: input.signal,
+              target: request.target,
+              userId: input.userId,
+            });
           const dependencies = requireHostedProviderFetchDependencies({
+            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
             ...(input.signal ? { signal: input.signal } : {}),
@@ -2746,6 +2761,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         telegramVoiceMemoRuntime: {
+          ...(telegramAuthorityBoundTarget
+            ? { authorityBoundTarget: telegramAuthorityBoundTarget }
+            : {}),
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),

@@ -53,11 +53,8 @@ import {
   readHostedGroupDisclosureGrantAuthorityTx,
 } from "./group-disclosure-store";
 
-export const HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED_ENV =
-  "HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED";
 export const HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED_ENV =
   "HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED";
-
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
 const HOSTED_GROUP_MEMBER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
@@ -129,18 +126,11 @@ interface HostedAssistantAskRequestReadResult {
   terminalReason: "expired" | "unavailable" | null;
 }
 
-export function isHostedAssistantAskProducerEnabled(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return source[HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED_ENV] === "1";
-}
-
 export function isHostedGroupDisclosureProducerEnabled(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
   return source[HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED_ENV] === "1";
 }
-
 export function createHostedAssistantAskRequestId(input: {
   memberId: string;
   originAssistantInputId: string;
@@ -188,7 +178,6 @@ export function createHostedGroupMemberAssistantAskRequestId(input: {
 }
 
 export async function requestHostedGroupAssistantAsk(input: {
-  environment?: Readonly<Record<string, string | undefined>>;
   groupLabel?: string | null;
   memberId: string;
   now?: Date;
@@ -197,10 +186,6 @@ export async function requestHostedGroupAssistantAsk(input: {
   prisma?: HostedAssistantAskPrismaClient;
   question: string;
 }): Promise<HostedGroupAssistantAskAdmission> {
-  if (!isHostedAssistantAskProducerEnabled(input.environment)) {
-    return unavailableAdmission("feature_disabled");
-  }
-
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const question = normalizeHostedAssistantAskText({

@@ -54,13 +54,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // have more surface.
 //
 // PR #813's reviewed route-authority boundary, after merging current main,
-// measured 9,314,428B on CI Linux and 9,364,555B on local macOS. PR #750's
+// measured 9,314,428B on CI Linux and 9,369,574B on local macOS after the
+// scheduled Telegram redirect authority correction. PR #750's
 // consented group-to-member ask path measures 9,402,536B on that merged base;
-// the scheduled-authority remediation measures 9,402,701B. Ratchet the fixed
-// total backstop to the exact combined local measurement;
+// the scheduled-authority remediation measures 9,402,701B, and the combined
+// post-#827 head measures 9,405,369B. Ratchet the fixed total backstop to the
+// exact combined local measurement;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_402_701;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_405_369;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

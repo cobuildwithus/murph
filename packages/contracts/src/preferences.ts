@@ -7,14 +7,6 @@ export const preferencesDocumentSchemaVersion = 1;
 export const assistantPreferenceMutationStateRelativePath =
   "bank/assistant-preference-mutations.json";
 export const assistantPreferenceMutationStateSchemaVersion = 1;
-export const MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV =
-  "MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED";
-
-export function assistantPersonalityCausalWritesEnabled(
-  env: Readonly<Record<string, string | undefined>>,
-): boolean {
-  return env[MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV]?.trim() === "1";
-}
 
 export const assistantPersonaIdValues = [
   "classic",

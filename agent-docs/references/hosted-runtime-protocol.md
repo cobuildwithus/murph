@@ -493,13 +493,13 @@ interrupts the exact child, waits a bounded grace period, terminates only that
 proven-owned process if needed, proves exit, and only then releases the
 workspace. Child failure cannot interrupt or poison the resident App Server.
 
-The first rollout is consumer-first. Deploy the runtime and runner consumers
-with immediate container rollout, prove `murph-group-read` confinement and the
-new bundle fingerprint, deploy Web with
-`HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`, and enable exact `1` only
-after convergence. Rollback disables and redeploys the Web producer first,
-waits at least the full ten-minute request lifetime, and rolls consumers back
-only after pending request and completion items have drained or expired.
+Assistant Ask is hard-cut across Web and the hosted runtime. Web always admits
+otherwise-authorized requests; there is no producer flag or disabled protocol
+mode. The first compatible runner bundle remains the rollback floor while an
+Ask request or completion can remain in a mailbox or restored workspace. Roll
+below that floor only after the full ten-minute request lifetime has elapsed
+and pending work has drained or expired; prefer a forward fix when imported
+items may remain.
 
 The consented reverse adapter has a distinct producer gate. First deploy
 consumers that tolerate the `consented_member` target, trusted invocation
@@ -537,25 +537,15 @@ dependency. A rollback to the prior bundle is safe only before the first
 is the hard rollback floor because a workspace, checkpoint, or retained outbox
 intent may contain the marker. Do not try to prove an incident-time drain;
 forward-fix instead of adding a compatibility reader or dual writer.
-The preference sparse-delta plus cross-lane causal-sequence rollout uses the
-same compatibility rule behind one gate. Vercel predeploy first adds nullable
-`causal_seq` storage, the keyed assistant-input lookup, and nullable Humor,
-Push, and Detail projection watermarks. The new web build starts producing
-sequences and supports the signed input-bound personality transaction while
-personality writes remain gated off; the old Cloudflare parser ignores the
-optional field. The normal post-deploy contract lane waits for old Vercel
-functions to drain and requires sequences only when no unconsumed legacy
-preference row remains, failing closed for a later retry otherwise. It then
-seeds all three personality watermarks to each member's current causal barrier,
-including null projection values, because the pre-fix projection may differ
-from canonical vault state and cannot be backfilled safely. Deploy the
-sequence-aware Cloudflare consumer with immediate runner rollout, prove fleet
-convergence, then enable the Vercel gate. The hard-cut Web build rejects the
-retired direct-vault causal-sequence action after old Vercel functions drain;
-legacy runners keep ordinary replies but style writes fail closed. Web must not
-roll back below that hard-cut while personality watermarks exist. Set the gate
-to `0` and redeploy Web before a runner rollback when unavailable controls must
-be hidden.
+Preference sparse deltas and cross-lane causal sequencing are hard-cut. Web
+always produces the sequence-aware delta and supports the signed input-bound
+personality transaction; there is no complete-snapshot producer or disabled
+write mode. The hard-cut Web build rejects the retired direct-vault
+causal-sequence action. The first sequence-aware Cloudflare consumer and that
+Web build are rollback floors while preference items or personality watermarks
+exist. Deploy behavior-changing consumer updates with immediate runner rollout
+and prove fleet convergence; prefer a forward fix over restoring a legacy
+producer or parser.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -949,39 +939,25 @@ Existing global file-type exclusions still apply regardless of directory.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
-Deploy consumers before the producer for this kind. Web emission is fail-closed
-unless `MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED=1`; while disabled,
-web retains the legacy runtime recheck and confirmation-message fallback and
-does not append the new mailbox kind. Merge with the gate disabled, first deploy
-and verify the web bundle that serves the observation-only action-approval read
-route, then deploy Cloudflare with `container_rollout=immediate` and wait for the
-managed-container smoke to prove the new parser/runtime bundle is active. Keep the gate disabled
-for a full 30-minute drain after the last old runtime bundle can serve an
-approval request; restart the drain window if an old bundle can still serve
-later. The drain covers the 15-minute pending approval lifetime plus the fresh
-15-minute approved lifetime, so pre-cutover approvals retain the legacy
-confirmation continuation through their entire actionable window. Only after
-that drain may the gate be set to `1` and web redeployed. Once enabled, browser
-returns use a bare conversation link; the confirmation-message fallback exists
-only while the gate is disabled. New web producer behavior against an old
-runtime is not safe because the old parser quarantines the new system row and
-blocks system-lane progress. Roll back in the reverse order: set the gate to `0`
-and redeploy web first so no new rows can be produced. Once the gate has ever
-been enabled in production, the first compatible Cloudflare/runner bundle is a
-permanent runtime rollback floor, and the first web bundle that serves its
-action-approval read route is the matching permanent web rollback floor. Keep
-web at that floor or newer while the compatible runtime or any parked local
-item, committed snapshot, approved row, or in-flight reconciliation can depend
-on the route. Removing either floor requires a separate migration or forward
-runtime that removes the dependency. System-lane lag measures import progress, not
-handling progress: an imported approval wake may still be pending in
+Approval decisions always append the generation-scoped reconciliation wake in
+the same transaction as the decision. Browser returns use a bare conversation
+link; there is no legacy runtime recheck, confirmation-message fallback, or
+disabled protocol mode. An old runtime is unsafe because its parser quarantines
+the system row and blocks system-lane progress. The first compatible
+Cloudflare/runner bundle is therefore a permanent runtime rollback floor, and
+the first web bundle that serves the action-approval read route is the matching
+permanent web rollback floor. Keep web at that floor or newer while the
+compatible runtime or any parked local item, committed snapshot, approved row,
+or in-flight reconciliation can depend on the route. Removing either floor
+requires a separate migration or forward runtime that removes the dependency.
+System-lane lag measures import progress, not handling progress: an imported
+approval wake may still be pending in
 `hosted-system-mailbox.json` and preserved in the hot workspace snapshot after
 lag reaches zero. Roll Cloudflare back only to that compatible bundle or newer,
 or forward-fix it. A rollback below the floor requires a separate migration and
 operator proof that covers durable server rows, imported local pending items,
-committed snapshots, and in-flight producers; disabling the gate and observing
-zero lag alone is insufficient. Do not roll the runtime back while the producer
-remains active.
+committed snapshots, and in-flight producers; observing zero lag alone is
+insufficient.
 
 ### Hosted Runtime Maintenance Wake
 

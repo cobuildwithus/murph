@@ -17,7 +17,6 @@ import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { Separator } from "@/src/components/ui/separator";
 import {
-  isHostedActionApprovalOutcomeWakeEnabled,
   readHostedActionApproval,
   requireHostedActionApprovalId,
 } from "@/src/lib/action-approvals";
@@ -33,6 +32,9 @@ import { cn } from "@/src/lib/utils";
 type TerminalActionApprovalView = HostedActionApprovalView & {
   status: Exclude<HostedActionApprovalStatus, "pending">;
 };
+
+const EXPIRED_APPROVAL_REPLY_BODY =
+  "That approval link expired. Please send a new one.";
 
 export default async function ActionApprovalPage({
   params,
@@ -79,13 +81,12 @@ async function ActionApprovalTerminalState({
   approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
-  const needsConfirmationMessage = approval.status === "expired"
-    || !isHostedActionApprovalOutcomeWakeEnabled();
+  const needsRecoveryMessage = approval.status === "expired";
   const contactOptions = approval.returnContactKind === null
     ? []
     : await resolveHostedMurphContactOptions({
-        ...(needsConfirmationMessage
-          ? { message: { body: content.replyBody } }
+        ...(needsRecoveryMessage
+          ? { message: { body: EXPIRED_APPROVAL_REPLY_BODY } }
           : {}),
         preferredKind: approval.returnContactKind,
       }).catch(() => []);
@@ -117,14 +118,14 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : needsConfirmationMessage ? (
+        ) : needsRecoveryMessage ? (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
               send:
             </p>
             <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
-              {content.replyBody}
+              {EXPIRED_APPROVAL_REPLY_BODY}
             </p>
           </div>
         ) : (
@@ -152,7 +153,6 @@ interface TerminalContent {
   actionLabel: string;
   description: string;
   icon: LucideIcon;
-  replyBody: string;
   title: string;
 }
 
@@ -165,7 +165,6 @@ function terminalContent(
         actionLabel: "Return to Murph",
         description: "You approved this action. Head back to Murph to continue.",
         icon: CheckCircle2,
-        replyBody: "I approved the request.",
         title: "Approved",
       };
     case "denied":
@@ -173,7 +172,6 @@ function terminalContent(
         actionLabel: "Return to Murph",
         description: "Murph will not continue with this action.",
         icon: XCircle,
-        replyBody: "I denied the request.",
         title: "Denied",
       };
     case "expired":
@@ -182,7 +180,6 @@ function terminalContent(
         description:
           "Approval links expire after a short time for your security. Nothing was approved or changed.",
         icon: Clock3,
-        replyBody: "That approval link expired. Please send a new one.",
         title: "Approval link expired",
       };
   }

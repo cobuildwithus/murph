@@ -32,9 +32,6 @@ export interface HostedGroupJoinConfirmationSignal {
   memberId: string;
 }
 
-export const HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED_ENV =
-  "HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED";
-
 export type HostedGroupJoinConfirmationAppendResult =
   | {
       kind: "appended";
@@ -53,7 +50,7 @@ export type HostedGroupJoinConfirmationOrigin =
   | "web";
 
 export type HostedGroupJoinConfirmationMaterializationResult =
-  | { kind: "disabled" | "empty" }
+  | { kind: "empty" }
   | { kind: "deferred" }
   | { kind: "terminal-skip" }
   | {
@@ -73,12 +70,6 @@ export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_DEFAULT_LIMIT = 10;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_DRAIN_MAX_LIMIT = 25;
 export const HOSTED_GROUP_JOIN_CONFIRMATION_HANDOFF_TIMEOUT_MS =
   HOSTED_POST_COMMIT_TIMEOUT_MS;
-
-export function isHostedGroupJoinConfirmationProducerEnabled(
-  source: Record<string, string | undefined> = process.env,
-): boolean {
-  return source[HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED_ENV] === "1";
-}
 
 export async function appendHostedGroupJoinConfirmationTx(input: {
   groupDisplayName: string | null;
@@ -153,10 +144,6 @@ export async function materializePendingHostedGroupJoinConfirmations(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedGroupJoinConfirmationMaterializationResult> {
-  if (!isHostedGroupJoinConfirmationProducerEnabled()) {
-    return { kind: "disabled" };
-  }
-
   const prisma = input.prisma ?? getPrisma();
   const deadlineMs = createHostedPostCommitDeadline(input.timeoutMs);
   const result = await waitForHostedPostCommitOperation({
@@ -236,16 +223,6 @@ export async function drainPendingHostedGroupJoinConfirmations(input: {
   limit?: number;
   prisma?: PrismaClient;
 } = {}): Promise<HostedGroupJoinConfirmationDrainResult> {
-  if (!isHostedGroupJoinConfirmationProducerEnabled()) {
-    return {
-      appended: 0,
-      deferred: 0,
-      nextCursor: null,
-      scanned: 0,
-      terminalSkipped: 0,
-    };
-  }
-
   const prisma = input.prisma ?? getPrisma();
   const limit = normalizeDrainLimit(input.limit);
   const cursor = input.cursor?.trim() || null;

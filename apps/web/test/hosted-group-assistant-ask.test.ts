@@ -28,7 +28,6 @@ import {
   createHostedAssistantAskCompletionId,
   createHostedAssistantAskRequestId,
   handleHostedRuntimeAssistantAskControl,
-  isHostedAssistantAskProducerEnabled,
   requestHostedGroupAssistantAsk,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
@@ -45,9 +44,6 @@ const TARGET_RUNTIME_MEMBER_ID = "member-group-runtime";
 const ORIGIN_ASSISTANT_INPUT_ID = `ain_${"a".repeat(32)}`;
 const ORIGIN_SESSION_ID = "session_private";
 const QUESTION = "What is today's workout?";
-const ENABLED_ENVIRONMENT = {
-  HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED: "1",
-} as const;
 
 function directOriginWake() {
   return {
@@ -179,27 +175,6 @@ describe("Hosted group Assistant Ask admission", () => {
     );
   });
 
-  it("keeps the producer disabled unless the gate is exactly one", async () => {
-    const { prisma } = createPrisma();
-
-    expect(isHostedAssistantAskProducerEnabled({
-      HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED: "true",
-    })).toBe(false);
-    await expect(requestHostedGroupAssistantAsk({
-      environment: {},
-      memberId: ORIGIN_MEMBER_ID,
-      now: NOW,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-      originSessionId: ORIGIN_SESSION_ID,
-      prisma: prisma as never,
-      question: QUESTION,
-    })).resolves.toEqual({
-      mailboxWake: null,
-      result: { status: "unavailable", unavailableReason: "feature_disabled" },
-    });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-  });
-
   it("automatically selects the only membership and appends one expiring request", async () => {
     const { prisma } = createPrisma();
     const requestId = createHostedAssistantAskRequestId({
@@ -208,7 +183,6 @@ describe("Hosted group Assistant Ask admission", () => {
     });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -261,7 +235,6 @@ describe("Hosted group Assistant Ask admission", () => {
     });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       groupLabel: "  100   CLUB  ",
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
@@ -296,7 +269,6 @@ describe("Hosted group Assistant Ask admission", () => {
     });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -317,7 +289,6 @@ describe("Hosted group Assistant Ask admission", () => {
     const { prisma } = createPrisma({ memberships: [] });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -340,7 +311,6 @@ describe("Hosted group Assistant Ask admission", () => {
     });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       groupLabel: "100 club",
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
@@ -359,7 +329,6 @@ describe("Hosted group Assistant Ask admission", () => {
     const { prisma, tx } = createPrisma({ syntheticOrigin: true });
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -380,7 +349,6 @@ describe("Hosted group Assistant Ask admission", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       groupLabel: "Mobility Crew",
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
@@ -403,7 +371,6 @@ describe("Hosted group Assistant Ask admission", () => {
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -430,7 +397,6 @@ describe("Hosted group Assistant Ask admission", () => {
     const { prisma, tx } = createPrisma();
 
     await expect(requestHostedGroupAssistantAsk({
-      environment: ENABLED_ENVIRONMENT,
       memberId: ORIGIN_MEMBER_ID,
       now: NOW,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
