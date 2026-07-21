@@ -57,10 +57,12 @@ The onboarding picker preserves the current four-step design:
 3. choose a voice using the main personality's preview set and recommendations
 4. choose tone and save the canonical combination ID, voice, and tone atomically
 
-`/home?initialVisit=true` opens this picker directly and consumes the query
-marker as a one-shot browser handoff. There is no preceding contact-card step
-or trailing welcome dialog on this route. Skip or dismiss closes the picker
-without writing preferences.
+`/home?initialVisit=true` consumes the query marker as a one-shot browser
+handoff. Members with a resolved text contact see the contact-card picker first;
+adding the card, skipping, or dismissing it advances to the personality picker.
+Members without a text contact start directly at the personality picker. There
+is no trailing welcome dialog on this route. Skipping or dismissing the
+personality picker closes it without writing preferences.
 
 ## Existing members and legacy reads
 
