@@ -203,9 +203,11 @@ fail-closed reasons. The read-only plan-usage projection remains an
 included-period view and must not be treated as the gate result.
 
 Usage accounting may create a period-scoped notice candidate when remaining
-effective capacity crosses the 20% low threshold or reaches zero. A
-message-triggered record carries its originating Linq or Telegram target
-through the current invocation and signed usage-record seam. Every rendered
+effective capacity reaches zero. Low capacity does not send a standalone
+message. On the next allowed conversation-mailbox fetch, Web projects only a
+coarse `low` bit when effective remaining capacity is at or below the shared
+20% threshold. The runtime binds that trusted bit to the accepted input, and
+Murph mentions it naturally inside the resulting reply. Every rendered
 personal limit notice states the included allowance as 100% used before the
 channel-specific follow-up copy.
 
@@ -249,13 +251,15 @@ action reports only `healthy`, `low`, or `exhausted` plus the current period and
 first-party funding URL. It never exposes internal USD-micro accounting,
 contributors, receipts, or payer identity.
 
-A group low-usage or exhaustion notice may use only the exact originating
-external-thread target after web re-authorizes its persisted thread authority;
-no personal-home fallback is valid for an accepted group conversation. At
-delivery time Web rechecks the expected coarse state and may append the
-group's `/groups/fund/[joinCode]` link. The notice stays reply-oriented and does
-not name a payer, claim that payment occurred, or add a separate scheduler or
-money-prompt lifecycle.
+Group low usage follows the same next-turn context path as personal usage: it
+never creates a standalone message, and the prompt asks Murph to finish the
+current request before mentioning the low capacity casually. A deterministic
+group exhaustion notice may use only the exact originating external-thread
+target after Web re-authorizes its persisted thread authority; no personal-home
+fallback is valid for an accepted group conversation. At delivery time Web
+rechecks the exhausted state and may append the group's
+`/groups/fund/[joinCode]` link. The notice does not name a payer, claim that
+payment occurred, or add a separate scheduler or money-prompt lifecycle.
 
 ## Non-Goals
 

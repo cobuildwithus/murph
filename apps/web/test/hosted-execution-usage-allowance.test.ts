@@ -1379,7 +1379,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
-  it("returns one coarse low-usage notice when a thread crosses 20% remaining", async () => {
+  it("accounts a thread crossing 20% remaining without creating a notice", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -1392,12 +1392,8 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toMatchObject({
-      userNotice: {
-        code: "thread_usage_low",
-        message: expect.not.stringMatching(/\$|USD|https?:\/\//u),
-      },
-    });
+    })).resolves.toBeNull();
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {

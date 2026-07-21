@@ -28,6 +28,7 @@ export interface HostedMailboxAssistantInputItem {
   groupReactionContext?: string
   inputId: string
   mailboxItemId: string
+  usageRunningLow?: true
 }
 
 export interface HostedMailboxAssistantInputItemInventoryEntry {
@@ -45,6 +46,7 @@ export async function recordHostedMailboxAssistantInputItem(input: {
   groupReactionContext?: string
   inputId: string
   mailboxItemId: string
+  usageRunningLow?: true
   vault: string
 }): Promise<void> {
   const paths = resolveAssistantStatePaths(input.vault)
@@ -223,6 +225,7 @@ function normalizeHostedMailboxAssistantInputItem(
     groupReactionContext?: unknown
     inputId?: unknown
     mailboxItemId?: unknown
+    usageRunningLow?: unknown
   }
   if (
     record.groupParticipantAdded !== undefined &&
@@ -231,6 +234,9 @@ function normalizeHostedMailboxAssistantInputItem(
     throw new TypeError(
       'groupParticipantAdded must be true when present.',
     )
+  }
+  if (record.usageRunningLow !== undefined && record.usageRunningLow !== true) {
+    throw new TypeError('usageRunningLow must be true when present.')
   }
   const groupReactionContext = typeof record.groupReactionContext === 'string'
     ? normalizeNullableString(record.groupReactionContext)
@@ -254,6 +260,7 @@ function normalizeHostedMailboxAssistantInputItem(
       record.mailboxItemId,
       'mailboxItemId',
     ),
+    ...(record.usageRunningLow === true ? { usageRunningLow: true } : {}),
   }
 }
 

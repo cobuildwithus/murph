@@ -1376,13 +1376,18 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
-    turnContext: affirmativeReaction
+    turnContext: buildAssistantAutoReplyTurnContext({
+      baseContext: affirmativeReaction
       ? buildAssistantAutoReplyAffirmativeReactionTurnContext(
           outboxContext.replyTargetDelivery?.message ?? null,
         )
       : buildAssistantAutoReplyCrossSessionTurnContext(
           latestCrossSessionDelivery?.message ?? null,
         ),
+      usageRunningLow: input.group.items.some(
+        (item) => item.inputCandidate?.event.usageRunningLow === true,
+      ),
+    }),
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -4229,6 +4234,23 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
     '',
     'Use it only to interpret the current user message.',
   ].join('\n')
+}
+
+function buildAssistantAutoReplyTurnContext(input: {
+  baseContext: string | null
+  usageRunningLow: boolean
+}): string | null {
+  const sections = [
+    input.baseContext,
+    input.usageRunningLow
+      ? [
+          'Hosted usage context:',
+          "This conversation's remaining Murph usage is running low.",
+        ].join('\n')
+      : null,
+  ].filter((section): section is string => section !== null)
+
+  return sections.length > 0 ? sections.join('\n\n') : null
 }
 
 function buildAssistantAutoReplyAffirmativeReactionTurnContext(

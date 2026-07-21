@@ -81,6 +81,7 @@ describe('store-backed assistant input source', () => {
     await recordHostedMailboxAssistantInputItem({
       inputId: stored.inputId,
       mailboxItemId: 'raw_mailbox_item_store',
+      usageRunningLow: true,
       vault: vaultRoot,
     })
     await updateAssistantInputAttachmentEvidence({
@@ -160,6 +161,7 @@ describe('store-backed assistant input source', () => {
         },
         text: 'stored input text',
         transcriptText: 'stored input text',
+        usageRunningLow: true,
       },
       projection: {
         captureId: null,
@@ -176,6 +178,7 @@ describe('store-backed assistant input source', () => {
       [stored.inputId, {
         inputId: stored.inputId,
         mailboxItemId: 'raw_mailbox_item_store',
+        usageRunningLow: true,
       }],
     ]))
   })
