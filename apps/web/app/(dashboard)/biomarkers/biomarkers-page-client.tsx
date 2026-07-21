@@ -94,9 +94,9 @@ export function BiomarkersPageClient({
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <PageHeader
-          eyebrow="Lab history"
+          eyebrow="Health data"
           title="Your biomarkers"
-          description="Every biomarker in your saved lab results, grouped by health area."
+          description="Biomarkers from your devices and saved lab results, with private history over time."
         />
         {authenticated && totalCount > 0 ? (
           <p className="text-sm tabular-nums text-muted-foreground">
@@ -152,6 +152,10 @@ export function BiomarkersPageClient({
         </Alert>
       ) : null}
 
+      {authenticated && !authRequired && deviceMetrics.length > 0 ? (
+        <DeviceMetricsSection items={deviceMetrics} />
+      ) : null}
+
       {(authRequired || status === "empty" || status === "ready") && (!authenticated || biomarkers.length === 0) ? (
         <EmptyBiomarkersState
           authRequired={authRequired}
@@ -162,15 +166,11 @@ export function BiomarkersPageClient({
       ) : null}
 
       {authenticated && groups.length > 0 ? (
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-6">
           {groups.map((group) => (
             <MeasuredBiomarkerSection key={group.id} group={group} />
           ))}
         </div>
-      ) : null}
-
-      {authenticated && !authRequired && deviceMetrics.length > 0 ? (
-        <DeviceMetricsSection items={deviceMetrics} />
       ) : null}
     </div>
   );
@@ -256,18 +256,23 @@ function MeasuredBiomarkerSection({ group }: { group: MeasuredBiomarkerGroup }) 
   const headingId = `biomarker-area-${group.id}`;
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between gap-4">
+    <details aria-labelledby={headingId} className="group flex flex-col gap-3">
+      <summary className="flex cursor-pointer list-none items-center gap-4 rounded-lg px-1 py-1.5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background [&::-webkit-details-marker]:hidden">
         <h2
-          className="font-serif text-xl font-semibold tracking-tight text-foreground"
+          className="min-w-0 flex-1 font-serif text-xl font-semibold tracking-tight text-foreground"
           id={headingId}
         >
           {group.label}
         </h2>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           {group.items.length} {group.items.length === 1 ? "biomarker" : "biomarkers"}
         </span>
-      </div>
+        <ChevronRight
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-90"
+          strokeWidth={1.75}
+        />
+      </summary>
 
       <ul className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
         {group.items.map((biomarker) => (
@@ -279,7 +284,7 @@ function MeasuredBiomarkerSection({ group }: { group: MeasuredBiomarkerGroup }) 
           </li>
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 

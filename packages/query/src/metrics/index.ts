@@ -65,6 +65,7 @@ export {
   metricPointRecordIds,
   normalizeMetricKey,
   normalizeMetricValue,
+  resolveCanonicalBiomarkerKey,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
@@ -499,15 +500,21 @@ function scalarMetricPoint(input: {
 }): MetricPoint {
   const metricKey = resolveNonEmptyMetricKey(input.metric);
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
-  const normalized = normalizeMetricValue({ metricKey: definition.key, unit: input.unit ?? definition.displayUnit, value: input.value });
+  const normalized = input.sourceKind === "test-result" && input.unit === null
+    ? null
+    : normalizeMetricValue({
+        metricKey: definition.key,
+        unit: input.unit ?? definition.displayUnit,
+        value: input.value,
+      });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
   const effectiveDate = input.effectiveDate ?? observedAt.slice(0, 10);
   const labName = readString(input.entity.attributes.labName);
 
   return createMetricPoint({
     biomarkerKey: definition.biomarkerKey,
-    canonicalUnit: normalized.canonicalUnit,
-    canonicalValue: normalized.canonicalValue,
+    canonicalUnit: normalized?.canonicalUnit ?? null,
+    canonicalValue: normalized?.canonicalValue ?? null,
     comparator: input.comparator ?? null,
     confidence: input.confidence,
     context: compactContext(input.context),
