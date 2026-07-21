@@ -57,14 +57,15 @@ deploy a forward fix or roll forward to #586 or newer.
 
 ## Approval-outcome deployment compatibility
 
-Deploy the gate-disabled web bundle that serves the internal action-approval
-read route before deploying a runtime that reconciles parked approvals through
-that route. Once the approval-outcome producer gate has ever been enabled, keep
-web at that read-route bundle or newer while the compatible runtime or any
-parked local item, committed snapshot, approved row, or in-flight reconciliation
-can depend on it. Disable and redeploy the producer gate before rollback, but do
-not roll web below this floor without a separate migration or a forward runtime
-that removes the dependency.
+Approval decisions unconditionally append the generation-scoped reconciliation
+wake. Keep Web at the first bundle that serves the internal action-approval read
+route or newer, and keep the runtime at the first bundle that parses
+`runtime.pending-effects-reconcile-requested` or newer. A rollback below either
+permanent floor requires a separate migration or a forward fix that removes the
+dependency; there is no environment toggle that makes a below-floor rollback
+safe. See `agent-docs/references/hosted-runtime-protocol.md` and
+`apps/cloudflare/DEPLOY.md` for the durable-row and committed-snapshot proof
+required before any such migration.
 
 ## Direct-login deferred-checkpoint deployment compatibility
 
@@ -955,27 +956,26 @@ use the neutral confirmation. The
 `20260711230000_drop_group_join_compatibility_bridges` contract migration
 removes both only after the consumer-capable production deployment is live and
 the guarded prior-function drain and alias proof have completed.
-The first assistant-personality causal rollout adds nullable causal-sequence
+The first assistant-personality causal release adds nullable causal-sequence
 state, a nullable `assistant_input_lookup_key` projection on conversation
 mailbox rows, and nullable Humor, Push, and Detail projection watermarks. Deploy
-the Web build with personality writes gated off. It writes a server-keyed blind
-lookup derived from the existing deterministic input id for new conversation
-messages, never the raw id, and hard-rejects callbacks that cannot resolve the
-callback member plus a derived candidate key to one live conversation-lane
-`conversation.message` row. There is no numeric sequence fallback and no
-mailbox wire, `sourceRef`, or event-id change. The automatic post-deploy
-contract lane waits for old functions, applies the causal-sequence constraint
-only when no unconsumed sequence-less preference row remains, and then seeds
-all three personality watermarks to the member's current causal barrier. The
-seed intentionally includes null projection values because pre-fix Web values
-may differ from canonical vault values and cannot be backfilled safely. This
-Web hard cut is the rollback floor. Deploy Cloudflare/runtime next with an
-immediate rollout and prove fleet convergence, then enable the Web personality
-gate. The hard-cut build rejects the retired direct-vault causal-sequence
-action after old Vercel functions drain. Legacy runtimes continue ordinary
-replies while style writes fail closed; deploy the two planes in tandem to
-minimize that temporary unavailable-write window. Keep Web at this hard-cut
-floor during any runner rollback.
+the compatible Cloudflare/runtime consumer before the Web producer. Web writes
+a server-keyed blind lookup derived from the existing deterministic input id for
+new conversation messages, never the raw id, and hard-rejects callbacks that
+cannot resolve the callback member plus a derived candidate key to one live
+conversation-lane `conversation.message` row. There is no numeric sequence
+fallback and no mailbox wire, `sourceRef`, or event-id change. The automatic
+post-deploy contract lane waits for old functions, applies the causal-sequence
+constraint only when no unconsumed sequence-less preference row remains, and
+then seeds all three personality watermarks to the member's current causal
+barrier. The seed intentionally includes null projection values because pre-fix
+Web values may differ from canonical vault values and cannot be backfilled
+safely. Web emits sparse causal writes and exposes personality controls
+unconditionally. The first compatible FIFO runtime and this Web hard cut are
+permanent rollback floors; a rollback below either requires a separately proved
+migration or a forward fix. The hard-cut build rejects the retired direct-vault
+causal-sequence action after old Vercel functions drain. Keep Web at this floor
+during any runner rollback.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

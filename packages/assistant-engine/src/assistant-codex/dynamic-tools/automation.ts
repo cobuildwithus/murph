@@ -4,6 +4,7 @@ import {
   automationAssistantTargetOverrideSchema,
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
+  automationScheduleCronSchema,
   automationScheduleSchema,
   automationStatusValues,
   automationSupportKindValues,
@@ -16,6 +17,14 @@ import type {
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
+import {
+  buildGroupNewsletterAutomationSaveRequest,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES,
+  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,
+  GROUP_NEWSLETTER_DELIVERY_VALUES,
+  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,
+  GROUP_NEWSLETTER_TONE_VALUES,
+} from '../../assistant/group-newsletter-automation.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const AUTOMATION_TOOL_RESULT_MAX_BYTES = 24_000
@@ -34,6 +43,17 @@ const automationSummarySchema = z.string().trim().min(1).max(4_000)
 const automationTagsSchema = z
   .array(z.string().trim().min(1).max(80))
   .max(32)
+  .superRefine((tags, context) => {
+    for (const [index, tag] of tags.entries()) {
+      if (tag.startsWith('system:')) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Reserved system tags cannot be supplied directly.',
+          path: [index],
+        })
+      }
+    }
+  })
 
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
@@ -99,8 +119,41 @@ const reconcileAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema,
 }).strict()
 
+const saveGroupNewsletterArgumentsSchema = z.object({
+  action: z.literal('save_newsletter'),
+  customNote: z.string().trim().min(1).max(2_000).nullable().optional(),
+  delivery: z.enum(GROUP_NEWSLETTER_DELIVERY_VALUES),
+  healthScopes: z
+    .array(z.enum(GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES))
+    .min(1)
+    .max(GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES.length)
+    .optional(),
+  newsletterName: automationTitleSchema,
+  schedule: automationScheduleCronSchema,
+  tone: z.enum(GROUP_NEWSLETTER_TONE_VALUES).default('supportive'),
+}).strict().superRefine((value, context) => {
+  if (
+    value.healthScopes
+    && new Set(value.healthScopes).size !== value.healthScopes.length
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Newsletter health scopes must be unique.',
+      path: ['healthScopes'],
+    })
+  }
+  if (value.delivery === 'current_chat' && (value.healthScopes?.length ?? 0) > 3) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Current-chat newsletters support at most three health scopes.',
+      path: ['healthScopes'],
+    })
+  }
+})
+
 const automationArgumentsSchema = z.discriminatedUnion('action', [
   saveAutomationArgumentsSchema,
+  saveGroupNewsletterArgumentsSchema,
   patchAutomationArgumentsSchema,
   reconcileAutomationArgumentsSchema,
 ])
@@ -109,7 +162,7 @@ export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save binds delivery to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -151,13 +204,37 @@ export function readAutomationDynamicToolRequest(input: {
       'tags',
       'title',
       'desiredAutomationIds',
+      'customNote',
+      'delivery',
+      'healthScopes',
+      'newsletterName',
+      'tone',
     ],
     toolName: 'murph.automation',
     value: input.arguments,
   })
 
   return parsed.ok
-    ? { kind: 'automation', request: parsed.args }
+    ? {
+        kind: 'automation',
+        request: parsed.args.action === 'save_newsletter'
+          ? buildGroupNewsletterAutomationSaveRequest({
+              configuration: {
+                customNote: parsed.args.customNote,
+                delivery: parsed.args.delivery,
+                healthScopes: parsed.args.healthScopes
+                  ?? (
+                    parsed.args.delivery === 'current_chat'
+                      ? [...GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES]
+                      : [...GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES]
+                  ),
+                newsletterName: parsed.args.newsletterName,
+                tone: parsed.args.tone,
+              },
+              schedule: parsed.args.schedule,
+            })
+          : parsed.args,
+      }
     : {
         kind: 'invalid-automation-arguments',
         validationDigest: parsed.validationDigest,

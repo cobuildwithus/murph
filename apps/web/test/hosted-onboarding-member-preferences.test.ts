@@ -56,7 +56,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -95,7 +94,6 @@ describe("hosted member assistant preferences", () => {
 
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferences: {
@@ -178,7 +176,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -187,7 +184,6 @@ describe("hosted member assistant preferences", () => {
       prisma,
     });
     await upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -238,7 +234,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferenceCausalSeq: "100",
@@ -289,7 +284,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: { tone: "formal" },
@@ -306,7 +300,6 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferenceCausalSeq: "15",
@@ -340,7 +333,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: { personality: { humor: 6 } },
@@ -365,7 +357,6 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferenceCausalSeq: "15",
@@ -407,7 +398,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -429,74 +419,6 @@ describe("hosted member assistant preferences", () => {
       }),
       tx: prisma,
     });
-  });
-
-  it("emits a complete tone and voice snapshot for the gate-off legacy consumer", async () => {
-    const member = {
-      assistantDetail: 5 as number | null,
-      assistantDetailCausalSeq: null as bigint | null,
-      assistantHumor: 3 as number | null,
-      assistantHumorCausalSeq: null as bigint | null,
-      assistantPush: 3 as number | null,
-      assistantPushCausalSeq: null as bigint | null,
-      assistantTone: "casual" as string | null,
-      assistantToneCausalSeq: 102n as bigint | null,
-      assistantVoice: "warm" as string | null,
-      assistantVoiceCausalSeq: null as bigint | null,
-      id: "member_123",
-    };
-    const prisma = createPreferencesPrismaDouble(member);
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
-      dedupeConflict: false,
-      item: {
-        causalSeq: 1n,
-        id: "mailbox_item_123",
-      },
-    });
-
-    await upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "legacy_snapshot",
-      memberId: "member_123",
-      occurredAt: "2026-07-08T12:00:00.000Z",
-      preferenceCausalSeq: "100",
-      preferences: {
-        voice: "deep-calm",
-      },
-      prisma,
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        preferences: {
-          tone: "casual",
-          voice: "deep-calm",
-        },
-        requestedFields: ["voice"],
-      }),
-      tx: prisma,
-    });
-    expect(member).toMatchObject({
-      assistantTone: "casual",
-      assistantToneCausalSeq: 102n,
-      assistantVoiceCausalSeq: 100n,
-    });
-
-    mocks.appendHostedMailboxEnvelopeTx.mockClear();
-    await expect(upsertHostedMemberAssistantPreferencesTx({
-      causalOrigin: "turn",
-      mailboxPayloadMode: "legacy_snapshot",
-      memberId: "member_123",
-      occurredAt: "2026-07-08T12:01:00.000Z",
-      preferenceCausalSeq: "101",
-      preferences: { tone: "formal" },
-      prisma,
-    })).resolves.toMatchObject({
-      assistantTone: "casual",
-      dispatch: null,
-      updated: false,
-    });
-    expect(member.assistantToneCausalSeq).toBe(102n);
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("persists sparse personality intent and preserves sibling values", async () => {
@@ -521,7 +443,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
@@ -581,7 +502,6 @@ describe("hosted member assistant preferences", () => {
 
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:01:00.000Z",
       preferences: {
@@ -684,7 +604,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:02:00.000Z",
       preferenceCausalSeq: "11",
@@ -739,7 +658,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:03:00.000Z",
       preferenceCausalSeq: "16",
@@ -789,7 +707,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:04:00.000Z",
       preferenceCausalSeq: "70",
@@ -833,7 +750,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:05:00.000Z",
       preferences: { personality: { humor: 9 } },
@@ -848,7 +764,6 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockClear();
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:06:00.000Z",
       preferenceCausalSeq: "35",
@@ -888,7 +803,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:07:00.000Z",
       preferenceCausalSeq: "40",
@@ -941,7 +855,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:08:00.000Z",
       preferenceCausalSeq: "44",
@@ -986,7 +899,6 @@ describe("hosted member assistant preferences", () => {
 
     await upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:09:00.000Z",
       preferenceCausalSeq: "61",
@@ -995,7 +907,6 @@ describe("hosted member assistant preferences", () => {
     });
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:09:01.000Z",
       preferenceCausalSeq: "61",
@@ -1035,7 +946,6 @@ describe("hosted member assistant preferences", () => {
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:10:00.000Z",
       preferenceCausalSeq: "31",
@@ -1075,7 +985,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {

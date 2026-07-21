@@ -313,6 +313,9 @@ function buildStableRouteCapabilityPrompt(
   }
   return joinPromptSections(
     buildAssistantTurnPriorityText(conversationScope),
+    input.hostedRuntime === true
+      ? buildAssistantLowUsageGuidanceText()
+      : null,
     conversationScope === "direct"
       ? buildAssistantNonBlockingDelegationText()
       : null,
@@ -381,6 +384,14 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantCliContractText(input.assistantCliContract)
       : null
   );
+}
+
+function buildAssistantLowUsageGuidanceText(): string {
+  return [
+    "Low hosted usage:",
+    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then casually mention in at most one short sentence that your time together may pause soon unless more usage is added.",
+    "- Do not expose token counts, prices, internal accounting, or contributor identity. Do not dramatize, guilt, pressure, send a separate warning, or repeat the warning if it already appeared in the recent conversation.",
+  ].join("\n");
 }
 
 function buildAssistantLabsGuidanceText(): string {

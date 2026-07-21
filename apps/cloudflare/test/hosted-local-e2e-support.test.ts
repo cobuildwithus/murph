@@ -470,6 +470,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
+      && name !== "murph.newsletter"
       && name !== "murph.send_vault_file"
     );
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
@@ -503,6 +504,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
         messageTargetingAvailable: true,
+        newsletterAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         vaultFileSendAvailable: true,

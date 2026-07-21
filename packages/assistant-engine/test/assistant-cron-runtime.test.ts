@@ -18,6 +18,9 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+} from '../src/assistant/group-newsletter-automation.js'
 
 type MockAutomationRecord = {
   activeUntil?: string | null
@@ -3657,7 +3660,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('withholds first newsletter send authority until the opt-out window elapses', async () => {
+  it('withholds newsletter send authority until the latest configuration opt-out window elapses', async () => {
     async function runOccurrence(occurrenceAt: string) {
       vi.setSystemTime(new Date(occurrenceAt))
       const { vaultRoot } = await createRuntimeContext(
@@ -3666,7 +3669,7 @@ describe('assistant cron runtime orchestration', () => {
       getVaultAutomationStore(vaultRoot).push({
         automationId: 'automation-newsletter-window',
         continuityPolicy: 'fresh',
-        createdAt: '2026-07-06T10:00:00.000Z',
+        createdAt: '2026-06-01T10:00:00.000Z',
         instructions: 'Compose the group health newsletter.',
         route: {
           channel: 'linq',
@@ -3755,7 +3758,10 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it('only grants scheduled newsletter send authority for cron schedules', async () => {
-    async function runSchedule(schedule: AutomationSchedule) {
+    async function runSchedule(
+      schedule: AutomationSchedule,
+      tags: string[] = ['assistant', 'scheduled'],
+    ) {
       vi.setSystemTime(new Date('2026-07-06T12:00:00.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         'assistant-cron-runtime-newsletter-schedule-kind-',
@@ -3777,7 +3783,7 @@ describe('assistant cron runtime orchestration', () => {
         slug: 'group-health-newsletter',
         status: 'active',
         summary: null,
-        tags: ['assistant', 'scheduled'],
+        tags,
         title: 'Group Health Newsletter',
         updatedAt: '2026-07-06T10:00:00.000Z',
       })
@@ -3823,30 +3829,56 @@ describe('assistant cron runtime orchestration', () => {
         vault: vaultRoot,
       })
       const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-        | { scheduledAutomationAuthority?: unknown }
+        | { instructions?: string; scheduledAutomationAuthority?: unknown }
         | undefined
       if (!input) {
         throw new Error('Expected scheduled notification input.')
       }
       const authority = input.scheduledAutomationAuthority ?? null
       expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
-      return authority
+      return {
+        authority,
+        instructions: input.instructions ?? '',
+        status: result.run.status,
+      }
     }
 
     vi.useFakeTimers()
     try {
       await expect(
         runSchedule({ kind: 'cron', expression: '0 * * * *' }),
-      ).resolves.toEqual({
-        automationId: 'automation-newsletter-schedule-kind',
-        occurrenceAt: '2026-07-06T12:00:00.000Z',
+      ).resolves.toMatchObject({
+        authority: {
+          automationId: 'automation-newsletter-schedule-kind',
+          occurrenceAt: '2026-07-06T12:00:00.000Z',
+        },
+        instructions: expect.stringContaining(
+          'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier.',
+        ),
+        status: 'failed',
       })
       await expect(
         runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
-      ).resolves.toBeNull()
+      ).resolves.toMatchObject({ authority: null, status: 'succeeded' })
       await expect(
         runSchedule({ kind: 'every', everyMs: 3_600_000 }),
-      ).resolves.toBeNull()
+      ).resolves.toMatchObject({ authority: null, status: 'succeeded' })
+      await expect(
+        runSchedule(
+          { kind: 'cron', expression: '0 * * * *' },
+          [
+            'assistant',
+            'scheduled',
+            GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+          ],
+        ),
+      ).resolves.toMatchObject({
+        authority: null,
+        instructions: expect.stringContaining(
+          'delivered to the current group chat through the ordinary scheduled assistant response',
+        ),
+        status: 'succeeded',
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -6836,6 +6868,158 @@ describe('assistant cron runtime orchestration', () => {
         threadId: '123456789',
       }),
     )
+  })
+
+  it('scopes scheduled shared reads to canonical Telegram group routes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-group-tools-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-group-tools',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group sleep reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '-100123456789',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-group-tools-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram group tools reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const groupSharedReader = {
+      async request() {
+        return {
+          status: 'unavailable' as const,
+          unavailableReason: 'synthetic_unavailable',
+        }
+      },
+    }
+    const createScheduledGroupTools = vi.fn(() => ({ groupSharedReader }))
+    const routeAuthority = {
+      channel: 'telegram' as const,
+      containerMemberId: 'member-telegram-group-tools',
+      threadId: '-100123456789',
+    }
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => routeAuthority)
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          memberId: 'member-telegram-group-tools',
+          resolveScheduledExternalThreadRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(createScheduledGroupTools).toHaveBeenCalledWith({
+      channel: 'telegram',
+      target: '-100123456789',
+      threadIsDirect: false,
+    })
+    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
+      channel: 'telegram',
+      signal: expect.any(AbortSignal),
+      target: routeAuthority.threadId,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'telegram',
+        executionContext: {
+          hosted: expect.objectContaining({ groupSharedReader }),
+        },
+        outboxExternalThreadRouteAuthority: routeAuthority,
+        threadIsDirect: false,
+      }),
+    )
+    const notificationContext = cronMocks.sendAssistantMessageLocal.mock
+      .calls.at(-1)?.[0]?.executionContext
+    expect(notificationContext?.hosted?.groupPermissionOfferTool).toBeUndefined()
+  })
+
+  it('fails a hosted Telegram group cron before shared reads when live route authority is unavailable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-group-route-authority-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-group-route-authority',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group sleep reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '-100987654321',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-group-route-authority-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram group route authority reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const createScheduledGroupTools = vi.fn(() => ({
+      groupSharedReader: {
+        async request() {
+          throw new Error('Shared reads must stay unreachable without route authority.')
+        },
+      },
+    }))
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          memberId: 'member-telegram-group-route-authority',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'failed',
+      reason: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+      status: 'failed',
+    })
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
   it('executes existing email thread routes only when a sender identity is present', async () => {

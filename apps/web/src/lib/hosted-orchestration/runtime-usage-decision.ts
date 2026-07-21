@@ -9,7 +9,10 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 
 export type HostedRuntimeUsageGateCheck =
-  | { status: "allowed" }
+  | {
+    usageRunningLow?: true;
+    status: "allowed";
+  }
   | {
     decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }>;
     status: "denied";
@@ -43,7 +46,20 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
     };
   }
 
-  return { status: "allowed" };
+  return {
+    ...(isHostedRuntimeUsageRunningLow(decision)
+      ? { usageRunningLow: true as const }
+      : {}),
+    status: "allowed",
+  };
+}
+
+function isHostedRuntimeUsageRunningLow(
+  decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: true }>,
+): boolean {
+  const lowThresholdUsdMicros = (decision.limitUsdMicros + 4n) / 5n;
+  return decision.remainingUsdMicros > 0n
+    && decision.remainingUsdMicros <= lowThresholdUsdMicros;
 }
 
 // AI-gated mailbox work: conversation-lane items and shared gated system kinds.

@@ -15,6 +15,8 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
+  selectBrowserVaultBiomarkerPanel,
+  selectBrowserVaultExperimentResults,
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
@@ -310,6 +312,187 @@ test("browser-vault metric rows preserve same-day lab record ids for anchored ex
     [140, ["evt_anchor_ldl"]],
     [150, ["evt_same_day_ldl"]],
   ]);
+});
+
+test("unitless catalog labs stay raw and cannot drive metric consumers", async () => {
+  const buildVault = (unit: string | null) => createVaultReadModel({
+    entities: [
+      createEvent("evt_ldl_unit_provenance_baseline", "test", {
+        occurredAt: "2026-04-23T08:00:00.000Z",
+        attributes: {
+          collectedAt: "2026-04-23T08:00:00.000Z",
+          results: [{
+            analyte: "LDL-C",
+            biomarkerSlug: "ldl-c",
+            ...(unit ? { unit } : {}),
+            value: 140,
+          }],
+        },
+      }),
+      createEvent("evt_ldl_unit_provenance_followup", "test", {
+        occurredAt: "2026-08-02T08:00:00.000Z",
+        attributes: {
+          collectedAt: "2026-08-02T08:00:00.000Z",
+          results: [{
+            analyte: "LDL-C",
+            biomarkerSlug: "ldl-c",
+            ...(unit ? { unit } : {}),
+            value: 120,
+          }],
+        },
+      }),
+      {
+        attributes: {},
+        body: null,
+        date: "2026-04-20",
+        entityId: "goal_ldl_unit_provenance",
+        experimentSlug: null,
+        family: "goal",
+        frontmatter: {
+          metricTargets: [{
+            comparator: "<",
+            evaluation: { kind: "selected-value" },
+            kind: "metric",
+            metricKey: "ldl-c",
+            targetId: "ldl-under-130",
+            unit: "mg/dL",
+            value: 130,
+          }],
+          status: "active",
+        },
+        kind: "goal",
+        links: [],
+        lookupIds: ["goal_ldl_unit_provenance"],
+        occurredAt: "2026-04-20T00:00:00.000Z",
+        path: "history/goals/goal_ldl_unit_provenance.md",
+        primaryLookupId: "goal_ldl_unit_provenance",
+        recordClass: "bank",
+        relatedIds: [],
+        status: "active",
+        stream: null,
+        tags: [],
+        title: "LDL-C goal",
+      } satisfies CanonicalEntity,
+      {
+        attributes: {},
+        body: null,
+        date: "2026-08-02",
+        entityId: "exp_ldl_unit_provenance",
+        experimentSlug: "ldl-unit-provenance",
+        family: "experiment",
+        frontmatter: {
+          analysisPlan: {
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                biomarkerKeys: ["biomarker:ldl-c"],
+                kind: "lab_panel",
+                observedOn: "2026-04-23",
+                recordId: "evt_ldl_unit_provenance_baseline",
+                role: "baseline",
+              },
+              {
+                biomarkerKeys: ["biomarker:ldl-c"],
+                kind: "lab_panel",
+                observedOn: "2026-08-02",
+                recordId: "evt_ldl_unit_provenance_followup",
+                role: "followup",
+              },
+            ],
+            primaryBiomarkerKey: "biomarker:ldl-c",
+          },
+          runPlan: {
+            baselineEnd: "2026-04-23",
+            baselineStart: "2026-04-23",
+            interventionEnd: "2026-08-01",
+            interventionStart: "2026-04-24",
+          },
+          status: "completed",
+        },
+        kind: "experiment_entry",
+        links: [],
+        lookupIds: ["exp_ldl_unit_provenance", "ldl-unit-provenance"],
+        occurredAt: "2026-08-02T00:00:00.000Z",
+        path: "bank/experiments/ldl-unit-provenance.md",
+        primaryLookupId: "exp_ldl_unit_provenance",
+        recordClass: "bank",
+        relatedIds: [],
+        status: "completed",
+        stream: null,
+        tags: [],
+        title: "LDL-C unit provenance experiment",
+      } satisfies CanonicalEntity,
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+
+  const unitlessReplica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-08-02T12:00:00.000Z",
+    sourceBundleHash: "a".repeat(64),
+    vault: buildVault(null),
+  });
+  const unitlessClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitlessReplica));
+  const unitlessSelection = unitlessClient.metricSelections.get("ldl-c");
+  const unitlessGoal = unitlessClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
+  const unitlessExperiment = selectBrowserVaultExperimentResults(unitlessClient, "ldl-unit-provenance");
+  const unitlessPanel = selectBrowserVaultBiomarkerPanel({
+    biomarkerKey: "biomarker:ldl-c",
+    client: unitlessClient,
+    label: "LDL-C",
+    metricKey: "ldl-c",
+    trendDefaults: {
+      aggregation: "mean",
+      comparisonWindowDays: 30,
+      latestWindowDays: 30,
+      minimumPoints: 1,
+    },
+    unit: "mg/dL",
+    valuePrecision: 0,
+  });
+
+  assert.deepEqual(
+    unitlessClient.labResults.list({ metricKey: "ldl-c" }).map((row) => [
+      row.value,
+      row.unit,
+      row.normalizedValue,
+      row.normalizedUnit,
+    ]),
+    [[140, null, null, null], [120, null, null, null]],
+  );
+  assert.deepEqual(unitlessClient.metrics.series({ metricKey: "ldl-c" }), []);
+  assert.ok(unitlessSelection);
+  assert.equal(unitlessSelection.status, "no_data");
+  assert.equal(unitlessSelection.value, null);
+  assert.equal(unitlessSelection.selectedMetricRowId, null);
+  assert.equal(unitlessPanel.status, "no_data");
+  assert.equal(unitlessPanel.primary, null);
+  assert.ok(unitlessGoal);
+  assert.equal(unitlessGoal.status, "unsupported");
+  assert.equal(unitlessGoal.currentValue, null);
+  assert.ok(unitlessExperiment);
+  assert.equal(unitlessExperiment.biomarkers[0]?.status, "no_data");
+  assert.equal(unitlessExperiment.biomarkers[0]?.deltaAbs, null);
+
+  const unitfulReplica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-08-02T12:00:00.000Z",
+    sourceBundleHash: "b".repeat(64),
+    vault: buildVault("mg/dL"),
+  });
+  const unitfulClient = createBrowserVaultQueryClient(parseBrowserVaultReplica(unitfulReplica));
+  const unitfulSelection = unitfulClient.metricSelections.get("ldl-c");
+  const unitfulGoal = unitfulClient.metricGoals.progress({ goalId: "goal_ldl_unit_provenance" })[0];
+  const unitfulExperiment = selectBrowserVaultExperimentResults(unitfulClient, "ldl-unit-provenance");
+
+  assert.deepEqual(
+    unitfulClient.metrics.series({ metricKey: "ldl-c" }).map((row) => [row.value, row.unit]),
+    [[140, "mg/dL"], [120, "mg/dL"]],
+  );
+  assert.equal(unitfulSelection?.status, "ready");
+  assert.equal(unitfulSelection?.value, 120);
+  assert.equal(unitfulGoal?.status, "met");
+  assert.equal(unitfulGoal?.currentValue, 120);
+  assert.equal(unitfulExperiment?.biomarkers[0]?.deltaAbs, -20);
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {

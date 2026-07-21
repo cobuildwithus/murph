@@ -60,13 +60,16 @@ export interface TrendChartPoint {
 }
 
 export function TrendChart({ data, className, signal }: TrendChartProps) {
-  const hasHistory = data.history.length > 0;
+  const chartData = data.windowComparison
+    ? materializeWindowAverageTrend(data)
+    : data;
+  const hasHistory = chartData.history.length > 0;
   const [showHistory, setShowHistory] = useState(false);
-  const lastBaselinePoint = data.baseline[data.baseline.length - 1];
+  const lastBaselinePoint = chartData.baseline[chartData.baseline.length - 1];
   const baselineEnd = lastBaselinePoint?.day ?? 0;
-  const expectedRange = data.expectedRange ?? [];
+  const expectedRange = chartData.expectedRange ?? [];
   const hasExpectedRange = expectedRange.length > 0;
-  const deduped = buildTrendChartPoints(data, showHistory);
+  const deduped = buildTrendChartPoints(chartData, showHistory);
   const metricValue = signal?.value ?? formatChartValue(data.currentValue);
   const metricUnit = signal?.unit ?? data.unit;
   const delta = signal?.delta ?? data.delta;
@@ -124,120 +127,134 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
         )}
       </div>
 
-      {data.windowComparison ? (
-        <WindowComparisonChart data={data} />
-      ) : (
-        <>
-          <ChartContainer config={chartConfig} className="h-40 w-full">
-            <AreaChart data={deduped} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.5} />
-              <XAxis dataKey="day" hide />
-              <YAxis hide domain={["auto", "auto"]} />
-              {baselineEnd > 0 && (
-                <ReferenceLine
-                  x={baselineEnd}
-                  stroke="var(--color-foreground)"
-                  strokeOpacity={0.25}
-                  strokeDasharray="2 3"
-                />
-              )}
-              <ChartTooltip
-                cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const day = payload[0]?.payload?.day;
-                  const rows = payload
-                    .map((entry) => formatTooltipRow(entry, data.unit))
-                    .filter((row): row is { key: SeriesKey; label: string; value: string } => row !== null);
+      <ChartContainer
+        aria-label={data.windowComparison
+          ? `${data.label}: baseline window average ${formatChartValue(data.baselineAvg)} ${data.unit}; experiment window average ${formatChartValue(data.currentValue)} ${data.unit}.`
+          : undefined}
+        className="h-40 w-full"
+        config={chartConfig}
+        role={data.windowComparison ? "img" : undefined}
+      >
+        <AreaChart data={deduped} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.5} />
+          <XAxis dataKey="day" hide />
+          <YAxis
+            hide
+            domain={data.windowComparison
+              ? buildWindowAverageDomain(data.baselineAvg, data.currentValue)
+              : ["auto", "auto"]}
+          />
+          {baselineEnd > 0 && (
+            <ReferenceLine
+              x={baselineEnd}
+              stroke="var(--color-foreground)"
+              strokeOpacity={0.25}
+              strokeDasharray="2 3"
+            />
+          )}
+          {!data.windowComparison ? (
+            <ChartTooltip
+              cursor={{ stroke: "var(--color-border)", strokeDasharray: "3 3" }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const day = payload[0]?.payload?.day;
+                const rows = payload
+                  .map((entry) => formatTooltipRow(entry, data.unit))
+                  .filter((row): row is { key: SeriesKey; label: string; value: string } => row !== null);
 
-                  if (rows.length === 0) return null;
+                if (rows.length === 0) return null;
 
-                  return (
-                    <div className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs">
-                      <div className="font-medium text-foreground">
-                        {dayToDate(data.startDate, day)}
-                      </div>
-                      <div className="mt-1 grid gap-1">
-                        {rows.map((row) => (
-                          <div key={row.key} className="flex items-center justify-between gap-3">
-                            <span className="flex items-center gap-1.5 text-muted-foreground">
-                              <span
-                                aria-hidden="true"
-                                className={cn("inline-block w-3", SERIES[row.key].swatch)}
-                              />
-                              {row.label}
-                            </span>
-                            <span className="font-mono tabular-nums text-foreground">{row.value}</span>
-                          </div>
-                        ))}
-                      </div>
+                return (
+                  <div className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs">
+                    <div className="font-medium text-foreground">
+                      {dayToDate(data.startDate, day)}
                     </div>
-                  );
-                }}
-              />
-              {showHistory && (
-                <Area
-                  dataKey="history"
-                  type="monotone"
-                  stroke="#B0A48C"
-                  strokeWidth={1.5}
-                  strokeDasharray="3 2"
-                  strokeOpacity={1}
-                  fill="none"
-                  connectNulls
-                  dot={false}
-                  activeDot={false}
-                />
-              )}
-              {hasExpectedRange && (
-                <Area
-                  dataKey="expectedRange"
-                  type="monotone"
-                  stroke="#7A8C6E"
-                  strokeWidth={1}
-                  strokeDasharray="3 3"
-                  strokeOpacity={0.5}
-                  fill="#7A8C6E"
-                  fillOpacity={0.12}
-                  connectNulls={false}
-                  dot={false}
-                  activeDot={false}
-                />
-              )}
-              <Area
-                dataKey="baseline"
-                type="monotone"
-                stroke="#d4c4a8"
-                strokeWidth={1.5}
-                strokeDasharray="4 3"
-                fill="#d4c4a8"
-                fillOpacity={0.12}
-                connectNulls={false}
-                dot={false}
-              />
-              <Area
-                dataKey="active"
-                type="monotone"
-                stroke="#7A8C6E"
-                strokeWidth={2.5}
-                fill="none"
-                connectNulls
-                dot={false}
-                activeDot={{ r: 4, fill: "#7A8C6E" }}
-              />
-            </AreaChart>
-          </ChartContainer>
+                    <div className="mt-1 grid gap-1">
+                      {rows.map((row) => (
+                        <div key={row.key} className="flex items-center justify-between gap-3">
+                          <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <span
+                              aria-hidden="true"
+                              className={cn("inline-block w-3", SERIES[row.key].swatch)}
+                            />
+                            {row.label}
+                          </span>
+                          <span className="font-mono tabular-nums text-foreground">
+                            {row.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }}
+            />
+          ) : null}
+          {showHistory && (
+            <Area
+              dataKey="history"
+              type="monotone"
+              stroke="#B0A48C"
+              strokeWidth={1.5}
+              strokeDasharray="3 2"
+              strokeOpacity={1}
+              fill="none"
+              connectNulls
+              dot={false}
+              activeDot={false}
+            />
+          )}
+          {hasExpectedRange && (
+            <Area
+              dataKey="expectedRange"
+              type="monotone"
+              stroke="#7A8C6E"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              strokeOpacity={0.5}
+              fill="#7A8C6E"
+              fillOpacity={0.12}
+              connectNulls={false}
+              dot={false}
+              activeDot={false}
+            />
+          )}
+          <Area
+            dataKey="baseline"
+            type="monotone"
+            stroke="#d4c4a8"
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            fill="#d4c4a8"
+            fillOpacity={0.12}
+            connectNulls={false}
+            dot={false}
+          />
+          <Area
+            dataKey="active"
+            type="monotone"
+            stroke="#7A8C6E"
+            strokeWidth={2.5}
+            fill="none"
+            connectNulls
+            dot={false}
+            activeDot={data.windowComparison ? false : { r: 4, fill: "#7A8C6E" }}
+          />
+        </AreaChart>
+      </ChartContainer>
 
-          <div className="flex justify-between gap-4 text-[10px] text-muted-foreground">
-            <span>
-              {formatChartValue(data.baselineAvg)} {data.unit} baseline average
-            </span>
-            <span className="text-right">
-              {formatChartValue(data.currentValue)} {data.unit}{" "}
-              {data.currentValueLabel ?? "latest"}
-            </span>
-          </div>
-        </>
+      {data.windowComparison ? (
+        <WindowComparisonFooter data={data} />
+      ) : (
+        <div className="flex justify-between gap-4 text-[10px] text-muted-foreground">
+          <span>
+            {formatChartValue(data.baselineAvg)} {data.unit} baseline average
+          </span>
+          <span className="text-right">
+            {formatChartValue(data.currentValue)} {data.unit}{" "}
+            {data.currentValueLabel ?? "latest"}
+          </span>
+        </div>
       )}
     </div>
   );
@@ -255,18 +272,10 @@ function resolveDeltaClassName(signal: ExperimentSignal | undefined): string {
   return "text-muted-foreground";
 }
 
-function WindowComparisonChart({ data }: { data: TrendData }) {
+function WindowComparisonFooter({ data }: { data: TrendData }) {
   const comparison = data.windowComparison;
   if (!comparison) return null;
 
-  const comparisonScale = Math.max(
-    Math.abs(data.baselineAvg),
-    Math.abs(data.currentValue),
-    1,
-  );
-  const relativeChange = (data.currentValue - data.baselineAvg) / comparisonScale;
-  const baselineY = 51;
-  const interventionY = Math.min(84, Math.max(18, baselineY - relativeChange * 240));
   const baselineCoverage = formatCoverage(
     comparison.baselineDaysWithData,
     comparison.baselineTotalDays,
@@ -277,68 +286,56 @@ function WindowComparisonChart({ data }: { data: TrendData }) {
   );
 
   return (
-    <div className="flex flex-col gap-3">
-      <svg
-        aria-label={`${data.label}: baseline window average ${formatChartValue(data.baselineAvg)} ${data.unit}; experiment window average ${formatChartValue(data.currentValue)} ${data.unit}.`}
-        className="h-28 w-full overflow-visible"
-        role="img"
-        viewBox="0 0 320 104"
-      >
-        {[18, 51, 84].map((y) => (
-          <line
-            key={y}
-            x1="24"
-            x2="296"
-            y1={y}
-            y2={y}
-            stroke="var(--color-border)"
-            strokeDasharray="3 4"
-            strokeWidth="1"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        <path
-          d={`M 28 ${baselineY} L 292 ${interventionY}`}
-          fill="none"
-          stroke="var(--color-primary)"
-          strokeLinecap="round"
-          strokeWidth="2.5"
-          vectorEffect="non-scaling-stroke"
-        />
-        <circle
-          cx="28"
-          cy={baselineY}
-          fill="var(--color-card)"
-          r="5"
-          stroke="var(--color-chart-2)"
-          strokeWidth="3"
-          vectorEffect="non-scaling-stroke"
-        />
-        <circle
-          cx="292"
-          cy={interventionY}
-          fill="var(--color-primary)"
-          r="5"
-        />
-      </svg>
-
-      <div className="grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
-        <WindowLabel
-          coverage={baselineCoverage}
-          label="Baseline average"
-          unit={data.unit}
-          value={data.baselineAvg}
-        />
-        <WindowLabel
-          align="right"
-          coverage={interventionCoverage}
-          label="Experiment average"
-          unit={data.unit}
-          value={data.currentValue}
-        />
-      </div>
+    <div className="grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
+      <WindowLabel
+        coverage={baselineCoverage}
+        label="Baseline average"
+        unit={data.unit}
+        value={data.baselineAvg}
+      />
+      <WindowLabel
+        align="right"
+        coverage={interventionCoverage}
+        label="Experiment average"
+        unit={data.unit}
+        value={data.currentValue}
+      />
     </div>
   );
+}
+
+function materializeWindowAverageTrend(data: TrendData): TrendData {
+  const comparison = data.windowComparison;
+  if (!comparison) return data;
+
+  // These fixed positions describe two aggregate windows, not daily samples.
+  return {
+    ...data,
+    history: [],
+    baseline: [
+      { day: 0, value: data.baselineAvg },
+      { day: 1, value: data.baselineAvg },
+    ],
+    active: [
+      { day: 1, value: data.currentValue },
+      { day: 3, value: data.currentValue },
+    ],
+    expectedRange: undefined,
+  };
+}
+
+export function buildWindowAverageDomain(
+  baselineAverage: number,
+  experimentAverage: number,
+): [number, number] {
+  const minimum = Math.min(baselineAverage, experimentAverage);
+  const maximum = Math.max(baselineAverage, experimentAverage);
+  const center = (minimum + maximum) / 2;
+  const difference = maximum - minimum;
+  const referenceMagnitude = Math.max(Math.abs(minimum), Math.abs(maximum), 1);
+  const span = Math.max(difference * 3, referenceMagnitude * 0.1, 1);
+
+  return [center - span / 2, center + span / 2];
 }
 
 function WindowLabel({
@@ -393,7 +390,7 @@ export function buildTrendChartPoints(data: TrendData, showHistory: boolean): Tr
         ...(firstBaselinePoint ? [{ day: firstBaselinePoint.day, value: firstBaselinePoint.value }] : []),
       ]
     : [];
-  const activeWithBridge = lastBaselineValue !== undefined
+  const activeWithBridge = lastBaselineValue !== undefined && !data.windowComparison
     ? [{ day: baselineEnd, value: lastBaselineValue }, ...data.active.filter((point) => point.day > baselineEnd)]
     : data.active;
   const allDays = new Set<number>([

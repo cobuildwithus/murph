@@ -429,6 +429,9 @@ async function createHostedAssistantInputCandidates(input: {
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
           : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+        ...(hostedMailboxItem?.usageRunningLow === true
+          ? { usageRunningLow: true as const }
+          : {}),
       });
     });
 }

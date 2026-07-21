@@ -4647,6 +4647,12 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
           canonical_value = NULL,
           canonical_unit = NULL
         WHERE source_record_id = 'evt_bun_projection_upgrade';
+
+        UPDATE query_metric_points
+        SET
+          canonical_value = 7,
+          canonical_unit = 'mg/dL'
+        WHERE source_record_id = 'evt_bun_projection_unitless';
       `);
     } finally {
       staleDatabase.close();

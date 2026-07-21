@@ -74,6 +74,17 @@ export function readAssistantInputMessageRef(input: {
     }
   }
 
+  if (
+    source === 'telegram' &&
+    conversation.threadIsDirect === false &&
+    (
+      input.sourceMetadata?.kind !== 'telegram' ||
+      input.sourceMetadata.externalThreadRouteAuthorityPresent !== true
+    )
+  ) {
+    return null
+  }
+
   return inputId
 }
 

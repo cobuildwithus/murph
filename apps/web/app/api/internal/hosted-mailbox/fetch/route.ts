@@ -52,7 +52,7 @@ export const POST = withJsonError(async (request: Request) => {
     now: fetchedAt,
     userId,
   });
-  await requireHostedRuntimeMailboxAiUsageAccess({
+  const usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
     consumedSeqByLane: projection.consumedSeqByLane,
     items: projection.items,
     lanes: body.lanes,
@@ -60,6 +60,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(parseHostedMailboxFetchResponse({
+    ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),
     consumedSeqByLane: projection.consumedSeqByLane,
     fetchedAt: fetchedAt.toISOString(),
     items: projection.items,
@@ -73,7 +74,7 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   userId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
   // watermarks are simpler than returning partial lane output around denied AI work.
   if (!hostedMailboxItemsRequireAiUsageAccess({
@@ -88,7 +89,7 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     })),
     lanes: input.lanes,
   })) {
-    return;
+    return false;
   }
 
   const gate = await resolveHostedRuntimeAiUsageGate({
@@ -97,7 +98,7 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   });
 
   if (gate.status === "allowed") {
-    return;
+    return gate.usageRunningLow === true;
   }
 
   throw hostedOnboardingError({

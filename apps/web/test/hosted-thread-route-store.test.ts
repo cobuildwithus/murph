@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertHostedLinqRouteEgressAuthority,
+  assertHostedThreadRouteEgressAuthority,
   hasHostedMemberEstablishedLinqThreadRoute,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
@@ -257,6 +258,54 @@ describe("hosted thread route store", () => {
     ).resolves.toMatchObject({
       channel: "linq",
       containerMemberId: "member_container_123",
+    });
+  });
+
+  it("authorizes Telegram egress only for the route's exact runtime container", async () => {
+    const memberState = {
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_state_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    const createAuthorizedPrisma = () => {
+      const prisma = createPrismaMock();
+      prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([{
+        channel: "telegram",
+        container: {
+          member: { ...memberState, id: "member_container_123" },
+          owner: { ...memberState, id: "member_owner_123" },
+        },
+        containerMemberId: "member_container_123",
+      }]);
+      prisma.hostedMember.findUnique.mockResolvedValueOnce(
+        buildThreadContainerAccessRecord({ ownerBillingStatus: "active" }),
+      );
+      return prisma;
+    };
+
+    await expect(assertHostedThreadRouteEgressAuthority({
+      authority: {
+        channel: "telegram",
+        containerMemberId: "member_container_123",
+        threadId: "telegram_group_123",
+      },
+      prisma: createAuthorizedPrisma(),
+    })).resolves.toMatchObject({
+      channel: "telegram",
+      containerMemberId: "member_container_123",
+    });
+
+    await expect(assertHostedThreadRouteEgressAuthority({
+      authority: {
+        channel: "telegram",
+        containerMemberId: "member_other",
+        threadId: "telegram_group_123",
+      },
+      prisma: createAuthorizedPrisma(),
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
     });
   });
 

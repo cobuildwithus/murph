@@ -128,6 +128,11 @@ export type HostedExecutionLinqExternalThreadRouteAuthority =
     channel: "linq";
   };
 
+export type HostedExecutionTelegramExternalThreadRouteAuthority =
+  HostedExecutionExternalThreadRouteAuthority & {
+    channel: "telegram";
+  };
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -305,6 +310,7 @@ export interface HostedExecutionTelegramMessage {
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
   text?: string | null;
   threadId: string;
+  threadIsDirect?: boolean;
 }
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
@@ -499,6 +505,7 @@ export function readHostedLinqConversationMessageAccountLookupKey(
 
 export interface HostedExecutionTelegramConversationMessagePayload {
   channel: "telegram";
+  routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
   telegramMessage: HostedExecutionTelegramMessage;
 }
 

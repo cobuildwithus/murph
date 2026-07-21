@@ -58,9 +58,13 @@ import type {
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
   canAutoReply(eligibility) {
-    return eligibility.threadIsDirect === true
+    return eligibility.threadIsDirect === true ||
+      (
+        eligibility.threadIsDirect === false &&
+        eligibility.externalThreadRouteAuthorityPresent === true
+      )
       ? null
-      : 'Telegram auto-reply only runs for direct chats'
+      : 'Telegram auto-reply only runs for direct chats or validated hosted group routes'
   },
   isReadyForSetup(env) {
     return resolveTelegramBotToken(env) !== null
@@ -317,7 +321,7 @@ async function sendTelegramVoiceMemoDelivery(input: {
         replyToMessageId: input.replyToMessageId ?? null,
         targetOverride: voiceMemoTarget,
       },
-      input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      voiceMemoRuntimeDependencies,
     )
   } catch (error) {
     if (fallbackText) {

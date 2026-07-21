@@ -1,49 +1,50 @@
 ---
 name: group-newsletter
 description: |
-  Write, set up, edit, or send Murph's recurring group health newsletter from
-  consented shared stats. Read when a group asks for an email newsletter and
-  on every scheduled `group-health-newsletter` run. Owns the weekly editorial
-  story, natural presentation of exercise, sleep, steps, and trends,
-  the exact group-name subject rule, supportive or explicitly opted-in roast
-  tone, and the final shared email. Use group-chat alongside this skill for
-  room etiquette, join offers, and opt-out behavior.
+  Write, set up, edit, or send Murph's recurring group health newsletter in
+  the current iMessage or Telegram group chat or by consented group email.
+  Read during setup and on every scheduled `group-health-newsletter` run.
+  Owns the weekly editorial story, natural presentation of exercise, sleep,
+  steps, and trends, supportive or explicitly opted-in roast tone, and the
+  final edition. Use group-chat alongside this skill for room etiquette,
+  email consent offers, and opt-out behavior.
 ---
 
 # Group Newsletter
 
-Write the email that makes the group want to reply. It should feel like a
+Write the edition that makes the group want to reply. It should feel like a
 friend noticed what happened this week, not like a wearable exported a report.
 Use the shared numbers generously when they make the story better.
 
 Read `group-chat` alongside this skill during setup or a live group
 conversation. This skill owns the newsletter's editorial decisions and final
-email; `group-chat` owns room behavior, consent offers, and opt-out handling.
+edition; `group-chat` owns room behavior, email consent offers, and opt-out
+handling.
 
 ## Set up the scheduled run
 
-Keep the newsletter as the single `group-health-newsletter` cron automation in
-the group vault. During setup, follow the questions, consent, schedule, notice,
-and first-send rules in `group-chat`.
+Keep one `group-health-newsletter` cron automation in the group vault for
+either delivery mode. During setup, follow the questions, email consent,
+schedule, notice, and first-send rules in `group-chat`.
 
-Save self-contained automation instructions. Future scheduled notification
-turns may not have read the setup conversation or `group-chat`. Include:
-
-- that this is the `group-health-newsletter` email automation;
-- the exact chosen newsletter name and tone;
-- any custom note from the group;
-- an instruction to read and follow
-  `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing;
-- an instruction that every subject starts with the exact chosen name, never a
-  generic label such as "Weekly Group Health Digest."
+Create or replace it only with `murph.automation action="save_newsletter"`.
+Supply the chosen `newsletterName`, cron `schedule`, `delivery`
+(`current_chat` or `group_email`), `tone`, exact `healthScopes`, and optional
+`customNote`. Do not hand-author generic automation instructions, a slug, or
+reserved system tags. The structured action writes canonical configuration,
+binds it to the current group route, and lets the runtime append the current
+execution contract on every scheduled run. Current-chat delivery uses one
+bounded shared read, so select at most three health scopes; email may use the
+full supported set.
 
 ## Compose each edition
 
-1. Use the current scheduled automation instructions so their exact name, tone,
-   and custom note govern this edition. Normal conversation and shell/tool
-   access remain available, but do not use them as alternate health-data sources
-   for the edition.
-2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
+1. Follow the trusted execution contract appended to the scheduled automation
+   prompt. The saved block supplies the exact name, delivery, tone, health
+   scopes, and custom note. Normal conversation and tools remain available,
+   but do not use them as alternate health-data sources for the edition.
+2. For `group_email`, call `murph.newsletter` with `action="prepare"` and no
+   group or route identifier. This returns recipient
    eligibility, the scheduled `referenceAt`, and `members` containing current-
    week facts only for currently eligible email recipients. The trusted runtime
    starts this authority and data work only after the model calls the tool. It
@@ -64,12 +65,19 @@ turns may not have read the setup conversation or `group-chat`. Include:
 5. Choose the facts that develop that story. Usually include 6–12 useful stats,
    but use more or fewer when the week warrants it. Do not give every person
    the same fields merely because they are available.
-6. Write the subject, HTML body, and equivalent text body. Then call
-   `murph.newsletter` with `action="send"` once. If email eligibility or any
+6. For `group_email`, write the subject, HTML body, and equivalent text body.
+   Then call `murph.newsletter` with `action="send"` once and no group or route
+   identifier. If email eligibility or any
    health-data grant changed after preparation, send fails closed; do not reuse
    the already-composed body.
 
-After any `send` result—including sent, partial failure, no recipients,
+For `current_chat`, do not call `murph.newsletter` and do not require email
+sharing. Call `murph.group action="read_shared"` once for the exact saved health
+scopes, use only the currently granted facts it returns, and return one concise
+`send_message` edition. The ordinary conversation outbox delivers it to the
+automation's bound iMessage or Telegram group route.
+
+After any email `send` result—including sent, partial failure, no recipients,
 unavailable, or failed—do not retry `send` in the same turn. Return the
 notification decision `{"kind":"skip","privateSummary":"..."}` with a short
 factual private summary. The email tool or runtime owns delivery, retry, and
@@ -139,15 +147,16 @@ Never expose dashboard language such as a raw total of active minutes.
 
 Use this default shape:
 
-1. **Subject:** `<Exact Group Name> — <specific hook>`.
+1. **Email subject:** `<Exact Newsletter Name> — <specific hook>`.
 2. **Opening:** Lead with the week's headline, not "Here is your snapshot."
 3. **Middle:** Develop two or three connected threads: the lead, the chase, and
    the group pattern.
 4. **Awards:** When it fits, give two or three playful titles in one line.
 5. **Close:** End with one easy question or challenge that invites reply-all.
 
-Aim for roughly 140–220 words, with short paragraphs. A richer week can run a
-little longer. Vary the structure when the data suggests something better.
+Aim for roughly 140–220 words for email and a shorter conversational update for
+chat, with short paragraphs. A richer week can run a little longer. Vary the
+structure when the data suggests something better.
 Sound observant, warm, and lightly playful. Do not use report language such as
 "group health snapshot," "another group member," "broadly steady," or
 "focus area."
@@ -203,7 +212,7 @@ Please argue among yourselves.
 
 Before sending, verify all of the following:
 
-- The subject starts with the exact saved newsletter name.
+- For email, the subject starts with the exact saved newsletter name.
 - Every fact came from returned, consented shared data.
 - Durations use human units rather than raw minute totals.
 - The email has one recognizable weekly story.

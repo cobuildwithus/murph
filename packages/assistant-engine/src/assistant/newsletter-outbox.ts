@@ -25,6 +25,7 @@ type NewsletterPreparation = {
 }
 
 export function createAssistantNewsletterOutboxTool(input: {
+  automationAuthority?: AssistantOutboxIntent['automationAuthority']
   authority: HostedRuntimeNewsletterScheduledAuthority | null
   newsletterTool: AssistantHostedNewsletterTool
   sessionId: string
@@ -51,7 +52,6 @@ export function createAssistantNewsletterOutboxTool(input: {
         prepareAttempted = true
         const result = await input.newsletterTool.request({
           action: 'prepare',
-          groupId: request.groupId,
         })
         if (
           input.authority
@@ -84,7 +84,6 @@ export function createAssistantNewsletterOutboxTool(input: {
       }
       if (
         !prepared
-        || prepared.groupId !== request.groupId
         || prepared.authority.automationId !== input.authority.automationId
         || prepared.authority.occurrenceAt !== input.authority.occurrenceAt
       ) {
@@ -158,6 +157,7 @@ export function createAssistantNewsletterOutboxTool(input: {
       }
 
       await createAssistantOutboxIntent({
+        automationAuthority: input.automationAuthority ?? null,
         channel: 'email',
         dedupeToken: [
           'group-newsletter-parent',
@@ -304,6 +304,7 @@ async function createRetryRecipientIntentsFromParent(input: {
     await createAssistantOutboxIntent({
       actorId: input.parent.actorId,
       answeredMailboxItemIds: input.parent.answeredMailboxItemIds,
+      automationAuthority: input.parent.automationAuthority ?? null,
       channel: 'email',
       dedupeToken: [
         'hosted-email-group-recipient',

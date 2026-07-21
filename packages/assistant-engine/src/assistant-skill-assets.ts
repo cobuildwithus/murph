@@ -227,7 +227,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-newsletter',
     name: 'group-newsletter',
     triggerHint:
-      'Read when a group asks to set up, edit, stop, or write its recurring health newsletter, and on every scheduled group-health-newsletter run. Owns the weekly editorial story, human-readable exercise and sleep comparisons, exact group-name subjects, tone, and the final shared email. Use group-chat alongside it for room etiquette, consent offers, and opt-out behavior.',
+      'Read when a group asks to set up, edit, stop, or write its recurring health newsletter in the current iMessage or Telegram chat or by group email, and on every scheduled group-health-newsletter run. Owns the weekly editorial story, human-readable exercise and sleep comparisons, email subject, tone, and final edition. Use group-chat alongside it for room etiquette, email consent offers, and opt-out behavior.',
   },
   {
     slug: 'group-chat',

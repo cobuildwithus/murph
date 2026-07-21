@@ -99,36 +99,26 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
-## Assistant Ask Rollout
+## Assistant Ask Deployment
 
 Assistant Ask adds paired mailbox kinds and a one-shot process inside the
 existing runner container. It adds no Cloudflare binding, secret, Durable
-Object state, second container, scheduler, or workflow. Roll out the first
-release in this order:
+Object state, second container, scheduler, or workflow. Web always produces
+otherwise-authorized requests, so an old runner that cannot parse the mailbox
+kinds is no longer a supported deployment target. The first compatible runner
+bundle is the rollback floor while an Ask request or completion can remain in a
+mailbox or restored workspace. Roll below it only after at least the full
+ten-minute request lifetime and proof that pending Ask work has drained or
+expired; prefer a forward fix if any imported item may remain.
 
-1. Deploy the Assistant Ask consumers, isolated executor, and
-   `murph-group-read` profile in the Cloudflare Worker and runner bundle with
-   `container_rollout=immediate`. Keep the Web producer gate off.
-2. Require managed-container smoke to report the new runner-bundle fingerprint
-   and prove the named profile can read the intended committed group context
-   while writes, `.runtime/**`, `.codex/**`, environment files, other roots,
-   inherited shell secrets, and tool network fail closed. The thread-start
-   attestation must confirm the effective profile, exact roots, empty working
-   directory, empty instruction sources, and approval policy.
-3. Deploy the Web producer and completion control path with
-   `HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`.
-4. After the consumer fleet and sandbox proof converge, set the Web gate to
-   exact `1` and redeploy Web. Smoke one private-to-group ask while the group
-   runtime is idle and one while its foreground Murph is replying; neither may
-   create group-visible activity or delay the foreground reply.
-
-An old runner cannot parse the new mailbox kinds, so the producer must not be
-enabled before immediate runner convergence. After enablement, the first
-compatible runner bundle is the rollback floor while an Ask request or
-completion can remain in a mailbox or restored workspace. To roll back, set the
-Web producer gate to `0` and redeploy Web first, wait at least the full ten-minute
-request lifetime, verify pending Ask work has drained or expired, then roll back
-the consumers. A forward fix is preferred if any imported item remains.
+For changes to the consumer contract, deploy the Worker and runner bundle with
+`container_rollout=immediate`. Managed-container smoke must report the expected
+runner-bundle fingerprint and prove the `murph-group-read` profile can read the
+intended committed group context while writes, `.runtime/**`, `.codex/**`,
+environment files, other roots, inherited shell secrets, and tool network fail
+closed. Smoke one private-to-group ask while the group runtime is idle and one
+while its foreground Murph is replying; neither may create group-visible
+activity or delay the foreground reply.
 
 ## Linq Participant-Context Rollout
 
@@ -615,32 +605,18 @@ group automation, and confirm there are no new
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 
-The first shared preference-causal-sequence release uses a Web-first hard cut.
-Vercel predeploy adds nullable `causal_seq` state, the nullable keyed
-assistant-input lookup projection, and nullable Humor, Push, and Detail
-projection watermarks, then deploys Web with
-`MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. New conversation rows
-store a server-keyed lookup of their existing deterministic assistant input id,
-never the raw id, without changing the mailbox wire, `sourceRef`, or event id.
-The Web callback accepts no numeric sequence fallback: inside the mutation
-transaction it derives every configured lookup-key candidate from the callback
-id, resolves the callback member plus one matching key to one live
-conversation-lane `conversation.message` row, and derives that row's canonical
-sequence. The hard-cut route also rejects the retired direct-vault
-causal-sequence action after old Vercel functions drain. This Web build is the
-rollback floor. The post-deploy contract lane checks legacy work against the
-system-lane `consumed_seq`, adds the new-write constraint `NOT VALID`, and seeds
-all three personality watermarks to each member's current causal barrier,
-including null projection values because historical Web values may differ from
-canonical vault values and cannot be backfilled safely. Deploy this Cloudflare
-worker and runner bundle next with `container_rollout=immediate` and prove fleet
-convergence; for an update, it forwards only the terminal input id from a
-locally revalidated bounded exact-successor provider batch. Then set the Vercel
-gate to `1` and redeploy Web to switch Settings to sparse deltas and expose
-personality controls plus hosted conversation convergence. Legacy runtimes
-continue ordinary replies while style writes fail closed. Deploy Web and
-Cloudflare/runtime in tandem to minimize that temporary unavailable-write
-window, and keep Web at the hard-cut floor during any runner rollback.
+Shared preference causal writes are hard-cut. Web always emits sparse deltas,
+Settings always exposes personality controls, and the runtime forwards only the
+terminal input id from a locally revalidated bounded exact-successor provider
+batch. The Web callback accepts no numeric sequence fallback: inside the
+mutation transaction it resolves the callback member and keyed assistant-input
+lookup to one live conversation-lane row, then derives that row's canonical
+sequence. The retired direct-vault causal-sequence action and legacy snapshot
+producer path stay deleted. Keep Web at the hard-cut floor during any runner
+rollback. Deploy behavior-changing consumer updates with
+`container_rollout=immediate`, prove the runner fingerprint, and smoke Settings
+and conversational changes to the same field so the later accepted intent wins
+in both the Web projection and canonical vault.
 
 The first production release that writes `murph.inbox-capture.v2` records or
 `parser-result` assistant-input evidence must use
@@ -652,21 +628,16 @@ traffic, require managed-container smoke to report the new runner-bundle
 fingerprint; afterward, smoke one capture, projection rebuild, and assistant
 candidate scan so both durable readers are proved on the deployed bundle.
 
-Approval-outcome mailbox wakes have a permanent runtime rollback floor after
-`MURPH_HOSTED_ACTION_APPROVAL_OUTCOME_WAKE_ENABLED` is first enabled in
-production. Before the first compatible Cloudflare deployment, deploy and verify
-the gate-disabled web bundle that serves the action-approval read route. That
-bundle is the matching permanent web rollback floor. Disable the web gate and
-redeploy web before any rollback, but keep web at the read-route floor or newer
-while compatible runtime or pending approval work can depend on it, and do
-not roll Cloudflare/runner below the first bundle that parses
+Approval-outcome mailbox wakes are unconditional. Keep Web at the permanent
+read-route floor or newer while compatible runtime or pending approval work can
+depend on it, and do not roll Cloudflare/runner below the first bundle that parses
 `runtime.pending-effects-reconcile-requested`. System-lane lag records import
 progress only: the imported wake may remain pending in
 `hosted-system-mailbox.json` and in a committed hot workspace snapshot after lag
 reaches zero. Roll back to that compatible bundle or newer, or forward-fix. A
 below-floor rollback needs a separate migration and proof covering server rows,
 imported local pending items, committed snapshots, and in-flight producers;
-gate-off plus zero lag is not sufficient. Removing the web floor also requires a
+zero lag is not sufficient. Removing the web floor also requires a
 separate migration or forward runtime that removes the read-route dependency.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.

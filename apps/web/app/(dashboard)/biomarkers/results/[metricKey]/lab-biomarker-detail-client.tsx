@@ -10,7 +10,7 @@ import {
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabBiomarkerDetail,
-  type BrowserVaultLabResultRow,
+  type BrowserVaultPresentedLabResultRow,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
@@ -39,6 +39,7 @@ import {
   formatLabFlag,
   formatLabNumber,
   formatLabReferenceRange,
+  formatLabResultReferenceRange,
   formatLabUnit,
   labResultYear,
   labUnitSuffix,
@@ -56,7 +57,7 @@ interface LabBiomarkerDetailClientProps {
 }
 
 interface LabResultYearGroup {
-  rows: BrowserVaultLabResultRow[];
+  rows: BrowserVaultPresentedLabResultRow[];
   year: string;
 }
 
@@ -194,7 +195,7 @@ function BiomarkerDetailContent({
   const chartNotes = buildChartNotes(detail);
   const chartRange = resolveChartedReferenceRange(detail);
   const latestChangeNote = buildLatestChangeNote(detail);
-  const latestRange = formatLabReferenceRange(detail.latest.referenceRange, detail.latest.unit);
+  const latestRange = formatLabResultReferenceRange(detail.latest);
   const latestRangeSource = detail.latest.labName ?? detail.latest.sourceLabel;
 
   return (
@@ -321,7 +322,7 @@ function BiomarkerDetailContent({
             All results
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Values and reference ranges are shown as each lab reported them.
+            Numeric results and ranges use one comparable unit when conversion is available.
           </p>
         </div>
 
@@ -345,7 +346,7 @@ function ResultSummaryItem({
   flag?: string | null;
   label: string;
   note?: string | null;
-  row: BrowserVaultLabResultRow;
+  row: BrowserVaultPresentedLabResultRow;
 } & Pick<ComponentProps<"div">, "className">) {
   return (
     <div className={cn(
@@ -394,7 +395,7 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
 
         <ol>
           {group.rows.map((row) => {
-            const referenceRange = formatLabReferenceRange(row.referenceRange, row.unit);
+            const referenceRange = formatLabResultReferenceRange(row);
             const source = row.labName ?? row.sourceLabel;
 
             return (
@@ -563,7 +564,7 @@ function BackToBiomarkersLink() {
   );
 }
 
-function groupRowsByYear(rows: readonly BrowserVaultLabResultRow[]): LabResultYearGroup[] {
+function groupRowsByYear(rows: readonly BrowserVaultPresentedLabResultRow[]): LabResultYearGroup[] {
   const groups = new Map<string, LabResultYearGroup>();
 
   for (const row of rows.slice().reverse()) {
@@ -587,7 +588,7 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
   return `${detail.rows.length} saved ${detail.rows.length === 1 ? "result" : "results"}, ${span}.`;
 }
 
-function formatHistorySpan(rows: readonly BrowserVaultLabResultRow[]): string {
+function formatHistorySpan(rows: readonly BrowserVaultPresentedLabResultRow[]): string {
   const first = rows[0]?.date;
   const last = rows.at(-1)?.date;
   if (!first || !last) return "No dated results";
@@ -598,9 +599,8 @@ function formatHistorySpan(rows: readonly BrowserVaultLabResultRow[]): string {
 
 /**
  * The chart plots normalized comparable values, so a reference band is only
- * truthful when every charted row reported the same numeric bounds on the
- * same scale as its plotted value. Any disagreement or missing range means
- * no band.
+ * truthful when every charted row has the same normalized numeric bounds.
+ * Any disagreement or missing numeric range means no band.
  */
 function resolveChartedReferenceRange(
   detail: BrowserVaultLabBiomarkerDetail,
@@ -619,17 +619,20 @@ function resolveChartedReferenceRange(
     if (plottedValue === undefined) {
       continue;
     }
-    // Equal values alone cannot prove no conversion happened (0 converts to
-    // 0), so the reported unit must also match the plotted unit.
     if (
-      row.value !== plottedValue
-      || formatLabUnit(row.unit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
+      row.normalizedValue !== plottedValue
+      || formatLabUnit(row.normalizedUnit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
     ) {
       return null;
     }
 
-    const low = row.referenceRange?.low ?? null;
-    const high = row.referenceRange?.high ?? null;
+    const normalizedRange = row.normalizedReferenceRange;
+    if (normalizedRange?.lowComparator || normalizedRange?.highComparator) {
+      return null;
+    }
+
+    const low = normalizedRange?.low ?? null;
+    const high = normalizedRange?.high ?? null;
     if (low === null && high === null) {
       return null;
     }
@@ -687,16 +690,6 @@ function buildLatestChangeNote(detail: BrowserVaultLabBiomarkerDetail): string |
   if (latestValue === undefined || previousValue === undefined) {
     return null;
   }
-  // The note sits under the raw "Latest result" value, so it may only speak
-  // when both rows were reported on the plotted scale; a normalized delta
-  // under a raw value in another unit would misattribute the change.
-  if (
-    detail.latestComparable.value !== latestValue
-    || detail.previousComparable.value !== previousValue
-  ) {
-    return null;
-  }
-
   const since = formatLabDate(detail.previousComparable.date);
   const difference = Math.abs(latestValue - previousValue);
   if (difference < 1e-9) {

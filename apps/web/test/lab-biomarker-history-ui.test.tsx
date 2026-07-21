@@ -28,6 +28,10 @@ const browserVaultMock = vi.hoisted(() => ({
   },
 }));
 
+const linkPropsMock = vi.hoisted(() => ({
+  value: [] as Array<{ href: string; prefetch: boolean | undefined }>,
+}));
+
 vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault() {
     return browserVaultMock.value;
@@ -44,11 +48,13 @@ vi.mock("@/src/components/ui/auth-button", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default({ children, href, ...props }: {
+  default({ children, href, prefetch, ...props }: {
     children: ReactNode;
     href: string;
+    prefetch?: boolean;
     [key: string]: unknown;
   }) {
+    linkPropsMock.value.push({ href, prefetch });
     return createElement("a", { ...props, href }, children);
   },
 }));
@@ -57,6 +63,7 @@ import { BiomarkersPageClient } from "../app/(dashboard)/biomarkers/biomarkers-p
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
 
 beforeEach(() => {
+  linkPropsMock.value = [];
   browserVaultMock.value = {
     client: null,
     error: null,
@@ -71,6 +78,18 @@ test("measured biomarkers are grouped by health area and link to private histori
   browserVaultMock.value.client = clientWithRows([
     labRow({ date: "2019-02-10", id: "hba1c-2019", value: 5.2 }),
     labRow({ date: "2026-02-10", flag: "high", id: "hba1c-2026", value: 5.8 }),
+    labRow({
+      analyte: "Glucose",
+      biomarkerKey: "biomarker:blood-glucose",
+      date: "2026-01-12",
+      flag: "normal",
+      id: "glucose-2026",
+      metricKey: "glucose",
+      normalizedUnit: "mg/dL",
+      normalizedValue: 92,
+      unit: "mg/dL",
+      value: 92,
+    }),
     labRow({
       analyte: "Apolipoprotein B",
       biomarkerKey: "biomarker:apob",
@@ -104,36 +123,114 @@ test("measured biomarkers are grouped by health area and link to private histori
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("Your biomarkers");
-    expect(text).toContain("2 biomarkers");
+    expect(text).toContain("Biomarkers");
+    expect(rendered.container.querySelector('input[placeholder="Search biomarkers"]')).not.toBeNull();
     expect(text).toContain("Blood sugar");
     expect(text).toContain("Heart & lipids");
-    expect(text).toContain("2019 to 2026");
-    expect(text).toContain("High");
+    expect(text).toContain("Above range");
+    expect(text).toContain("In range");
+    expect(text).toContain("Reported");
     expect(text).not.toContain("No lab flag");
+    expect(text).not.toContain("2 results");
+    expect(text).not.toContain("2019 to 2026");
     expect(text.indexOf("Blood sugar")).toBeLessThan(text.indexOf("Heart & lipids"));
     const labGroups = [...rendered.container.querySelectorAll("details")];
     expect(labGroups).toHaveLength(2);
-    expect(labGroups.every((group) => !group.hasAttribute("open"))).toBe(true);
+    expect(labGroups.every((group) => group.hasAttribute("open"))).toBe(true);
     const firstSummary = labGroups[0]?.querySelector("summary");
     expect(firstSummary?.textContent).toContain("Blood sugar");
-    expect(firstSummary?.parentElement?.querySelector("ul")?.className).toContain("md:grid-cols-2");
+    const firstGrid = firstSummary?.nextElementSibling;
+    expect(firstGrid?.className).not.toMatch(/(?:^|\s)grid-cols-/u);
+    expect(firstGrid?.className).toContain("md:grid-cols-2");
+    expect(firstGrid?.className).toContain("xl:grid-cols-3");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );
     expect(hba1cLink).not.toBeNull();
     expect(hba1cLink?.getAttribute("aria-label")).toBeNull();
     expect(hba1cLink?.textContent).toContain("HbA1c");
-    expect(hba1cLink?.textContent).toContain("2 results");
     expect(hba1cLink?.textContent).toContain("5.8%");
-    const latestDate = hba1cLink?.querySelector("time");
-    expect(latestDate?.getAttribute("dateTime")).toBe("2026-02-10");
-    expect(latestDate?.textContent).toContain("2026");
-    expect(hba1cLink?.textContent).toContain("High");
-    expect(hba1cLink?.closest("li")?.parentElement?.tagName).toBe("UL");
+    expect(hba1cLink?.textContent).toContain("Above range");
+    expect(hba1cLink?.getAttribute("role")).toBeNull();
+    expect(hba1cLink?.parentElement).toBe(firstGrid);
+    expect(hba1cLink?.className).toContain("cursor-pointer");
+    const resultLinkProps = linkPropsMock.value.filter(({ href }) =>
+      href.startsWith("/biomarkers/results/")
+    );
+    expect(resultLinkProps).toHaveLength(3);
+    expect(resultLinkProps.every(({ prefetch }) => prefetch === false)).toBe(true);
+    const glucoseLink = rendered.container.querySelector(
+      'a[href="/biomarkers/results/glucose"]',
+    );
+    expect(glucoseLink?.textContent).toContain("In range");
+    expect((firstGrid?.textContent ?? "").indexOf("HbA1c")).toBeLessThan(
+      (firstGrid?.textContent ?? "").indexOf("Glucose"),
+    );
     expect(rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]')).toBeNull();
     expect(text).not.toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).not.toContain("Library");
+
+    const reviewFilter = rendered.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Review, 1"]',
+    );
+    expect(reviewFilter).not.toBeNull();
+    await act(async () => {
+      reviewFilter?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/hba1c"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/glucose"]')).toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/apob"]')).toBeNull();
+
+    const allFilter = rendered.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="All, 3"]',
+    );
+    await act(async () => {
+      allFilter?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    const search = rendered.container.querySelector<HTMLInputElement>(
+      'input[placeholder="Search biomarkers"]',
+    );
+    expect(search).not.toBeNull();
+    await act(async () => {
+      if (search) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          rendered.window.HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (valueSetter) {
+          valueSetter.call(search, "apo");
+        } else {
+          search.value = "apo";
+        }
+        search.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+        search.dispatchEvent(new rendered.window.Event("change", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/apob"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/hba1c"]')).toBeNull();
+
+    await act(async () => {
+      if (search) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          rendered.window.HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (valueSetter) {
+          valueSetter.call(search, "not present");
+        } else {
+          search.value = "not present";
+        }
+        search.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+        search.dispatchEvent(new rendered.window.Event("change", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    expect(rendered.container.textContent).toContain("No matching biomarkers");
+    expect(rendered.container.textContent).toContain("Try another name or status.");
+    expect(rendered.container.querySelector('[href^="/biomarkers/results/"]')).toBeNull();
   } finally {
     await rendered.cleanup();
   }
@@ -283,6 +380,123 @@ test("a numeric result with source text remains plotted without a qualitative om
   }
 });
 
+test("albumin uses one normalized unit across the overview, summary, ranges, and history", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Albumin",
+      biomarkerKey: "biomarker:albumin",
+      date: "2026-02-17",
+      id: "albumin-gdl",
+      metricKey: "albumin",
+      normalizedUnit: "g/dL",
+      normalizedValue: 5.1,
+      unit: "g/dL",
+      value: 5.1,
+    }),
+    labRow({
+      analyte: "Albumin",
+      biomarkerKey: "biomarker:albumin",
+      date: "2026-04-23",
+      id: "albumin-gl",
+      metricKey: "albumin",
+      normalizedUnit: "g/dL",
+      normalizedValue: 4.9,
+      referenceRange: { text: "34 - 50" },
+      unit: "g/L",
+      value: 49,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const overview = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+  try {
+    const albuminLink = overview.container.querySelector(
+      'a[href="/biomarkers/results/albumin"]',
+    );
+    expect(albuminLink?.textContent).toContain("4.9 g/dL");
+    expect(albuminLink?.textContent).not.toContain("49 g/L");
+  } finally {
+    await overview.cleanup();
+  }
+
+  const detail = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="albumin" />,
+    { requireButton: false },
+  );
+  try {
+    const text = detail.container.textContent ?? "";
+    expect(text).toContain("2 comparable numeric results in g/dL");
+    expect(text).toContain("4.9 g/dL");
+    expect(text).toContain("5.1 g/dL");
+    expect(text).toContain("3.4 to 5 g/dL");
+    expect(text).toContain("Down 0.2 g/dL since Feb 17, 2026");
+    expect(text).not.toContain("49 g/L");
+    expect(text).not.toContain("34 - 50");
+  } finally {
+    await detail.cleanup();
+  }
+});
+
+test("a unitless latest result stays raw and is not compared as a canonical value", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Total Cholesterol",
+      biomarkerKey: null,
+      date: "2025-02-17",
+      id: "cholesterol-explicit",
+      metricKey: "total-cholesterol",
+      normalizedUnit: "mg/dL",
+      normalizedValue: 201.1,
+      unit: "mg/dL",
+      value: 201.1,
+    }),
+    labRow({
+      analyte: "Total Cholesterol",
+      biomarkerKey: null,
+      date: "2026-04-23",
+      id: "cholesterol-unitless",
+      metricKey: "total-cholesterol",
+      normalizedUnit: null,
+      normalizedValue: null,
+      referenceRange: { high: 6, text: "<6 mmol/L" },
+      unit: null,
+      value: 5.2,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const overview = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+  try {
+    const cholesterolLink = overview.container.querySelector(
+      'a[href="/biomarkers/results/total-cholesterol"]',
+    );
+    expect(cholesterolLink?.textContent).toContain("5.2");
+    expect(cholesterolLink?.textContent).not.toContain("5.2 mg/dL");
+  } finally {
+    await overview.cleanup();
+  }
+
+  const detail = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="total-cholesterol" />,
+    { requireButton: false },
+  );
+  try {
+    const text = detail.container.textContent ?? "";
+    expect(text).toContain("1 comparable numeric result in mg/dL");
+    expect(text).toContain("<6 mmol/L");
+    expect(text).not.toContain("5.2 mg/dL");
+    expect(text).not.toContain("since Feb 17, 2025");
+  } finally {
+    await detail.cleanup();
+  }
+});
+
 test("tiny nonzero lab values and ranges retain meaningful precision", () => {
   expect(formatLabNumber(0.0004)).toBe("0.0004");
   expect(formatLabNumber(0.0014)).toBe("0.0014");
@@ -295,6 +509,8 @@ test("tiny nonzero lab values and ranges retain meaningful precision", () => {
   })).toBe("0.0004 mg/L");
   expect(formatLabReferenceRange({ high: 0.0009, low: 0.0001 }, "mg/L"))
     .toBe("0.0001 to 0.0009 mg/L");
+  expect(formatLabReferenceRange({ high: 5, highComparator: "<=" }, "g/dL"))
+    .toBe("<=5 g/dL");
 });
 
 test("signed-out empty state offers sign-in instead of lab sync", async () => {
@@ -722,6 +938,71 @@ test("a shared lab-reported range yields a chart band, range tile, and change no
     expect(text).not.toContain("Saved history");
     expect(text).toContain("Up 0.2% since Jun 3, 2025");
     expect(text).toContain("Range 4 to 5.6%");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("an exact one-sided range stays in history without becoming an ambiguous chart line", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      date: "2025-06-03",
+      id: "hba1c-2025",
+      referenceRange: { text: "<5.6" },
+      value: 5.4,
+    }),
+    labRow({
+      date: "2026-06-14",
+      id: "hba1c-2026",
+      referenceRange: { text: "<5.6" },
+      value: 5.5,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("<5.6%");
+    expect(text).not.toContain("dashed line marks");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("qualified structured ranges keep their exact text and never become a chart band", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      date: "2025-06-03",
+      id: "glucose-2025",
+      referenceRange: { high: 99, low: 70, text: "70-99 fasting; <140 non-fasting" },
+      unit: "mg/dL",
+      value: 95,
+    }),
+    labRow({
+      date: "2026-06-14",
+      id: "glucose-2026",
+      referenceRange: { high: 99, low: 70, text: "70-99 fasting; <140 non-fasting" },
+      unit: "mg/dL",
+      value: 120,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("70-99 fasting; <140 non-fasting");
+    expect(text).not.toContain("shaded area");
+    expect(text).not.toContain("Range 70 to 99 mg/dL");
   } finally {
     await rendered.cleanup();
   }

@@ -41,10 +41,6 @@ export interface HostedMemberAssistantPreferencesUpdate {
   voice?: AssistantVoiceOptionId;
 }
 
-export type HostedMemberAssistantPreferencesMailboxPayloadMode =
-  | "legacy_snapshot"
-  | "sparse_delta";
-
 export interface HostedMemberAssistantPreferencesResult {
   appliedFields: AssistantPreferenceFieldId[];
   assistantPersona: AssistantPersonaId | null;
@@ -67,7 +63,6 @@ function maxCausalSeq(current: bigint | null, next: bigint): bigint {
 
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
   causalOrigin?: "event" | "turn";
-  mailboxPayloadMode: HostedMemberAssistantPreferencesMailboxPayloadMode;
   memberId: string;
   occurredAt: string;
   preferenceCausalSeq?: string;
@@ -147,15 +142,6 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
 
   const preferences = applicablePreferences.preferences;
 
-  if (
-    input.mailboxPayloadMode === "legacy_snapshot"
-    && (preferences.persona !== undefined || preferences.personality !== undefined)
-  ) {
-    throw new TypeError(
-      "Assistant persona and personality updates require the sparse mailbox payload rollout.",
-    );
-  }
-
   const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
     ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
     eventId: buildHostedMemberPreferencesUpdatedEventId({
@@ -167,12 +153,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     ...(input.preferenceCausalSeq
       ? { preferenceCausalSeq: input.preferenceCausalSeq }
       : {}),
-    preferences: input.mailboxPayloadMode === "sparse_delta"
-      ? preferences
-      : buildHostedMemberAssistantPreferencesSnapshot({
-          tone: preferences.tone ?? member.assistantTone,
-          voice: preferences.voice ?? member.assistantVoice,
-        }),
+    preferences,
     requestedFields: [
       ...(preferences.persona === undefined ? [] : ["persona" as const]),
       ...(preferences.tone === undefined ? [] : ["tone" as const]),
@@ -478,18 +459,6 @@ function readStoredAssistantPersonalityScore(
     case "push":
       return value.assistantPush;
   }
-}
-
-function buildHostedMemberAssistantPreferencesSnapshot(input: {
-  tone: string | null;
-  voice: string | null;
-}): HostedExecutionMemberPreferences {
-  const tone = normalizeStoredAssistantTone(input.tone);
-  const voice = normalizeStoredAssistantVoice(input.voice);
-  return {
-    ...(tone === null ? {} : { tone }),
-    ...(voice === null ? {} : { voice }),
-  };
 }
 
 function normalizeStoredAssistantPersona(

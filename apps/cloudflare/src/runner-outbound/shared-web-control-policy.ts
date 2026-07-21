@@ -45,6 +45,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
@@ -99,6 +100,7 @@ export type HostedRunnerWebControlOperation =
   | "newsletter_tool"
   | "plan_usage_tool"
   | "subscription_tool"
+  | "thread_route_authority"
   | "phone_call_start"
   | "runtime_latency_trace"
   | "runtime_log_write"
@@ -142,6 +144,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],
   [HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH, "plan_usage_tool"],
   [HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH, "subscription_tool"],
+  [HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH, "thread_route_authority"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],
