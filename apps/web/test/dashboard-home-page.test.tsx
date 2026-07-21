@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
@@ -65,13 +66,24 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
 }));
 
 vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
-  HomeInitialVisitPersonaPickerClient() {
+  HomeInitialVisitPersonaPickerClient({
+    showContactCard,
+  }: {
+    showContactCard: boolean;
+  }) {
     return createElement(
       "section",
-      { "data-home-initial-visit-persona-picker": "shown" },
+      {
+        "data-show-contact-card": showContactCard ? "true" : "false",
+        "data-home-initial-visit-persona-picker": "shown",
+      },
       "Persona onboarding",
     );
   },
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -147,6 +159,13 @@ beforeEach(() => {
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
+  mocks.resolveHostedMurphContactOption.mockResolvedValue({
+    href: "sms:+15555550123",
+    kind: "text",
+    label: "Text Murph",
+    rel: undefined,
+    target: undefined,
+  });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
     allowanceSource: "direct_paid_member_plan",
@@ -533,7 +552,9 @@ test("HomePage opens persona onboarding for initial visits", async () => {
 
   assert.match(markup, /Welcome to Murph/);
   assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-show-contact-card="true"/);
   assert.match(markup, /Persona onboarding/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
   assert.doesNotMatch(markup, /data-home-initial-visit-dialog/);
 });
 
@@ -548,4 +569,5 @@ test("HomePage keeps persona onboarding gated behind the exact initial-visit mar
   );
 
   assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });

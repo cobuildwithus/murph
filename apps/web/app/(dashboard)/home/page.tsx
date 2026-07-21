@@ -5,6 +5,7 @@ import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -63,6 +64,7 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
+    showInitialVisitContactCard,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member,
@@ -83,6 +85,9 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
+    showInitialVisitPersonaPicker
+      ? resolveHomeInitialVisitShowsContactCard()
+      : Promise.resolve(false),
   ]);
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
@@ -133,7 +138,9 @@ export default async function HomePage({
       ) : null}
 
       {showInitialVisitPersonaPicker ? (
-        <HomeInitialVisitPersonaPickerClient />
+        <HomeInitialVisitPersonaPickerClient
+          showContactCard={showInitialVisitContactCard}
+        />
       ) : null}
 
       {usageLimitNotice ? (
@@ -167,4 +174,15 @@ function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+async function resolveHomeInitialVisitShowsContactCard(): Promise<boolean> {
+  const option = await resolveHostedMurphContactOption({
+    message: {
+      body: "Hey Murph, do your thing",
+      subject: "Hey Murph, do your thing",
+    },
+  });
+
+  return option?.kind === "text";
 }

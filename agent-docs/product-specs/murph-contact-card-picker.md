@@ -1,7 +1,7 @@
 # Murph Contact Card Picker
 
 Last verified: 2026-07-21
-Status: Implemented (picker on `/design?tab=components`, vCard route, and signup-success placement); persisted avatar choice not started
+Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, and initial-visit handoff); persisted avatar choice not started
 
 ## Why
 
@@ -12,7 +12,7 @@ Murph's contact card ships with one canonical headshot (the hooded character). S
 The contact-card picker remains available immediately after website signup:
 
 1. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
-2. `/home?initialVisit=true` no longer includes the contact-card picker. That one-shot handoff opens the Murph personality picker directly, independently of the member's contact channel.
+2. `/home?initialVisit=true` resolves the member's contact channel. Members with a text contact see the contact-card picker first; adding the card, skipping, or dismissing advances to the Murph personality picker. Members without a text contact start directly at the personality picker.
 
 The signup and design-system surfaces reuse `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
 
@@ -40,4 +40,4 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 
 ## Current state
 
-`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, `MurphContactCardPreview`, and `MurphAddToContactsButton` are live on `/design?tab=components` and the signup success stage; the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: the optional persisted avatar choice for group-share reuse.
+`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, `MurphContactCardPreview`, and `MurphAddToContactsButton` are live on `/design?tab=components`, the signup success stage, and the initial-visit handoff for members with a text contact; the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: the optional persisted avatar choice for group-share reuse.

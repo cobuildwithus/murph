@@ -38,9 +38,10 @@ Last verified: 2026-07-21
   a problem.
 - Hosted landing-page signup should hand members directly toward messaging
   Murph. Signup-oriented accessible-stage landing auth routes to
-  `/home?initialVisit=true`, where `/home` opens the one-shot four-step Murph
-  personality picker. Login-oriented landing CTAs continue to route to
-  ordinary `/home`.
+  `/home?initialVisit=true`, where members with a resolved text contact first see
+  the contact-card picker and then the one-shot four-step Murph personality
+  picker. Members without a text contact start at the personality picker.
+  Login-oriented landing CTAs continue to route to ordinary `/home`.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older
   item resolve to the exact archive window and anchor that contains it.
