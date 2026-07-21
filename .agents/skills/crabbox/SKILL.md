@@ -18,8 +18,11 @@ For a local Codex parent, those commands automatically use Crabbox's direct
 `blacksmith-testbox` provider when `MURPH_CRABBOX_BLACKSMITH=1` or an existing
 `MURPH_CRABBOX_LEASE_ID` is configured and both CLIs are available. CI,
 non-Codex callers, and unconfigured or unavailable CLIs retain the existing
-local shared-host path. `MURPH_VERIFY_EXECUTOR=crabbox` explicitly requests a
-fresh one-shot Testbox without another target variable.
+local shared-host path. Within that path, canonical acceptance intentionally
+selects the bounded composed profile on hosts with at least 12 logical CPUs;
+ordinary commands and smaller hosts keep their conservative shared-host caps.
+`MURPH_VERIFY_EXECUTOR=crabbox` explicitly requests a fresh one-shot Testbox
+without another target variable.
 
 ## Environment and sync boundary
 
@@ -53,7 +56,7 @@ fresh one-shot Testbox without another target variable.
 # Default: remote only for configured Codex; otherwise local.
 MURPH_CRABBOX_BLACKSMITH=1 pnpm test:diff <paths>
 
-# Force the existing local shared-host lane.
+# Force local execution; capable acceptance still uses its bounded composition.
 MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance
 
 # Force a fresh one-shot Blacksmith Testbox and fail rather than falling back.
@@ -67,5 +70,15 @@ Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,
 command transport, and idle expiry. Crabbox owns provider selection, the local
 claim, command invocation, timing, and cleanup. Preserve the printed Testbox ID,
 Crabbox timing summary, and linked Actions run in verification evidence.
+On the standard 16-vCPU Testbox, `verify:acceptance` automatically selects the
+same bounded composed-parallel profile as a capable local host; confirm the
+printed `resources` line rather than adding provider-specific worker overrides.
+The sanitized remote bootstrap deliberately leaves `MURPH_VERIFY_STEP_PARALLEL`
+unset so the root verifier remains the sole owner of Web-parallel versus
+Cloudflare-serial composed app scheduling.
+The protected CLI phase uses four CLI workers with one two-worker package peer;
+CLI completion releases the two heavy app steps and lets package coverage refill
+to five two-worker processes. The scheduled Vitest total stays below the host's
+CPU count.
 Audits, parent final review, plan/ledger closure, commits, pushes, and PR work
 remain local.

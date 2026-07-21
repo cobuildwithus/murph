@@ -51,7 +51,6 @@ const SAFE_TEST_ENVIRONMENT = {
   MURPH_TEST_LANES_PARALLEL: "1",
   MURPH_VERIFY_EXECUTOR: "local",
   MURPH_VERIFY_SHARED_HOST: "0",
-  MURPH_VERIFY_STEP_PARALLEL: "1",
   NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_crabbox_verify_placeholder1",
   NEXT_TELEMETRY_DISABLED: "1",
   PRIVY_VERIFICATION_KEY: "crabbox-hosted-web-verification-key",
