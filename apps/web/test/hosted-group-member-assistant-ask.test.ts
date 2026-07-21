@@ -229,7 +229,7 @@ function mailboxItemForWake(input: {
 
 function createPrisma() {
   const tx = {
-    $queryRaw: vi.fn().mockResolvedValue([{ locked: true }]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     hostedThreadContainer: {
       findUnique: vi.fn(async (input: { where: { memberId: string } }) =>
         input.where.memberId === GROUP_RUNTIME_MEMBER_ID
@@ -434,8 +434,8 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
           result: { status: "accepted" },
         },
       ]);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(new Set(tx.$queryRaw.mock.calls.map((call) => call[2]))).toEqual(
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(new Set(tx.$executeRaw.mock.calls.map((call) => call[2]))).toEqual(
       new Set([firstRequestId, secondRequestId]),
     );
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
