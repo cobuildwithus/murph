@@ -124,6 +124,7 @@ Updated: 2026-07-21
   106 Node test files (1,845 tests) and the Workers lane green.
 - Passed a fresh 9,369,574B runner-bundle assembly, deploy smoke, and the full
   hosted-local Telegram scheduled-reminder scenario (2 tests, 500.89s).
-- Every exact-head PR CI check passes. ReviewGPT round 1 passed with no finding;
-  round 2 found only the accepted missing deploy-surface disclosure above.
-  Pending: the final disclosure-verification round.
+- Every exact-head PR CI check passed, and PR #827 was squash-merged into
+  `main`. ReviewGPT round 1 passed with no finding. Round 2 found only the
+  accepted missing deploy-surface disclosure above; the PR body was corrected
+  without a production-code change before the external merge was discovered.

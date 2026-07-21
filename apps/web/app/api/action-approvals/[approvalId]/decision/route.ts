@@ -11,7 +11,6 @@ import type { HostedActionApprovalDecisionResponse } from "@/src/lib/action-appr
 import { formatHostedExecutionSafeLogErrorDetails } from "@/src/lib/hosted-execution/logging";
 import {
   signalHostedMailboxAppendRuntime,
-  signalHostedRuntimeRecheckRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -27,8 +26,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import { verifySensitiveActionChallenge } from "@/src/lib/sensitive-actions/server";
 
 const ACTION_APPROVAL_DECISION_BODY_LIMIT_BYTES = 4 * 1024;
-const APPROVED_REPLY_BODY = "I approved the secure request.";
-const DENIED_REPLY_BODY = "I denied the secure request.";
 
 type ActionApprovalDecision =
   | {
@@ -79,46 +76,27 @@ export const POST = withJsonError(async (
           tx,
         }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  if (result.runtimeResume) {
-    // The decision and control row committed together. Temporal receives only
-    // the mailbox pointer; the runtime re-reads approval state before resuming.
-    await signalHostedMailboxAppendRuntime({
-      expectedUserId: session.member.id,
-      knownCheckpoint: {
-        lane: result.runtimeResume.lane,
-        laneSeq: result.runtimeResume.laneSeq,
-        userId: result.runtimeResume.userId,
-      },
-      mailboxItemId: result.runtimeResume.mailboxItemId,
-    }).catch((error: unknown) => {
-      console.warn("Hosted action approval mailbox wake signal failed after decision commit.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_ACTION_APPROVAL_TEMPORAL_SIGNAL_FAILED",
-        }),
-        mailboxItemIdPresent: result.runtimeResume !== null,
-      });
+  // The decision and control row committed together. Temporal receives only
+  // the mailbox pointer; the runtime re-reads approval state before resuming.
+  await signalHostedMailboxAppendRuntime({
+    expectedUserId: session.member.id,
+    knownCheckpoint: {
+      lane: result.runtimeResume.lane,
+      laneSeq: result.runtimeResume.laneSeq,
+      userId: result.runtimeResume.userId,
+    },
+    mailboxItemId: result.runtimeResume.mailboxItemId,
+  }).catch((error: unknown) => {
+    console.warn("Hosted action approval mailbox wake signal failed after decision commit.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_ACTION_APPROVAL_TEMPORAL_SIGNAL_FAILED",
+      }),
     });
-  } else {
-    // Until the compatible runtime bundle is verified, retain the legacy
-    // shoulder tap and confirmation-message fallback without emitting the new
-    // mailbox kind.
-    await signalHostedRuntimeRecheckRuntime({
-      userId: session.member.id,
-    }).catch(() => undefined);
-  }
+  });
 
   const contactOption = approval.returnContactKind === null
     ? null
     : await resolveHostedMurphContactOption({
-        ...(result.runtimeResume
-          ? {}
-          : {
-              message: {
-                body: decision.decision === "approved"
-                  ? APPROVED_REPLY_BODY
-                  : DENIED_REPLY_BODY,
-              },
-            }),
         preferredKind: approval.returnContactKind,
       }).catch(() => null);
   const response: HostedActionApprovalDecisionResponse = {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -48,26 +48,9 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 import {
   appendHostedGroupJoinConfirmationTx,
   drainPendingHostedGroupJoinConfirmations,
-  isHostedGroupJoinConfirmationProducerEnabled,
   materializePendingHostedGroupJoinConfirmations,
   materializePendingHostedGroupJoinConfirmationsTx,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-describe("isHostedGroupJoinConfirmationProducerEnabled", () => {
-  it("keeps the producer off unless the rollout flag is explicitly enabled", () => {
-    expect(isHostedGroupJoinConfirmationProducerEnabled({})).toBe(false);
-    expect(isHostedGroupJoinConfirmationProducerEnabled({
-      HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED: "0",
-    })).toBe(false);
-    expect(isHostedGroupJoinConfirmationProducerEnabled({
-      HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED: "1",
-    })).toBe(true);
-  });
-});
 
 describe("appendHostedGroupJoinConfirmationTx", () => {
   beforeEach(() => {
@@ -897,7 +880,6 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   });
 
   it("materializes one targeted membership after commit and signals its durable mailbox item", async () => {
-    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const findFirst = vi.fn().mockResolvedValue({
       createdAt: new Date("2026-07-10T14:00:00.000Z"),
       group: { joinCode: "JOIN1" },
@@ -938,7 +920,6 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   it("bounds a materializer signal that never settles", async () => {
     vi.useFakeTimers();
     try {
-      vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
       const tx = {
         hostedGroupMember: {
           findFirst: vi.fn().mockResolvedValue({
@@ -971,7 +952,6 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   });
 
   it("stops waiting on abort after the durable confirmation append", async () => {
-    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const controller = new AbortController();
     const tx = {
       hostedGroupMember: {
@@ -1002,7 +982,6 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   });
 
   it("drains a bounded page and returns a cursor without one large transaction", async () => {
-    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const candidates = [
       { id: "membership_1", memberId: "member_1" },
       { id: "membership_2", memberId: "member_2" },
@@ -1054,7 +1033,6 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
   });
 
   it("continues a drain cursor deterministically when candidates share createdAt", async () => {
-    vi.stubEnv("HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED", "1");
     const createdAt = new Date("2026-07-10T14:00:00.000Z");
     const candidates = [
       { createdAt, id: "membership_1", memberId: "member_1" },

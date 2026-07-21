@@ -18,7 +18,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   assistantPersonalitySettingIds,
-  assistantPersonalityCausalWritesEnabled,
   resolveAssistantEffectiveStyle,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
@@ -29,7 +28,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedMemberAssistantPreferences,
   upsertHostedMemberAssistantPreferencesTx,
@@ -79,17 +77,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   const request = input.request;
-  if (
-    request.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION
-    && !assistantPersonalityCausalWritesEnabled(process.env)
-  ) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
-      httpStatus: 503,
-      message: "Personality settings are temporarily unavailable during rollout.",
-      retryable: true,
-    });
-  }
   const authority = input.authority;
   if (!authority) {
     throw new TypeError("Assistant personalization update requires assistant input authority.");
@@ -115,9 +102,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
           causalOrigin: "turn",
-          mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
-            ? "sparse_delta"
-            : "legacy_snapshot",
           memberId: input.memberId,
           occurredAt: new Date().toISOString(),
           preferenceCausalSeq,
@@ -194,7 +178,6 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
       });
     const styleResult = await upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: input.memberId,
       occurredAt: new Date().toISOString(),
       preferenceCausalSeq,
