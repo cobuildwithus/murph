@@ -217,13 +217,43 @@ describe("verification dispatcher", () => {
     ]);
   });
 
-  it("parses porcelain -z rename records without treating the original path as another state", () => {
+  it("parses porcelain -z copy and rename records without shifting later states", () => {
     expect(callDispatcherExport(
       "parseGitStatusPorcelainV1Z",
-      "R  renamed file.ts\0original file.ts\0 M tracked file.ts\0",
+      [
+        "C  copied file.ts\0source file.ts\0",
+        "RM renamed file.ts\0original file.ts\0",
+        "RD deleted rename.ts\0original delete.ts\0",
+        " M tracked file.ts\0",
+      ].join(""),
     )).toEqual([
-      { indexStatus: "R", worktreeStatus: " " },
+      { indexStatus: "C", worktreeStatus: " " },
+      { indexStatus: "R", worktreeStatus: "M" },
+      { indexStatus: "R", worktreeStatus: "D" },
       { indexStatus: " ", worktreeStatus: "M" },
+    ]);
+  });
+
+  it("treats copied additions like additions while preserving tracked renames", () => {
+    expect(callDispatcherExport(
+      "findUnsafeBlacksmithWorktreeStates",
+      [
+        { indexStatus: "C", worktreeStatus: " " },
+        { indexStatus: "R", worktreeStatus: "M" },
+        { indexStatus: "R", worktreeStatus: "D" },
+      ],
+    )).toEqual([]);
+    expect(callDispatcherExport(
+      "findUnsafeBlacksmithWorktreeStates",
+      [
+        { indexStatus: "C", worktreeStatus: "M" },
+        { indexStatus: "C", worktreeStatus: "D" },
+        { indexStatus: "C", worktreeStatus: "T" },
+      ],
+    )).toEqual([
+      "staged-addition-changed",
+      "staged-addition-changed",
+      "staged-addition-changed",
     ]);
   });
 
@@ -257,6 +287,9 @@ describe("verification dispatcher", () => {
       [" A intent.txt\\000", "intent-to-add"],
       ["AM staged.txt\\000", "staged-addition-changed"],
       ["AD staged-then-deleted.txt\\000", "staged-addition-changed"],
+      ["CM copied.ts\\000source.ts\\000", "staged-addition-changed"],
+      ["CD copied.ts\\000source.ts\\000", "staged-addition-changed"],
+      ["CT copied.ts\\000source.ts\\000", "staged-addition-changed"],
       ["DD conflict.txt\\000", "unmerged"],
       ["AU conflict.txt\\000", "unmerged"],
       ["UD conflict.txt\\000", "unmerged"],
@@ -430,6 +463,42 @@ describe("verification dispatcher", () => {
     expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
       .toContain("sync refused sensitive managed paths");
   });
+
+  it("refuses copy-detected additions changed or deleted after staging", () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    mkdirSync(repoDir, { recursive: true });
+    runGit(repoDir, ["init", "--quiet"]);
+    runGit(repoDir, ["config", "status.renames", "copies"]);
+    writeFileSync(path.join(repoDir, "source.ts"), "export const value = 1;\n", "utf8");
+    runGit(repoDir, ["add", "source.ts"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+
+    writeFileSync(path.join(repoDir, "copied.ts"), "export const value = 1;\n", "utf8");
+    writeFileSync(path.join(repoDir, "source.ts"), "export const value = 2;\n", "utf8");
+    runGit(repoDir, ["add", "source.ts", "copied.ts"]);
+    expect(readGitStatus(repoDir)).toContain("C  copied.ts\0source.ts\0");
+    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
+
+    writeFileSync(path.join(repoDir, "copied.ts"), "export const value = 3;\n", "utf8");
+    expect(readGitStatus(repoDir)).toContain("CM copied.ts\0source.ts\0");
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("staged-addition-changed=1");
+
+    rmSync(path.join(repoDir, "copied.ts"));
+    expect(readGitStatus(repoDir)).toContain("CD copied.ts\0source.ts\0");
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("staged-addition-changed=1");
+  });
 });
 
 function callDispatcherExport<T>(exportName: string, argument: unknown): T {
@@ -572,4 +641,14 @@ function withoutVerificationRoutingEnvironment(
 function runGit(repoDir: string, args: string[]): void {
   const result = spawnSync("git", args, { cwd: repoDir, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
+}
+
+function readGitStatus(repoDir: string): string {
+  const result = spawnSync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    { cwd: repoDir, encoding: "utf8" },
+  );
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout;
 }

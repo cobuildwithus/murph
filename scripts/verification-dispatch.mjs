@@ -237,7 +237,10 @@ export function findUnsafeBlacksmithWorktreeStates(entries) {
     if (indexStatus === " " && worktreeStatus === "A") {
       return ["intent-to-add"];
     }
-    if (indexStatus === "A" && worktreeStatus !== " ") {
+    if (
+      (indexStatus === "A" || indexStatus === "C") &&
+      worktreeStatus !== " "
+    ) {
       return ["staged-addition-changed"];
     }
     if (
