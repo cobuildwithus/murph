@@ -41,6 +41,7 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
     day: privateRun.day,
     durationDays: privateRun.durationDays,
     nextStep: privateRun.nextStep,
+    outcomeConfidence: privateRun.outcomeConfidence,
     privateRun,
     schedule: privateRun.schedule,
     sessionContext: privateRun.sessionContext,
@@ -57,17 +58,25 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
     : null;
 
   return (
-    <div className="flex flex-col gap-10">
-      <header className="flex max-w-3xl flex-col gap-3">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 sm:gap-10">
+      <header className="flex max-w-4xl flex-col gap-3 border-b border-border pb-6 sm:pb-8">
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Private vault
+          Private experiment report
         </span>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
           {privateRun.title}
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {[privateRun.statusLabel, startedLabel].filter(Boolean).join(" · ")}
-        </p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+          <span>{privateRun.statusLabel}</span>
+          {startedLabel ? (
+            <>
+              <span aria-hidden="true" className="text-border">/</span>
+              <span>{startedLabel}</span>
+            </>
+          ) : null}
+          <span aria-hidden="true" className="text-border">/</span>
+          <span>Saved privately in your vault</span>
+        </div>
       </header>
 
       <ResultsTab
@@ -75,6 +84,7 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
         onPrivateRunRetry={browserVault.refresh}
         privateRunError={browserVault.error}
         privateRunStatus={browserVault.status}
+        showHeader={false}
       />
     </div>
   );

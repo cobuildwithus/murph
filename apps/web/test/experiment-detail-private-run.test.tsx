@@ -721,9 +721,10 @@ describe("experiment detail private-run composition", () => {
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
-  it("keeps the exact canonical saved outcome after normal lifecycle and title changes", async () => {
+  it("keeps the exact canonical saved outcome and charts window means without a saved delta", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     const outcome = createSavedOutcome({
+      deltaAbs: null,
       id: "exp_sauna_saved_outcome",
       slug: "finnish-sauna",
       status: "paused",
@@ -785,21 +786,30 @@ describe("experiment detail private-run composition", () => {
       statusLabel: "Finished",
       summary: outcome.conclusion.headline,
     }));
-    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.plainLanguage);
-    expect(privateRun?.summaryDetail).toContain(outcome.confidence.reasons[0]);
-    expect(privateRun?.summaryDetail).toContain(outcome.conclusion.caveats[0]);
-    expect(privateRun?.signals).toEqual([
+    expect(privateRun?.summaryDetail).toBe(outcome.conclusion.plainLanguage);
+    expect(privateRun?.outcomeConfidence).toBe("medium");
+    expect(privateRun?.signals).toEqual([]);
+    expect(privateRun?.trends).toEqual([
       expect.objectContaining({
-        baseline: "62 bpm",
-        delta: "-4 bpm",
+        active: [],
+        baseline: [],
+        baselineAvg: 62,
+        currentValue: 58,
         label: "Resting heart rate",
-        value: "58",
+        windowComparison: {
+          baselineDaysWithData: 3,
+          baselineTotalDays: 3,
+          interventionDaysWithData: 3,
+          interventionTotalDays: 3,
+        },
       }),
     ]);
-    expect(privateRun?.trends).toEqual([]);
-    expect(privateRun?.conclusions?.[0]?.items[0]?.text).toBe(
-      outcome.conclusion.plainLanguage,
-    );
+    expect(privateRun?.conclusions?.[0]?.title).toBe("What limits this read");
+    expect(privateRun?.conclusions?.[0]?.items.map((item) => item.text)).toEqual([
+      outcome.confidence.reasons[0],
+      outcome.conclusion.caveats[0],
+      outcome.confounders[0],
+    ]);
 
     const markup = renderToStaticMarkup(
       <ResultsTab
@@ -813,6 +823,12 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain(outcome.conclusion.plainLanguage);
     expect(markup).toContain(outcome.confidence.reasons[0]);
     expect(markup).toContain(outcome.conclusion.caveats[0]);
+    expect(markup).toContain("medium confidence");
+    expect(markup).toContain("Window averages");
+    expect(markup).toContain("Baseline average");
+    expect(markup).toContain("Experiment average");
+    expect(markup).toContain("3 of 3 days measured");
+    expect(markup).not.toContain("What the saved analysis says");
 
     const emptyMetricMarkup = renderToStaticMarkup(
       <ResultsTab
@@ -946,6 +962,7 @@ describe("experiment detail private-run composition", () => {
           { day: 9, value: 59 },
           { day: 10, value: 58 },
         ],
+        currentValueLabel: "experiment average",
         expectedRange: undefined,
       }),
     ]);
@@ -955,6 +972,8 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(trendMarkup).not.toContain("Expected");
+    expect(trendMarkup).toContain("experiment average");
+    expect(trendMarkup).not.toContain("latest");
   });
 
   it("projects ordered comparable card metrics from production browser-vault signals", async () => {
@@ -2363,6 +2382,7 @@ function createExperimentFrontmatter(input: {
 }
 
 function createSavedOutcome(input: {
+  deltaAbs?: number | null;
   id: string;
   slug: string;
   status?: ExperimentOutcome["experiment"]["status"];
@@ -2407,8 +2427,8 @@ function createSavedOutcome(input: {
       baselineMean: 62,
       biomarkerKey: "biomarker:resting-heart-rate",
       completeness: "good",
-      deltaAbs: -4,
-      deltaPct: -6.45,
+      deltaAbs: input.deltaAbs === undefined ? -4 : input.deltaAbs,
+      deltaPct: input.deltaAbs === null ? null : -6.45,
       expectedDirection: "decrease",
       intervention: {
         daysWithData: 3,
