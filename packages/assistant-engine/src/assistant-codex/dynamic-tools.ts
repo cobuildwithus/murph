@@ -76,6 +76,7 @@ import {
   type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   buildSharedGroupWeeklyMembers,
@@ -2619,7 +2620,20 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'expired':
             return toolTextResult(false, 'vault-file delivery approval expired')
         }
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof VaultCliError
+          && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
+        ) {
+          return toolTextResult(
+            true,
+            JSON.stringify({
+              note:
+                'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+              status: 'already_in_progress',
+            }),
+          )
+        }
         return toolTextResult(false, 'secure vault-file approval could not be prepared')
       }
     }

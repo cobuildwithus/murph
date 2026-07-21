@@ -38,6 +38,9 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
           experimentOutcomeSchema.parse(entry)
         ),
     generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
+    ...(record.generation === undefined
+      ? {}
+      : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
     ),
@@ -313,6 +316,11 @@ function readNullableFiniteNumber(value: unknown): number | null {
 function requireNonNegativeInteger(value: unknown, label: string): number {
   const parsed = requireFiniteNumber(value, label);
   if (!Number.isInteger(parsed) || parsed < 0) throw new TypeError(`${label} must be a non-negative integer.`);
+  return parsed;
+}
+function requirePositiveSafeInteger(value: unknown, label: string): number {
+  const parsed = requireFiniteNumber(value, label);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new TypeError(`${label} must be a positive safe integer.`);
   return parsed;
 }
 function readNullableNonNegativeInteger(value: unknown, label: string): number | null {

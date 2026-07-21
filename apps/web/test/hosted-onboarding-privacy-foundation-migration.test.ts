@@ -870,6 +870,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260716190000_linq_signup_welcome_reservation",
       "20260716220000_hosted_growth_snapshot_message_counts",
       "20260718090000_hosted_vault_share_projection_snapshot",
+      "20260720150000_clinical_retrieval_plan",
       "20260720173000_hosted_assistant_persona",
       "migration_lock.toml",
     ]);

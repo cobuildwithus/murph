@@ -27,10 +27,11 @@ import {
   clinicalImportReviewDecisionSchema,
   clinicalImportUpsertDecisionSchema,
   clinicalRawManifestSchema,
+  clinicalRawManifestResourceFileRetrievalKey,
   externalRefForFhir,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
-  hasWholeFamilyClinicalFhirRetrievalScope,
+  isCompleteWholeFamilyClinicalFhirRetrieval,
   isClinicalFhirUrlWithinBase,
   isClinicalFhirUrlWithinBaseResourceType,
   normalizeClinicalFhirPatientReference,
@@ -468,13 +469,11 @@ function allergySnapshotEvidence(input: {
 }
 
 function hasCompleteAllergyEvidence(manifest: ClinicalRawManifest): boolean {
-  const completedResourceTypes = new Set<string>(manifest.completedResourceTypes);
   return [...ALLERGY_CONFLICT_RESOURCE_TYPES].every((resourceType) =>
-    completedResourceTypes.has(resourceType)
-    && hasWholeFamilyClinicalFhirRetrievalScope(manifest, resourceType)
+    isCompleteWholeFamilyClinicalFhirRetrieval(manifest, resourceType)
     && hasGrantedFhirReadScope(manifest, resourceType)
     && manifest.errors?.some((error) =>
-      error.resourceType === undefined || error.resourceType === resourceType
+      !("resourceType" in error) || error.resourceType === resourceType
     ) !== true
   );
 }
@@ -690,22 +689,23 @@ function assertResolvedFhirPagination(input: {
   manifest: ClinicalRawManifest;
   resourcePages: readonly FhirResourcePage[];
 }): void {
-  const pagesByResourceType = new Map<string, FhirResourcePage[]>();
-  const pagesByResourceTypeAndUrl = new Map<string, Map<string, FhirResourcePage>>();
+  const pagesByRetrieval = new Map<string, FhirResourcePage[]>();
+  const pagesByRetrievalAndUrl = new Map<string, Map<string, FhirResourcePage>>();
   for (const page of input.resourcePages) {
-    const pages = pagesByResourceType.get(page.resourceFile.resourceType) ?? [];
+    const retrievalKey = clinicalRawManifestResourceFileRetrievalKey(page.resourceFile);
+    const pages = pagesByRetrieval.get(retrievalKey) ?? [];
     pages.push(page);
-    pagesByResourceType.set(page.resourceFile.resourceType, pages);
+    pagesByRetrieval.set(retrievalKey, pages);
     const pageUrlHash = page.resourceFile.pageUrlHash;
     if (!pageUrlHash) {
       continue;
     }
-    const pagesByUrl = pagesByResourceTypeAndUrl.get(page.resourceFile.resourceType) ?? new Map();
+    const pagesByUrl = pagesByRetrievalAndUrl.get(retrievalKey) ?? new Map();
     if (pagesByUrl.has(pageUrlHash)) {
       throw new Error(`Clinical FHIR raw manifest has duplicate page URL hashes for ${page.resourceFile.resourceType}.`);
     }
     pagesByUrl.set(pageUrlHash, page);
-    pagesByResourceTypeAndUrl.set(page.resourceFile.resourceType, pagesByUrl);
+    pagesByRetrievalAndUrl.set(retrievalKey, pagesByUrl);
   }
 
   const nextPageByRawRef = new Map<string, FhirResourcePage>();
@@ -713,8 +713,8 @@ function assertResolvedFhirPagination(input: {
     if (!page.nextPageUrlHash) {
       continue;
     }
-    const nextPage = pagesByResourceTypeAndUrl
-      .get(page.resourceFile.resourceType)
+    const nextPage = pagesByRetrievalAndUrl
+      .get(clinicalRawManifestResourceFileRetrievalKey(page.resourceFile))
       ?.get(page.nextPageUrlHash);
     if (!nextPage) {
       throw new Error(`Clinical FHIR raw manifest has unresolved pagination for ${page.rawRef}.`);
@@ -722,14 +722,15 @@ function assertResolvedFhirPagination(input: {
     nextPageByRawRef.set(page.rawRef, nextPage);
   }
 
-  for (const [resourceType, pages] of pagesByResourceType) {
+  for (const [retrievalKey, pages] of pagesByRetrieval) {
+    const resourceType = pages[0]?.resourceFile.resourceType ?? retrievalKey;
     const hasPaginationMetadata = pages.some((page) =>
       page.resourceFile.pageUrlHash !== undefined
       || page.nextPageUrlHash !== undefined
     );
     const graphPages = hasPaginationMetadata
       ? pages
-      : hasWholeFamilyClinicalFhirRetrievalScope(input.manifest, resourceType)
+      : isWholeFamilyRetrieval(input.manifest, pages[0]?.resourceFile)
         ? pages.filter((page) => page.isBundle)
         : [];
     if (graphPages.length === 0) {
@@ -753,6 +754,25 @@ function assertResolvedFhirPagination(input: {
       throw new Error(`Clinical FHIR raw manifest has unreachable pagination for ${unreachable?.rawRef ?? resourceType}.`);
     }
   }
+}
+
+function isWholeFamilyRetrieval(
+  manifest: ClinicalRawManifest,
+  resourceFile: ClinicalRawManifestResourceFile | undefined,
+): boolean {
+  if (!resourceFile) return false;
+  if (manifest.schemaVersion === "murph.clinical-raw-manifest.v2") {
+    return manifest.retrievalScopes.some((scope) =>
+      scope.resourceType === resourceFile.resourceType
+      && scope.coverage === "whole-family"
+    );
+  }
+  if (!("queryScopeId" in resourceFile)) return false;
+  return manifest.retrievalSlices.some((slice) =>
+    slice.queryScopeId === resourceFile.queryScopeId
+    && slice.sliceId === resourceFile.sliceId
+    && slice.coverage === "whole-family"
+  );
 }
 
 async function readVaultRelativeText(

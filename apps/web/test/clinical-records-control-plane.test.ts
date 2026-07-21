@@ -228,6 +228,21 @@ describe("Clinical Records authorization persistence", () => {
       data: expect.objectContaining({
         generation: 1,
         grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
+        retrievalPlanJson: {
+          schemaVersion: "murph.clinical-retrieval-plan.v1",
+          slices: [
+            expect.objectContaining({
+              queryScopeId: "patient-demographics",
+              resourceType: "Patient",
+              sliceId: "whole",
+            }),
+            expect.objectContaining({
+              queryScopeId: "laboratory-observations",
+              resourceType: "Observation",
+              sliceId: "whole",
+            }),
+          ],
+        },
         status: "queued",
       }),
     });

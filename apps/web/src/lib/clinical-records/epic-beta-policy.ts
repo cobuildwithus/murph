@@ -1,8 +1,16 @@
+import { createHash } from "node:crypto";
+
+import {
+  clinicalFhirRetrievalPlanSchema,
+  type ClinicalFhirRetrievalPlan,
+} from "@murphai/clinical-records";
+
 export const EPIC_BETA_RESOURCE_TYPES = Object.freeze([
   "Patient",
   "Observation",
   "DiagnosticReport",
 ] as const);
+export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 export type EpicBetaResourceType = typeof EPIC_BETA_RESOURCE_TYPES[number];
 
@@ -15,6 +23,37 @@ const EPIC_BETA_OPERATION_BY_RESOURCE: Readonly<Record<EpicBetaResourceType, Epi
     Observation: "search",
     Patient: "read",
   });
+
+const EPIC_BETA_QUERY_SCOPE_ID_BY_RESOURCE: Readonly<Record<EpicBetaResourceType, string>> =
+  Object.freeze({
+    DiagnosticReport: "diagnostic-reports",
+    Observation: "laboratory-observations",
+    Patient: "patient-demographics",
+  });
+
+export function buildEpicBetaRetrievalPlan(input: {
+  pageCount: string;
+  resourceTypes: readonly string[];
+}): ClinicalFhirRetrievalPlan {
+  return clinicalFhirRetrievalPlanSchema.parse({
+    schemaVersion: "murph.clinical-retrieval-plan.v1",
+    slices: input.resourceTypes.map((resourceType) => {
+      const betaResourceType = requireEpicBetaResourceType(resourceType);
+      return {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex(
+          buildEpicBetaRetrievalQueryFingerprintInput({
+            pageCount: input.pageCount,
+            resourceType: betaResourceType,
+          }),
+        ),
+        queryScopeId: EPIC_BETA_QUERY_SCOPE_ID_BY_RESOURCE[betaResourceType],
+        resourceType: betaResourceType,
+        sliceId: "whole",
+      };
+    }),
+  });
+}
 
 export function buildEpicBetaSmartResourceScope(input: {
   permissionVersion: SmartPermissionVersion;
@@ -96,4 +135,8 @@ function scopeGrantsEpicBetaOperation(
   if (!/^c?r?u?d?s?$/u.test(permission)) return false;
   const operation = EPIC_BETA_OPERATION_BY_RESOURCE[resourceType];
   return operation === "read" ? permission.includes("r") : permission.includes("s");
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }

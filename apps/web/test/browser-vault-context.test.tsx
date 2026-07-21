@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultReplica,
@@ -168,6 +169,132 @@ test("browser-vault provider rejects not_modified refs that do not match the kno
   const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
   assert.deepEqual(secondRequest.knownReplicaRef, ref);
   assert.equal(rendered.container.textContent?.includes("Your dashboard data is not available right now."), true);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider rejects decrypted replica generations that do not match the ref", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockResolvedValue(
+    new TextEncoder().encode(JSON.stringify(createReplica({
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION + 1,
+    }))),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "error");
+  assert.equal(
+    rendered.container.textContent?.includes("Your dashboard data is not available right now."),
+    true,
+  );
+
+  await rendered.cleanup();
+});
+
+test("browser-vault loader restores a current payload generation omitted by an old Worker", async () => {
+  const ref = createReplicaRef();
+  const legacyEchoRef: Record<string, unknown> = { ...ref };
+  delete legacyEchoRef.generation;
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    freshness: "stale",
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: legacyEchoRef,
+    refreshPending: true,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const outcome = await startBrowserVaultWarmLoad();
+
+  assert.equal(outcome.status, "ready");
+  assert.equal(getBrowserVaultReadySnapshot()?.ref.generation, ref.generation);
+  assert.equal(getBrowserVaultReadySnapshot()?.metadata.freshness, "stale");
+  assert.equal(getBrowserVaultReadySnapshot()?.metadata.refreshPending, true);
+});
+
+test("browser-vault loader retains a known generation omitted by an old Web echo", async () => {
+  const ref = createReplicaRef();
+  const legacyEchoRef: Record<string, unknown> = { ...ref };
+  delete legacyEchoRef.generation;
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: legacyEchoRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const firstOutcome = await startBrowserVaultWarmLoad();
+  const firstClient = getBrowserVaultReadySnapshot()?.client;
+  const secondOutcome = await startBrowserVaultWarmLoad();
+
+  assert.equal(firstOutcome.status, "ready");
+  assert.equal(secondOutcome.status, "ready");
+  assert.equal(getBrowserVaultReadySnapshot()?.client, firstClient);
+  assert.deepEqual(getBrowserVaultReadySnapshot()?.ref, ref);
+});
+
+test("browser-vault provider keeps matching legacy replicas readable while refresh is pending", async () => {
+  const legacyRef: Record<string, unknown> = { ...createReplicaRef() };
+  delete legacyRef.generation;
+  const legacyReplica: Record<string, unknown> = { ...createReplica() };
+  delete legacyReplica.generation;
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    freshness: "stale",
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: legacyRef,
+    refreshPending: true,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockResolvedValue(
+    new TextEncoder().encode(JSON.stringify(legacyReplica)),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `ready:${"d".repeat(64)}`);
+  const snapshot = getBrowserVaultReadySnapshot();
+  assert.equal(snapshot?.metadata.freshness, "stale");
+  assert.equal(snapshot?.metadata.refreshPending, true);
+  assert.equal(snapshot?.ref.generation, undefined);
 
   await rendered.cleanup();
 });
@@ -1670,6 +1797,7 @@ function createReplicaRef() {
     byteLength: 128,
     dataVersion: "d".repeat(64),
     generatedAt: "2026-04-20T08:00:00.000Z",
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica" as const,
@@ -1734,6 +1862,7 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     },
     entities: [],
     generatedAt: "2026-04-30T12:00:00.000Z",
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     metricGoalProgressRows: [],
     metricRows: [],
     metricSelectionRows: [],

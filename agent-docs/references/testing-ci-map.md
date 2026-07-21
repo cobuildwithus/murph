@@ -198,7 +198,11 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   retain everything. Active runtime files enter encrypted checkpoints,
   `.runtime/**` stays out of portable ZIPs, and portable-eligible ordinary
   `exports/assistant-deliveries/**` files remain ordinary vault data. Archive
-  exclusions stay global rather than granting that generic path ownership. The
+  exclusions stay global rather than granting that generic path ownership.
+  Assistant-engine coverage also proves that a later turn cannot replace an
+  approved same-target generated vault-file ref or request a second approval
+  during the approval-observation gap, while a distinct pre-decision request,
+  exact-ref retry, and distinct same-turn send remain available. The
   hosted approval-resume E2E creates and requests the runtime file in one provider
   turn, checkpoints it, destroys the container, approves, restores, and proves
   one attachment delivery with no duplicate or mailbox lag. The phase-one

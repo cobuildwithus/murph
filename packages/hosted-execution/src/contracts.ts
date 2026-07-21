@@ -14,6 +14,9 @@ import type {
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import type {
+  BROWSER_VAULT_REPLICA_SCHEMA,
+} from "@murphai/contracts/browser-vault";
+import type {
   HostedExecutionBundlePayload,
   HostedExecutionLayeredSnapshotRef as SharedHostedExecutionLayeredSnapshotRef,
   HostedExecutionSnapshotRefState,
@@ -693,9 +696,11 @@ export interface HostedBrowserVaultReplicaRef {
   dataKeyEnvelope?: HostedDataKeyEnvelopeV1;
   dataVersion: string;
   generatedAt: string;
+  /** Absent only on legacy refs produced before generation-aware freshness. */
+  generation?: number;
   keyId: string;
   objectKey: string;
-  replicaSchema: "murph.browser-vault-replica";
+  replicaSchema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   runtimeRootKeyId: string;
   schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
   sourceBundleHash: string;
