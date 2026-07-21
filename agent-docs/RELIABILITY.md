@@ -105,6 +105,11 @@ Last verified: 2026-07-20
   fan-out remain inside bounded control envelopes, the 500 provider-page cap,
   and the 100-error cap; this is deliberately independent from the 500-file
   raw-storage cap.
+- Epic activates 24 primary query scopes across 17 unique FHIR resource
+  permissions. Each granted family expands into all of its query variants. Nine
+  time-bounded queries freeze one initial newest-first 90- or 365-day slice at
+  run creation; dependency reads and older-window backfill remain separate
+  bounded work rather than implicit fan-out.
 - Cloudflare container and Durable Object RPC methods must be invoked directly on the platform stub, not detached, bound, wrapped, or passed around as ordinary callbacks. Test doubles for hosted runner/container seams should model that direct-call contract so local coverage catches receiver/proxy mistakes before they become accepted-but-stuck runtime work.
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.

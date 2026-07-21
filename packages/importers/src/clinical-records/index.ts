@@ -607,9 +607,12 @@ function patientReferencesForResource(resource: Resource): string[] {
     return patientId ? [patientId] : [];
   }
 
-  const patientField = resource.resourceType === "AllergyIntolerance" || resource.resourceType === "Immunization"
-    ? "patient"
-    : "subject";
+  const patientField = (
+    resource.resourceType === "AllergyIntolerance"
+    || resource.resourceType === "Device"
+    || resource.resourceType === "FamilyMemberHistory"
+    || resource.resourceType === "Immunization"
+  ) ? "patient" : "subject";
   if (!isRecord(resource)) {
     return [];
   }

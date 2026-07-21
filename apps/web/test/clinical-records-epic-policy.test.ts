@@ -4,6 +4,7 @@ import {
   EPIC_ACQUISITION_POLICY,
   EPIC_BETA_RESOURCE_TYPES,
   buildEpicBetaInitialFhirPageUrl,
+  buildEpicBetaRetrievalPlan,
   buildEpicBetaRetrievalQueryFingerprintInput,
   buildEpicBetaSmartResourceScope,
 } from "@/src/lib/clinical-records/epic-policy";
@@ -50,7 +51,7 @@ const EXACT_EPIC_REGISTRATION_API_NAMES = [
 ] as const;
 
 describe("Epic Clinical Records acquisition policy", () => {
-  it("keeps the longitudinal catalog disabled behind the existing beta query set", () => {
+  it("activates every primary longitudinal query in a stable execution order", () => {
     const active = EPIC_ACQUISITION_POLICY.queryScopes
       .filter((query) => query.status === "active-beta")
       .sort((left, right) => (left.activeOrder ?? 0) - (right.activeOrder ?? 0));
@@ -65,11 +66,33 @@ describe("Epic Clinical Records acquisition policy", () => {
       "patient-demographics",
       "laboratory-observations",
       "diagnostic-reports",
+      "allergies",
+      "care-plans",
+      "care-teams",
+      "condition-encounter-diagnoses",
+      "condition-problem-list",
+      "device-implants",
+      "document-references-notes",
+      "encounters",
+      "family-member-history",
+      "immunizations",
+      "medication-dispenses",
+      "medication-requests",
+      "observation-assessments",
+      "observation-sdoh-assessments",
+      "observation-social-history",
+      "procedure-orders",
+      "procedure-surgeries",
+      "procedure-surgical-history",
+      "provider-goals",
+      "service-requests",
+      "vital-sign-observations",
     ]);
-    expect(active.map((query) => query.resourceType)).toEqual(EPIC_BETA_RESOURCE_TYPES);
-    expect(active.every((query) => query.dependencyPolicyIds.length === 0)).toBe(true);
+    expect(new Set(active.map((query) => query.resourceType))).toEqual(
+      new Set(EPIC_BETA_RESOURCE_TYPES),
+    );
     expect(EPIC_ACQUISITION_POLICY.queryScopes.filter((query) => query.status === "disabled"))
-      .toHaveLength(21);
+      .toHaveLength(0);
     expect(EPIC_ACQUISITION_POLICY.dependencyPolicies.every((dependency) =>
       dependency.sameFhirBaseOnly
       && dependency.maxTraversalDepth === 2
@@ -77,39 +100,149 @@ describe("Epic Clinical Records acquisition policy", () => {
     )).toBe(true);
   });
 
-  it("preserves the active SMART scopes, request URLs, and fingerprints", () => {
-    expect(EPIC_BETA_RESOURCE_TYPES).toEqual(["Patient", "Observation", "DiagnosticReport"]);
+  it("deduplicates SMART permissions while preserving all query variants", () => {
+    expect(EPIC_BETA_RESOURCE_TYPES).toEqual([
+      "Patient",
+      "Observation",
+      "DiagnosticReport",
+      "AllergyIntolerance",
+      "CarePlan",
+      "CareTeam",
+      "Condition",
+      "Device",
+      "DocumentReference",
+      "Encounter",
+      "FamilyMemberHistory",
+      "Immunization",
+      "MedicationDispense",
+      "MedicationRequest",
+      "Procedure",
+      "Goal",
+      "ServiceRequest",
+    ]);
     expect(EPIC_BETA_RESOURCE_TYPES.map((resourceType) =>
       buildEpicBetaSmartResourceScope({ permissionVersion: "v2", resourceType })
     )).toEqual([
       "patient/Patient.r",
       "patient/Observation.s",
       "patient/DiagnosticReport.s",
+      "patient/AllergyIntolerance.s",
+      "patient/CarePlan.s",
+      "patient/CareTeam.s",
+      "patient/Condition.s",
+      "patient/Device.s",
+      "patient/DocumentReference.s",
+      "patient/Encounter.s",
+      "patient/FamilyMemberHistory.s",
+      "patient/Immunization.s",
+      "patient/MedicationDispense.s",
+      "patient/MedicationRequest.s",
+      "patient/Procedure.s",
+      "patient/Goal.s",
+      "patient/ServiceRequest.s",
     ]);
+    const plan = buildEpicBetaRetrievalPlan({
+      frozenAt: new Date("2026-07-21T12:00:00.000Z"),
+      pageCount: "100",
+      resourceTypes: EPIC_BETA_RESOURCE_TYPES,
+    });
+    expect(plan.slices).toHaveLength(24);
+    expect(plan.slices.filter((slice) => slice.coverage === "whole-family"))
+      .toHaveLength(15);
+    expect(plan.slices.filter((slice) => slice.coverage === "bounded-window"))
+      .toHaveLength(9);
+    expect(plan.slices.map((slice) =>
+      [slice.queryScopeId, slice.resourceType, slice.coverage, slice.sliceId].join(":")
+    )).toEqual([
+      "patient-demographics:Patient:whole-family:whole",
+      "laboratory-observations:Observation:whole-family:whole",
+      "diagnostic-reports:DiagnosticReport:whole-family:whole",
+      "allergies:AllergyIntolerance:whole-family:whole",
+      "care-plans:CarePlan:whole-family:whole",
+      "care-teams:CareTeam:whole-family:whole",
+      "condition-encounter-diagnoses:Condition:whole-family:whole",
+      "condition-problem-list:Condition:whole-family:whole",
+      "device-implants:Device:whole-family:whole",
+      "document-references-notes:DocumentReference:bounded-window:window-20260422-20260721",
+      "encounters:Encounter:bounded-window:window-20250721-20260721",
+      "family-member-history:FamilyMemberHistory:whole-family:whole",
+      "immunizations:Immunization:bounded-window:window-20250721-20260721",
+      "medication-dispenses:MedicationDispense:whole-family:whole",
+      "medication-requests:MedicationRequest:whole-family:whole",
+      "observation-assessments:Observation:bounded-window:window-20250721-20260721",
+      "observation-sdoh-assessments:Observation:bounded-window:window-20250721-20260721",
+      "observation-social-history:Observation:bounded-window:window-20250721-20260721",
+      "procedure-orders:Procedure:bounded-window:window-20250721-20260721",
+      "procedure-surgeries:Procedure:bounded-window:window-20250721-20260721",
+      "procedure-surgical-history:Procedure:whole-family:whole",
+      "provider-goals:Goal:whole-family:whole",
+      "service-requests:ServiceRequest:whole-family:whole",
+      "vital-sign-observations:Observation:bounded-window:window-20250721-20260721",
+    ]);
+    const urls = plan.slices.map((retrievalSlice) => buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      pageCount: "100",
+      patientId: "patient-1",
+      retrievalSlice,
+    }).toString());
+    expect(new Set(urls).size).toBe(24);
+
+    const patientSlice = requireSlice(plan, "patient-demographics");
     expect(buildEpicBetaInitialFhirPageUrl({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       pageCount: "100",
       patientId: "patient/with spaces",
-      queryScopeId: "patient-demographics",
-      resourceType: "Patient",
-      sliceId: "whole",
+      retrievalSlice: patientSlice,
     }).toString()).toBe(
       "https://fhir.example.test/FHIR/R4/Patient/patient%2Fwith%20spaces",
     );
+    const laboratorySlice = requireSlice(plan, "laboratory-observations");
     expect(buildEpicBetaInitialFhirPageUrl({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       pageCount: "100",
       patientId: "patient-1",
-      queryScopeId: "laboratory-observations",
-      resourceType: "Observation",
-      sliceId: "whole",
+      retrievalSlice: laboratorySlice,
     }).toString()).toBe(
       "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=laboratory&_count=100",
     );
     expect(buildEpicBetaRetrievalQueryFingerprintInput({
       pageCount: "100",
-      resourceType: "DiagnosticReport",
+      queryScopeId: "diagnostic-reports",
     })).toBe("epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1");
+  });
+
+  it("freezes bounded windows into the Epic-owned search parameter", () => {
+    const plan = buildEpicBetaRetrievalPlan({
+      frozenAt: new Date("2026-07-21T12:00:00.000Z"),
+      pageCount: "100",
+      resourceTypes: ["DocumentReference", "Observation"],
+    });
+    const noteSlice = requireSlice(plan, "document-references-notes");
+    const socialHistorySlice = requireSlice(plan, "observation-social-history");
+
+    expect(noteSlice).toMatchObject({
+      coverage: "bounded-window",
+      from: "2026-04-22T12:00:00.000Z",
+      sliceId: "window-20260422-20260721",
+      to: "2026-07-21T12:00:00.000Z",
+    });
+    expect(buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      pageCount: "100",
+      patientId: "patient-1",
+      retrievalSlice: noteSlice,
+    }).toString()).toBe(
+      "https://fhir.example.test/FHIR/R4/DocumentReference?patient=patient-1&category=clinical-note&period=ge2026-04-22T12%3A00%3A00.000Z&period=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    );
+    expect(buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      pageCount: "100",
+      patientId: "patient-1",
+      retrievalSlice: socialHistorySlice,
+    }).searchParams.getAll("issued")).toEqual([
+      "ge2025-07-21T12:00:00.000Z",
+      "lt2026-07-21T12:00:00.000Z",
+    ]);
   });
 
   it("pins the exact current Epic portal registration names", () => {
@@ -182,4 +315,13 @@ describe("Epic Clinical Records acquisition policy", () => {
 function expectStrictlySorted(values: readonly string[]): void {
   expect(values).toEqual([...values].sort((left, right) => left.localeCompare(right)));
   expect(new Set(values).size).toBe(values.length);
+}
+
+function requireSlice(
+  plan: ReturnType<typeof buildEpicBetaRetrievalPlan>,
+  queryScopeId: string,
+) {
+  const slice = plan.slices.find((candidate) => candidate.queryScopeId === queryScopeId);
+  if (!slice) throw new TypeError(`Missing test retrieval slice ${queryScopeId}.`);
+  return slice;
 }

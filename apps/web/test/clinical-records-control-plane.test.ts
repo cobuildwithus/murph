@@ -241,12 +241,39 @@ describe("Clinical Records authorization persistence", () => {
               resourceType: "Observation",
               sliceId: "whole",
             }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-assessments",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-sdoh-assessments",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "observation-social-history",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "bounded-window",
+              queryScopeId: "vital-sign-observations",
+              resourceType: "Observation",
+            }),
           ],
         },
         retrievalProtocol: "query-slices-v2",
         status: "queued",
       }),
     });
+    const retrievalRun = harness.retrievalRunCreate.mock.calls[0]?.[0]?.data as {
+      createdAt: Date;
+      retrievalPlanJson: { slices: Array<{ coverage: string; to?: string }> };
+    };
+    expect(retrievalRun.retrievalPlanJson.slices
+      .filter((slice) => slice.coverage === "bounded-window")
+      .every((slice) => slice.to === retrievalRun.createdAt.toISOString())).toBe(true);
   });
 
   it("rejects a second retrieval for the same member and provider", async () => {

@@ -20,6 +20,9 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
   "Patient",
   "AllergyIntolerance",
   "Condition",
+  "Device",
+  "FamilyMemberHistory",
+  "MedicationDispense",
   "MedicationRequest",
   "MedicationStatement",
   "Observation",
@@ -31,6 +34,7 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
   "CarePlan",
   "CareTeam",
   "Goal",
+  "ServiceRequest",
 ] as const);
 
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;

@@ -132,17 +132,16 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` is the single source of truth for Epic SMART base scopes,
 query-scope definitions, required FHIR operations, deterministic query
 templates, slicing rules, bounded dependency traversal, and the Epic API keys
-that must be registered. The longitudinal catalog is configuration only: all
-queries beyond `patient-demographics`, `laboratory-observations`, and
-`diagnostic-reports` are explicitly disabled. Provider endpoint presence does
-not imply support for a disabled query; any provider-specific claim requires a
+that must be registered. All 24 primary query scopes are active. They span 17
+unique FHIR resource families because Condition, Observation, and Procedure each
+have multiple policy-owned query variants. Provider endpoint presence still does
+not establish a provider-specific capability claim; any such claim requires a
 sorted capability override with an evidence version.
 
 Dependency policies are purpose-bound, restricted to the selected provider's
 FHIR base, capped at traversal depth two, and charged against the parent slice
-limits. They are not a generic reference crawler. Activating a query or adding
-a SMART operation is a separate behavior change and is outside this directory
-schema migration.
+limits. They are not a generic reference crawler, and dependency reads remain
+registration-only until that bounded traversal owner lands.
 
 ## Retrieval contract and limits
 
@@ -157,11 +156,16 @@ runtime uses three signed POST operations:
 - `/api/internal/clinical-records/runtime/record-outcome`
 
 The web control plane fetches only the exact configured FHIR origin and exact
-resource-family path. Patient uses a direct patient read, Observation uses
-`patient=<launch-patient>&category=laboratory&_count=100`, and DiagnosticReport
-uses `patient=<launch-patient>&_count=100`. Provider redirects are disabled. A
-continuation must remain on the same origin and family path; only its query may
-change. Root pages omit `pageUrlHash`; continuation pages include it, while the
+resource-family path. Patient uses a direct patient read; the other 23 primary
+queries use their policy-owned patient search template and fixed category where
+required. Fifteen queries use one whole-family slice. Nine use one initial
+newest-first bounded slice: clinical notes cover 90 days, and Encounter,
+Immunization, assessment, social-history, Procedure, and vital-sign searches
+cover 365 days. The frozen run creation time owns both endpoints; searches send
+repeated `ge`/`lt` values through the Epic-documented `period`, `date`, or
+`issued` parameter. Provider redirects are disabled. A continuation must remain
+on the same origin and family path; only its query may change. Root pages omit
+`pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
 root-reachable chain. Formally marked Bundle search-outcome entries remain in
 raw-page counts but do not enter patient-family mapping. The exact validated provider link text is the provenance
@@ -170,9 +174,9 @@ fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
 
 Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
-provider egress per run, 500 Bundle entries per page, and three Epic beta
-resource families. The shared FHIR schema retains its broader 14-family
-superset for future integrations; the Epic directory does not request it.
+provider egress per run, 500 Bundle entries per page, and 17 Epic primary
+resource families. The shared FHIR schema admits those families plus the legacy
+MedicationStatement family, for 18 total.
 New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
 deterministic slice ids. That plan can represent multiple queries for one FHIR
 resource type and ordered, non-overlapping bounded windows without treating
@@ -181,8 +185,11 @@ protocol: existing nullable-protocol rows remain legacy until terminal, while
 new runs emit `query-slices-v2`. Every query-aware page request, opaque cursor,
 server-derived request fingerprint, durable request claim, and terminal outcome
 is checked against the frozen query-scope and slice identity before provider
-egress or outcome mutation. This foundation does not expand the Epic beta
-authorization scopes; only the three active query scopes execute.
+egress or outcome mutation. New OAuth requests deduplicate the 24 queries into
+17 resource permissions, and each granted family expands back into every active
+query variant in the frozen run plan. A partial grant still requires Patient plus
+at least one clinical family and executes all active queries for each granted
+family.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual bytes after a valid response. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
@@ -295,10 +302,12 @@ ServiceRequest.Search (Orders) (R4)
 Specimen.Read (Patient Chart) (R4)
 ```
 
-Registration is approval metadata, not runtime activation. Until later mapping
-and activation PRs ship, the OAuth request remains limited to Patient read,
-Observation Labs search, and DiagnosticReport Results search. Do not request
-refresh tokens or `offline_access`. Epic recommends a separate localhost-only
+Registration covers both the 24 active primary queries and supporting dependency
+reads. Runtime requests only the 17 unique primary resource permissions and does
+not execute dependency traversal. Resource families without a canonical mapper
+are retained as patient-bound raw evidence with an explicit review decision; no
+family is silently dropped. Do not request refresh tokens or `offline_access`.
+Epic recommends a separate localhost-only
 test app that is never activated. Register the callback with the actual local
 port, for example
 `http://localhost:3000/api/clinical-records/oauth/callback`, and set

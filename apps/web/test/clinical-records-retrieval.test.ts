@@ -129,6 +129,21 @@ describe("Clinical Records retrieval control plane", () => {
     });
   });
 
+  it("fails closed when a query-aware run has no frozen plan", async () => {
+    const harness = createHarness(["Observation"], "query-slices-v2");
+    harness.state.run.retrievalPlanJson = null;
+
+    await expect(readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    })).resolves.toEqual({
+      errorCode: "run-configuration-invalid",
+      retryable: false,
+      status: "unavailable",
+    });
+  });
+
   it("emits and executes the query-aware beta wire for newly pinned runs", async () => {
     const harness = createHarness(["Observation"], "query-slices-v2");
     const queryFingerprint = sha256Hex(
@@ -142,15 +157,20 @@ describe("Clinical Records retrieval control plane", () => {
     expect(readResult).toMatchObject({
       run: {
         retrievalProtocol: "query-slices-v2",
-        retrievalSlices: [{
+        retrievalSlices: expect.arrayContaining([{
+          coverage: "whole-family",
           queryFingerprint,
           queryScopeId: "laboratory-observations",
           resourceType: "Observation",
           sliceId: "whole",
-        }],
+        }]),
       },
       status: "ready",
     });
+    if (readResult.status !== "ready" || !("retrievalSlices" in readResult.run)) {
+      throw new TypeError("Expected a query-aware retrieval descriptor.");
+    }
+    expect(readResult.run.retrievalSlices).toHaveLength(5);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
       resourceType: "Bundle",
@@ -647,6 +667,46 @@ describe("Clinical Records retrieval control plane", () => {
     expect(result.status).toBe("page");
     expect(fetchImpl).toHaveBeenCalledWith(
       new URL(expectedUrl),
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
+    );
+  });
+
+  it("executes a frozen bounded query through the query-aware egress path", async () => {
+    const harness = createHarness(["Observation"], "query-slices-v2");
+    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() + 120_000);
+    const slice = buildEpicBetaRetrievalPlan({
+      frozenAt: new Date("2026-07-10T15:00:00.000Z"),
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+      resourceTypes: ["Observation"],
+    }).slices.find((candidate) => candidate.queryScopeId === "observation-assessments");
+    if (!slice || slice.coverage !== "bounded-window") {
+      throw new TypeError("Expected the assessment bounded query slice.");
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
+      entry: [],
+      resourceType: "Bundle",
+      type: "searchset",
+    }));
+
+    await expect(fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: {
+        cursor: null,
+        generation: 1,
+        queryFingerprint: slice.queryFingerprint,
+        queryScopeId: slice.queryScopeId,
+        requestId: "request_bounded_assessment",
+        resourceType: slice.resourceType,
+        retrievalProtocol: "query-slices-v2",
+        runId: RUN_ID,
+        sliceId: slice.sliceId,
+      },
+    })).resolves.toMatchObject({ status: "page" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL(
+        "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&date=ge2025-07-10T15%3A00%3A00.000Z&date=lt2026-07-10T15%3A00%3A00.000Z&_count=100",
+      ),
       expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
   });
@@ -1169,10 +1229,14 @@ describe("Clinical Records retrieval control plane", () => {
   });
 
   it("binds query-aware terminal outcomes to the frozen slice plan", async () => {
-    const frozenSlices = [
-      { queryScopeId: "patient-demographics", sliceId: "whole" },
-      { queryScopeId: "laboratory-observations", sliceId: "whole" },
-    ];
+    const frozenSlices = buildEpicBetaRetrievalPlan({
+      frozenAt: new Date("2026-07-10T15:00:00.000Z"),
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+      resourceTypes: ["Patient", "Observation"],
+    }).slices.map((slice) => ({
+      queryScopeId: slice.queryScopeId,
+      sliceId: slice.sliceId,
+    }));
     const harness = createHarness(["Patient", "Observation"], "query-slices-v2");
     const counts = outcomeCounts();
     await recordClinicalRetrievalOutcome({
@@ -1520,6 +1584,7 @@ function buildRun(
     providerRequestCount: 0,
     retrievalPlanJson: retrievalProtocol === "query-slices-v2"
       ? buildEpicBetaRetrievalPlan({
+          frozenAt: new Date("2026-07-10T15:00:00.000Z"),
           pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
           resourceTypes,
         })

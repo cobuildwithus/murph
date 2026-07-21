@@ -342,11 +342,13 @@ async function persistClinicalConnection(input: {
       await tx.clinicalRecordRetrievalRun.create({
         data: {
           connectionId,
+          createdAt: input.now,
           generation: retrievalGeneration,
           id: retrievalRunId,
           memberId: input.memberId,
           grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
           retrievalPlanJson: buildEpicBetaRetrievalPlan({
+            frozenAt: input.now,
             pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
             resourceTypes: input.resourceTypes,
           }),

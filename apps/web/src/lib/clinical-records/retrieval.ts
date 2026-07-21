@@ -48,6 +48,7 @@ import {
 import {
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalPlan,
+  buildEpicLegacyBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
 } from "./epic-policy";
 import {
@@ -418,6 +419,7 @@ export async function recordClinicalRetrievalOutcome(input: {
     });
     if (!run) throw staleRunError();
     assertOutcomeRetrievalIdentity({
+      createdAt: run.createdAt,
       request: input.request,
       retrievalPlanJson: run.retrievalPlanJson,
       retrievalProtocol: run.retrievalProtocol,
@@ -674,13 +676,18 @@ async function loadRunnableClinicalRun(input: {
   let sourceSystem: ClinicalSourceSystem;
   try {
     resourceTypes = parseStoredResourceTypes(record.resourceTypesJson);
-    retrievalPlan = parseStoredRetrievalPlan(record.retrievalPlanJson, resourceTypes);
     if (
       record.retrievalProtocol !== null
       && record.retrievalProtocol !== "query-slices-v2"
     ) {
       throw new TypeError("Stored Clinical Records retrieval protocol is unsupported.");
     }
+    retrievalPlan = parseStoredRetrievalPlan({
+      createdAt: record.createdAt,
+      protocol: record.retrievalProtocol,
+      resourceTypes,
+      value: record.retrievalPlanJson,
+    });
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
   } catch {
     return { retryable: false, unavailable: "run-configuration-invalid" };
@@ -714,9 +721,7 @@ function buildInitialFhirPageUrl(input: {
     fhirBaseUrl: input.fhirBaseUrl,
     pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
     patientId: input.patientId,
-    queryScopeId: input.retrievalSlice.queryScopeId,
-    resourceType: input.retrievalSlice.resourceType,
-    sliceId: input.retrievalSlice.sliceId,
+    retrievalSlice: input.retrievalSlice,
   });
 }
 
@@ -1246,6 +1251,7 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
 }
 
 function assertOutcomeRetrievalIdentity(input: {
+  createdAt: Date;
   request: HostedClinicalRecordsRecordOutcomeRequest;
   retrievalPlanJson: Prisma.JsonValue | null;
   retrievalProtocol: string | null;
@@ -1263,7 +1269,12 @@ function assertOutcomeRetrievalIdentity(input: {
     return;
   }
   const resourceTypes = parseStoredResourceTypes(input.resourceTypesJson);
-  const plan = parseStoredRetrievalPlan(input.retrievalPlanJson, resourceTypes);
+  const plan = parseStoredRetrievalPlan({
+    createdAt: input.createdAt,
+    protocol: "query-slices-v2",
+    resourceTypes,
+    value: input.retrievalPlanJson,
+  });
   const expected = plan.slices.map((slice) => ({
     queryScopeId: slice.queryScopeId,
     sliceId: slice.sliceId,
@@ -1292,21 +1303,32 @@ function parseStoredResourceTypes(
   return resourceTypes;
 }
 
-function parseStoredRetrievalPlan(
-  value: Prisma.JsonValue | null,
-  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][],
-): ClinicalFhirRetrievalPlan {
-  const expectedPlan = buildEpicBetaRetrievalPlan({
-    pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-    resourceTypes,
-  });
-  const plan = value === null
+function parseStoredRetrievalPlan(input: {
+  createdAt: Date;
+  protocol: "query-slices-v2" | null;
+  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][];
+  value: Prisma.JsonValue | null;
+}): ClinicalFhirRetrievalPlan {
+  if (input.protocol === "query-slices-v2" && input.value === null) {
+    throw new TypeError("Stored query-aware Clinical Records run is missing its frozen retrieval plan.");
+  }
+  const expectedPlan = input.protocol === "query-slices-v2"
+    ? buildEpicBetaRetrievalPlan({
+        frozenAt: input.createdAt,
+        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+        resourceTypes: input.resourceTypes,
+      })
+    : buildEpicLegacyBetaRetrievalPlan({
+        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+        resourceTypes: input.resourceTypes,
+      });
+  const plan = input.value === null
     ? expectedPlan
-    : clinicalFhirRetrievalPlanSchema.parse(value);
+    : clinicalFhirRetrievalPlanSchema.parse(input.value);
   if (
     JSON.stringify(plan.slices) !== JSON.stringify(expectedPlan.slices)
   ) {
-    throw new TypeError("Stored Clinical Records retrieval plan is unsupported by its legacy reader.");
+    throw new TypeError("Stored Clinical Records retrieval plan does not match its owned acquisition policy.");
   }
   return plan;
 }
