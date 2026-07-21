@@ -117,12 +117,12 @@ consumer.
 ## Durability and failure behavior
 
 Every new join-code membership records its confirmation obligation in the
-membership transaction, independently of the rollout flag. The same row stores
-`web` or `group_chat_reaction` until the obligation is consumed. When the
-producer is enabled and the required route and crypto roots already exist,
-membership, grants, revokes, and the confirmation mailbox item share that
-transaction. If a required mailbox append fails, the whole mutation rolls
-back. A stable membership-derived event ID makes mailbox replay idempotent.
+membership transaction. The same row stores `web` or `group_chat_reaction`
+until the obligation is consumed. When the required route and crypto roots
+already exist, membership, grants, revokes, and the confirmation mailbox item
+share that transaction. If a required mailbox append fails, the whole mutation
+rolls back. A stable membership-derived event ID makes mailbox replay
+idempotent.
 
 The additive migrations add nullable eligibility and origin columns. The
 eligibility migration temporarily stamps new join-code member rows inserted by
@@ -177,30 +177,16 @@ committed obligation. A signal failure never reverses committed work.
 
 ## Deployment concerns
 
-Apply the additive `hosted_member_routing` and `hosted_group_member`
-migrations first. Their temporary warm-old database bridges protect new legacy
-writes without backfilling history. Then use a two-stage web rollout so an
-older warm activation function cannot provision roots after a newer join has
-recorded eligibility without also running the materializer:
+Join confirmation is hard-cut in Web. Every new membership records eligibility
+and immediately attempts the existing private confirmation append; there is no
+producer flag or disabled result. Rows that still lack crypto roots or a safe
+private route remain eligible for later activation, private inbound, join
+retry, or a deliberate bounded call to
+`POST /api/ops/group-join-confirmations`.
 
-1. Deploy the consumer and materializer code with
-   `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED` absent or set to `0`.
-2. Wait at least the repository's bounded prior-function drain interval
-   (`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`, default 300 seconds and
-   currently capped at 600 seconds), then verify the production alias still
-   targets that consumer-capable commit. Let the guarded Hosted Web Contract
-   Migrations lane remove both compatibility bridges only after that same
-   alias proof and drain.
-3. Set `HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED=1` and redeploy the
-   same commit or a descendant that preserves the consumer contract.
-4. Call the authenticated
-   `POST /api/ops/group-join-confirmations` drain in bounded pages, following
-   each returned `nextCursor` until it is `null`. Rows that still lack crypto
-   roots or a safe private route remain eligible for a later activation,
-   private inbound, join retry, or another deliberate bounded drain.
-
-The first consumer-capable commit is the rollback floor while the producer is
-enabled. To roll back below it, disable the producer and redeploy, wait the
-same prior-function drain interval, and only then deploy the older build. The
-hosted runtime already supports the generic assistant-notification mailbox
-contract, so Cloudflare does not require a tandem deployment.
+The first consumer-capable Web commit is the rollback floor while eligible or
+appended confirmation work remains. Rolling below it requires explicit proof
+that no current row depends on materialization, plus a migration or forward fix
+for any retained obligation. The hosted runtime already supports the generic
+assistant-notification mailbox contract, so Cloudflare does not require a
+tandem deployment.

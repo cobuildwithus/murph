@@ -371,12 +371,11 @@ see one stale dial until that dial's next conversational set/reset or Settings
 save. Sparse writes do not repair untouched siblings. That historical one-time
 gap is not an ongoing source-of-truth exception.
 
-After the web gate is enabled, `member.preferences.updated` is a delta contract,
-not a replaceable snapshot. The hosted system mailbox applies every preference
-item in mailbox order. An older retry blocks newer preference deltas until it
-succeeds; preference items must not be latest-wins coalesced or superseded. The
-gate-off complete snapshot is deployment compatibility for the old consumer,
-not a second steady-state contract.
+`member.preferences.updated` is a delta contract, not a replaceable snapshot.
+The hosted system mailbox applies every preference item in mailbox order. An
+older retry blocks newer preference deltas until it succeeds; preference items
+must not be latest-wins coalesced or superseded. Web has no complete-snapshot
+producer path.
 
 The scheduled handoff backstop selects retained unconsumed preference rows for
 active person members and active synthetic room runtimes before applying its
@@ -482,64 +481,24 @@ so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The sparse-delta, shared-causal-sequence, personalization-authority, and
-conversation-to-Settings convergence transition uses additive expansion
-followed by a hard cut:
+Sparse-delta writes, shared causal sequencing, personalization authority, and
+conversation-to-Settings convergence are hard-cut. Web always emits sparse
+deltas and exposes personality controls. The runtime forwards the terminal
+input id only from a locally revalidated same-conversation, same-anchor,
+exact-successor accepted-input batch, and Web derives its causal sequence from
+the live member-owned mailbox row inside the write transaction. There is no
+sequence fallback, legacy snapshot producer, disabled write mode, or rollout
+environment switch. The first Web build with the input-bound transaction and
+the first compatible FIFO runtime remain rollback floors.
 
-1. Vercel predeploy applies the nullable `causal_seq` expansion and the
-   nullable keyed assistant-input lookup projection, plus nullable Humor,
-   Push, and Detail projection-watermark columns. Deploy the new web build with
-   `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
-   personality controls and hosted personality mutation action remain
-   unavailable while old functions drain. That build writes a server-keyed
-   lookup of the existing deterministic assistant input id for new conversation
-   messages, supports the signed input-bound personality transaction, and
-   hard-rejects callbacks that do not resolve it. It also rejects the retired
-   direct-vault `resolve_preference_causal_seq` action; old Vercel functions may
-   still serve that action only during their bounded pre-contract drain. It does
-   not change the mailbox wire, `sourceRef`, or event id. This web build is the
-   rollback floor.
-2. The normal post-deploy contract-migration lane waits for the old Vercel
-   function window, then fails closed only if a legacy preference row remains
-   above the authoritative system-lane `consumed_seq`. It installs the
-   new-write check `NOT VALID`, so handled retained history does not block the
-   rollout and new null-sequence preference writes are rejected. After that
-   same drain, it seeds all three personality projection watermarks to each
-   member's current causal barrier, including dials whose projection value is
-   null. This is an intentional exception to the populated-field rule used for
-   tone and voice: before reverse convergence, a null personality projection
-   could still disagree with a custom canonical vault value. The barrier makes
-   older pre-cutover turns stale without pretending the unavailable historical
-   value can be backfilled. The boundary row at the barrier keeps the normal
-   equal-sequence command semantics; every message accepted after the committed
-   seed is strictly newer. A direct-vault write completed through an old Vercel
-   function before the drain ends joins the bounded historical non-backfill
-   caveat; after the drain, the hard-cut route cannot create another one.
-3. Deploy the new Cloudflare worker and runner with
-   `container_rollout=immediate`; prove the managed fleet has converged. The
-   runtime forwards the terminal input id only from a locally revalidated
-   same-conversation, same-anchor, exact-successor accepted-input batch, and Web
-   derives its causal sequence from the live member-owned mailbox row inside
-   the write transaction. There is no sequence fallback.
-4. Set `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=1` and redeploy Web.
-   Settings switches tone/voice to sparse deltas and
-   exposes personality controls and hosted conversation convergence only after
-   the FIFO consumer fleet is present. Existing reply styling, ordinary
-   conversation, and current-inbound replies stay available throughout.
+The consumer accepts already-imported tokenless v1 local pending items through
+the explicit sequence-zero path. Retain that reader while a restored workspace
+may still contain one; it does not recreate the deleted producer mode.
 
-The new consumer accepts already-imported tokenless v1 local pending items
-through the explicit sequence-zero path. The pre-switch drain ensures that
-compatibility path is not asked to reconstruct unavailable cross-lane order.
-
-During the old-Vercel-function drain, a legacy runtime may still complete the
-old direct-vault path through an old function. After that drain, hard-cut Web
-rejects the retired resolver: legacy runtimes continue ordinary replies, but
-style writes fail closed as unconfirmed until the input-bound fleet converges.
-Deploying Web and Cloudflare/runtime in tandem minimizes both windows. Keep Web
-at or above the hard-cut build during any runtime rollback; an older runtime
-continues ordinary replies but its style writes remain unavailable. Do not
-enable the gate until the converged fleet uses the input-bound personality
-transaction. Post-deploy, save one dial, run a
+Hard-cut Web rejects the retired direct-vault resolver. Keep Web at or above the
+input-bound build during any runtime rollback; an older runtime continues
+ordinary replies but its style writes remain unavailable. Post-deploy, save one
+dial, run a
 conversational change to the same dial, confirm the later accepted intent wins
 in both the refreshed Settings projection and canonical vault, exercise a
 reset, and confirm no preference item remains rejected or stuck. An already

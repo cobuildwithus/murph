@@ -23,15 +23,12 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
-  isHostedGroupJoinConfirmationProducerEnabled: vi.fn(),
   readActiveHostedVaultShareProjectionScopes: vi.fn(),
   revokeHostedVaultSharesTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   appendHostedGroupJoinConfirmationTx: mocks.appendHostedGroupJoinConfirmationTx,
-  isHostedGroupJoinConfirmationProducerEnabled:
-    mocks.isHostedGroupJoinConfirmationProducerEnabled,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -299,7 +296,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(true);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
@@ -473,32 +469,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     expect(result).not.toHaveProperty("joinConfirmationSignal");
 
-    expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        joinConfirmationEligibleAt: now,
-        joinConfirmationOrigin: "web",
-      }),
-      select: { id: true },
-    });
-    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
-  });
-
-  it("records the obligation while the producer rollout flag is disabled", async () => {
-    const tx = buildTx();
-    const now = new Date("2026-07-01T00:00:00.000Z");
-    mocks.isHostedGroupJoinConfirmationProducerEnabled.mockReturnValue(false);
-
-    await acceptHostedGroupJoinCodeTx({
-      confirmationPublicBaseUrl: "https://murph.example",
-      expectedMembershipId: null,
-      joinCode: "join_1",
-      memberId: "member_joiner",
-      now,
-      selectedVaultShareProjectionKinds: [],
-      tx,
-    });
-
-    expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         joinConfirmationEligibleAt: now,

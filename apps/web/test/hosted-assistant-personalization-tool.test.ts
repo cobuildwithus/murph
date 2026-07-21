@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
@@ -48,7 +48,6 @@ import {
 describe("hosted assistant personalization tool owner adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     const tx = {
       hostedThreadContainer: {
         findUnique: mocks.findUniqueHostedThreadContainer,
@@ -108,10 +107,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       dispatch: { mailboxItemId: "mailbox_preferences_1" },
       updated: true,
     });
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
   });
 
   it("reads the effective hosted snapshot without opening a mutation transaction", async () => {
@@ -333,7 +328,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_group_runtime",
       occurredAt: expect.any(String),
       preferenceCausalSeq: "42",
@@ -593,27 +587,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
 
-  it("rejects personality updates behind the rollout gate before opening a transaction", async () => {
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
-
-    await expect(handleHostedRuntimeAssistantPersonalizationTool({
-      authority: { assistantInputId: "ain_88888888888888888888888888888888" },
-      memberId: "member_personalization_1",
-      request: {
-        action: "update_personality",
-        personality: { humor: 8 },
-      },
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_PERSONALITY_ROLLOUT_PENDING",
-    });
-
-    expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
-    ).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
-  });
-
   it("rejects personality updates without assistant input authority", async () => {
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_1",
@@ -687,7 +660,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
       causalOrigin: "turn",
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_personalization_1",
       occurredAt: expect.any(String),
       preferenceCausalSeq: "42",
@@ -743,8 +715,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
   });
 
   it("saves a style-only update while reading the effective model from its canonical owner", async () => {
-    vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
-
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       authority: { assistantInputId: "ain_22222222222222222222222222222222" },
       memberId: "member_personalization_1",
@@ -778,7 +748,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        mailboxPayloadMode: "legacy_snapshot",
         causalOrigin: "turn",
         memberId: "member_personalization_1",
         preferenceCausalSeq: "42",
