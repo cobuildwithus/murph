@@ -67,7 +67,6 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
-  isHostedGroupDisclosureProducerEnabled,
   requestHostedGroupAssistantAsk,
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
@@ -802,9 +801,6 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
     action: "post_disclosure_request",
     result: { status: "unavailable", unavailableReason },
   });
-  if (!isHostedGroupDisclosureProducerEnabled()) {
-    return unavailable("feature_disabled");
-  }
 
   let permissionText: string;
   try {

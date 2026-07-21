@@ -247,18 +247,10 @@ and disclosure contract.
 
 ## Rollout and rollback
 
-Deploy Web support for the new `consented_member` target, accepted-input exact
-delivery, and scheduled exact-replay result first with the producer gate off.
-Then deploy Cloudflare/runner support for trusted accepted-input and
-scheduled-automation origins, disclosure-context preparation, the outgoing
-reviewer, accepted-input group delivery, and same-turn scheduled sleep/replay
-before Web may emit new work.
-Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
-deployment and the runner fingerprint/confinement smoke. The synchronous
-history caps satisfy the cardinality prerequisite; enable exact `1` only after
-both planes have converged and smoke has passed.
-
-Rollback disables and redeploys the Web producer first. Keep compatible
-consumers deployed until every consented request and accepted-input or automation completion
-has drained from Web mailboxes, imported runtime state, and existing outbox
-obligations. Prefer a forward fix once new work has been produced.
+Consented group disclosure is hard-cut across Web and the hosted runtime; there
+is no producer flag or disabled protocol mode. The first compatible runner
+bundle remains the rollback floor while a request or completion can remain in a
+Web mailbox, imported runtime state, or existing outbox obligation. Roll below
+that floor only after the full ten-minute request lifetime has elapsed and
+pending work has drained or expired; prefer a forward fix once new work has
+been produced.

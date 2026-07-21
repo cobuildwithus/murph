@@ -503,17 +503,12 @@ below that floor only after the full ten-minute request lifetime has elapsed
 and pending work has drained or expired; prefer a forward fix when imported
 items may remain.
 
-The consented reverse adapter has a distinct producer gate. First deploy
-consumers that tolerate the `consented_member` target, trusted invocation
-origins, reviewed exact accepted-input completion, and isolated internal
-automation completion while
-`HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
-immediate runner fleet converge and confinement/fingerprint smoke passes,
-the synchronous 25-row permission and per-group/per-member grant-generation
-caps satisfy the cardinality prerequisite. Enable exact `1` only after that
-convergence proof. Rollback turns that gate
-off first and keeps compatible consumers until new requests and completions
-have drained or expired from both Web mailboxes and imported runtime state.
+The consented reverse adapter is also hard-cut with no producer flag or disabled
+protocol mode. The first compatible runner bundle remains the rollback floor
+while a request or completion can remain in a Web mailbox or imported runtime
+state. Roll below that floor only after the full ten-minute request lifetime has
+elapsed and pending work has drained or expired; prefer a forward fix when an
+imported item may remain.
 
 ### Deploy Compatibility Rule
 
