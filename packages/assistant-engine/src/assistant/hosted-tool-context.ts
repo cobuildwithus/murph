@@ -6,6 +6,9 @@ import type {
   HostedRuntimeNewsletterScheduledAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
+  HostedExecutionAssistantAskOrigin,
+} from '@murphai/hosted-execution/contracts'
+import type {
   AssistantSession,
   AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -59,6 +62,11 @@ export interface AssistantHostedUserActionScope
   originSessionId: string
 }
 
+export interface AssistantHostedInvocationScope {
+  conversationScope: AssistantConversationScope | null
+  origin: HostedExecutionAssistantAskOrigin
+}
+
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -102,6 +110,7 @@ export interface AssistantHostedToolContext {
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
+  currentInvocationScope?(): AssistantHostedInvocationScope | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -185,6 +194,19 @@ export function createAssistantHostedToolContext(input: {
       userActionAcceptedInputIds.at(-1) === currentAssistantInputId
       ? currentAssistantInputId
       : null
+  }
+  const readCurrentUserActionScope = (): AssistantHostedUserActionScope | null => {
+    const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
+    if (acceptedInputIds.length === 0) {
+      return null
+    }
+    const deliveryContext = readDeliveryContext()
+    return {
+      ...buildRequestKeyScope(acceptedInputIds),
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      originSessionId: deliveryContext.session.sessionId,
+    }
   }
   let subscriptionActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -273,21 +295,35 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
+    currentInvocationScope: () => {
+      const userActionScope = readCurrentUserActionScope()
+      const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
+      if (userActionScope && assistantInputId) {
+        return {
+          conversationScope: userActionScope.conversationScope,
+          origin: {
+            assistantInputId,
+            kind: 'accepted_input',
+            sessionId: userActionScope.originSessionId,
+          },
+        }
+      }
+      const authority =
+        readDeliveryContext().messageInput.scheduledInvocationAuthority ?? null
+      return authority
+        ? {
+            conversationScope: null,
+            origin: {
+              automationId: authority.automationId,
+              kind: 'automation_occurrence',
+              occurrenceAt: authority.occurrenceAt,
+            },
+          }
+        : null
+    },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
-    currentUserActionScope: () => {
-      const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
-      if (acceptedInputIds.length === 0) {
-        return null
-      }
-      const deliveryContext = readDeliveryContext()
-      return {
-        ...buildRequestKeyScope(acceptedInputIds),
-        conversationScope:
-          input.getConversationScope?.() ?? 'unverified-external',
-        originSessionId: deliveryContext.session.sessionId,
-      }
-    },
+    currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
     sendVaultFile: input.sendVaultFile ?? (async () => {

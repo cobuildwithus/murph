@@ -333,6 +333,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         request.action !== "read_chat_participants"
         && request.action !== "update_display_name"
+        && request.action !== "post_disclosure_request"
         && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"
@@ -365,6 +366,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
+    case "ask_member":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -390,6 +392,8 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "set_chat_avatar":
     case "share_contact_card":
     case "leave_membership":
+    case "post_disclosure_request":
+    case "revoke_disclosure_grant":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -718,6 +722,9 @@ function createHostedScheduledGroupTools(input: {
 }): {
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool;
   groupSharedReader: AssistantHostedGroupSharedReader;
+  groupTool: NonNullable<
+    NonNullable<AssistantExecutionContext["hosted"]>["groupTool"]
+  >;
 } | null {
   const channel = input.channel.trim().toLowerCase();
   const containerMemberId = normalizeAssistantRouteString(input.containerMemberId);
@@ -727,6 +734,7 @@ function createHostedScheduledGroupTools(input: {
     || input.threadIsDirect !== false
     || !containerMemberId
     || !target
+    || !input.groupToolPort
   ) {
     return null;
   }
@@ -738,6 +746,7 @@ function createHostedScheduledGroupTools(input: {
       groupSharedReader: createHostedGroupSharedReader({
         groupToolPort: input.groupToolPort,
       }),
+      groupTool: input.groupToolPort,
     };
   }
 
@@ -815,7 +824,11 @@ function createHostedScheduledGroupTools(input: {
     },
   };
 
-  return { groupPermissionOfferTool, groupSharedReader };
+  return {
+    groupPermissionOfferTool,
+    groupSharedReader,
+    groupTool: input.groupToolPort,
+  };
 }
 
 function buildHostedScheduledGroupPermissionOfferUnavailable(): Extract<

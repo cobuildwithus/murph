@@ -3,6 +3,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -157,6 +158,7 @@ describe("hosted system mailbox notification execution context", () => {
         userEnvKeys: [],
       },
     };
+    const groupRequest = vi.fn();
 
     try {
       assert.deepEqual(
@@ -174,7 +176,9 @@ describe("hosted system mailbox notification execution context", () => {
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext,
         now: () => FIXED_NOW,
-        runtime: createRuntime({}),
+        runtime: createRuntime({
+          groupToolPort: { request: groupRequest },
+        }),
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
       });
@@ -193,6 +197,82 @@ describe("hosted system mailbox notification execution context", () => {
             kind: "assistant.notification.requested",
           }),
         }),
+      );
+      expect(
+        mocks.executeHostedMailboxEvent.mock.calls[0]?.[0]
+          .executionContext.hosted,
+      ).not.toHaveProperty("groupTool");
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("does not rescope the group tool for a late scheduled completion", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const wake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        origin: {
+          automationId: "automation_call_circle",
+          kind: "automation_occurrence",
+          occurrenceAt: FIXED_NOW,
+        },
+        question: "Which coarse call windows work over the next week?",
+        requestId: "aask_req_system_internal",
+        result: {
+          answer: "Tuesday evening.",
+          outcome: "answered",
+        },
+        targetLabel: null,
+      },
+      eventId: "aask_done_system_internal",
+      memberId: "member_group_runtime",
+      occurredAt: FIXED_NOW,
+    });
+    const groupRequest = vi.fn();
+
+    try {
+      assert.deepEqual(
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedAssistantAskCompletionItem(),
+          vaultRoot: workspace.vaultRoot,
+          wake,
+        }),
+        {
+          reasonCode: "system_mailbox.queued",
+          status: "imported",
+        },
+      );
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({
+          groupToolPort: { request: groupRequest },
+        }),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      const executionInput = mocks.executeHostedMailboxEvent.mock.calls[0]?.[0];
+      expect(executionInput).toEqual(
+        expect.objectContaining({
+          executionContext: expect.objectContaining({
+            hosted: expect.objectContaining({
+              memberId: "member_group_runtime",
+            }),
+          }),
+          sourceMailboxItemId: "mailbox_item_system_assistant_ask_completed",
+          wake: expect.objectContaining({
+            kind: "assistant.ask.completed",
+          }),
+        }),
+      );
+      expect(executionInput?.executionContext.hosted).not.toHaveProperty(
+        "groupTool",
       );
     } finally {
       await workspace.cleanup();
@@ -2263,6 +2343,47 @@ function createResolvedNotificationItem(overrides: Partial<{
     },
     route: {
       action: "dispatch-assistant-notification",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createResolvedAssistantAskCompletionItem(): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: "aask_done_system_internal",
+    expiresAt: null,
+    id: "mailbox_item_system_assistant_ask_completed",
+    kind: "assistant.ask.completed",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_group_runtime",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: "aask_req_system_internal",
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "continue-assistant-ask",
       advanceProgress: true,
       itemRef: {
         id: item.id,

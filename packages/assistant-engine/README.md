@@ -103,6 +103,29 @@ checkpointed, replaced, or released. Further asks remain pending in the
 existing hosted mailbox; assistant-engine does not add a process pool or
 scheduler.
 
+`executeConsentedReadOnlyAssistantAsk` is the disclosure-scoped composition of
+that primitive. Its first one-shot child reads the authorized personal
+workspace with the exact immutable permission context and proposes one bounded
+answer. A second, sequential, fresh-context one-shot child receives only that
+permission, the incoming question, and the proposed answer against an empty
+runtime root. It has no personal workspace, conversation history, dynamic
+tools, delivery route, network, or other authority and returns only `allow` or
+`deny`.
+
+There is no incoming model reviewer and no rewrite pass. The reviewer interprets
+the proposed answer in the context of the question because a terse confirmation
+can disclose the question's premise. An allow returns the candidate bytes
+unchanged; deny produces `cannot_answer`, while invalid output fails closed for
+the existing retry/expiry lifecycle. This executor still owns no grant,
+membership, routing, persistence, retry, completion, or delivery
+state. Web and the hosted runtime must revalidate those boundaries before the
+read and before exact-byte group delivery.
+
+Private grant discovery reuses `murph.group(action="list_memberships")`, whose
+successful result includes a top-level `disclosureGrants` array. The runtime
+normalizes older additive responses without that field to an empty array, and
+`revoke_disclosure_grant` may use only an exact id from the private list.
+
 ## Dynamic tool contracts
 
 Route planning is the single owner of the dynamic tool contract. It resolves the

@@ -17724,6 +17724,7 @@ describe('steered final segments', () => {
     const response = {
       action: 'list_memberships' as const,
       result: {
+        disclosureGrants: [],
         memberships: [{
           displayName: 'Sunday runners sentinel',
           grantedVaultShareProjectionScopes: [

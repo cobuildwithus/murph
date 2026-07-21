@@ -4,6 +4,7 @@ import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 import {
   createHostedAssistantConversationIdentifierBlind,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   createHostedMailboxAssistantInputId,
   createHostedMailboxAssistantInputIdFromBlindedIdentity,
   hashHostedAssistantConversationIdentifier,
@@ -13,6 +14,16 @@ import {
 import type { HostedExecutionConversationMessageWake } from "../src/contracts.ts";
 
 const HOSTED_ASSISTANT_IDENTIFIER_PATTERN = /^hid_[0-9a-f]{32}$/u;
+
+describe("hosted Assistant Ask delivery identifiers", () => {
+  it("preserves the reviewed Assistant Ask completion delivery key byte-for-byte", () => {
+    expect(createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      "aask_done_exact_vector",
+    )).toBe(
+      "reviewed-assistant-ask-completion:aef61e90376a8d9f43a6bc329711d11b20c66c8ea5a5b4af",
+    );
+  });
+});
 
 describe("hosted assistant conversation identifiers", () => {
   it("derives stable blinded identifiers for one hosted member", () => {

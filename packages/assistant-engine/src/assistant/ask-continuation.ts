@@ -53,7 +53,7 @@ import { resolveAssistantConversationScope } from './conversation-policy.js'
 
 const ASSISTANT_ASK_CONTINUATION_RECEIPT_PROMPT =
   'assistant.ask.completed private continuation'
-const ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES = [
+export const ASSISTANT_ASK_CONTINUATION_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
   'features.shell_tool=false',

@@ -4490,15 +4490,28 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
-  it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {
+  it("write-fences Linq egress authority assertions and preserves boolean fallback/directness", async () => {
     let responseCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
       responseCount += 1;
-      const body = await request.json() as { authorityCheckOnly?: unknown };
+      const body = await request.json() as {
+        assistantAskCompletionExpiresAt?: unknown;
+        assistantAskFallback?: unknown;
+        authorityCheckOnly?: unknown;
+      };
       expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
+      expect(body.assistantAskFallback).toBe(
+        responseCount === 1 ? undefined : false,
+      );
+      expect(body.assistantAskCompletionExpiresAt).toBe(
+        responseCount === 1 ? undefined : "2026-07-16T12:10:00.000Z",
+      );
       return new Response(JSON.stringify({
+        ...(body.assistantAskFallback === false
+          ? { assistantAskFallbackRequired: true }
+          : {}),
         ok: true,
         ...(body.authorityCheckOnly === false
           ? { providerDispatchClaimed: true }
@@ -4534,10 +4547,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirect: false,
     });
     await expect(assertLinqRecentInboundEngagement({
+      assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
+      assistantAskFallback: false,
       authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({});
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
