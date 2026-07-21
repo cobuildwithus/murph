@@ -350,6 +350,7 @@ async function persistClinicalConnection(input: {
             pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
             resourceTypes: input.resourceTypes,
           }),
+          retrievalProtocol: "query-slices-v2",
           resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
           status: "queued",
         },

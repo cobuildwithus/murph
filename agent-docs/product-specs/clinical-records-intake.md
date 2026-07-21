@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Product outcome
 
@@ -176,10 +176,13 @@ superset for future integrations; the Epic directory does not request it.
 New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
 deterministic slice ids. That plan can represent multiple queries for one FHIR
 resource type and ordered, non-overlapping bounded windows without treating
-either id as canonical clinical identity. This foundation does not expand the
-Epic beta request scopes: Web still emits the current resource-family runtime
-descriptor and rejects query-aware page traffic until compatible readers have
-deployed.
+either id as canonical clinical identity. Each run also pins its retrieval
+protocol: existing nullable-protocol rows remain legacy until terminal, while
+new runs emit `query-slices-v2`. Every query-aware page request, opaque cursor,
+server-derived request fingerprint, durable request claim, and terminal outcome
+is checked against the frozen query-scope and slice identity before provider
+egress or outcome mutation. This foundation does not expand the Epic beta
+authorization scopes; only the three active query scopes execute.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual bytes after a valid response. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
@@ -232,25 +235,73 @@ control-plane credentials, OAuth state, page fingerprints, or raw provider pages
 
 ## Deployment
 
-Deploy the additive Prisma migration and Web control plane before enabling the
-UI/runtime path. The old Web build ignores the new tables. Then deploy
-Cloudflare and the hosted runner so their exact allowlist and optional Clinical
-Records capability converge. An old runner simply omits assistant link
-creation; a new runner against an old Cloudflare or Web deployment fails closed
-without creating an intent. Browser connection remains available once Web is
-current. Never fall back to direct unfenced provider access. After all three
-surfaces converge, smoke-test both browser-started and assistant-started links.
+Deploy the additive Prisma migration and Web control plane first. Existing run
+rows retain the nullable legacy protocol for their entire lifecycle; new runs
+pin `query-slices-v2`. The already-compatible reader can consume the new
+descriptor during this deploy window, while Web temporarily accepts its page
+request without `queryFingerprint` and its legacy aggregate terminal outcome.
+Then deploy Cloudflare and the hosted runner so page requests and outcomes echo
+the full frozen identity. Remove that narrow compatibility only after all old
+runner bundles and in-flight runs they can service have drained and the runtime
+rollback floor has advanced. Never fall back to direct unfenced provider access.
+After all three surfaces converge, smoke-test both browser-started and
+assistant-started links, one legacy run, and one new query-aware run.
 
 Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
 [Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, USCDI v3,
-use the Murph product name without adding `Epic` to the app name, and select only
-[Patient.Read](https://fhir.epic.com/Specifications?api=931),
-[Observation.Search (Labs)](https://fhir.epic.com/Specifications?api=999), and
-[DiagnosticReport.Search (Results)](https://fhir.epic.com/Specifications?api=989).
-Do not request refresh tokens. Epic recommends a separate localhost-only test
-app that is never activated. Register the callback with the actual local port,
-for example `http://localhost:3000/api/clinical-records/oauth/callback`, and set
+use the Murph product name without adding `Epic` to the app name, and register
+the following exact 38 names from Epic's current
+[FHIR catalog](https://open.epic.com/Interface/FHIR):
+
+```text
+AllergyIntolerance.Search (Patient Chart) (R4)
+Binary.Read (Clinical Notes) (R4)
+CarePlan.Search (Longitudinal) (R4)
+CareTeam.Search (Longitudinal CareTeam) (R4)
+Condition.Search (Encounter Diagnosis) (R4)
+Condition.Search (Problems) (R4)
+Device.Search (Implants) (R4)
+DiagnosticReport.Search (Results) (R4)
+DocumentReference.Search (Clinical Notes) (R4)
+Encounter.Read (Patient Chart) (R4)
+Encounter.Search (Patient Chart) (R4)
+FamilyMemberHistory.Search (R4)
+Goal.Search (Patient) (R4)
+Immunization.Search (Patient Chart) (R4)
+Location.Read (Organizational Directory) (R4)
+MedicationDispense.Search (Fill Status) (R4)
+Medication.Read (Organization Med List) (R4)
+MedicationRequest.Read (Signed Medication Order) (R4)
+MedicationRequest.Search (Signed Medication Order) (R4)
+Observation.Read (Assessments) (R4)
+Observation.Read (Labs) (R4)
+Observation.Search (Assessments) (R4)
+Observation.Search (Labs) (R4)
+Observation.Search (SDOH Assessments) (R4)
+Observation.Search (Social History) (R4)
+Observation.Search (Vital Signs) (R4)
+Organization.Read (Organizational Directory) (R4)
+Patient.Read (Demographics) (R4)
+Practitioner.Read (Organizational Directory) (R4)
+PractitionerRole.Read (Organizational Directory) (R4)
+Procedure.Search (Orders) (R4)
+Procedure.Search (Patient-Reported Surgical History) (R4)
+Procedure.Search (Surgeries) (R4)
+Provenance.Read (R4)
+Questionnaire.Read (Patient-Entered Questionnaires) (R4)
+ServiceRequest.Read (Orders) (R4)
+ServiceRequest.Search (Orders) (R4)
+Specimen.Read (Patient Chart) (R4)
+```
+
+Registration is approval metadata, not runtime activation. Until later mapping
+and activation PRs ship, the OAuth request remains limited to Patient read,
+Observation Labs search, and DiagnosticReport Results search. Do not request
+refresh tokens or `offline_access`. Epic recommends a separate localhost-only
+test app that is never activated. Register the callback with the actual local
+port, for example
+`http://localhost:3000/api/clinical-records/oauth/callback`, and set
 `EPIC_SMART_NON_PRODUCTION_CLIENT_ID` to Epic's non-production client id. The
 curated sandbox FHIR base is
 `https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4`.

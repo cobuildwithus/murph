@@ -97,11 +97,14 @@ Last verified: 2026-07-20
   stable query/slice identity, bounded windows must be non-overlapping, and
   checkpoint completion is recorded per slice while resource-family outcome
   counts remain deduplicated. Legacy checkpoints and manifests remain readable;
-  Web must not emit the query-aware protocol until compatible runtime readers
-  have deployed. Plans admit at most 80 slices so the maximum descriptor,
-  pagination budget, and terminal-error fan-out remain inside their existing
-  64 KiB control response, 500 provider-page, and 100-error envelopes; this is
-  deliberately independent from the 500-file raw-storage cap.
+  legacy retrieval rows remain on the legacy wire protocol, while newly
+  created runs pin `query-slices-v2` for their full lifecycle. Query-aware page
+  claims, cursors, fingerprints, and outcomes bind the frozen query-scope and
+  slice identity. Plans admit at most 80 slices so the maximum descriptor,
+  32 KiB terminal-outcome request, pagination budget, and terminal-error
+  fan-out remain inside bounded control envelopes, the 500 provider-page cap,
+  and the 100-error cap; this is deliberately independent from the 500-file
+  raw-storage cap.
 - Cloudflare container and Durable Object RPC methods must be invoked directly on the platform stub, not detached, bound, wrapped, or passed around as ordinary callbacks. Test doubles for hosted runner/container seams should model that direct-call contract so local coverage catches receiver/proxy mistakes before they become accepted-but-stuck runtime work.
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.

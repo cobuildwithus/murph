@@ -3,6 +3,7 @@ import type {
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
+  HostedClinicalRecordsReadRunRequest,
   HostedClinicalRecordsReadRunResponse,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
@@ -396,10 +397,10 @@ export interface HostedRuntimeClinicalRecordsPort {
     request: HostedClinicalRecordsFetchPageRequest,
     options?: { signal?: AbortSignal | null },
   ): Promise<HostedClinicalRecordsFetchPageResponse>;
-  readRun(request: {
-    generation: number;
-    runId: string;
-  }, options?: { signal?: AbortSignal | null }): Promise<HostedClinicalRecordsReadRunResponse>;
+  readRun(
+    request: HostedClinicalRecordsReadRunRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsReadRunResponse>;
   recordOutcome(
     request: HostedClinicalRecordsRecordOutcomeRequest,
     options?: { signal?: AbortSignal | null },

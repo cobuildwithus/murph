@@ -8,6 +8,47 @@ import {
   buildEpicBetaSmartResourceScope,
 } from "@/src/lib/clinical-records/epic-policy";
 
+const EXACT_EPIC_REGISTRATION_API_NAMES = [
+  "AllergyIntolerance.Search (Patient Chart) (R4)",
+  "Binary.Read (Clinical Notes) (R4)",
+  "CarePlan.Search (Longitudinal) (R4)",
+  "CareTeam.Search (Longitudinal CareTeam) (R4)",
+  "Condition.Search (Encounter Diagnosis) (R4)",
+  "Condition.Search (Problems) (R4)",
+  "Device.Search (Implants) (R4)",
+  "DiagnosticReport.Search (Results) (R4)",
+  "DocumentReference.Search (Clinical Notes) (R4)",
+  "Encounter.Read (Patient Chart) (R4)",
+  "Encounter.Search (Patient Chart) (R4)",
+  "FamilyMemberHistory.Search (R4)",
+  "Goal.Search (Patient) (R4)",
+  "Immunization.Search (Patient Chart) (R4)",
+  "Location.Read (Organizational Directory) (R4)",
+  "MedicationDispense.Search (Fill Status) (R4)",
+  "Medication.Read (Organization Med List) (R4)",
+  "MedicationRequest.Read (Signed Medication Order) (R4)",
+  "MedicationRequest.Search (Signed Medication Order) (R4)",
+  "Observation.Read (Assessments) (R4)",
+  "Observation.Read (Labs) (R4)",
+  "Observation.Search (Assessments) (R4)",
+  "Observation.Search (Labs) (R4)",
+  "Observation.Search (SDOH Assessments) (R4)",
+  "Observation.Search (Social History) (R4)",
+  "Observation.Search (Vital Signs) (R4)",
+  "Organization.Read (Organizational Directory) (R4)",
+  "Patient.Read (Demographics) (R4)",
+  "Practitioner.Read (Organizational Directory) (R4)",
+  "PractitionerRole.Read (Organizational Directory) (R4)",
+  "Procedure.Search (Orders) (R4)",
+  "Procedure.Search (Surgeries) (R4)",
+  "Procedure.Search (Patient-Reported Surgical History) (R4)",
+  "Provenance.Read (R4)",
+  "Questionnaire.Read (Patient-Entered Questionnaires) (R4)",
+  "ServiceRequest.Read (Orders) (R4)",
+  "ServiceRequest.Search (Orders) (R4)",
+  "Specimen.Read (Patient Chart) (R4)",
+] as const;
+
 describe("Epic Clinical Records acquisition policy", () => {
   it("keeps the longitudinal catalog disabled behind the existing beta query set", () => {
     const active = EPIC_ACQUISITION_POLICY.queryScopes
@@ -49,7 +90,9 @@ describe("Epic Clinical Records acquisition policy", () => {
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       pageCount: "100",
       patientId: "patient/with spaces",
+      queryScopeId: "patient-demographics",
       resourceType: "Patient",
+      sliceId: "whole",
     }).toString()).toBe(
       "https://fhir.example.test/FHIR/R4/Patient/patient%2Fwith%20spaces",
     );
@@ -57,7 +100,9 @@ describe("Epic Clinical Records acquisition policy", () => {
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       pageCount: "100",
       patientId: "patient-1",
+      queryScopeId: "laboratory-observations",
       resourceType: "Observation",
+      sliceId: "whole",
     }).toString()).toBe(
       "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=laboratory&_count=100",
     );
@@ -65,6 +110,12 @@ describe("Epic Clinical Records acquisition policy", () => {
       pageCount: "100",
       resourceType: "DiagnosticReport",
     })).toBe("epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1");
+  });
+
+  it("pins the exact current Epic portal registration names", () => {
+    expect(
+      EPIC_ACQUISITION_POLICY.registrationApis.map((api) => api.epicCatalogName),
+    ).toEqual(EXACT_EPIC_REGISTRATION_API_NAMES);
   });
 
   it("keeps the owned policy internally consistent", () => {

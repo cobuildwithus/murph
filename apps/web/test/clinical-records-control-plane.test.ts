@@ -243,6 +243,7 @@ describe("Clinical Records authorization persistence", () => {
             }),
           ],
         },
+        retrievalProtocol: "query-slices-v2",
         status: "queued",
       }),
     });

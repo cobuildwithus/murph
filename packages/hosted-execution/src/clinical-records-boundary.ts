@@ -1,3 +1,7 @@
+import {
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
+} from "@murphai/clinical-records";
+
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
 // A JSON string can expand one UTF-16 code unit to six ASCII bytes (`\uXXXX`).
 // Keep the transport envelope broad enough for every body accepted here so
@@ -23,6 +27,10 @@ export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =
   "/api/internal/clinical-records/runtime/fetch-page";
 export const HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH =
   "/api/internal/clinical-records/runtime/record-outcome";
+// A query-aware outcome can echo up to 80 bounded slice references. Keep the
+// signed transport limit aligned with that contract instead of the smaller
+// legacy aggregate outcome.
+export const HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES = 32 * 1024;
 
 export interface HostedClinicalRecordsOutcomeCounts {
   createdCount: number;
@@ -36,10 +44,17 @@ export interface HostedClinicalRecordsOutcomeCounts {
   supersededCount: number;
 }
 
+export interface HostedClinicalRecordsRetrievalSliceRef {
+  queryScopeId: string;
+  sliceId: string;
+}
+
 export interface HostedClinicalRecordsRecordOutcomeRequest {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode?: string;
   generation: number;
+  retrievalProtocol?: "query-slices-v2";
+  retrievalSlices?: HostedClinicalRecordsRetrievalSliceRef[];
   runId: string;
   status: "completed" | "failed" | "partial" | "preempted";
 }
@@ -61,7 +76,15 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
 ): HostedClinicalRecordsRecordOutcomeRequest {
   const record = requireExactObject(
     value,
-    ["counts", "errorCode", "generation", "runId", "status"],
+    [
+      "counts",
+      "errorCode",
+      "generation",
+      "retrievalProtocol",
+      "retrievalSlices",
+      "runId",
+      "status",
+    ],
     "Hosted clinical records outcome request",
   );
   const counts = requireExactObject(
@@ -80,6 +103,20 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     "Hosted clinical records outcome counts",
   );
   const errorCode = Reflect.get(record, "errorCode");
+  const retrievalProtocol = Reflect.get(record, "retrievalProtocol");
+  const retrievalSlices = Reflect.get(record, "retrievalSlices");
+  const queryAware = retrievalProtocol !== undefined || retrievalSlices !== undefined;
+  if (
+    queryAware
+    && (
+      retrievalProtocol !== "query-slices-v2"
+      || !Array.isArray(retrievalSlices)
+      || retrievalSlices.length < 1
+      || retrievalSlices.length > CLINICAL_FHIR_MAX_RETRIEVAL_SLICES
+    )
+  ) {
+    throw new TypeError("Hosted clinical records outcome retrieval identity is invalid.");
+  }
   return {
     counts: {
       createdCount: parseNonNegativeCount(Reflect.get(counts, "createdCount")),
@@ -100,9 +137,37 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     },
     ...(errorCode === undefined ? {} : { errorCode: parseErrorCode(errorCode) }),
     generation: parsePositiveSafeInteger(Reflect.get(record, "generation")),
+    ...(queryAware
+      ? {
+          retrievalProtocol: "query-slices-v2" as const,
+          retrievalSlices: retrievalSlices.map(parseRetrievalSliceRef),
+        }
+      : {}),
     runId: parseHostedClinicalRecordsIdentifier(Reflect.get(record, "runId")),
     status: parseOutcomeStatus(Reflect.get(record, "status")),
   };
+}
+
+function parseRetrievalSliceRef(
+  value: unknown,
+): HostedClinicalRecordsRetrievalSliceRef {
+  const record = requireExactObject(
+    value,
+    ["queryScopeId", "sliceId"],
+    "Hosted clinical records outcome retrieval slice",
+  );
+  return {
+    queryScopeId: parseClinicalFhirPathId(Reflect.get(record, "queryScopeId")),
+    sliceId: parseClinicalFhirPathId(Reflect.get(record, "sliceId")),
+  };
+}
+
+function parseClinicalFhirPathId(value: unknown): string {
+  const parsed = parseHostedClinicalRecordsIdentifier(value);
+  if (parsed === "." || parsed === "..") {
+    throw new TypeError("Hosted clinical records retrieval identifier is invalid.");
+  }
+  return parsed;
 }
 
 function requireExactObject(

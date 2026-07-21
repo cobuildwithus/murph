@@ -341,6 +341,7 @@ model ClinicalRecordRetrievalRun {
   status               String                           @default("queued")
   resourceTypesJson    Json                             @map("resource_types_json")
   retrievalPlanJson    Json?                            @map("retrieval_plan_json")
+  retrievalProtocol    String?                          @map("retrieval_protocol")
   grantedScopesJson    Json                             @map("granted_scopes_json")
   pageCount            Int                              @default(0) @map("page_count")
   fetchedBytes         Int                              @default(0) @map("fetched_bytes")
@@ -370,6 +371,8 @@ model ClinicalRecordRetrievalRequest {
   runId              String                     @map("run_id")
   generation         Int
   requestFingerprint String                     @map("request_fingerprint")
+  queryScopeId       String?                    @map("query_scope_id")
+  sliceId            String?                    @map("slice_id")
   reservedBytes      Int                        @default(0) @map("reserved_bytes")
   responseBytes      Int?                       @map("response_bytes")
   claimVersion       Int                        @default(1) @map("claim_version")

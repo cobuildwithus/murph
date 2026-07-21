@@ -256,6 +256,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           requestId: `cr-${checkpointIdentity.generation}-${resourceIndex + 1}-${checkpoint.pageFetchCount + 1}`,
           ...(checkpointIdentity.retrievalProtocol === "query-slices-v2"
             ? {
+                queryFingerprint: requireQueryRetrievalSlice(scope).queryFingerprint,
                 queryScopeId: requireQueryRetrievalSlice(scope).queryScopeId,
                 retrievalProtocol: checkpointIdentity.retrievalProtocol,
                 sliceId: requireQueryRetrievalSlice(scope).sliceId,
@@ -473,8 +474,8 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           checkpoint.successfulPageCount,
           checkpoint.completedResourceTypes.length,
         ),
+        checkpointIdentity,
         errorCode: "snapshot_rejected",
-        wake: input.wake,
       });
       return checkpoint.authorizationRequired
         ? { ...failure, outcome: null }
@@ -509,6 +510,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       counts,
       ...(checkpoint.errors[0] ? { errorCode: checkpoint.errors[0].code } : {}),
       generation: checkpointIdentity.generation,
+      ...retrievalOutcomeIdentity(checkpointIdentity),
       runId: checkpointIdentity.runId,
       status,
     } satisfies HostedClinicalRecordsRecordOutcomeRequest;
@@ -671,8 +673,8 @@ async function terminalFailureAfterClearingCheckpoint(input: {
       input.checkpoint.successfulPageCount,
       input.checkpoint.completedResourceTypes.length,
     ),
+    checkpointIdentity: input.checkpointIdentity,
     errorCode: input.errorCode,
-    wake: input.input.wake,
   });
 }
 
@@ -748,20 +750,43 @@ function throwIfPreempted(input: {
 }
 
 function terminalFailure(input: {
+  checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode: string;
-  wake: HostedExecutionClinicalRecordsSyncRequestedWake;
 }): HostedClinicalRecordsSyncMetrics {
   return {
     counts: input.counts,
     outcome: {
       counts: input.counts,
       errorCode: input.errorCode,
-      generation: input.wake.generation,
-      runId: input.wake.runId,
+      generation: input.checkpointIdentity.generation,
+      ...retrievalOutcomeIdentity(input.checkpointIdentity),
+      runId: input.checkpointIdentity.runId,
       status: "failed",
     },
     status: "failed",
+  };
+}
+
+function retrievalOutcomeIdentity(
+  identity: ClinicalFhirRetrievalCheckpointIdentity,
+): {
+  retrievalProtocol: "query-slices-v2";
+  retrievalSlices: Array<{ queryScopeId: string; sliceId: string }>;
+} | Record<string, never> {
+  if (identity.retrievalProtocol !== "query-slices-v2") return {};
+  if (!identity.retrievalSlices || identity.retrievalSlices.length === 0) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_QUERY_SCOPE_MISSING",
+      "Hosted clinical records query-aware retrieval identity is unavailable.",
+    );
+  }
+  return {
+    retrievalProtocol: identity.retrievalProtocol,
+    retrievalSlices: identity.retrievalSlices.map((slice) => ({
+      queryScopeId: slice.queryScopeId,
+      sliceId: slice.sliceId,
+    })),
   };
 }
 
