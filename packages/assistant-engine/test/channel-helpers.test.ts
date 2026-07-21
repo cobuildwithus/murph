@@ -1372,8 +1372,13 @@ describe('channel helper seams', () => {
 
     const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
         {
-          actorId: null,
+          actorId: '+15550000001',
+          answeredMailboxItemIds: ['mailbox_item_answered_1'],
           bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          deliverySource: {
+            kind: 'linq',
+            fromPhoneNumber: '+15550000002',
+          },
           explicitTarget: null,
           idempotencyKey: 'idem-partial-voice',
           identityId: null,
@@ -1383,7 +1388,8 @@ describe('channel helper seams', () => {
             }),
           ],
           message: 'Text before memo',
-          replyToMessageId: null,
+          replyToMessageId: 'linq-message-answered-1',
+          threadIsDirect: true,
         },
         {
           sendLinq,
@@ -1391,9 +1397,13 @@ describe('channel helper seams', () => {
         },
       )
     expect(sendLinq).toHaveBeenNthCalledWith(2, {
+      answeredMailboxItemIds: ['mailbox_item_answered_1'],
+      directRecipientPhoneNumber: '+15550000001',
+      fromPhoneNumber: '+15550000002',
+      homeRouteFallbackAllowed: true,
       idempotencyKey: 'linq-voice-memo-transcript:idem-partial-voice',
       message: 'Have you had any recent blood tests?',
-      replyToMessageId: null,
+      replyToMessageId: 'linq-message-answered-1',
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })

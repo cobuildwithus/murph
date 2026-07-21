@@ -7941,7 +7941,9 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("carries distinct stable identities through hosted Linq voice transcript fallback", async () => {
+    const answeredMailboxItemIds = ["mailbox_item_answered_1"];
     const effect = createEffect({
+      answeredMailboxItemIds,
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -7949,10 +7951,31 @@ describe("hosted runtime callbacks", () => {
         transcript: "Have you had any recent blood tests?",
       })],
       message: "",
+      replyToMessageId: "linq_message_answered_1",
       transportIdempotent: false,
     });
     const assertRecentInbound = vi.fn(async (request) =>
       buildClaimedLinqEngagementResult(request));
+    let releaseAcceptedFallbackOutcome: () => void = () => {};
+    const acceptedFallbackOutcomeReleased = new Promise<void>((resolve) => {
+      releaseAcceptedFallbackOutcome = resolve;
+    });
+    let markAcceptedFallbackOutcomeStarted: () => void = () => {};
+    const acceptedFallbackOutcomeStarted = new Promise<void>((resolve) => {
+      markAcceptedFallbackOutcomeStarted = resolve;
+    });
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async (request) => {
+      if (
+        request.acceptedAt
+        && request.idempotencyKey
+          === "linq-voice-memo-transcript:assistant-outbox:intent_123"
+      ) {
+        markAcceptedFallbackOutcomeStarted();
+        await acceptedFallbackOutcomeReleased;
+      }
+    });
     mocks.sendLinqMessage
       .mockResolvedValueOnce({
         providerMessageId: "linq_transcript_fallback",
@@ -7975,6 +7998,7 @@ describe("hosted runtime callbacks", () => {
       assert.ok(adapter);
       const delivery = await adapter.send({
         actorId: "actor_123",
+        answeredMailboxItemIds,
         bindingDelivery: { kind: "thread", target: "linq_chat_123" },
         explicitTarget: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -7983,7 +8007,7 @@ describe("hosted runtime callbacks", () => {
           transcript: "Have you had any recent blood tests?",
         })],
         message: "",
-        replyToMessageId: null,
+        replyToMessageId: "linq_message_answered_1",
         threadIsDirect: true,
       }, dependencies);
       return createDispatchResult({
@@ -7992,17 +8016,36 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    await expect(drainHostedPreparedAssistantDeliveries({
+    let deliverySettled = false;
+    const deliveryPromise = drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
       platformEnv: {},
       providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
-    })).resolves.toEqual([
+    }).finally(() => {
+      deliverySettled = true;
+    });
+
+    await acceptedFallbackOutcomeStarted;
+    expect(deliverySettled).toBe(false);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredMailboxItemIds,
+        idempotencyKey:
+          "linq-voice-memo-transcript:assistant-outbox:intent_123",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    releaseAcceptedFallbackOutcome();
+
+    await expect(deliveryPromise).resolves.toEqual([
       expect.objectContaining({ deliveryStatus: "sent" }),
     ]);
 
@@ -8016,9 +8059,16 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound.mock.calls
       .map(([request]) => request)
       .filter((request) => request.authorityCheckOnly === true)
-      .map((request) => request.idempotencyKey)).toEqual([
-      "linq-voice-memo:intent_123",
-    ]);
+      .map((request) => request.idempotencyKey)).toEqual([]);
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+        idempotencyKey:
+          "linq-voice-memo-transcript:assistant-outbox:intent_123",
+        replyToMessageId: "linq_message_answered_1",
+      }),
+      { signal: null },
+    );
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
   });

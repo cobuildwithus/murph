@@ -797,10 +797,18 @@ async function sendLinqVoiceMemoDelivery(input: {
     if (fallbackText) {
       try {
         const deliveredFallback = await sendLinqVoiceMemoFallbackText({
+          answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           attachmentId,
           dependencies: input.dependencies,
+          directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
           deliveryIdempotencyKey: input.idempotencyKey ?? null,
+          fromPhoneNumber:
+            input.deliverySource?.kind === 'linq'
+              ? input.deliverySource.fromPhoneNumber
+              : null,
+          homeRouteFallbackAllowed,
           message: fallbackText,
+          replyToMessageId: input.replyToMessageId ?? null,
           target: voiceMemoTarget,
           targetKind: voiceMemoTargetKind,
         })
@@ -859,28 +867,38 @@ async function sendLinqVoiceMemoDelivery(input: {
 }
 
 async function sendLinqVoiceMemoFallbackText(input: {
+  answeredMailboxItemIds: readonly string[]
   attachmentId: string
   dependencies: AssistantChannelDependencies
+  directRecipientPhoneNumber: string | null
   deliveryIdempotencyKey: string | null
+  fromPhoneNumber: string | null
+  homeRouteFallbackAllowed: boolean
   message: string
+  replyToMessageId: string | null
   target: string
   targetKind: 'explicit' | 'participant' | 'thread'
 }) {
   const idempotencyKey = buildLinqVoiceMemoFallbackIdempotencyKey(input)
   return input.dependencies.sendLinq
     ? await input.dependencies.sendLinq({
+        answeredMailboxItemIds: input.answeredMailboxItemIds,
+        directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+        fromPhoneNumber: input.fromPhoneNumber,
+        homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
         idempotencyKey,
         message: input.message,
-        replyToMessageId: null,
+        replyToMessageId: input.replyToMessageId,
         ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
         target: input.target,
         targetKind: input.targetKind,
       })
     : await sendLinqMessage(
         {
+          fromPhoneNumber: input.fromPhoneNumber,
           idempotencyKey,
           message: input.message,
-          replyToMessageId: null,
+          replyToMessageId: input.replyToMessageId,
           target: input.target,
           targetKind: input.targetKind,
         },
